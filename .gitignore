@@ -41,3 +41,6 @@ htmlcov/
 # 类型检查
 .mypy_cache/
 .ruff_cache/
+
+#笔记内容
+智能体开发笔记
