@@ -55,6 +55,46 @@
           </view>
         </view>
 
+        <view class="section" v-if="hasConsultationContext">
+          <text class="section-title">咨询依据</text>
+          <view class="consult-grid">
+            <view v-if="currentDayun" class="consult-card">
+              <text class="consult-label">当前大运</text>
+              <text class="consult-main">{{ currentDayun.ganzhi || currentDayun.year }}</text>
+              <text class="consult-sub">{{ currentDayun.startYear }}-{{ currentDayun.endYear || currentDayun.startYear + 9 }}</text>
+            </view>
+            <view v-if="startYun" class="consult-card">
+              <text class="consult-label">起运口径</text>
+              <text class="consult-main">{{ startYun.direction || '-' }}</text>
+              <text class="consult-sub">{{ startYun.startDate || '-' }}</text>
+            </view>
+            <view v-if="analysis?.strength" class="consult-card">
+              <text class="consult-label">日主强弱</text>
+              <text class="consult-main">{{ analysis.day_master }}{{ analysis.strength }}</text>
+              <text class="consult-sub">置信度 {{ analysis.confidence || '-' }}</text>
+            </view>
+          </view>
+          <view v-if="analysis?.adjustment" class="consult-note">
+            <text>{{ analysis.adjustment }}</text>
+          </view>
+          <view v-if="analysis?.patternHint" class="consult-note">
+            <text>{{ analysis.patternHint }}</text>
+          </view>
+          <view v-if="relationText" class="consult-note">
+            <text>{{ relationText }}</text>
+          </view>
+          <view v-if="liunian.length" class="liunian-strip">
+            <view v-for="l in liunian.slice(0, 6)" :key="l.year" class="liunian-pill">
+              <text class="ln-year">{{ l.year }}</text>
+              <text class="ln-gz">{{ l.ganzhi }}</text>
+              <text class="ln-dy">{{ l.dayun || '-' }}</text>
+            </view>
+          </view>
+          <view v-if="warnings.length" class="warning-list">
+            <text v-for="w in warnings" :key="w" class="warning-item">{{ w }}</text>
+          </view>
+        </view>
+
         <!-- 神煞 -->
         <view class="section" v-if="shensha.length">
           <text class="section-title">神煞</text>
@@ -97,7 +137,7 @@
 
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import type { Pillar, WuxingItem, DayunItem, ShenshaItem } from '@/api'
+import type { Pillar, WuxingItem, DayunItem, ShenshaItem, LiuNianItem, ChartAnalysis } from '@/api'
 import { generateFullReport, downloadReport, downloadFullReportPdf } from '@/api'
 
 const props = defineProps<{
@@ -105,7 +145,11 @@ const props = defineProps<{
   pillars: Pillar[]
   wuxing: WuxingItem[]
   dayun: DayunItem[]
+  liunian?: LiuNianItem[]
   shensha: ShenshaItem[]
+  analysis?: ChartAnalysis
+  startYun?: Record<string, any>
+  warnings?: string[]
   birthTime?: string
   gender?: string
 }>()
@@ -115,6 +159,26 @@ const reportContent = ref('')
 const reportLoading = ref(false)
 
 const maxWuxing = computed(() => Math.max(...props.wuxing.map((w) => w.count), 1))
+const liunian = computed(() => props.liunian || [])
+const warnings = computed(() => props.warnings || [])
+const currentYear = new Date().getFullYear()
+const currentDayun = computed(() =>
+  props.dayun.find((d) => d.startYear <= currentYear && (d.endYear || d.startYear + 9) >= currentYear) || props.dayun[0]
+)
+const relationText = computed(() => {
+  const a = props.analysis
+  if (!a) return ''
+  const parts = [
+    ...(a.combinations || []).map((v) => `合：${v}`),
+    ...(a.clashes || []).map((v) => `冲：${v}`),
+    ...(a.harms || []).map((v) => `害：${v}`),
+    ...(a.punishments || []).map((v) => `刑：${v}`),
+  ]
+  return parts.join('；')
+})
+const hasConsultationContext = computed(() =>
+  !!props.analysis || !!props.startYun || liunian.value.length > 0 || warnings.value.length > 0
+)
 
 function close() {
   emit('close')
@@ -326,6 +390,84 @@ async function generateReport() {
   display: block;
   font-size: 20rpx;
   color: #6B7280;
+}
+
+.consult-grid {
+  display: flex;
+  gap: 12rpx;
+}
+.consult-card {
+  flex: 1;
+  min-width: 0;
+  background: rgba(124, 58, 237, 0.06);
+  border-radius: 16rpx;
+  padding: 16rpx 12rpx;
+  border: 1rpx solid rgba(124, 58, 237, 0.18);
+}
+.consult-label {
+  display: block;
+  font-size: 20rpx;
+  color: #94A3B8;
+  margin-bottom: 6rpx;
+}
+.consult-main {
+  display: block;
+  font-size: 28rpx;
+  color: #F59E0B;
+  font-weight: 700;
+  margin-bottom: 4rpx;
+}
+.consult-sub {
+  display: block;
+  font-size: 20rpx;
+  color: #94A3B8;
+}
+.consult-note {
+  margin-top: 12rpx;
+  padding: 14rpx 16rpx;
+  background: rgba(245, 158, 11, 0.06);
+  border: 1rpx solid rgba(245, 158, 11, 0.16);
+  border-radius: 16rpx;
+  color: #C4B5FD;
+  font-size: 22rpx;
+  line-height: 1.55;
+}
+.liunian-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10rpx;
+  margin-top: 12rpx;
+}
+.liunian-pill {
+  width: 31%;
+  padding: 12rpx 10rpx;
+  background: rgba(124, 58, 237, 0.06);
+  border: 1rpx solid rgba(124, 58, 237, 0.18);
+  border-radius: 14rpx;
+}
+.ln-year,
+.ln-gz,
+.ln-dy {
+  display: block;
+  text-align: center;
+}
+.ln-year { font-size: 20rpx; color: #94A3B8; }
+.ln-gz { font-size: 26rpx; color: #FFFFFF; font-weight: 700; margin: 4rpx 0; }
+.ln-dy { font-size: 20rpx; color: #06B6D4; }
+.warning-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
+  margin-top: 12rpx;
+}
+.warning-item {
+  padding: 12rpx 14rpx;
+  background: rgba(245, 158, 11, 0.06);
+  border: 1rpx solid rgba(245, 158, 11, 0.16);
+  border-radius: 14rpx;
+  color: #FDE68A;
+  font-size: 22rpx;
+  line-height: 1.5;
 }
 
 /* 神煞 */

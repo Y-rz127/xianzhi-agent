@@ -1,0 +1,101 @@
+{
+  "cases": [
+    {
+      "id": "male_1990_standard",
+      "birth_time": "1990-05-20 14:30",
+      "gender": "\u7537",
+      "liunian_start_year": 2025,
+      "liunian_years": 3,
+      "expected": {
+        "pillars": ["\u5e9a\u5348", "\u8f9b\u5df3", "\u4e59\u9149", "\u7678\u672a"],
+        "start_yun": {"startDate": "1995-12-10", "direction": "\u987a\u6392", "startYear": 5, "startSolarYear": 1995},
+        "dayun": [
+          ["\u58ec\u5348", 1995, 2004, 6, 15],
+          ["\u7678\u672a", 2005, 2014, 16, 25],
+          ["\u7532\u7533", 2015, 2024, 26, 35],
+          ["\u4e59\u9149", 2025, 2034, 36, 45],
+          ["\u4e19\u620c", 2035, 2044, 46, 55]
+        ],
+        "liunian": [[2025, "\u4e59\u5df3", 36, "\u4e59\u9149"], [2026, "\u4e19\u5348", 37, "\u4e59\u9149"], [2027, "\u4e01\u672a", 38, "\u4e59\u9149"]],
+        "warning_contains": ["\u7acb\u6625\u53e3\u5f84"]
+      }
+    },
+    {
+      "id": "female_1990_reverse",
+      "birth_time": "1990-05-20 14:30",
+      "gender": "\u5973",
+      "liunian_start_year": 2025,
+      "liunian_years": 3,
+      "expected": {
+        "pillars": ["\u5e9a\u5348", "\u8f9b\u5df3", "\u4e59\u9149", "\u7678\u672a"],
+        "start_yun": {"startDate": "1995-03-20", "direction": "\u9006\u6392", "startYear": 4, "startSolarYear": 1995},
+        "dayun": [
+          ["\u5e9a\u8fb0", 1995, 2004, 6, 15],
+          ["\u5df1\u536f", 2005, 2014, 16, 25],
+          ["\u620a\u5bc5", 2015, 2024, 26, 35],
+          ["\u4e01\u4e11", 2025, 2034, 36, 45],
+          ["\u4e19\u5b50", 2035, 2044, 46, 55]
+        ],
+        "liunian": [[2025, "\u4e59\u5df3", 36, "\u4e01\u4e11"], [2026, "\u4e19\u5348", 37, "\u4e01\u4e11"], [2027, "\u4e01\u672a", 38, "\u4e01\u4e11"]],
+        "warning_contains": ["\u7acb\u6625\u53e3\u5f84"]
+      }
+    },
+    {
+      "id": "lichun_before_2025",
+      "birth_time": "2025-02-03 10:00",
+      "gender": "\u7537",
+      "liunian_start_year": 2025,
+      "liunian_years": 2,
+      "expected": {
+        "pillars": ["\u7532\u8fb0", "\u4e01\u4e11", "\u7678\u536f", "\u4e01\u5df3"],
+        "start_yun": {"startDate": "2025-04-03", "direction": "\u987a\u6392", "startYear": 0, "startSolarYear": 2025},
+        "dayun": [
+          ["\u620a\u5bc5", 2025, 2034, 1, 10],
+          ["\u5df1\u536f", 2035, 2044, 11, 20],
+          ["\u5e9a\u8fb0", 2045, 2054, 21, 30]
+        ],
+        "liunian": [[2025, "\u4e59\u5df3", 1, "\u620a\u5bc5"], [2026, "\u4e19\u5348", 2, "\u620a\u5bc5"]],
+        "warning_contains": ["\u7acb\u6625\u53e3\u5f84"]
+      }
+    },
+    {
+      "id": "late_zi_hour",
+      "birth_time": "1988-12-01 23:30",
+      "gender": "\u7537",
+      "liunian_start_year": 2026,
+      "liunian_years": 2,
+      "expected": {
+        "pillars": ["\u620a\u8fb0", "\u7678\u4ea5", "\u5e9a\u5bc5", "\u620a\u5b50"],
+        "start_yun": {"startDate": "1990-09-11", "direction": "\u987a\u6392", "startYear": 1, "startSolarYear": 1990},
+        "dayun": [
+          ["\u7532\u5b50", 1990, 1999, 3, 12],
+          ["\u4e59\u4e11", 2000, 2009, 13, 22],
+          ["\u4e19\u5bc5", 2010, 2019, 23, 32],
+          ["\u4e01\u536f", 2020, 2029, 33, 42]
+        ],
+        "liunian": [[2026, "\u4e19\u5348", 39, "\u4e01\u536f"], [2027, "\u4e01\u672a", 40, "\u4e01\u536f"]],
+        "warning_contains": ["\u7acb\u6625\u53e3\u5f84", "\u5b50\u65f6"]
+      }
+    },
+    {
+      "id": "future_dayun_binding",
+      "birth_time": "1990-05-20 14:30",
+      "gender": "\u7537",
+      "liunian_start_year": 2036,
+      "liunian_years": 2,
+      "expected": {
+        "pillars": ["\u5e9a\u5348", "\u8f9b\u5df3", "\u4e59\u9149", "\u7678\u672a"],
+        "start_yun": {"startDate": "1995-12-10", "direction": "\u987a\u6392", "startYear": 5, "startSolarYear": 1995},
+        "dayun": [
+          ["\u58ec\u5348", 1995, 2004, 6, 15],
+          ["\u7678\u672a", 2005, 2014, 16, 25],
+          ["\u7532\u7533", 2015, 2024, 26, 35],
+          ["\u4e59\u9149", 2025, 2034, 36, 45],
+          ["\u4e19\u620c", 2035, 2044, 46, 55]
+        ],
+        "liunian": [[2036, "\u4e19\u8fb0", 47, "\u4e19\u620c"], [2037, "\u4e01\u5df3", 48, "\u4e19\u620c"]],
+        "warning_contains": ["\u7acb\u6625\u53e3\u5f84"]
+      }
+    }
+  ]
+}

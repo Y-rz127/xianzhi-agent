@@ -42,6 +42,40 @@
               </div>
             </div>
           </div>
+          <div v-if="hasConsultationContext" class="consult-section">
+            <div class="section-title">咨询依据</div>
+            <div class="consult-grid">
+              <div v-if="currentDayun" class="consult-card">
+                <div class="consult-label">当前大运</div>
+                <div class="consult-main">{{ currentDayun.ganzhi || currentDayun.year }}</div>
+                <div class="consult-sub">{{ currentDayun.startYear }}-{{ currentDayun.endYear || currentDayun.startYear + 9 }} · {{ currentDayun.startAge }}-{{ currentDayun.endAge || currentDayun.startAge + 9 }}岁</div>
+              </div>
+              <div v-if="startYun" class="consult-card">
+                <div class="consult-label">起运口径</div>
+                <div class="consult-main">{{ startYun.direction || '-' }}</div>
+                <div class="consult-sub">{{ startYun.startDate || '-' }}</div>
+              </div>
+              <div v-if="analysis?.strength" class="consult-card">
+                <div class="consult-label">日主强弱</div>
+                <div class="consult-main">{{ analysis.day_master }}{{ analysis.strength }}</div>
+                <div class="consult-sub">置信度 {{ analysis.confidence || '-' }}</div>
+              </div>
+              <div v-if="analysis?.season" class="consult-card wide">
+                <div class="consult-label">调候提示</div>
+                <div class="consult-text">{{ analysis.adjustment }}</div>
+              </div>
+            </div>
+            <div v-if="analysis?.patternHint" class="consult-note">{{ analysis.patternHint }}</div>
+            <div v-if="relationText" class="consult-note">{{ relationText }}</div>
+            <div v-if="liunian.length" class="liunian-strip">
+              <div v-for="l in liunian.slice(0, 6)" :key="l.year" class="liunian-pill">
+                <span>{{ l.year }}</span><b>{{ l.ganzhi }}</b><em>{{ l.dayun || '-' }}</em>
+              </div>
+            </div>
+            <div v-if="warnings.length" class="warning-list">
+              <div v-for="w in warnings" :key="w" class="warning-item">{{ w }}</div>
+            </div>
+          </div>
           <div v-if="shensha.length" class="shensha-section">
             <div class="section-title">神煞</div>
             <div class="shensha-list">
@@ -89,7 +123,7 @@
 
 <script setup lang="ts">
 import { ref, computed } from "vue"
-import type { Pillar, WuxingItem, DayunItem, ShenshaItem } from "../api"
+import type { Pillar, WuxingItem, DayunItem, ShenshaItem, LiuNianItem, ChartAnalysis } from "../api"
 import { downloadReport, generateFullReport, downloadFullReportPDF } from "../api"
 import MarkdownRender from "./MarkdownRender.vue"
 
@@ -98,7 +132,11 @@ const props = defineProps<{
   pillars: Pillar[]
   wuxing: WuxingItem[]
   dayun: DayunItem[]
+  liunian?: LiuNianItem[]
   shensha: ShenshaItem[]
+  analysis?: ChartAnalysis
+  startYun?: Record<string, any>
+  warnings?: string[]
   birthTime?: string
   gender?: string
 }>()
@@ -106,6 +144,26 @@ const props = defineProps<{
 const emit = defineEmits<{ close: [] }>()
 
 const maxWuxing = computed(() => Math.max(...props.wuxing.map(w => w.count), 1))
+const liunian = computed(() => props.liunian || [])
+const warnings = computed(() => props.warnings || [])
+const currentYear = new Date().getFullYear()
+const currentDayun = computed(() =>
+  props.dayun.find(d => d.startYear <= currentYear && (d.endYear || d.startYear + 9) >= currentYear) || props.dayun[0]
+)
+const relationText = computed(() => {
+  const a = props.analysis
+  if (!a) return ""
+  const parts = [
+    ...(a.combinations || []).map(v => `合：${v}`),
+    ...(a.clashes || []).map(v => `冲：${v}`),
+    ...(a.harms || []).map(v => `害：${v}`),
+    ...(a.punishments || []).map(v => `刑：${v}`),
+  ]
+  return parts.join("；")
+})
+const hasConsultationContext = computed(() =>
+  !!props.analysis || !!props.startYun || liunian.value.length > 0 || warnings.value.length > 0
+)
 const close = () => emit("close")
 const handleDownload = () => {
   if (props.birthTime && props.gender) downloadReport(props.birthTime, props.gender)
@@ -184,6 +242,21 @@ const downloadFullPDF = () => {
 .dayun-year { font-size: 16px; font-weight: bold; color: var(--accent-light); margin-bottom: 4px; }
 .dayun-range { font-size: 10px; color: var(--text-dim); margin-bottom: 2px; }
 .dayun-age { font-size: 10px; color: rgba(138,155,176,0.6); }
+.consult-section { margin-bottom: 24px; }
+.consult-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 10px; }
+.consult-card { background: rgba(255,255,255,0.03); border: 1px solid var(--border); border-radius: 10px; padding: 10px; min-width: 0; }
+.consult-card.wide { grid-column: span 3; }
+.consult-label { font-size: 10px; color: var(--text-muted); margin-bottom: 4px; }
+.consult-main { font-size: 15px; color: var(--accent-light); font-weight: 700; margin-bottom: 3px; }
+.consult-sub,
+.consult-text { font-size: 11px; color: var(--text-dim); line-height: 1.5; }
+.consult-note { font-size: 12px; line-height: 1.6; color: var(--text-dim); background: rgba(212,175,55,0.05); border: 1px solid rgba(212,175,55,0.12); border-radius: 10px; padding: 9px 10px; margin-top: 8px; }
+.liunian-strip { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 10px; }
+.liunian-pill { display: grid; grid-template-columns: auto auto 1fr; gap: 6px; align-items: center; padding: 8px 9px; border-radius: 9px; background: rgba(255,255,255,0.03); border: 1px solid var(--border); font-size: 11px; color: var(--text-dim); }
+.liunian-pill b { color: var(--text); font-size: 13px; }
+.liunian-pill em { font-style: normal; color: var(--accent); text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.warning-list { margin-top: 10px; display: grid; gap: 6px; }
+.warning-item { font-size: 11px; color: #d8bf7a; line-height: 1.5; padding: 8px 10px; border-radius: 9px; background: rgba(212,175,55,0.06); border: 1px solid rgba(212,175,55,0.12); }
 .shensha-list { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
 .shensha-item { background: rgba(255,255,255,0.03); border-radius: 10px; padding: 10px; border: 1px solid var(--border); }
 .shensha-name { font-size: 12px; color: var(--accent); font-weight: 600; margin-bottom: 4px; }
@@ -201,4 +274,10 @@ const downloadFullPDF = () => {
 .modal-footer { display: flex; justify-content: flex-end; gap: 10px; padding: 16px 20px;
   border-top: 1px solid var(--border); background: rgba(255,255,255,0.02); flex-wrap: wrap; }
 .modal-footer .btn { display: inline-flex; align-items: center; gap: 6px; }
+
+@media (max-width: 640px) {
+  .consult-grid { grid-template-columns: repeat(2, 1fr); }
+  .consult-card.wide { grid-column: span 2; }
+  .liunian-strip { grid-template-columns: repeat(2, 1fr); }
+}
 </style>

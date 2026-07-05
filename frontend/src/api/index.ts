@@ -65,7 +65,54 @@ export async function generateFullReport(birthTime: string, gender: string, sect
   return data.content || ""
 }
 
-export interface ChartCase { id: string; name: string; tags: string[]; birthTime: string; gender: string; createdAt: string; updatedAt: string; chartData?: any }
+export interface ChartAnalysis {
+  day_master?: string
+  day_master_wuxing?: string
+  strength?: string
+  strength_score?: number
+  useful_hint?: string
+  tenGods?: Record<string, number>
+  exposedStems?: string[]
+  rootedStems?: string[]
+  combinations?: string[]
+  clashes?: string[]
+  harms?: string[]
+  punishments?: string[]
+  season?: string
+  adjustment?: string
+  patternHint?: string
+  confidence?: number
+}
+
+export interface ChartData {
+  birth?: Record<string, any>
+  pillars: Pillar[]
+  wuxing: WuxingItem[]
+  dayun: DayunItem[]
+  liunian: LiuNianItem[]
+  shensha: ShenshaItem[]
+  analysis?: ChartAnalysis
+  startYun?: Record<string, any>
+  warnings?: string[]
+  chartText?: string
+  analysisText?: string
+  dayunText?: string
+  liunianText?: string
+}
+
+export interface ChartCase { id: string; name: string; tags: string[]; birthTime: string; gender: string; createdAt: string; updatedAt: string; chartData?: ChartData }
+
+export async function getChart(birthTime: string, gender: string, sect = 2, yunSect = 1): Promise<ChartData> {
+  const params = new URLSearchParams({
+    birth_time: birthTime,
+    gender,
+    sect: String(sect),
+    yun_sect: String(yunSect),
+  })
+  const res = await fetch(`${API_BASE}/ai/xianzhi/chart?${params.toString()}`)
+  if (!res.ok) throw new Error(`排盘失败 ${res.status}`)
+  return await res.json()
+}
 
 export async function fetchChartCases(): Promise<ChartCase[]> {
   try {
@@ -173,8 +220,8 @@ export function parseWuxing(text: string): WuxingItem[] {
   return result
 }
 
-export interface DayunItem { year: string; ganzhi: string; startAge: number; startYear: number; liunian?: LiuNianItem[] }
-export interface LiuNianItem { year: string; ganzhi: string }
+export interface DayunItem { year: string; ganzhi: string; startAge: number; startYear: number; endAge?: number; endYear?: number; liunian?: LiuNianItem[] }
+export interface LiuNianItem { year: string; ganzhi: string; age?: number; dayun?: string; dayunStartYear?: number; dayunEndYear?: number; xunkong?: string }
 export function parseDayun(text: string): DayunItem[] {
   if (!text) return []
   const result: DayunItem[] = []

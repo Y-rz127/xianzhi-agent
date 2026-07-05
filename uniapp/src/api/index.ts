@@ -129,8 +129,11 @@ export interface ChartData {
   pillars: Pillar[]
   wuxing: WuxingItem[]
   dayun: DayunItem[]
-  liunian: any[]
+  liunian: LiuNianItem[]
   shensha: ShenshaItem[]
+  analysis?: ChartAnalysis
+  startYun?: Record<string, any>
+  warnings?: string[]
   chartText?: string
   analysisText?: string
   dayunText?: string
@@ -299,7 +302,27 @@ export function parseWuxing(text: string): WuxingItem[] {
   return result
 }
 
-export interface DayunItem { year: string; ganzhi: string; startAge: number; startYear: number }
+export interface ChartAnalysis {
+  day_master?: string
+  day_master_wuxing?: string
+  strength?: string
+  strength_score?: number
+  useful_hint?: string
+  tenGods?: Record<string, number>
+  exposedStems?: string[]
+  rootedStems?: string[]
+  combinations?: string[]
+  clashes?: string[]
+  harms?: string[]
+  punishments?: string[]
+  season?: string
+  adjustment?: string
+  patternHint?: string
+  confidence?: number
+}
+
+export interface DayunItem { year: string; ganzhi: string; startAge: number; startYear: number; endAge?: number; endYear?: number }
+export interface LiuNianItem { year: string; ganzhi: string; age?: number; dayun?: string; dayunStartYear?: number; dayunEndYear?: number; xunkong?: string }
 export function parseDayun(text: string): DayunItem[] {
   if (!text) return []
   const result: DayunItem[] = []
@@ -325,4 +348,3 @@ export function parseShensha(text: string): ShenshaItem[] {
   }
   return result.slice(0, 8)
 }
-

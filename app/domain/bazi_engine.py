@@ -44,6 +44,50 @@ GENERATES = {"木": "火", "火": "土", "土": "金", "金": "水", "水": "木
 CONTROLS = {"木": "土", "土": "水", "水": "火", "火": "金", "金": "木"}
 WUXING_ORDER = ("金", "木", "水", "火", "土")
 
+LIU_HE = {
+    frozenset(("子", "丑")): "子丑合土",
+    frozenset(("寅", "亥")): "寅亥合木",
+    frozenset(("卯", "戌")): "卯戌合火",
+    frozenset(("辰", "酉")): "辰酉合金",
+    frozenset(("巳", "申")): "巳申合水",
+    frozenset(("午", "未")): "午未合土",
+}
+LIU_CHONG = {
+    frozenset(("子", "午")): "子午冲",
+    frozenset(("丑", "未")): "丑未冲",
+    frozenset(("寅", "申")): "寅申冲",
+    frozenset(("卯", "酉")): "卯酉冲",
+    frozenset(("辰", "戌")): "辰戌冲",
+    frozenset(("巳", "亥")): "巳亥冲",
+}
+LIU_HAI = {
+    frozenset(("子", "未")): "子未害",
+    frozenset(("丑", "午")): "丑午害",
+    frozenset(("寅", "巳")): "寅巳害",
+    frozenset(("卯", "辰")): "卯辰害",
+    frozenset(("申", "亥")): "申亥害",
+    frozenset(("酉", "戌")): "酉戌害",
+}
+SAN_XING = {
+    frozenset(("寅", "巳", "申")): "寅巳申三刑",
+    frozenset(("丑", "未", "戌")): "丑未戌三刑",
+}
+SELF_XING = {"辰": "辰辰自刑", "午": "午午自刑", "酉": "酉酉自刑", "亥": "亥亥自刑"}
+SEASON_NOTES = {
+    "寅": "春初木旺，重在疏土培木，兼看火来通明。",
+    "卯": "仲春木旺，木气纯粹，宜看金土是否成器。",
+    "辰": "季春湿土，木余水藏，需分清湿土与木气。",
+    "巳": "初夏火旺，燥热渐起，喜水调候、金水相济。",
+    "午": "仲夏火极，最怕燥烈失衡，调候优先看水。",
+    "未": "季夏燥土，火土偏重时需金水润局。",
+    "申": "初秋金旺，金气肃杀，宜看火炼与水润。",
+    "酉": "仲秋金旺，金清则贵，过寒则需火暖。",
+    "戌": "季秋燥土，火库土燥，喜水润燥。",
+    "亥": "初冬水旺，寒气渐重，喜火暖局、土来制水。",
+    "子": "仲冬水极，寒湿明显，调候首看火。",
+    "丑": "季冬寒土，湿寒并见，喜火温土。",
+}
+
 
 @dataclass(frozen=True)
 class BirthInfo:
@@ -107,10 +151,26 @@ class WuxingAnalysis:
 
 
 @dataclass(frozen=True)
+class DomainAnalysis:
+    ten_gods: dict[str, int]
+    exposed_stems: list[str]
+    rooted_stems: list[str]
+    combinations: list[str]
+    clashes: list[str]
+    harms: list[str]
+    punishments: list[str]
+    season: str
+    adjustment: str
+    pattern_hint: str
+    confidence: float
+
+
+@dataclass(frozen=True)
 class BaziChart:
     birth: BirthInfo
     pillars: list[Pillar]
     wuxing: WuxingAnalysis
+    analysis: DomainAnalysis
     dayun: list[DayunItem]
     liunian: list[LiunianItem]
     ming_gong: str
@@ -234,6 +294,90 @@ def _build_wuxing_analysis(ec) -> WuxingAnalysis:
     )
 
 
+def _count_ten_gods(pillars: list[Pillar]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for pillar in pillars:
+        if pillar.shishen_gan and pillar.shishen_gan != "日主":
+            counts[pillar.shishen_gan] = counts.get(pillar.shishen_gan, 0) + 1
+        for item in pillar.shishen_zhi:
+            if item:
+                counts[item] = counts.get(item, 0) + 1
+    return dict(sorted(counts.items(), key=lambda item: (-item[1], item[0])))
+
+
+def _branch_relations(zhis: list[str]) -> tuple[list[str], list[str], list[str], list[str]]:
+    combinations: list[str] = []
+    clashes: list[str] = []
+    harms: list[str] = []
+    punishments: list[str] = []
+    for i in range(len(zhis)):
+        for j in range(i + 1, len(zhis)):
+            pair = frozenset((zhis[i], zhis[j]))
+            if pair in LIU_HE:
+                combinations.append(LIU_HE[pair])
+            if pair in LIU_CHONG:
+                clashes.append(LIU_CHONG[pair])
+            if pair in LIU_HAI:
+                harms.append(LIU_HAI[pair])
+    zhi_set = set(zhis)
+    for group, label in SAN_XING.items():
+        if group.issubset(zhi_set):
+            punishments.append(label)
+    for zhi in zhi_set:
+        if zhis.count(zhi) >= 2 and zhi in SELF_XING:
+            punishments.append(SELF_XING[zhi])
+    return combinations, clashes, harms, punishments
+
+
+def _build_domain_analysis(pillars: list[Pillar], wuxing: WuxingAnalysis) -> DomainAnalysis:
+    day_master = wuxing.day_master
+    visible_gans = [p.gan for p in pillars if p.gan]
+    hidden_stems = [stem for p in pillars for stem in p.hidden_stems]
+    exposed = [gan for gan in visible_gans if gan != day_master]
+    rooted = sorted({day_master for stem in hidden_stems if stem == day_master})
+    zhis = [p.zhi for p in pillars if p.zhi]
+    combinations, clashes, harms, punishments = _branch_relations(zhis)
+    month_zhi = pillars[1].zhi if len(pillars) > 1 else ""
+    adjustment = SEASON_NOTES.get(month_zhi, "调候需结合月令、寒暖燥湿与全局五行再定。")
+
+    ten_gods = _count_ten_gods(pillars)
+    top_gods = list(ten_gods.keys())[:3]
+    relation_bits = []
+    if combinations:
+        relation_bits.append("有合，关系与资源容易被牵动")
+    if clashes:
+        relation_bits.append("有冲，变化、迁移、关系波动信号较明显")
+    if harms:
+        relation_bits.append("有害，暗耗、人际误解或隐性压力需留意")
+    if punishments:
+        relation_bits.append("有刑，自我压力、规则冲突或反复感更强")
+    if not relation_bits:
+        relation_bits.append("原局地支冲合刑害不重，更多看大运流年触发")
+    root_hint = "日主有根" if rooted else "日主根气不显"
+    pattern_hint = f"{wuxing.day_master}日主{wuxing.strength}，{root_hint}；十神以{('、'.join(top_gods) if top_gods else '不显')}较突出；" + "；".join(relation_bits)
+    confidence = 0.72
+    if month_zhi:
+        confidence += 0.08
+    if top_gods:
+        confidence += 0.05
+    if combinations or clashes or harms or punishments:
+        confidence += 0.05
+
+    return DomainAnalysis(
+        ten_gods=ten_gods,
+        exposed_stems=exposed,
+        rooted_stems=rooted,
+        combinations=combinations,
+        clashes=clashes,
+        harms=harms,
+        punishments=punishments,
+        season=month_zhi,
+        adjustment=adjustment,
+        pattern_hint=pattern_hint,
+        confidence=round(min(confidence, 0.9), 2),
+    )
+
+
 def _pillar(name: str, ganzhi: str, nayin: str, xunkong: str, hidden: str, shishen_gan: str, shishen_zhi: Any) -> Pillar:
     gan = ganzhi[0] if ganzhi else ""
     zhi = ganzhi[1] if len(ganzhi) > 1 else ""
@@ -339,6 +483,8 @@ def build_bazi_chart(
         _pillar("日柱", ec.getDay(), ec.getDayNaYin(), ec.getDayXunKong(), ec.getDayHideGan(), "日主", ec.getDayShiShenZhi()),
         _pillar("时柱", ec.getTime(), ec.getTimeNaYin(), ec.getTimeXunKong(), ec.getTimeHideGan(), ec.getTimeShiShenGan(), ec.getTimeShiShenZhi()),
     ]
+    wuxing = _build_wuxing_analysis(ec)
+    analysis = _build_domain_analysis(pillars, wuxing)
     dayun = _build_dayun(yun, dayun_count)
     start_year = liunian_start_year or _dt.date.today().year
     liunian = _build_liunian(yun, dayun, start_year, liunian_years)
@@ -359,7 +505,8 @@ def build_bazi_chart(
             yun_sect=yun_sect,
         ),
         pillars=pillars,
-        wuxing=_build_wuxing_analysis(ec),
+        wuxing=wuxing,
+        analysis=analysis,
         dayun=dayun,
         liunian=liunian,
         ming_gong=ec.getMingGong(),
@@ -404,7 +551,20 @@ def chart_to_api_dict(chart: BaziChart) -> dict[str, Any]:
             {"name": name, "count": chart.wuxing.counts.get(name, 0), "color": colors[name]}
             for name in WUXING_ORDER
         ],
-        "analysis": asdict(chart.wuxing),
+        "analysis": {
+            **asdict(chart.wuxing),
+            "tenGods": chart.analysis.ten_gods,
+            "exposedStems": chart.analysis.exposed_stems,
+            "rootedStems": chart.analysis.rooted_stems,
+            "combinations": chart.analysis.combinations,
+            "clashes": chart.analysis.clashes,
+            "harms": chart.analysis.harms,
+            "punishments": chart.analysis.punishments,
+            "season": chart.analysis.season,
+            "adjustment": chart.analysis.adjustment,
+            "patternHint": chart.analysis.pattern_hint,
+            "confidence": chart.analysis.confidence,
+        },
         "dayun": [
             {
                 "year": item.ganzhi,
@@ -486,7 +646,23 @@ def format_analysis_text(chart: BaziChart, question: str = "整体运势") -> st
     lines += ["", "【藏干】"]
     for p in chart.pillars:
         lines.append(f"  {p.name}{p.zhi}: {', '.join(p.hidden_stems) or '-'}")
-    lines += ["", f"【分析方向】 {question}", "【口径说明】"]
+    lines += [
+        "",
+        "【结构判断】",
+        f"  十神分布: {chart.analysis.ten_gods}",
+        f"  透干: {', '.join(chart.analysis.exposed_stems) or '-'}",
+        f"  通根: {', '.join(chart.analysis.rooted_stems) or '-'}",
+        f"  合: {', '.join(chart.analysis.combinations) or '-'}",
+        f"  冲: {', '.join(chart.analysis.clashes) or '-'}",
+        f"  害: {', '.join(chart.analysis.harms) or '-'}",
+        f"  刑: {', '.join(chart.analysis.punishments) or '-'}",
+        f"  调候: {chart.analysis.adjustment}",
+        f"  格局提示: {chart.analysis.pattern_hint}",
+        f"  判断置信度: {chart.analysis.confidence}",
+        "",
+        f"【分析方向】 {question}",
+        "【口径说明】",
+    ]
     lines += [f"  - {note}" for note in wx.notes]
     return "\n".join(lines)
 

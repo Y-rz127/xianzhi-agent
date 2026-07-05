@@ -8,7 +8,7 @@ from __future__ import annotations
 import re
 from typing import Optional
 
-from langchain_core.messages import SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.tools import BaseTool
 from langchain_core.language_models import BaseChatModel
 
@@ -20,7 +20,7 @@ from app.memory import create_chat_memory
 from app.tools.mcp_client import mcp_manager
 import asyncio
 
-from app.tools.bazi import bazi_full
+from app.agent.xianzhi_workflow import XianzhiWorkflow, WorkflowChartContext, build_chart_context, render_full_fact_context
 
 
 # 用于从用户输入中尝试提取出生时间与性别
@@ -101,6 +101,8 @@ class Xianzhi(ToolCallAgent):
         self._conversation_id = "xianzhi-default"
         self._memory = create_chat_memory()
         self.chart_context = ""
+        self._workflow = XianzhiWorkflow(chat_model)
+        self._workflow_context: WorkflowChartContext | None = None
         self._last_birth_info: Optional[dict] = None
         self._sect = 2
         self._yun_sect = 1
@@ -134,18 +136,21 @@ class Xianzhi(ToolCallAgent):
             yun_sect: 大运计算流派，1=按天数和时辰数（默认），2=按分钟数
         """
         try:
-            chart = bazi_full.invoke({"birth_time": birth_time, "gender": gender, "sect": sect, "yun_sect": yun_sect})
+            workflow_context = build_chart_context(birth_time, gender, sect, yun_sect)
+            chart = render_full_fact_context(workflow_context)
             self.chart_context = (
                 "【当前命盘上下文】\n"
                 "以下盘面信息已由系统根据用户提供的出生时间自动排盘生成，"
                 "请你在后续回答中优先基于该命盘进行推理与分析，无需再次排盘：\n\n"
                 f"{chart}\n"
             )
+            self._workflow_context = workflow_context
             self._last_birth_info = {"time": birth_time, "gender": gender, "sect": sect, "yun_sect": yun_sect}
             log.info("已挂载命盘上下文: {} {}", birth_time, gender)
         except Exception as e:
             log.warning("挂载命盘上下文失败: {}", e)
             self.chart_context = ""
+            self._workflow_context = None
             self._last_birth_info = None
 
     def _extract_birth_info(self, text: str):
@@ -185,6 +190,9 @@ class Xianzhi(ToolCallAgent):
         self.reset()
         self.mount_chart_context(user_prompt, self._sect, self._yun_sect)
         self._load_history()
+        if self._workflow_context:
+            chunks = list(self._workflow_stream(user_prompt))
+            return chunks[-1] if chunks else ""
         return super().run(user_prompt)
 
     def think(self):
@@ -248,6 +256,50 @@ class Xianzhi(ToolCallAgent):
             # 前端已通过 /api/ai/xianzhi/chart 拿到结构化命盘数据
             log.info("[xianzhi] 终止时无文本回答，仅返回工具结果")
 
+    def _run_workflow_once(self, user_prompt: str, history_snapshot=None) -> str:
+        """Run the chart-grounded workflow for one turn."""
+        if not self._workflow_context:
+            raise RuntimeError("workflow context is not mounted")
+        history = list(history_snapshot) if history_snapshot is not None else list(self.message_list)
+        answer = self._workflow.answer(user_prompt, self._workflow_context, history)
+        return answer
+
+    def _workflow_stream(self, user_prompt: str):
+        try:
+            self.state = AgentState.RUNNING
+            history_snapshot = list(self.message_list)
+            self.message_list.append(HumanMessage(content=user_prompt))
+            answer = self._run_workflow_once(user_prompt, history_snapshot)
+            self.final_answer = answer
+            self.message_list.append(AIMessage(content=answer))
+            self.state = AgentState.FINISHED
+            yield answer
+        except Exception as e:
+            self.state = AgentState.ERROR
+            self._last_error = str(e)
+            log.exception("Xianzhi workflow error")
+            yield "分析过程遇到错误：{}。请稍后重试。".format(str(e)[:200])
+        finally:
+            self.cleanup()
+
+    async def _aworkflow_stream(self, user_prompt: str):
+        try:
+            self.state = AgentState.RUNNING
+            history_snapshot = list(self.message_list)
+            self.message_list.append(HumanMessage(content=user_prompt))
+            answer = await asyncio.to_thread(self._run_workflow_once, user_prompt, history_snapshot)
+            self.final_answer = answer
+            self.message_list.append(AIMessage(content=answer))
+            self.state = AgentState.FINISHED
+            yield answer
+        except Exception as e:
+            self.state = AgentState.ERROR
+            self._last_error = str(e)
+            log.exception("Xianzhi workflow error")
+            yield "分析过程遇到错误：{}。请稍后重试。".format(str(e)[:200])
+        finally:
+            self.cleanup()
+
     def run_stream(self, user_prompt, verbose: bool = False):
         """同步流式执行。
 
@@ -258,6 +310,8 @@ class Xianzhi(ToolCallAgent):
         self.reset()
         self.mount_chart_context(user_prompt, self._sect, self._yun_sect)
         self._load_history()
+        if self._workflow_context and not verbose:
+            return self._workflow_stream(user_prompt)
         # 直接调用 BaseAgent.run_stream（绕开 ToolCallAgent.run_stream 的二次 reset，
         # 避免历史被清空；同时让 step 输出走 BaseAgent 的日志逻辑）
         base_stream = BaseAgent.run_stream(self, user_prompt)
@@ -275,6 +329,10 @@ class Xianzhi(ToolCallAgent):
         self.reset()
         self.mount_chart_context(user_prompt, self._sect, self._yun_sect)
         self._load_history()
+        if self._workflow_context and not verbose:
+            async for chunk in self._aworkflow_stream(user_prompt):
+                yield chunk
+            return
         if verbose:
             async for chunk in super().arun_stream(user_prompt):
                 yield chunk
@@ -322,5 +380,6 @@ class Xianzhi(ToolCallAgent):
         self._persist_history()
         # 清理当前轮次的命盘上下文，避免跨会话污染
         self.chart_context = ""
+        self._workflow_context = None
         self._last_birth_info = None
         super().cleanup()

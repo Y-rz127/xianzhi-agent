@@ -150,7 +150,20 @@
       </div>
     </div>
 
-    <BaziModal :visible="showModal" :pillars="pillars" :wuxing="wuxing" :dayun="dayun" :shensha="shensha" :birthTime="lastBirthInfo?.time" :gender="lastBirthInfo?.gender" @close="showModal = false" />
+    <BaziModal
+      :visible="showModal"
+      :pillars="modalPillars"
+      :wuxing="modalWuxing"
+      :dayun="modalDayun"
+      :liunian="modalLiunian"
+      :shensha="modalShensha"
+      :analysis="chartData?.analysis"
+      :startYun="chartData?.startYun"
+      :warnings="chartData?.warnings || []"
+      :birthTime="lastBirthInfo?.time"
+      :gender="lastBirthInfo?.gender"
+      @close="showModal = false"
+    />
 
     <Teleport to="body">
       <div v-if="showCaseModal" class="case-modal-overlay" @click.self="closeCaseModal">
@@ -194,7 +207,7 @@
 
 <script setup lang="ts">
 import { ref, nextTick, computed, onMounted, onUnmounted } from "vue"
-import { chatWithXianzhi, chatWithRag, downloadReport, parsePillars, parseWuxing, parseDayun, parseShensha, fetchSessions, deleteSession as deleteSessionApi, getSessionMessages, fetchChartCases, createChartCase, deleteChartCase, type ChatSession, type SessionMessage, type ChartCase } from "../api"
+import { chatWithXianzhi, chatWithRag, downloadReport, parsePillars, parseWuxing, parseDayun, parseShensha, fetchSessions, deleteSession as deleteSessionApi, getSessionMessages, fetchChartCases, createChartCase, deleteChartCase, getChart, type ChatSession, type SessionMessage, type ChartCase, type ChartData } from "../api"
 import BaziCard from "../components/BaziCard.vue"
 import WuxingChart from "../components/WuxingChart.vue"
 import DayunTimeline from "../components/DayunTimeline.vue"
@@ -209,6 +222,7 @@ const loading = ref(false)
 const messagesEl = ref<HTMLElement | null>(null)
 const mode = ref<"agent" | "rag">("agent")
 const lastBirthInfo = ref<BirthInfo | null>(null)
+const chartData = ref<ChartData | null>(null)
 const conversationId = ref("xianzhi-" + Date.now())
 const ragSessionId = ref("rag-" + Date.now())
 const sidebarCollapsed = ref(false)
@@ -250,6 +264,11 @@ const pillars = computed(() => lastAssistantMsg.value ? parsePillars(extractAnsw
 const wuxing = computed(() => lastAssistantMsg.value ? parseWuxing(extractAnswer(lastAssistantMsg.value.content)) : [])
 const dayun = computed(() => lastAssistantMsg.value ? parseDayun(extractAnswer(lastAssistantMsg.value.content)) : [])
 const shensha = computed(() => lastAssistantMsg.value ? parseShensha(extractAnswer(lastAssistantMsg.value.content)) : [])
+const modalPillars = computed(() => chartData.value?.pillars?.length ? chartData.value.pillars : pillars.value)
+const modalWuxing = computed(() => chartData.value?.wuxing?.length ? chartData.value.wuxing : wuxing.value)
+const modalDayun = computed(() => chartData.value?.dayun?.length ? chartData.value.dayun : dayun.value)
+const modalLiunian = computed(() => chartData.value?.liunian || [])
+const modalShensha = computed(() => chartData.value?.shensha?.length ? chartData.value.shensha : shensha.value)
 const parsedDayun = computed(() => dayun.value.map(d => ({ ...d, liunian: [] })))
 const canSaveCase = computed(() =>
   caseName.value.trim() && caseBirthTime.value.trim() && (caseGender.value === "男" || caseGender.value === "女")
@@ -267,10 +286,22 @@ const scrollToBottom = async () => {
   if (messagesEl.value) messagesEl.value.scrollTop = messagesEl.value.scrollHeight
 }
 
+const fetchChartData = async (birthTime: string, gender: string) => {
+  try {
+    chartData.value = await getChart(birthTime, gender, sect.value, yunSect.value)
+  } catch {
+    chartData.value = null
+  }
+}
+
 const tryExtractBirth = (text: string) => {
   const m = text.match(/(男|女)/)
   const t = text.match(/(\d{4}[-年/]\d{1,2}[-月/]\d{1,2}[日 ]+\d{1,2}[:：]\d{1,2})/)
-  if (m && t) lastBirthInfo.value = { time: t[1].replace(/年|月/g, "-").replace("日", "").replace("：", ":"), gender: m[1] }
+  if (m && t) {
+    const time = t[1].replace(/年|月/g, "-").replace("日", "").replace("：", ":").trim()
+    lastBirthInfo.value = { time, gender: m[1] }
+    fetchChartData(time, m[1])
+  }
 }
 
 const formatContent = (text: string) => {
@@ -291,13 +322,14 @@ const switchMode = (m: "agent" | "rag") => {
   lastBirthInfo.value = null
 }
 
-const clearChat = () => { messages.value = []; lastBirthInfo.value = null }
+const clearChat = () => { messages.value = []; lastBirthInfo.value = null; chartData.value = null }
 
 const newSession = () => {
   conversationId.value = "xianzhi-" + Date.now()
   ragSessionId.value = "rag-" + Date.now()
   messages.value = []
   lastBirthInfo.value = null
+  chartData.value = null
   input.value = ""
   loadSessions()
 }
@@ -314,7 +346,12 @@ const exportChat = () => {
 }
 
 const useExample = (ex: string) => { input.value = ex }
-const showBaziModal = () => { showModal.value = true }
+const showBaziModal = async () => {
+  if (lastBirthInfo.value && !chartData.value) {
+    await fetchChartData(lastBirthInfo.value.time, lastBirthInfo.value.gender)
+  }
+  showModal.value = true
+}
 const toggleSidebar = () => { sidebarCollapsed.value = !sidebarCollapsed.value }
 
 const loadSessions = async () => {
@@ -380,6 +417,8 @@ const deleteChartCaseItem = async (id: string) => {
 const loadChartCase = (c: ChartCase) => {
   if (!c?.birthTime || !c?.gender) return
   lastBirthInfo.value = { time: c.birthTime, gender: c.gender }
+  chartData.value = c.chartData || null
+  if (!chartData.value) fetchChartData(c.birthTime, c.gender)
   input.value = "请分析这个命盘：" + c.name
 }
 
