@@ -1,0 +1,105 @@
+/**
+ * uni.scss - 全局样式变量
+ * 先知 - 玄幻科幻命理 App 品牌风格
+ * 深空背景 + 紫蓝能量渐变 + 灵动光晕 + 未来感排版
+ */
+
+/* === 品牌主色系（紫蓝能量） === */
+$color-primary: #7C3AED;
+$color-primary-light: #8B5CF6;
+$color-primary-lighter: #A78BFA;
+$color-primary-lightest: #C4B5FD;
+$color-primary-dark: #6D28D9;
+$color-primary-darker: #5B21B6;
+
+/* === 能量青色（辅助色） === */
+$color-energy: #06B6D4;
+$color-energy-light: #22D3EE;
+$color-energy-lighter: #67E8F9;
+$color-energy-dark: #0891B2;
+
+/* === 星光白 === */
+$color-ink: #E2E8F0;
+$color-ink-light: #94A3B8;
+$color-ink-lighter: #64748B;
+$color-ink-lightest: #475569;
+
+/* === 能量金（点缀） === */
+$color-gold: #F59E0B;
+$color-gold-light: #FBBF24;
+$color-gold-lighter: #FDE68A;
+
+/* === 灵动绿 === */
+$color-green: #10B981;
+$color-green-light: #34D399;
+$color-green-lighter: #A7F3D0;
+
+/* === 恋爱粉（love 页面专用） === */
+$color-pink: #EC4899;
+
+/* === 状态色 === */
+$state-success: #10B981;
+$state-warning: #F59E0B;
+$state-error: #EF4444;
+$state-info: #06B6D4;
+
+/* === 中性色（深空系） === */
+$color-bg: #0F0B1E;
+$color-bg-warm: #160F2E;
+$color-bg-card: rgba(30, 22, 56, 0.8);
+$color-bg-elevated: rgba(40, 30, 72, 0.9);
+$color-bg-inverse: #E2E8F0;
+$color-border: rgba(124, 58, 237, 0.2);
+$color-border-light: rgba(124, 58, 237, 0.1);
+$color-surface-divider: rgba(148, 163, 184, 0.12);
+
+/* === 阴影（能量光晕） === */
+$shadow-sm: 0 2rpx 6rpx rgba(124, 58, 237, 0.08);
+$shadow-md: 0 8rpx 24rpx rgba(124, 58, 237, 0.12);
+$shadow-elevated: 0 16rpx 64rpx rgba(124, 58, 237, 0.18);
+$glow-primary: 0 0 40rpx rgba(124, 58, 237, 0.3);
+$glow-energy: 0 0 40rpx rgba(6, 182, 212, 0.3);
+$glow-gold: 0 0 32rpx rgba(245, 158, 11, 0.25);
+
+/* === 字体（未来感） === */
+$font-family-display: 'Orbitron', 'Rajdhani', 'PingFang SC', 'Noto Sans SC', sans-serif;
+$font-family-body: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', 'Noto Sans SC', sans-serif;
+
+/* === 圆角 === */
+$radius-sm: 12rpx;
+$radius-md: 20rpx;
+$radius-lg: 28rpx;
+$radius-xl: 32rpx;
+$radius-full: 9999rpx;
+
+/* === 间距 === */
+$spacing-xs: 8rpx;
+$spacing-sm: 16rpx;
+$spacing-md: 24rpx;
+$spacing-base: 32rpx;
+$spacing-lg: 40rpx;
+$spacing-xl: 48rpx;
+$spacing-2xl: 64rpx;
+
+/* === 旧变量兼容（保持 uni-app 内置组件主题色） === */
+$uni-color-primary: $color-primary;
+$uni-color-success: $color-green;
+$uni-color-warning: $color-gold;
+$uni-color-error: $state-error;
+
+$uni-text-color: $color-ink;
+$uni-text-color-inverse: #ffffff;
+$uni-text-color-grey: $color-ink-light;
+$uni-text-color-placeholder: $color-ink-lighter;
+
+$uni-bg-color: $color-bg;
+$uni-bg-color-hover: $color-bg-warm;
+$uni-border-color: $color-border;
+
+$uni-font-size-sm: 22rpx;
+$uni-font-size-base: 26rpx;
+$uni-font-size-lg: 30rpx;
+$uni-spacing-row-sm: 16rpx;
+$uni-spacing-row-base: 32rpx;
+$uni-spacing-col-sm: 12rpx;
+$uni-spacing-col-base: 24rpx;

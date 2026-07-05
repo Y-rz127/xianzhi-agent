@@ -1,0 +1,50 @@
+﻿version: "3.8"
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: xianzhi-pg
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_DB: xianzhi
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - xianzhi-pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d xianzhi"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  api:
+    build: .
+    container_name: xianzhi-api
+    ports:
+      - "8123:8123"
+    environment:
+      POSTGRES_CONNECTION_STRING: postgresql://postgres:postgres@postgres:5432/xianzhi
+      VECTOR_STORE_TYPE: postgres
+      MEMORY_STORE_TYPE: postgres
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./app:/app/app
+      - ./data:/app/data
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: xianzhi-frontend
+    ports:
+      - "5174:80"
+    depends_on:
+      - api
+    restart: unless-stopped
+
+volumes:
+  xianzhi-pg-data:

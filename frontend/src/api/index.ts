@@ -1,0 +1,236 @@
+const API_BASE = import.meta.env.DEV ? "http://localhost:8123/api" : "/api"
+
+export interface SSECallbacks {
+  onMessage?: (data: string) => void
+  onError?: (err: Event) => void
+  onDone?: () => void
+}
+
+export interface ChatOptions {
+  birth_time?: string
+  gender?: string
+  sect?: number
+  yun_sect?: number
+}
+
+export function connectSSE(path: string, params: Record<string, string | undefined>, cb: SSECallbacks): EventSource {
+  const qs = Object.keys(params)
+    .filter((k) => params[k] !== undefined && params[k] !== "")
+    .map((k) => `${encodeURIComponent(k)}=${encodeURIComponent(params[k] as string)}`)
+    .join("&")
+  const url = `${API_BASE}${path}?${qs}`
+  const es = new EventSource(url)
+  es.onmessage = (e) => {
+    if (e.data === "[DONE]") { cb.onDone?.(); es.close() }
+    else cb.onMessage?.(e.data)
+  }
+  // 监听后端自定义 error 事件（如 event: error）
+  es.addEventListener("error", (e) => {
+    const data = (e as MessageEvent).data || ""
+    cb.onError?.(new ErrorEvent("error", { message: data }))
+    es.close()
+  })
+  es.onerror = (err) => { cb.onError?.(err); es.close() }
+  return es
+}
+
+export const chatWithXianzhi = (message: string, conversationId: string, cb: SSECallbacks, opts?: ChatOptions) =>
+  connectSSE("/ai/xianzhi/chat", {
+    message,
+    conversation_id: conversationId,
+    birth_time: opts?.birth_time,
+    gender: opts?.gender,
+    sect: opts?.sect !== undefined ? String(opts.sect) : undefined,
+    yun_sect: opts?.yun_sect !== undefined ? String(opts.yun_sect) : undefined,
+  }, cb)
+
+export const chatWithLove = (message: string, chatId: string, cb: SSECallbacks) =>
+  connectSSE("/ai/love_app/chat/sse", { message, chat_id: chatId }, cb)
+
+export const chatWithRag = (message: string, sessionId: string, cb: SSECallbacks) =>
+  connectSSE("/ai/xianzhi/rag", { message, session_id: sessionId }, cb)
+
+export function downloadReport(birthTime: string, gender: string): void {
+  const qs = `birth_time=${encodeURIComponent(birthTime)}&gender=${encodeURIComponent(gender)}`
+  const url = `${API_BASE}/ai/xianzhi/report?${qs}`
+  window.open(url, "_blank")
+}
+
+export async function generateFullReport(birthTime: string, gender: string, sections?: string[]): Promise<string> {
+  const params = new URLSearchParams({ birth_time: birthTime, gender })
+  if (sections && sections.length) params.set("sections", sections.join(","))
+  const res = await fetch(`${API_BASE}/ai/xianzhi/full_report?${params.toString()}`)
+  const data = await res.json()
+  if (data.error) throw new Error(data.error)
+  return data.content || ""
+}
+
+export interface ChartCase { id: string; name: string; tags: string[]; birthTime: string; gender: string; createdAt: string; updatedAt: string; chartData?: any }
+
+export async function fetchChartCases(): Promise<ChartCase[]> {
+  try {
+    const res = await fetch(`${API_BASE}/ai/xianzhi/chart_cases`)
+    if (!res.ok) throw new Error("fail")
+    return await res.json()
+  } catch { return [] }
+}
+
+export async function createChartCase(payload: Partial<ChartCase>): Promise<{ id?: string; error?: string }> {
+  const body = {
+    name: payload.name,
+    birth_time: payload.birthTime,
+    gender: payload.gender,
+    tags: payload.tags,
+    chart_data: payload.chartData,
+  }
+  const res = await fetch(`${API_BASE}/ai/xianzhi/chart_cases`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: `保存失败 ${res.status}` }))
+    throw new Error(err.detail || `保存失败 ${res.status}`)
+  }
+  return await res.json()
+}
+
+export async function updateChartCase(id: string, payload: Partial<ChartCase>): Promise<void> {
+  const res = await fetch(`${API_BASE}/ai/xianzhi/chart_cases/${id}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      name: payload.name,
+      tags: payload.tags,
+      birth_time: payload.birthTime,
+      gender: payload.gender,
+    }),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: `更新失败 ${res.status}` }))
+    throw new Error(err.detail || `更新失败 ${res.status}`)
+  }
+}
+
+export async function deleteChartCase(id: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/ai/xianzhi/chart_cases/${id}`, { method: "DELETE" })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: `删除失败 ${res.status}` }))
+    throw new Error(err.detail || `删除失败 ${res.status}`)
+  }
+}
+
+export function exportChartCasesJSON(): void {
+  const url = `${API_BASE}/ai/xianzhi/chart_cases/export/json`
+  window.open(url, "_blank")
+}
+
+export async function importChartCasesJSON(file: File): Promise<{ inserted: number; skipped: number }> {
+  const text = await file.text()
+  const data = JSON.parse(text)
+  const res = await fetch(`${API_BASE}/ai/xianzhi/chart_cases/import/json`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ cases: data.cases || [] }),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: `导入失败 ${res.status}` }))
+    throw new Error(err.detail || `导入失败 ${res.status}`)
+  }
+  return await res.json()
+}
+
+export function downloadFullReportPDF(birthTime: string, gender: string, sections?: string[]): void {
+  const params = new URLSearchParams({ birth_time: birthTime, gender })
+  if (sections && sections.length) params.set("sections", sections.join(","))
+  const url = `${API_BASE}/ai/xianzhi/full_report_pdf?${params.toString()}`
+  window.open(url, "_blank")
+}
+
+export interface Pillar { name: string; ganzhi: string; nayin: string }
+export function parsePillars(text: string): Pillar[] {
+  if (!text) return []
+  const result: Pillar[] = []
+  const re = /(年柱|月柱|日柱|时柱)[:\s]*([^\s(]+)\s*\(([^)]+)\)/g
+  let m: RegExpExecArray | null
+  while ((m = re.exec(text)) !== null) {
+    result.push({ name: m[1], ganzhi: m[2].trim(), nayin: m[3].trim() })
+  }
+  return result
+}
+
+export interface WuxingItem { name: string; count: number; color: string }
+export function parseWuxing(text: string): WuxingItem[] {
+  if (!text) return []
+  const colors: Record<string, string> = { "金": "#d4af37", "木": "#4a7c3a", "水": "#3a6ea5", "火": "#c0392b", "土": "#8b6f47" }
+  const result: WuxingItem[] = []
+  const m = text.match(/['"]?金['"]?\s*[:=]\s*(\d+).*?['"]?木['"]?\s*[:=]\s*(\d+).*?['"]?水['"]?\s*[:=]\s*(\d+).*?['"]?火['"]?\s*[:=]\s*(\d+).*?['"]?土['"]?\s*[:=]\s*(\d+)/s)
+  if (m) {
+    const vals = [parseInt(m[1]), parseInt(m[2]), parseInt(m[3]), parseInt(m[4]), parseInt(m[5])]
+    const names = ["金", "木", "水", "火", "土"]
+    names.forEach((n, i) => result.push({ name: n, count: vals[i], color: colors[n] }))
+  }
+  return result
+}
+
+export interface DayunItem { year: string; ganzhi: string; startAge: number; startYear: number; liunian?: LiuNianItem[] }
+export interface LiuNianItem { year: string; ganzhi: string }
+export function parseDayun(text: string): DayunItem[] {
+  if (!text) return []
+  const result: DayunItem[] = []
+  const re = /(\d+)[\s-~至~到](\d+)岁?\s*([^\s]+)\s*(\d+)-(\d+)/g
+  let m: RegExpExecArray | null
+  while ((m = re.exec(text)) !== null) {
+    result.push({ year: m[3], ganzhi: m[3], startAge: parseInt(m[1]), startYear: parseInt(m[4]) })
+  }
+  return result
+}
+
+export interface ShenshaItem { name: string; description: string }
+export function parseShensha(text: string): ShenshaItem[] {
+  if (!text) return []
+  const result: ShenshaItem[] = []
+  const re = /([^\n:：]+)[：:]\s*([^\n]+)/g
+  let m: RegExpExecArray | null
+  while ((m = re.exec(text)) !== null) {
+    const name = m[1].trim()
+    if (name && name.length < 20 && !name.includes("柱") && !name.includes("五行")) {
+      result.push({ name, description: m[2].trim() })
+    }
+  }
+  return result.slice(0, 8)
+}
+
+export interface ChatSession { id: string; title: string; lastMessage: string; lastTime: string; messageCount: number }
+export async function fetchSessions(type: "xianzhi" | "love"): Promise<ChatSession[]> {
+  try {
+    const endpoint = type === "xianzhi" ? "xianzhi" : "love_app"
+    const res = await fetch(`${API_BASE}/ai/${endpoint}/sessions`)
+    if (!res.ok) throw new Error("Not found")
+    return res.json()
+  } catch { return [] }
+}
+
+export async function deleteSession(type: "xianzhi" | "love", id: string): Promise<void> {
+  if (!id) return
+  try {
+    const endpoint = type === "xianzhi" ? "xianzhi" : "love_app"
+    await fetch(`${API_BASE}/ai/${endpoint}/sessions/${id}`, { method: "DELETE" })
+  } catch {}
+}
+
+export interface SessionMessage { role: "user" | "assistant"; content: string; time?: string }
+export async function getSessionMessages(type: "xianzhi" | "love", id: string): Promise<SessionMessage[]> {
+  if (!id) return []
+  try {
+    const endpoint = type === "xianzhi" ? "xianzhi" : "love_app"
+    const res = await fetch(`${API_BASE}/ai/${endpoint}/sessions/${id}/messages`)
+    if (!res.ok) return []
+    const data = await res.json()
+    return data.map((m: any) => ({
+      role: m.role === "user" ? "user" : "assistant",
+      content: typeof m.content === "string" ? m.content : "",
+      time: m.time || undefined,
+    }))
+  } catch { return [] }
+}

@@ -1,0 +1,17 @@
+version: '3.8'
+services:
+  redis:
+    image: redis:7
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+
+  milvus:
+    image: milvusdb/milvus:v2.2.9
+    restart: unless-stopped
+    environment:
+      TZ: UTC
+    ports:
+      - "19530:19530"
+      - "19121:19121"
+    # NOTE: image tag and command may need adjustment per Milvus release notes

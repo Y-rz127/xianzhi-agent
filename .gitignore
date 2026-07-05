@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.eggs/
+build/
+dist/
+.installed.cfg
+*.egg
+
+# 虚拟环境
+.venv/
+venv/
+env/
+ENV/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# 配置与敏感信息
+.env
+.env.local
+*.secret
+
+# 运行时数据
+data/
+logs/
+*.log
+
+# 测试
+.pytest_cache/
+.coverage
+htmlcov/
+
+# 类型检查
+.mypy_cache/
+.ruff_cache/

@@ -1,0 +1,85 @@
+{
+  "pages": [
+    {
+      "path": "pages/xianzhi/index",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "先知",
+        "enablePullDownRefresh": false
+      }
+    },
+    {
+      "path": "pages/hehun/index",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "合婚分析"
+      }
+    },
+    {
+      "path": "pages/huangli/index",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "黄历"
+      }
+    },
+    {
+      "path": "pages/love/index",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "恋爱大师"
+      }
+    },
+    {
+      "path": "pages/tarot/index",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "塔罗"
+      }
+    },
+    {
+      "path": "pages/settings/index",
+      "style": { "navigationBarTitleText": "服务器设置" }
+    },
+    {
+      "path": "pages/chart-cases/index",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "命例库"
+      }
+    },
+    {
+      "path": "pages/legal/disclaimer",
+      "style": { "navigationBarTitleText": "免责声明" }
+    },
+    {
+      "path": "pages/legal/privacy",
+      "style": { "navigationBarTitleText": "隐私政策" }
+    },
+    {
+      "path": "pages/legal/terms",
+      "style": { "navigationBarTitleText": "服务条款" }
+    }
+  ],
+  "globalStyle": {
+    "navigationBarTextStyle": "white",
+    "navigationBarTitleText": "先知",
+    "navigationBarBackgroundColor": "#160F2E",
+    "backgroundColor": "#0F0B1E",
+    "backgroundColorTop": "#160F2E",
+    "backgroundColorBottom": "#0F0B1E",
+    "backgroundTextStyle": "light"
+  },
+  "tabBar": {
+    "color": "#64748B",
+    "selectedColor": "#7C3AED",
+    "backgroundColor": "#0F0B1E",
+    "borderStyle": "black",
+    "list": [
+      { "pagePath": "pages/xianzhi/index", "text": "先知" },
+      { "pagePath": "pages/love/index", "text": "恋爱" },
+      { "pagePath": "pages/hehun/index", "text": "合婚" },
+      { "pagePath": "pages/huangli/index", "text": "黄历" },
+      { "pagePath": "pages/tarot/index", "text": "塔罗" }
+    ]
+  }
+}
