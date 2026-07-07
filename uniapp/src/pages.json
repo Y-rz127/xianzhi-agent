@@ -16,13 +16,6 @@
       }
     },
     {
-      "path": "pages/huangli/index",
-      "style": {
-        "navigationStyle": "custom",
-        "navigationBarTitleText": "黄历"
-      }
-    },
-    {
       "path": "pages/love/index",
       "style": {
         "navigationStyle": "custom",
@@ -78,7 +71,6 @@
       { "pagePath": "pages/xianzhi/index", "text": "先知" },
       { "pagePath": "pages/love/index", "text": "恋爱" },
       { "pagePath": "pages/hehun/index", "text": "合婚" },
-      { "pagePath": "pages/huangli/index", "text": "黄历" },
       { "pagePath": "pages/tarot/index", "text": "塔罗" }
     ]
   }

@@ -94,31 +94,6 @@ export const hehun = (a: { birthTimeA: string; genderA: string; birthTimeB: stri
     gender_b: a.genderB,
   })
 
-export interface HuangliData {
-  solar: string
-  lunar: string
-  yearGanZhi: string
-  monthGanZhi: string
-  dayGanZhi: string
-  shengXiao: string
-  yi: string[]
-  ji: string[]
-  chong: string
-  sha: string
-  jieQi: string
-  naYin: string
-  xiu: string
-  xiuLuck: string
-  xiuSong: string
-  jiShen: string[]
-  xiongSha: string[]
-  jiShi: any[]
-  xiongShi: any[]
-}
-
-export const getHuangli = (year?: number, month?: number, day?: number) =>
-  get<HuangliData>('/ai/xianzhi/huangli', { year, month, day })
-
 export const getCacheStats = () => get('/ai/xianzhi/cache_stats')
 
 export const getHealth = () => get<{ status: string; rag_ready: boolean }>('/ai/health')
