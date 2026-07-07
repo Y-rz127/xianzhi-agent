@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div class="layout">
     <StarBackground />
     <button class="sidebar-toggle-btn" @click="toggleSidebar" aria-label="切换侧边栏">
@@ -51,6 +51,24 @@
             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10"/><path d="M12 2a15.3 15.3 0 0 0-4 10 15.3 15.3 0 0 0 4 10"/><path d="M2 12h20"/></svg>
           </span>
           <span v-if="!sidebarCollapsed">每日塔罗</span>
+        </router-link>
+        <router-link to="/chart-cases" class="nav-item" active-class="active" @click="onNavClick">
+          <span class="nav-icon cases-icon">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+          </span>
+          <span v-if="!sidebarCollapsed">命例库</span>
+        </router-link>
+        <router-link to="/rag-manager" class="nav-item" active-class="active" @click="onNavClick">
+          <span class="nav-icon rag-icon">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+          </span>
+          <span v-if="!sidebarCollapsed">知识库</span>
+        </router-link>
+        <router-link to="/observability" class="nav-item" active-class="active" @click="onNavClick">
+          <span class="nav-icon observability-icon">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M18.7 8l-5.1 5.2-2.8-2.7L7 14.3"/></svg>
+          </span>
+          <span v-if="!sidebarCollapsed">可观测性</span>
         </router-link>
       </nav>
 
@@ -179,6 +197,12 @@ onUnmounted(() => {
 .nav-item.active .huangli-icon { background: rgba(139,199,139,0.15); color: #8bc78b; box-shadow: 0 0 12px rgba(139,199,139,0.2); }
 .tarot-icon { color: #b886e8; }
 .nav-item.active .tarot-icon { background: rgba(184,134,232,0.15); color: #b886e8; box-shadow: 0 0 12px rgba(184,134,232,0.2); }
+.cases-icon { color: #8bb8e8; }
+.nav-item.active .cases-icon { background: rgba(139,184,232,0.15); color: #8bb8e8; box-shadow: 0 0 12px rgba(139,184,232,0.2); }
+.rag-icon { color: #8be8c7; }
+.nav-item.active .rag-icon { background: rgba(139,232,199,0.15); color: #8be8c7; box-shadow: 0 0 12px rgba(139,232,199,0.2); }
+.observability-icon { color: #d4af37; }
+.nav-item.active .observability-icon { background: rgba(212,175,55,0.15); color: #d4af37; box-shadow: 0 0 12px rgba(212,175,55,0.2); }
 .sidebar-footer { padding: 16px 4px 0; }
 .divider { height: 1px; background: linear-gradient(90deg, transparent, var(--border), transparent); margin-bottom: 14px; }
 .motto { font-size: 12px; color: var(--text-dim); text-align: center; letter-spacing: 2px; margin-bottom: 6px; }
@@ -189,10 +213,11 @@ onUnmounted(() => {
 .main {
   flex: 1;
   min-width: 0;
-  overflow: hidden;
+  overflow-y: auto;
   position: relative;
   z-index: 2;
   background: linear-gradient(180deg, rgba(8, 13, 24, 0.72), rgba(5, 8, 16, 0.92));
+  height: 100%;
 }
 
 @media (max-width: 768px) {

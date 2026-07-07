@@ -90,7 +90,7 @@
         </div>
       </header>
 
-      <div class="messages" ref="messagesEl">
+      <div class="messages" ref="messagesEl" @scroll="onScroll">
         <div v-if="!messages.length" class="empty-state">
           <div class="orbit-ring"></div>
           <div class="empty-center">
@@ -133,11 +133,15 @@
             </div>
           </div>
         </template>
+
+        <div v-if="showScrollTop" class="scroll-top-btn" @click="scrollToBottom" aria-label="回到底部">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><polyline points="7 13 12 18 17 13"/><line x1="12" y1="18" x2="12" y2="3"/></svg>
+        </div>
       </div>
 
       <div class="input-area">
         <div class="input-wrap">
-          <textarea id="chat-input" name="chat-input" aria-label="消息输入" v-model="input" @keydown.enter.exact.prevent="send" :placeholder="placeholderText" :disabled="loading" rows="1"></textarea>
+          <textarea id="chat-input" name="chat-input" aria-label="消息输入" v-model="input" @keydown="handleKeydown" :placeholder="placeholderText" :disabled="loading" rows="1"></textarea>
           <div class="input-actions">
             <button class="btn send-btn" @click="send" :disabled="loading || !input.trim()" aria-label="发送">
               <span v-if="!loading">发送</span>
@@ -238,6 +242,7 @@ const caseBirthTime = ref("")
 const caseGender = ref<"男" | "女">("男")
 const sect = ref(2)
 const yunSect = ref(1)
+const showScrollTop = ref(false)
 
 const agentExamples = ["男，1990-05-20 14:30，排盘并分析事业", "女，1995-08-15 08:00，看近五年运势", "男，1988-12-01 23:30，大运流年推算"]
 const ragExamples = ["什么是七杀？有什么含义？", "用神怎么取？", "大运顺逆排的规则是什么？"]
@@ -283,7 +288,23 @@ const formatTime = (time: string) => time ? time.split("T")[0] : ""
 
 const scrollToBottom = async () => {
   await nextTick()
-  if (messagesEl.value) messagesEl.value.scrollTop = messagesEl.value.scrollHeight
+  if (messagesEl.value) {
+    messagesEl.value.scrollTo({ top: messagesEl.value.scrollHeight, behavior: "smooth" })
+    showScrollTop.value = false
+  }
+}
+
+const onScroll = () => {
+  if (!messagesEl.value) return
+  const el = messagesEl.value
+  showScrollTop.value = el.scrollHeight - el.scrollTop - el.clientHeight > 100
+}
+
+const handleKeydown = (e: KeyboardEvent) => {
+  if (e.key === "Enter" && !e.shiftKey && !e.ctrlKey) {
+    e.preventDefault()
+    send()
+  }
 }
 
 const fetchChartData = async (birthTime: string, gender: string) => {
@@ -510,7 +531,7 @@ onUnmounted(() => { window.removeEventListener("resize", checkMobile) })
 </script>
 
 <style scoped>
-.chat-view { display: flex; height: 100%; position: relative; }
+.chat-view { display: flex; min-height: 100%; position: relative; }
 
 .sidebar-expand-btn {
   position: fixed; left: 4px; top: 80px; z-index: 50;
@@ -563,7 +584,7 @@ onUnmounted(() => { window.removeEventListener("resize", checkMobile) })
 .case-tag { font-size: 10px; padding: 2px 8px; background: rgba(212,175,55,0.1);
   border-radius: 6px; color: var(--accent-light); }
 
-.chat-main { flex: 1; display: flex; flex-direction: column; padding: 16px; }
+.chat-main { flex: 1; display: flex; flex-direction: column; padding: 16px; min-height: 100%; }
 
 .chat-header { display: flex; justify-content: space-between; align-items: center; padding: 16px 20px;
   background: rgba(15,21,32,0.85); border: 1px solid var(--border); border-radius: var(--radius);
@@ -601,7 +622,7 @@ onUnmounted(() => { window.removeEventListener("resize", checkMobile) })
 .tab:hover { color: var(--text); }
 .tab.active { background: rgba(212,175,55,0.15); color: var(--accent-light); }
 
-.messages { flex: 1; overflow-y: auto; padding: 8px; }
+.messages { flex: 1; overflow-y: auto; padding: 8px; min-height: 0; }
 
 .empty-state { position: relative; text-align: center; padding: 60px 20px; display: flex;
   flex-direction: column; align-items: center; justify-content: center; min-height: 400px; }

@@ -8,6 +8,9 @@ import Terms from "../views/Terms.vue"
 import Huangli from "../views/Huangli.vue"
 import Hehun from "../views/Hehun.vue"
 import Tarot from "../views/Tarot.vue"
+import RagManager from "../views/RagManager.vue"
+import ChartCases from "../views/ChartCases.vue"
+import Observability from "../views/Observability.vue"
 
 const routes: RouteRecordRaw[] = [
   { path: "/", redirect: "/xianzhi" },
@@ -19,6 +22,9 @@ const routes: RouteRecordRaw[] = [
   { path: "/huangli", name: "huangli", component: Huangli, meta: { title: "黄历 · 择日" } },
   { path: "/hehun", name: "hehun", component: Hehun, meta: { title: "八字合婚" } },
   { path: "/tarot", name: "tarot", component: Tarot, meta: { title: "每日塔罗" } },
+  { path: "/rag-manager", name: "rag-manager", component: RagManager, meta: { title: "知识库管理" } },
+  { path: "/chart-cases", name: "chart-cases", component: ChartCases, meta: { title: "命例库" } },
+  { path: "/observability", name: "observability", component: Observability, meta: { title: "可观测性" } },
 ]
 
 const router = createRouter({ history: createWebHistory(), routes })

@@ -1,3 +1,27 @@
+/**
+ * Design Tokens - Semantic Token Map
+ *
+ * This file is the single source of truth for web CSS custom properties.
+ * The following names map to the uni-app SCSS variables in uniapp/src/uni.scss:
+ *
+ *   --bg          -> $color-bg
+ *   --bg-2        -> $color-bg-warm
+ *   --card        -> $color-bg-card
+ *   --border      -> $color-border
+ *   --text        -> $color-ink
+ *   --text-dim    -> $color-ink-light
+ *   --accent      -> $color-gold
+ *   --accent-light-> $color-gold-light
+ *   --love         -> $color-pink
+ *   --purple       -> $color-primary-light
+ *   --cyan         -> $color-energy-light
+ *   --danger       -> $state-error
+ *   --success      -> $color-green
+ *   --radius       -> $radius-lg
+ *   --radius-sm    -> $radius-md
+ *   --radius-xs    -> $radius-sm
+ */
+
 :root {
   --bg: #050810;
   --bg-2: #0a0f1a;
@@ -128,6 +152,57 @@ html { scrollbar-width: thin; scrollbar-color: rgba(138,180,220,0.2) transparent
 @keyframes dotPulse {
   0%, 80%, 100% { transform: scale(0.5); opacity: 0.4; }
   40% { transform: scale(1); opacity: 1; }
+}
+
+.skeleton {
+  background: linear-gradient(90deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0.10) 50%, rgba(255,255,255,0.04) 100%);
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.6s infinite linear;
+  border-radius: var(--radius-xs);
+}
+@keyframes skeleton-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+.skeleton-text { height: 1em; margin-bottom: 0.6em; }
+.skeleton-title { height: 1.2em; width: 60%; margin-bottom: 0.8em; }
+.skeleton-card { height: 120px; border-radius: var(--radius-sm); }
+
+.scroll-top-btn {
+  position: fixed;
+  right: 24px;
+  bottom: 120px;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: rgba(212,175,55,0.18);
+  border: 1px solid rgba(212,175,55,0.45);
+  color: var(--accent-light);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 100;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.35), 0 0 12px rgba(212,175,55,0.25);
+  transition: all 0.25s ease;
+  backdrop-filter: blur(8px);
+  animation: scrollTopIn 0.25s ease;
+}
+@keyframes scrollTopIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.scroll-top-btn:hover {
+  background: rgba(212,175,55,0.32);
+  border-color: rgba(212,175,55,0.7);
+  transform: scale(1.08);
+}
+.skeleton-circle { border-radius: 50%; }
+
+.page-transition { animation: pageFadeIn 0.5s ease-out forwards; }
+@keyframes pageFadeIn {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 @media (max-width: 768px) {

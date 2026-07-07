@@ -15,11 +15,11 @@ onHide(() => {
 <style lang="scss">
 /* 全局样式 - 先知深空紫蓝主题 */
 page {
-  background-color: #0F0B1E;
-  background: linear-gradient(180deg, #160F2E 0%, #0F0B1E 100%);
-  font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', 'Noto Sans SC', sans-serif;
+  background-color: $color-bg;
+  background: linear-gradient(180deg, $color-bg-warm 0%, $color-bg 100%);
+  font-family: $font-family-body;
   font-size: 28rpx;
-  color: #E2E8F0;
+  color: $color-ink;
   min-height: 100vh;
 }
 
@@ -31,16 +31,16 @@ text { color: inherit; }
 
 /* 全局工具类 */
 .glass-card {
-  background: rgba(30, 22, 56, 0.8);
+  background: $color-bg-card;
   backdrop-filter: blur(24rpx);
   -webkit-backdrop-filter: blur(24rpx);
-  border: 1rpx solid rgba(124, 58, 237, 0.2);
-  border-radius: 32rpx;
+  border: 1rpx solid $color-border;
+  border-radius: $radius-xl;
 }
 
-.glow-primary { box-shadow: 0 0 40rpx rgba(124, 58, 237, 0.3); }
-.glow-energy { box-shadow: 0 0 40rpx rgba(6, 182, 212, 0.3); }
-.glow-gold { box-shadow: 0 0 32rpx rgba(245, 158, 11, 0.25); }
+.glow-primary { box-shadow: $glow-primary; }
+.glow-energy { box-shadow: $glow-energy; }
+.glow-gold { box-shadow: $glow-gold; }
 
 /* 渐变标题字 */
 .display-font {
@@ -50,10 +50,10 @@ text { color: inherit; }
 
 /* 通用按钮 */
 .btn-primary {
-  background: linear-gradient(135deg, #7C3AED 0%, #6D28D9 100%);
-  color: #ffffff;
-  border-radius: 32rpx;
-  box-shadow: 0 0 40rpx rgba(124, 58, 237, 0.3);
+  background: linear-gradient(135deg, $color-primary 0%, $color-primary-dark 100%);
+  color: $uni-text-color-inverse;
+  border-radius: $radius-xl;
+  box-shadow: $glow-primary;
   border: none;
 }
 .btn-primary[disabled] { opacity: 0.5; }
@@ -61,7 +61,7 @@ text { color: inherit; }
 /* 页面通用容器 */
 .page {
   min-height: 100vh;
-  background: linear-gradient(180deg, #160F2E 0%, #0F0B1E 100%);
-  color: #E2E8F0;
+  background: linear-gradient(180deg, $color-bg-warm 0%, $color-bg 100%);
+  color: $color-ink;
 }
 </style>

@@ -267,6 +267,81 @@ export async function deleteSession(type: "xianzhi" | "love", id: string): Promi
 }
 
 export interface SessionMessage { role: "user" | "assistant"; content: string; time?: string }
+
+export interface RagDoc { filename: string; size: number; modified: string }
+export interface RagStatus { ready: boolean; count: number }
+
+export interface EndpointMetrics {
+  method: string
+  path: string
+  count: number
+  avg_latency_ms: number
+  total_latency_ms: number
+}
+
+export interface ErrorRecord {
+  timestamp: number
+  method: string
+  path: string
+  status: number
+  latency_ms: number
+}
+
+export interface MetricsData {
+  total_requests: number
+  avg_latency_ms: number
+  error_rate: number
+  status_codes: { "2xx": number; "4xx": number; "5xx": number }
+  endpoints: EndpointMetrics[]
+  top_endpoints: EndpointMetrics[]
+  recent_errors: ErrorRecord[]
+  uptime_seconds: number
+}
+
+export async function fetchMetrics(): Promise<MetricsData> {
+  const res = await fetch(`${API_BASE}/ai/metrics`)
+  if (!res.ok) throw new Error("获取指标失败")
+  return await res.json()
+}
+
+export async function getRagStatus(): Promise<RagStatus> {
+  const res = await fetch(`${API_BASE}/ai/rag/status`)
+  if (!res.ok) throw new Error("获取 RAG 状态失败")
+  return await res.json()
+}
+
+export async function listRagDocs(): Promise<RagDoc[]> {
+  const res = await fetch(`${API_BASE}/ai/rag/docs`)
+  if (!res.ok) throw new Error("获取文档列表失败")
+  const data = await res.json()
+  return data.files || []
+}
+
+export async function uploadRagDoc(file: File): Promise<{ filename: string; size: number }> {
+  const form = new FormData()
+  form.append("file", file)
+  const res = await fetch(`${API_BASE}/ai/rag/docs/upload`, { method: "POST", body: form })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: `上传失败 ${res.status}` }))
+    throw new Error(err.detail || `上传失败 ${res.status}`)
+  }
+  return await res.json()
+}
+
+export async function deleteRagDoc(filename: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/ai/rag/docs/${encodeURIComponent(filename)}`, { method: "DELETE" })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: `删除失败 ${res.status}` }))
+    throw new Error(err.detail || `删除失败 ${res.status}`)
+  }
+}
+
+export async function rebuildRagIndex(): Promise<{ ready: boolean }> {
+  const res = await fetch(`${API_BASE}/ai/rag/docs/rebuild`, { method: "POST" })
+  if (!res.ok) throw new Error("重建向量库失败")
+  return await res.json()
+}
+
 export async function getSessionMessages(type: "xianzhi" | "love", id: string): Promise<SessionMessage[]> {
   if (!id) return []
   try {

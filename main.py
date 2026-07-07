@@ -1,18 +1,20 @@
 """先知智能体 - 应用入口（对应 Java AiAgentApplication）。"""
 from __future__ import annotations
 
+import time
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from langchain_openai import ChatOpenAI
 
-from app.api.routes import router, set_instances
+from app.api.routes import router
+from app.api.state import set_instances
 from app.agent.xianzhi import Xianzhi
 from app.config import settings
 from app.love_app import LoveApp
 from app.memory import create_chat_memory
-from app.observability import init_observability
+from app.observability import init_observability, record_request
 from app.logger import log
 from app.rag.vector_store import knowledge_base
 from app.rag.rag_chain import RagChatChain
@@ -130,6 +132,20 @@ async def security_headers_middleware(request, call_next):
     # 静态资源增加缓存破坏
     if request.url.path.startswith("/assets/"):
         response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+    return response
+
+
+@app.middleware("http")
+async def metrics_middleware(request: Request, call_next):
+    """记录 API 请求指标，跳过静态资源与健康检查路径。"""
+    path = request.url.path
+    if path.startswith("/assets/") or path.startswith("/static/") or path == "/health" or path == "/api/ai/health":
+        return await call_next(request)
+
+    start = time.perf_counter()
+    response = await call_next(request)
+    duration = time.perf_counter() - start
+    record_request(request.method, path, response.status_code, duration)
     return response
 
 

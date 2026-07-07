@@ -24,9 +24,9 @@ $color-ink-light: #94A3B8;
 $color-ink-lighter: #64748B;
 $color-ink-lightest: #475569;
 
-/* === 能量金（点缀） === */
-$color-gold: #F59E0B;
-$color-gold-light: #FBBF24;
+/* === 能量金（点缀）- 与 Web 端 accent gold 对齐 === */
+$color-gold: #d4af37;
+$color-gold-light: #f0d878;
 $color-gold-lighter: #FDE68A;
 
 /* === 灵动绿 === */
@@ -43,14 +43,14 @@ $state-warning: #F59E0B;
 $state-error: #EF4444;
 $state-info: #06B6D4;
 
-/* === 中性色（深空系） === */
-$color-bg: #0F0B1E;
-$color-bg-warm: #160F2E;
-$color-bg-card: rgba(30, 22, 56, 0.8);
+/* === 中性色（深空系）- 核心背景/卡片/边框与 Web 端对齐 === */
+$color-bg: #050810;
+$color-bg-warm: #0a0f1a;
+$color-bg-card: rgba(15, 21, 32, 0.85);
 $color-bg-elevated: rgba(40, 30, 72, 0.9);
 $color-bg-inverse: #E2E8F0;
-$color-border: rgba(124, 58, 237, 0.2);
-$color-border-light: rgba(124, 58, 237, 0.1);
+$color-border: rgba(138, 180, 220, 0.12);
+$color-border-light: rgba(138, 180, 220, 0.08);
 $color-surface-divider: rgba(148, 163, 184, 0.12);
 
 /* === 阴影（能量光晕） === */
@@ -59,7 +59,7 @@ $shadow-md: 0 8rpx 24rpx rgba(124, 58, 237, 0.12);
 $shadow-elevated: 0 16rpx 64rpx rgba(124, 58, 237, 0.18);
 $glow-primary: 0 0 40rpx rgba(124, 58, 237, 0.3);
 $glow-energy: 0 0 40rpx rgba(6, 182, 212, 0.3);
-$glow-gold: 0 0 32rpx rgba(245, 158, 11, 0.25);
+$glow-gold: 0 0 32rpx rgba(212, 175, 55, 0.25);
 
 /* === 字体（未来感） === */
 $font-family-display: 'Orbitron', 'Rajdhani', 'PingFang SC', 'Noto Sans SC', sans-serif;

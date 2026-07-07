@@ -1,48 +1,103 @@
 <template>
-  <div class="tarot-page">
+  <div class="tarot-page page-transition">
     <div class="tarot-card-a glass-card">
       <div class="tarot-header">
         <h2>每日塔罗</h2>
-        <p>抽取一张塔罗牌，获得今日指引</p>
+        <p>选择牌阵，抽取塔罗牌，获得今日指引</p>
+      </div>
+
+      <div class="spread-selector">
+        <div class="spread-label">选择牌阵</div>
+        <div class="spread-options">
+          <button
+            v-for="s in spreads"
+            :key="s.key"
+            class="btn spread-btn"
+            :class="{ active: selectedSpread === s.key }"
+            @click="selectSpread(s.key)"
+            :aria-label="s.name"
+          >{{ s.name }}</button>
+        </div>
       </div>
 
       <div v-if="!drawn" class="tarot-deck">
-        <div class="deck-area" @click="drawCard">
+        <div class="deck-area" @click="drawCards">
           <div class="card-back">
             <div class="card-back-pattern">✦</div>
-            <div class="card-back-text">点击抽取</div>
+            <div class="card-back-text">点击抽牌</div>
+          </div>
+        </div>
+        <div class="deck-hint">{{ deckHint }}</div>
+      </div>
+
+      <div v-else class="tarot-result" :class="'layout-' + selectedSpread">
+        <div
+          v-for="(c, idx) in cards"
+          :key="c.id"
+          class="tc-card"
+          :style="cardGridStyle(idx)"
+        >
+          <div class="tc-position-label">{{ c.position }}</div>
+          <div class="tc-card-wrap" :class="{ 'cross-card': selectedSpread === 'celtic' && idx === 1 }">
+            <div class="tc-inner" :class="{ flipped: c.revealed, reversed: c.isReversed }">
+              <div class="tc-front">
+                <div class="card-emblem">{{ c.card.emblem }}</div>
+                <div class="card-name">{{ c.isReversed ? '逆位' : '正位' }} {{ c.card.name }}</div>
+                <div class="card-name-en">{{ c.card.nameEn }}</div>
+              </div>
+              <div class="tc-back">
+                <div class="card-back-mini">✦</div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
 
-      <div v-else class="tarot-result">
-        <div class="drawn-card" :class="card.isReversed ? 'reversed' : ''">
-          <div class="card-face">
-            <div class="card-emblem">{{ card.emblem }}</div>
-            <div class="card-name">{{ card.isReversed ? '逆位' : '正位' }} {{ card.name }}</div>
-            <div class="card-name-en">{{ card.nameEn }}</div>
-          </div>
+      <div v-if="drawn" class="reading-meanings">
+        <div v-for="c in cards" :key="'m-' + c.id" class="meaning-block">
+          <div class="meaning-title">{{ c.position }} · {{ c.isReversed ? '逆位' : '正位' }} {{ c.card.name }}</div>
+          <p>{{ c.isReversed ? c.card.reversedMeaning : c.card.meaning }}</p>
+          <p class="advice-line"><span class="advice-label">建议：</span>{{ c.card.advice }}</p>
         </div>
-        <div class="card-meaning">
-          <div class="meaning-title">解读</div>
-          <p>{{ card.isReversed ? card.reversedMeaning : card.meaning }}</p>
-        </div>
-        <div class="card-advice">
-          <div class="meaning-title">今日建议</div>
-          <p>{{ card.advice }}</p>
-        </div>
-        <button class="btn" @click="drawn = false; card = {} as any"  aria-label="重新抽取">重新抽取</button>
+        <button class="btn" @click="reset" aria-label="重新抽取">重新抽取</button>
       </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref } from "vue"
+import { ref, computed } from "vue"
 
 interface TarotCard {
   name: string; nameEn: string; emblem: string; meaning: string; reversedMeaning: string; advice: string
 }
+
+interface Spread {
+  key: "single" | "three" | "celtic"
+  name: string
+  positions: string[]
+}
+
+interface DrawnCard {
+  id: number
+  card: TarotCard
+  isReversed: boolean
+  revealed: boolean
+  position: string
+}
+
+const spreads: Spread[] = [
+  { key: "single", name: "单张牌", positions: ["今日指引"] },
+  { key: "three", name: "三牌阵", positions: ["过去", "现在", "未来"] },
+  {
+    key: "celtic",
+    name: "凯尔特十字",
+    positions: [
+      "现状/核心", "挑战/阻碍", "根基/过去", "近期/未来", "目标/理想",
+      "未来/结果", "自我/态度", "环境/他人", "希望/恐惧", "结局/总结",
+    ],
+  },
+]
 
 const majorArcana: TarotCard[] = [
   { name: "愚者", nameEn: "The Fool", emblem: "🌟", meaning: "新的开始、冒险、天真无邪。是时候勇敢迈出第一步，相信宇宙的指引。", reversedMeaning: "鲁莽、犹豫不决。你需要停下来重新审视当前的处境，不要盲目行动。", advice: "保持开放的心态，敢于尝试新事物。今天适合开启新计划。" },
@@ -69,14 +124,66 @@ const majorArcana: TarotCard[] = [
   { name: "世界", nameEn: "The World", emblem: "🌍", meaning: "完成、圆满、成就。一个周期的圆满结束，你已经达成了目标。", reversedMeaning: "未完成、拖延。你接近完成但尚未达成，需要最后一步努力。", advice: "今天是一个圆满的日子，庆祝你的成就，准备迎接新的旅程。" },
 ]
 
+const selectedSpread = ref<Spread["key"]>("single")
 const drawn = ref(false)
-const card = ref<TarotCard & { isReversed: boolean }>({} as any)
+const cards = ref<DrawnCard[]>([])
 
-const drawCard = () => {
-  const idx = Math.floor(Math.random() * majorArcana.length)
-  const isReversed = Math.random() > 0.5
-  card.value = { ...majorArcana[idx], isReversed }
+const currentSpread = computed(() => spreads.find((s) => s.key === selectedSpread.value)!)
+const deckHint = computed(() => `将抽取 ${currentSpread.value.positions.length} 张牌：${currentSpread.value.positions.join(" / ")}`)
+
+const selectSpread = (key: Spread["key"]) => {
+  selectedSpread.value = key
+  drawn.value = false
+  cards.value = []
+}
+
+function shuffle<T>(arr: T[]): T[] {
+  const pool = [...arr]
+  for (let i = pool.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1))
+    ;[pool[i], pool[j]] = [pool[j], pool[i]]
+  }
+  return pool
+}
+
+const drawCards = () => {
+  const spread = currentSpread.value
+  const pool = shuffle(majorArcana)
+  const picked = pool.slice(0, spread.positions.length)
+  cards.value = picked.map((card, idx) => ({
+    id: idx + 1,
+    card,
+    isReversed: Math.random() > 0.5,
+    revealed: false,
+    position: spread.positions[idx],
+  }))
   drawn.value = true
+  cards.value.forEach((c, i) => {
+    setTimeout(() => { c.revealed = true }, i * 250)
+  })
+}
+
+const reset = () => {
+  drawn.value = false
+  cards.value = []
+}
+
+const celticGrid: Record<number, { gridColumn: string; gridRow: string }> = {
+  0: { gridColumn: "2 / 3", gridRow: "2 / 3" },
+  1: { gridColumn: "2 / 3", gridRow: "2 / 3" },
+  2: { gridColumn: "2 / 3", gridRow: "3 / 4" },
+  3: { gridColumn: "1 / 2", gridRow: "2 / 3" },
+  4: { gridColumn: "2 / 3", gridRow: "1 / 2" },
+  5: { gridColumn: "3 / 4", gridRow: "2 / 3" },
+  6: { gridColumn: "4 / 5", gridRow: "1 / 2" },
+  7: { gridColumn: "4 / 5", gridRow: "2 / 3" },
+  8: { gridColumn: "4 / 5", gridRow: "3 / 4" },
+  9: { gridColumn: "4 / 5", gridRow: "4 / 5" },
+}
+
+const cardGridStyle = (idx: number) => {
+  if (selectedSpread.value !== "celtic") return {}
+  return celticGrid[idx] || {}
 }
 </script>
 
@@ -85,11 +192,18 @@ const drawCard = () => {
   height: 100vh; overflow-y: auto; padding: 20px;
   display: flex; justify-content: center; align-items: flex-start;
 }
-.tarot-card-a { width: 100%; max-width: 520px; padding: 28px; text-align: center; }
-.tarot-header { margin-bottom: 24px; }
+.tarot-card-a { width: 100%; max-width: 720px; padding: 28px; text-align: center; }
+.tarot-header { margin-bottom: 20px; }
 .tarot-header h2 { font-size: 22px; color: #b886e8; letter-spacing: 3px; }
 .tarot-header p { font-size: 12px; color: var(--text-dim); margin-top: 6px; }
-.tarot-deck { display: flex; justify-content: center; }
+
+.spread-selector { margin-bottom: 24px; }
+.spread-label { font-size: 12px; color: var(--text-dim); margin-bottom: 10px; letter-spacing: 2px; }
+.spread-options { display: flex; justify-content: center; gap: 10px; flex-wrap: wrap; }
+.spread-btn { min-width: 90px; }
+.spread-btn.active { border-color: rgba(184,134,232,0.6); color: #b886e8; background: rgba(184,134,232,0.08); }
+
+.tarot-deck { display: flex; flex-direction: column; align-items: center; gap: 16px; }
 .deck-area { cursor: pointer; -webkit-user-select: none; user-select: none; }
 .card-back {
   width: 180px; height: 280px; border-radius: 16px;
@@ -101,21 +215,86 @@ const drawCard = () => {
 .card-back:hover { transform: scale(1.05); border-color: rgba(184,134,232,0.7); box-shadow: 0 0 50px rgba(184,134,232,0.4); }
 .card-back-pattern { font-size: 48px; color: rgba(184,134,232,0.5); margin-bottom: 16px; animation: pulse-glow 2s ease-in-out infinite; }
 .card-back-text { font-size: 14px; color: rgba(184,134,232,0.7); letter-spacing: 2px; }
-@keyframes pulse-glow { 0%, 100% { opacity: 0.5; } 50% { opacity: 1; } }
-.tarot-result { animation: fadeIn 0.5s ease; }
+.deck-hint { font-size: 12px; color: var(--text-dim); }
+
+.tarot-result { margin-top: 8px; animation: fadeIn 0.4s ease; }
 @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-.drawn-card { width: 140px; height: 220px; margin: 0 auto 20px; border-radius: 14px;
-  background: linear-gradient(135deg, #3a2a5a, #2a1a4a); border: 2px solid rgba(184,134,232,0.5);
-  display: flex; align-items: center; justify-content: center; box-shadow: 0 0 40px rgba(184,134,232,0.3);
+
+.layout-single { display: flex; justify-content: center; }
+.layout-three {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; justify-items: center;
 }
-.drawn-card.reversed { transform: rotate(180deg); }
-.drawn-card.reversed .card-face { transform: rotate(180deg); }
-.card-face { text-align: center; }
-.card-emblem { font-size: 40px; margin-bottom: 10px; }
-.card-name { font-size: 16px; color: #b886e8; letter-spacing: 2px; }
-.card-name-en { font-size: 11px; color: rgba(184,134,232,0.5); margin-top: 4px; }
-.card-meaning, .card-advice { text-align: left; margin-top: 18px; }
+.layout-celtic {
+  display: grid; grid-template-columns: repeat(4, 1fr); grid-template-rows: repeat(4, 1fr);
+  gap: 10px; min-height: 520px; justify-items: center; align-items: center;
+}
+
+.tc-card { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.tc-position-label { font-size: 12px; color: #b886e8; letter-spacing: 1px; text-align: center; }
+
+.tc-card-wrap {
+  width: 160px; aspect-ratio: 2/3; perspective: 800px;
+}
+.layout-three .tc-card-wrap { width: 140px; }
+.layout-celtic .tc-card-wrap { width: 100%; max-width: 110px; }
+.tc-card-wrap.cross-card { transform: rotate(90deg); }
+
+.tc-inner {
+  position: relative; width: 100%; height: 100%;
+  transform-style: preserve-3d;
+  transition: transform 0.7s cubic-bezier(0.4, 0, 0.2, 1);
+  transform: rotateY(180deg);
+}
+.tc-inner.flipped { transform: rotateY(0deg); }
+.tc-inner.reversed .tc-front { transform: rotate(180deg); }
+
+.tc-front, .tc-back {
+  position: absolute; inset: 0; border-radius: 14px; backface-visibility: hidden;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+}
+.tc-front {
+  background: linear-gradient(135deg, #3a2a5a, #2a1a4a);
+  border: 2px solid rgba(184,134,232,0.5);
+  box-shadow: 0 0 40px rgba(184,134,232,0.3);
+  padding: 12px;
+}
+.tc-back {
+  background: linear-gradient(135deg, #2a1a4a, #1a0a2a);
+  border: 2px solid rgba(184,134,232,0.4);
+  transform: rotateY(180deg);
+  box-shadow: 0 0 30px rgba(184,134,232,0.2);
+}
+.card-back-mini { font-size: 32px; color: rgba(184,134,232,0.5); }
+
+.card-emblem { font-size: 36px; margin-bottom: 10px; }
+.card-name { font-size: 15px; color: #b886e8; letter-spacing: 2px; }
+.card-name-en { font-size: 10px; color: rgba(184,134,232,0.5); margin-top: 4px; }
+
+.reading-meanings { margin-top: 28px; text-align: left; }
+.meaning-block {
+  background: rgba(255,255,255,0.02); border: 1px solid var(--border); border-radius: 12px;
+  padding: 16px; margin-bottom: 12px; animation: fadeInUp 0.5s ease forwards;
+}
 .meaning-title { font-size: 13px; color: #b886e8; letter-spacing: 2px; margin-bottom: 8px; }
-.card-meaning p, .card-advice p { font-size: 13px; color: var(--text-dim); line-height: 1.7; }
-.drawn-card + .btn { margin-top: 20px; }
+.meaning-block p { font-size: 13px; color: var(--text-dim); line-height: 1.7; margin-bottom: 6px; }
+.advice-line { margin-top: 8px; }
+.advice-label { color: var(--text); }
+.reading-meanings .btn { margin-top: 8px; }
+
+@keyframes pulse-glow { 0%, 100% { opacity: 0.5; } 50% { opacity: 1; } }
+@keyframes fadeInUp { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: translateY(0); } }
+
+@media (max-width: 720px) {
+  .layout-three { grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .layout-celtic { min-height: 420px; gap: 6px; }
+  .tc-card-wrap { width: 120px; }
+  .layout-three .tc-card-wrap { width: 100px; }
+  .layout-celtic .tc-card-wrap { max-width: 80px; }
+  .card-name { font-size: 12px; letter-spacing: 1px; }
+  .card-emblem { font-size: 28px; }
+}
+@media (max-width: 480px) {
+  .layout-three { grid-template-columns: 1fr; }
+  .layout-celtic { min-height: 360px; }
+}
 </style>

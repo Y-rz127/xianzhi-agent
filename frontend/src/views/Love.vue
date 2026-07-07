@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div class="chat-view love-view">
     <div class="sidebar-mask" v-if="!sidebarCollapsed && isMobile" @click="sidebarCollapsed = true"></div>
     <div class="chat-sidebar" :class="{ collapsed: sidebarCollapsed }">
@@ -48,7 +48,7 @@
         </div>
       </header>
 
-      <div class="messages" ref="messagesEl">
+      <div class="messages" ref="messagesEl" @scroll="onScroll">
         <div v-if="!messages.length" class="empty">
           <div class="heart-pulse">
             <svg viewBox="0 0 24 24" width="36" height="36" fill="currentColor"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
@@ -88,11 +88,15 @@
             </div>
           </div>
         </div>
+
+        <div v-if="showScrollTop" class="scroll-top-btn" @click="scrollToBottom" aria-label="回到底部">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><polyline points="7 13 12 18 17 13"/><line x1="12" y1="18" x2="12" y2="3"/></svg>
+        </div>
       </div>
 
       <div class="input-area">
         <div class="input-wrap love-input-wrap">
-          <textarea id="love-chat-input" name="love-chat-input" aria-label="恋爱问题输入" v-model="input" @keydown.enter.exact.prevent="send" placeholder="描述你的恋爱问题，大师会认真倾听..." :disabled="loading" rows="1"></textarea>
+          <textarea id="love-chat-input" name="love-chat-input" aria-label="恋爱问题输入" v-model="input" @keydown="handleKeydown" placeholder="描述你的恋爱问题，大师会认真倾听..." :disabled="loading" rows="1"></textarea>
           <div class="input-actions">
             <button class="btn send-btn love-send" @click="send" :disabled="loading || !input.trim()" aria-label="发送">
               <span v-if="!loading">发送</span>
@@ -120,6 +124,7 @@ const chatId = ref("love-" + Date.now())
 const sidebarCollapsed = ref(false)
 const isMobile = ref(false)
 const sessions = ref<ChatSession[]>([])
+const showScrollTop = ref(false)
 
 const loveExamples = ["最近和喜欢的人聊天总是冷场，怎么办？", "分手后一直走不出来，该怎么调整心态？", "如何判断对方是不是对的人？"]
 
@@ -129,7 +134,23 @@ const formatTime = (time: string) => time ? time.split("T")[0] : ""
 
 const scrollToBottom = async () => {
   await nextTick()
-  if (messagesEl.value) messagesEl.value.scrollTop = messagesEl.value.scrollHeight
+  if (messagesEl.value) {
+    messagesEl.value.scrollTo({ top: messagesEl.value.scrollHeight, behavior: "smooth" })
+    showScrollTop.value = false
+  }
+}
+
+const onScroll = () => {
+  if (!messagesEl.value) return
+  const el = messagesEl.value
+  showScrollTop.value = el.scrollHeight - el.scrollTop - el.clientHeight > 100
+}
+
+const handleKeydown = (e: KeyboardEvent) => {
+  if (e.key === "Enter" && !e.shiftKey && !e.ctrlKey) {
+    e.preventDefault()
+    send()
+  }
 }
 
 const clearChat = () => { messages.value = [] }
@@ -156,11 +177,12 @@ const send = () => {
   messages.value.push({ role: "user", content: userMsg })
   input.value = ""
   loading.value = true
+  // 直接复用 onMessage 流式填充同一条消息，避免与 loading 指示器重复
   const aiMsg: SessionMessage = { role: "assistant", content: "" }
   messages.value.push(aiMsg)
   scrollToBottom()
   chatWithLove(userMsg, chatId.value, {
-    onMessage: (data) => { aiMsg.content += data; scrollToBottom() },
+    onMessage: (data) => { aiMsg.content += data; loading.value = false; scrollToBottom() },
     onError: () => { aiMsg.content += "\n[连接中断]"; loading.value = false },
     onDone: () => { loading.value = false; scrollToBottom(); loadSessions() },
   })
@@ -173,7 +195,7 @@ onUnmounted(() => { window.removeEventListener("resize", checkMobile) })
 </script>
 
 <style scoped>
-.chat-view { display: flex; height: 100%; position: relative; }
+.chat-view { display: flex; min-height: 100%; position: relative; }
 
 .sidebar-mask {
   position: fixed; top: 0; left: 0; right: 0; bottom: 0;
@@ -202,7 +224,7 @@ onUnmounted(() => { window.removeEventListener("resize", checkMobile) })
 .session-item:hover .session-delete { opacity: 1; }
 .session-delete:hover { color: var(--danger); }
 
-.chat-main { flex: 1; display: flex; flex-direction: column; padding: 16px 20px 0; }
+.chat-main { flex: 1; display: flex; flex-direction: column; padding: 16px 20px 0; min-height: 100%; }
 .chat-header { display: flex; justify-content: space-between; align-items: center; padding: 14px 22px; margin-bottom: 16px; }
 .header-left { display: flex; align-items: center; gap: 14px; }
 
@@ -219,7 +241,7 @@ onUnmounted(() => { window.removeEventListener("resize", checkMobile) })
 .header-right { display: flex; align-items: center; gap: 10px; }
 .header-btn { padding: 7px 12px; font-size: 12px; }
 
-.messages { flex: 1; overflow-y: auto; padding: 8px 12px 20px; }
+.messages { flex: 1; overflow-y: auto; padding: 8px 12px 20px; min-height: 0; }
 .empty { position: relative; text-align: center; padding: 70px 20px; color: var(--text-dim); }
 .heart-pulse { position: absolute; left: 50%; top: 55px; transform: translateX(-50%); color: rgba(232,139,139,0.15); animation: heartbeat 2s ease-in-out infinite; }
 @keyframes heartbeat { 0%, 100% { transform: translateX(-50%) scale(1); } 50% { transform: translateX(-50%) scale(1.15); } }
@@ -252,10 +274,10 @@ onUnmounted(() => { window.removeEventListener("resize", checkMobile) })
   position: relative; overflow: hidden; }
 .msg.user .msg-content { background: linear-gradient(135deg, rgba(212,165,165,0.85), rgba(176,108,108,0.85));
   border-color: rgba(255,255,255,0.08); box-shadow: 0 4px 20px rgba(0,0,0,0.25), 0 0 18px rgba(232,139,139,0.2); }
-.msg.assistant .msg-content::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
-  background: linear-gradient(180deg, var(--love), transparent); }
-.msg.user .msg-content::before { content: ""; position: absolute; right: 0; top: 0; bottom: 0; width: 3px;
-  background: linear-gradient(180deg, rgba(255,255,255,0.3), transparent); }
+.msg.assistant .msg-content::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 2px;
+  background: linear-gradient(180deg, rgba(232,139,139,0.35), transparent); opacity: 0.45; }
+.msg.user .msg-content::before { content: ""; position: absolute; right: 0; top: 0; bottom: 0; width: 2px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.15), transparent); opacity: 0.35; }
 .msg-content pre { white-space: pre-wrap; word-wrap: break-word; font-family: inherit; font-size: 14px; line-height: 1.75; color: var(--text); }
 .msg.user .msg-content pre { color: #fff; }
 
