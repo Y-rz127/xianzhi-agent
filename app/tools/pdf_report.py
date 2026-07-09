@@ -1,4 +1,4 @@
-﻿"""八字命理 PDF 报告生成（对应 Java 项目的 iText PDF 导出）。
+"""八字命理 PDF 报告生成（对应 Java 项目的 iText PDF 导出）。
 
 使用 reportlab 生成结构化命理报告 PDF。
 注册 Windows 系统中文字体（SimHei/SimSun）以支持中文显示。
@@ -144,6 +144,7 @@ def generate_bazi_report(
     analysis_text: str,
     dayun_text: str,
     ai_commentary: Optional[str] = None,
+    liunian_text: Optional[str] = None,
 ) -> bytes:
     """生成八字命理 PDF 报告。
 
@@ -154,6 +155,7 @@ def generate_bazi_report(
         analysis_text: bazi_analysis 返回的分析文本
         dayun_text: bazi_dayun 返回的大运文本
         ai_commentary: AI 综合解读（可选）
+        liunian_text: bazi_liunian 返回的流年文本（可选）
 
     Returns:
         PDF 文件二进制内容
@@ -202,9 +204,14 @@ def generate_bazi_report(
     story.append(Paragraph("四、大运推算", styles["h2"]))
     story.append(Paragraph(_escape(dayun_text), styles["body"]))
 
-    # 五、AI 综合解读
+    # 五、流年运势
+    if liunian_text:
+        story.append(Paragraph("五、流年运势", styles["h2"]))
+        story.append(Paragraph(_escape(liunian_text), styles["body"]))
+
+    # 六、AI 综合解读
     if ai_commentary:
-        story.append(Paragraph("五、先知综合解读", styles["h2"]))
+        story.append(Paragraph("六、先知综合解读", styles["h2"]))
         story.append(Paragraph(_escape(ai_commentary), styles["body"]))
 
     # 免责声明

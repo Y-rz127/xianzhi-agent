@@ -11,7 +11,7 @@
           <div class="hh-person-title male">男方</div>
           <div class="form-row">
             <label for="male-birth">出生时间</label>
-            <input id="male-birth" name="male-birth" v-model="male.birth" placeholder="1990-05-20 14:30" />
+            <input id="male-birth" name="male-birth" type="datetime-local" autocomplete="off" v-model="male.birth" />
           </div>
           <div class="form-row">
             <label for="male-gender">性别</label>
@@ -26,7 +26,7 @@
           <div class="hh-person-title female">女方</div>
           <div class="form-row">
             <label for="female-birth">出生时间</label>
-            <input id="female-birth" name="female-birth" v-model="female.birth" placeholder="1992-08-15 08:00" />
+            <input id="female-birth" name="female-birth" type="datetime-local" autocomplete="off" v-model="female.birth" />
           </div>
           <div class="form-row">
             <label for="female-gender">性别</label>
@@ -100,8 +100,10 @@ const previewLoading = ref(false)
 const maleChart = ref<ChartData | null>(null)
 const femaleChart = ref<ChartData | null>(null)
 
+// datetime-local 返回 "YYYY-MM-DDTHH:MM"，转成后端需要的 "YYYY-MM-DD HH:MM"
+const normalizeBirth = (s: string) => s.trim().replace("T", " ")
 const birthRegex = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/
-const isValidBirth = (s: string) => birthRegex.test(s.trim())
+const isValidBirth = (s: string) => birthRegex.test(normalizeBirth(s))
 
 let debounceTimer: ReturnType<typeof setTimeout> | null = null
 const updatePreview = async () => {
@@ -118,8 +120,8 @@ const updatePreview = async () => {
     previewLoading.value = true
     try {
       const [mChart, fChart] = await Promise.all([
-        getChart(male.value.birth, male.value.gender),
-        getChart(female.value.birth, female.value.gender),
+        getChart(normalizeBirth(male.value.birth), male.value.gender),
+        getChart(normalizeBirth(female.value.birth), female.value.gender),
       ])
       maleChart.value = mChart
       femaleChart.value = fChart
@@ -140,9 +142,9 @@ const analyze = async () => {
   result.value = ""
   try {
     const params = new URLSearchParams({
-      birth_time_a: male.value.birth,
+      birth_time_a: normalizeBirth(male.value.birth),
       gender_a: male.value.gender,
-      birth_time_b: female.value.birth,
+      birth_time_b: normalizeBirth(female.value.birth),
       gender_b: female.value.gender,
     })
     const res = await fetch(`${API_BASE}/ai/xianzhi/hehun?${params}`)
@@ -159,10 +161,10 @@ const analyze = async () => {
 
 <style scoped>
 .hehun-page {
-  height: 100vh; overflow-y: auto; padding: 20px;
-  display: flex; justify-content: center;
+  min-height: 100vh; display: flex; justify-content: center; align-items: flex-start;
+  padding: 20px;
 }
-.hh-card { width: 100%; max-width: 700px; padding: 28px; }
+.hh-card { width: 100%; max-width: 700px; max-height: calc(100vh - 40px); overflow-y: auto; padding: 28px; }
 .hh-header { text-align: center; margin-bottom: 24px; }
 .hh-header h2 { font-size: 22px; color: var(--love); letter-spacing: 3px; }
 .hh-header p { font-size: 12px; color: var(--text-dim); margin-top: 6px; }

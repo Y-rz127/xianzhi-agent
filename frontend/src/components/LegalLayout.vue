@@ -21,11 +21,12 @@ defineProps<{ title: string }>()
 
 <style scoped>
 .legal-page {
-  height: 100vh; overflow-y: auto; display: flex; justify-content: center;
+  min-height: 100vh; display: flex; justify-content: center; align-items: flex-start;
   padding: 40px 20px;
 }
 .legal-card {
-  width: 100%; max-width: 720px; background: linear-gradient(135deg, rgba(18,26,42,0.95), rgba(12,18,32,0.95));
+  width: 100%; max-width: 720px; max-height: calc(100vh - 80px); overflow-y: auto;
+  background: linear-gradient(135deg, rgba(18,26,42,0.95), rgba(12,18,32,0.95));
   border: 1px solid var(--border); border-radius: var(--radius); padding: 32px;
 }
 .legal-header { margin-bottom: 28px; }

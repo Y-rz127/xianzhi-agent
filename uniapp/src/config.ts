@@ -33,13 +33,23 @@ function defaultConfig(): RuntimeConfig {
   }
   // 小程序/App 默认：本地后端
   // 真机调试请在设置页改成电脑局域网 IP，如 http://192.168.1.100:8123/api
-  return { apiBase: 'http://localhost:8123/api', wsBase: 'ws://localhost:8123' }
+  // wsBase 留空，自动从 apiBase 推导，避免 localhost / IP 不一致问题
+  return { apiBase: 'http://localhost:8123/api', wsBase: '' }
 }
 
 function loadFromStorage(): RuntimeConfig | null {
   try {
     const s = uni.getStorageSync(STORAGE_KEY) as RuntimeConfig | string | undefined
-    if (s && typeof s === 'object' && 'apiBase' in s) return s
+    if (s && typeof s === 'object' && 'apiBase' in s) {
+      // 迁移：如果 wsBase 是 localhost 但 apiBase 已改成 IP，清掉旧 wsBase
+      const cfg = s as RuntimeConfig
+      if (cfg.wsBase) {
+        const wsHost = cfg.wsBase.replace(/^wss?:\/\//, '').split('/')[0]
+        const apiHost = cfg.apiBase.replace(/^https?:\/\//, '').split('/')[0]
+        if (wsHost !== apiHost) cfg.wsBase = ''
+      }
+      return cfg
+    }
   } catch { /* ignore */ }
   return null
 }
@@ -68,11 +78,17 @@ export function getConfig(): RuntimeConfig {
 
 /** 把 wsBase 解析为带协议的具体地址（小程序端无 location） */
 export function resolveWsBase(): string {
-  if (_config.wsBase) return _config.wsBase
+  // 如果 wsBase 有值且和 apiBase 的 host 一致，直接用
+  if (_config.wsBase) {
+    const wsHost = _config.wsBase.replace(/^wss?:\/\//, '').split('/')[0]
+    const apiHost = _config.apiBase.replace(/^https?:\/\//, '').split('/')[0]
+    if (wsHost === apiHost) return _config.wsBase
+    // host 不一致，说明 apiBase 已改但 wsBase 没跟上，从 apiBase 推导
+  }
   if (isH5()) {
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
     return `${proto}//${location.host}`
   }
-  // 小程序端从 apiBase 推导
-  return _config.apiBase.replace(/^http/, 'ws')
+  // 从 apiBase 推导，去掉 /api 后缀
+  return _config.apiBase.replace(/^http/, 'ws').replace(/\/api\/?$/, '')
 }

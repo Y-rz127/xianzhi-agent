@@ -7,8 +7,10 @@
     <view class="header">
       <view class="header-top">
         <text class="header-title display-font">先知</text>
-        <view class="header-actions">
+        <view class="header-icons">
           <text class="icon-btn" @tap="goSettings">⚙</text>
+          <text class="icon-btn" @tap="confirmClear">🗑</text>
+          <text class="icon-btn" @tap="confirmNew">+</text>
         </view>
       </view>
       <view class="mode-tabs">
@@ -82,21 +84,10 @@
       </view>
 
       <view v-for="(msg, i) in messages" :key="i" :class="['msg', msg.role]">
-        <view v-if="msg.role === 'assistant'" class="avatar display-font">易</view>
+        <view class="avatar display-font">{{ msg.role === 'assistant' ? '易' : '我' }}</view>
         <view class="msg-body">
           <!-- 排盘可视化组件：优先用后端直排盘数据（保证四柱完整），否则从回答文本解析 -->
-          <BaziCard
-            v-if="mode === 'agent' && msg.role === 'assistant'"
-            :pillars="(i === messages.length - 1 && chartData?.pillars?.length) ? chartData.pillars : parsePillars(extractAnswer(msg.content))"
-          />
-          <WuxingChart
-            v-if="mode === 'agent' && msg.role === 'assistant'"
-            :items="(i === messages.length - 1 && chartData?.wuxing?.length) ? chartData.wuxing : parseWuxing(extractAnswer(msg.content))"
-          />
-          <DayunTimeline
-            v-if="mode === 'agent' && msg.role === 'assistant'"
-            :dayun="(i === messages.length - 1 && chartData?.dayun?.length) ? chartData.dayun : parseDayun(extractAnswer(msg.content))"
-          />
+
           <view class="msg-text" :class="{ thinking: isThinking(msg.content) }">
             <MarkdownRender v-if="msg.role === 'assistant' && msg.content" :content="formatContent(msg.content)" />
             <text v-else-if="!msg.content" class="typing">推演中…</text>
@@ -107,12 +98,6 @@
             <text class="report-btn" @tap="openBaziModal">查看命盘详情</text>
             <text class="report-btn" @tap="downloadPdfReport">下载 PDF 报告</text>
           </view>
-        </view>
-      </view>
-      <view v-if="thinking" class="msg assistant">
-        <view class="avatar display-font">易</view>
-        <view class="msg-body">
-          <view class="msg-text"><text class="typing">推演中…</text></view>
         </view>
       </view>
 
@@ -270,6 +255,7 @@ import {
   parsePillars, parseWuxing, parseDayun, parseShensha,
   downloadReport, getChart,
   fetchChartCases, createChartCase, deleteChartCase,
+  clearSessionMessages,
   type ChartData, type ChartCase,
 } from '@/api'
 import { getLocalDateString } from '@/utils/datetimePicker'
@@ -290,11 +276,13 @@ const scrollTop = ref(0)
 const lastBirthInfo = ref<BirthInfo | null>(null)
 const showBaziModal = ref(false)
 const chartData = ref<ChartData | null>(null)
+// 会话ID：同一会话内多轮对话保持一致，切换/新建会话时才重新生成
+const conversationId = ref('mp-' + Date.now())
 
 // 状态栏高度（自定义导航栏需要）
 const statusBarHeight = ref(20)
 try {
-  const sysInfo = uni.getSystemInfoSync()
+  const sysInfo = uni.getWindowInfo()
   statusBarHeight.value = sysInfo.statusBarHeight || 20
 } catch {}
 
@@ -353,13 +341,48 @@ function useExample(ex: string) { inputText.value = ex }
 function switchMode(m: 'agent' | 'cases' | 'rag') {
   if (mode.value === m) return
   mode.value = m
-  if (m !== 'cases') {
-    messages.value = []
-    inputText.value = ''
-  } else {
+  if (m === 'cases') {
     // 进入命例 tab 时拉取最新列表
     loadCases()
   }
+}
+
+/** 清空当前会话的消息记录，保留会话ID与命盘上下文 */
+async function clearChat() {
+  try {
+    await clearSessionMessages('xianzhi', conversationId.value)
+  } catch {}
+  messages.value = []
+  inputText.value = ''
+}
+
+/** 清空前确认 */
+function confirmClear() {
+  uni.showModal({
+    title: '清空对话',
+    content: '确定清空当前会话的所有消息吗？命盘信息会保留。',
+    success: (res) => { if (res.confirm) clearChat() },
+  })
+}
+
+/** 新建会话：生成新会话ID并清空命盘上下文 */
+function newSession() {
+  conversationId.value = 'mp-' + Date.now()
+  messages.value = []
+  inputText.value = ''
+  lastBirthInfo.value = null
+  chartData.value = null
+  birthDate.value = ''
+  birthTime.value = ''
+}
+
+/** 新建会话前确认 */
+function confirmNew() {
+  uni.showModal({
+    title: '新建会话',
+    content: '确定新建会话吗？当前对话和命盘信息将被清空。',
+    success: (res) => { if (res.confirm) newSession() },
+  })
 }
 
 // =================== 命例管理 ===================
@@ -499,20 +522,18 @@ function openBaziModal() {
   showBaziModal.value = true
 }
 
-/** 从用户消息中提取出生信息，并主动拉取直排盘结构化数据（保证四柱完整可视化） */
-async function tryExtractBirth(text: string) {
+/** 从用户消息中提取出生信息，同步更新顶部表单（watch 会自动拉取 chartData 并设置 lastBirthInfo） */
+function tryExtractBirth(text: string) {
   const m = text.match(/(男|女)/)
   const t = text.match(/(\d{4}[-年/]\d{1,2}[-月/]\d{1,2}[日 ]+\d{1,2}[:：]\d{1,2})/)
   if (m && t) {
     const time = t[1].replace(/年|月/g, '-').replace('日', ' ').replace('：', ':').trim()
-    const g = m[1]
-    lastBirthInfo.value = { time, gender: g }
-    // 主动拉取结构化命盘（独立于模型输出，四柱一定完整）
-    try {
-      chartData.value = await getChart(time, g, 2, 1)
-    } catch {
-      chartData.value = null
-    }
+    const [d, tm] = time.split(' ')
+    birthDate.value = d || ''
+    birthTime.value = tm || ''
+    gender.value = m[1] as '男' | '女'
+    // 同步设置 lastBirthInfo，确保按钮立即显示；watch 会异步拉取 chartData
+    lastBirthInfo.value = { time, gender: m[1] as '男' | '女' }
   }
 }
 
@@ -548,14 +569,29 @@ function onSend() {
     thinking.value = false
     messages.value[idx].content = messages.value[idx].content || `[出错] ${err}`
   }
+  // 后端从 LLM 工具调用中提取到出生信息时回调（覆盖自然语言输入场景）
+  const onChartContext = async (bt: string, g: string) => {
+    if (!bt || !g) return
+    const [d, t] = bt.split(' ')
+    birthDate.value = d || ''
+    birthTime.value = t || ''
+    gender.value = g as '男' | '女'
+    lastBirthInfo.value = { time: bt, gender: g as '男' | '女' }
+    // 主动拉取结构化命盘数据（命盘详情弹窗内容）
+    try {
+      chartData.value = await getChart(bt, g, 2, 1)
+    } catch {
+      chartData.value = null
+    }
+  }
 
   if (mode.value === 'agent') {
     chatWithXianzhiWS(text, {
-      conversationId: 'mp-' + Date.now(),
+      conversationId: conversationId.value,
       birthTime: birthTimeFull.value || undefined,
       gender: gender.value,
       sect: sect.value,
-      onMessage, onDone, onError,
+      onMessage, onDone, onError, onChartContext,
     })
   } else {
     chatWithRagWS(text, {
@@ -601,9 +637,22 @@ messages.value.push({
   overflow: hidden;
 }
 .header-top {
+  position: relative;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
+}
+.header-icons {
+  position: absolute;
+  left: 0;
+  right: 0;
+  display: flex;
+  justify-content: center;
+  gap: 24rpx;
+  pointer-events: none;
+}
+.header-icons .icon-btn {
+  pointer-events: auto;
 }
 .header-title {
   font-size: 40rpx;
@@ -616,7 +665,7 @@ messages.value.push({
 .icon-btn {
   width: 64rpx;
   height: 64rpx;
-  line-height: 64rpx;
+  line-height: 60rpx;
   text-align: center;
   color: rgba(255, 255, 255, 0.85);
   font-size: 36rpx;
@@ -630,6 +679,7 @@ messages.value.push({
   width: 100%;
   box-sizing: border-box;
   overflow: hidden;
+  align-items: center;
 }
 .tab {
   flex: 1;
@@ -741,7 +791,10 @@ messages.value.push({
 /* === 消息列表 === */
 .messages {
   flex: 1;
-  padding: 24rpx 32rpx;
+  padding: 24rpx 24rpx;
+  overflow-x: hidden;
+  width: 100%;
+  box-sizing: border-box;
 }
 .empty-state {
   display: flex;
@@ -803,6 +856,10 @@ messages.value.push({
   display: flex;
   margin-bottom: 32rpx;
   gap: 16rpx;
+  align-items: flex-start;
+  padding: 0 8rpx;
+  width: 100%;
+  box-sizing: border-box;
 }
 .msg.user {
   flex-direction: row-reverse;
@@ -820,8 +877,13 @@ messages.value.push({
   font-weight: 600;
   box-shadow: 0 0 24rpx rgba(124, 58, 237, 0.3);
 }
+.msg.user .avatar {
+  background: linear-gradient(135deg, #6D28D9 0%, #5B21B6 100%);
+}
 .msg-body {
-  max-width: 75%;
+  flex: 1;
+  min-width: 0;
+  max-width: calc(100% - 80rpx);
   display: flex;
   flex-direction: column;
 }
@@ -833,12 +895,16 @@ messages.value.push({
   border-radius: 8rpx 28rpx 28rpx 28rpx;
   font-size: 28rpx;
   line-height: 1.6;
-  word-break: break-word;
+  word-break: break-all;
+  overflow-wrap: break-word;
   background: rgba(30, 22, 56, 0.8);
   backdrop-filter: blur(16rpx);
   -webkit-backdrop-filter: blur(16rpx);
   border: 1rpx solid rgba(124, 58, 237, 0.1);
   color: #E2E8F0;
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
 }
 .msg.user .msg-text {
   background: linear-gradient(135deg, #6D28D9 0%, #7C3AED 100%);

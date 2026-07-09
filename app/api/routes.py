@@ -7,7 +7,7 @@ from app.api.chart_cases import router as chart_cases_router
 from app.api.love import router as love_router
 from app.api.observability import router as observability_router
 from app.api.rag import chat_router as rag_chat_router, mgmt_router as rag_mgmt_router
-from app.api.state import _love_app, _rag_chain, _xianzhi, set_instances
+from app.api.state import set_instances
 from app.api.tools import router as tools_router
 from app.api.xianzhi import router as xianzhi_router
 

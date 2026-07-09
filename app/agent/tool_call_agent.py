@@ -23,7 +23,14 @@ class ToolCallAgent(ReActAgent):
         messages = self._build_messages()
         try:
             ai_msg = self._llm_with_tools.invoke(messages)
-            self.final_answer = ai_msg.content or ""
+            # 过滤 reasoning model 的 <think>...</think> 推理过程
+            raw_content = ai_msg.content or ""
+            import re as _re
+            cleaned = _re.sub(r"<think>[\s\S]*?</think>\s*", "", raw_content, flags=_re.IGNORECASE)
+            cleaned = _re.sub(r"<think>[\s\S]*$", "", cleaned, flags=_re.IGNORECASE).strip()
+            if cleaned:
+                ai_msg.content = cleaned
+            self.final_answer = cleaned or raw_content
             tool_calls = getattr(ai_msg, "tool_calls", None) or []
             log.info("{} Step {}: 选择了 {} 个工具", self.name, self._current_step, len(tool_calls))
             for tc in tool_calls:

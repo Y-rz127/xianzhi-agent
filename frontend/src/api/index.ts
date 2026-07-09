@@ -4,6 +4,7 @@ export interface SSECallbacks {
   onMessage?: (data: string) => void
   onError?: (err: Event) => void
   onDone?: () => void
+  onChartContext?: (birthTime: string, gender: string) => void
 }
 
 export interface ChatOptions {
@@ -24,6 +25,13 @@ export function connectSSE(path: string, params: Record<string, string | undefin
     if (e.data === "[DONE]") { cb.onDone?.(); es.close() }
     else cb.onMessage?.(e.data)
   }
+  // 监听后端 chart_context 事件（自然语言输入时后端从工具调用提取的出生信息）
+  es.addEventListener("chart_context", (e) => {
+    try {
+      const data = JSON.parse((e as MessageEvent).data)
+      if (data?.birth_time && data?.gender) cb.onChartContext?.(data.birth_time, data.gender)
+    } catch {}
+  })
   // 监听后端自定义 error 事件（如 event: error）
   es.addEventListener("error", (e) => {
     const data = (e as MessageEvent).data || ""
@@ -266,6 +274,14 @@ export async function deleteSession(type: "xianzhi" | "love", id: string): Promi
   } catch {}
 }
 
+export async function clearSessionMessages(type: "xianzhi" | "love", id: string): Promise<void> {
+  if (!id) return
+  try {
+    const endpoint = type === "xianzhi" ? "xianzhi" : "love_app"
+    await fetch(`${API_BASE}/ai/${endpoint}/sessions/${id}/clear`, { method: "POST" })
+  } catch {}
+}
+
 export interface SessionMessage { role: "user" | "assistant"; content: string; time?: string }
 
 export interface RagDoc { filename: string; size: number; modified: string }
@@ -350,7 +366,7 @@ export async function getSessionMessages(type: "xianzhi" | "love", id: string): 
     if (!res.ok) return []
     const data = await res.json()
     return data.map((m: any) => ({
-      role: m.role === "user" ? "user" : "assistant",
+      role: (m.role === "user" || m.role === "human") ? "user" : "assistant",
       content: typeof m.content === "string" ? m.content : "",
       time: m.time || undefined,
     }))

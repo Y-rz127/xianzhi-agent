@@ -1,4 +1,4 @@
-"""先知 - 八字命理分析预测智能体（对应 Java 的 Manus）。
+"""先知 - 八字命理分析预测智能体
 
 基于 ToolCallAgent，拥有自主规划能力，可直接使用。
 工具集 = 本地工具（八字/搜索/终止）+ MCP 工具（高德地图）。
@@ -20,6 +20,18 @@ from app.memory import create_chat_memory
 from app.tools.mcp_client import mcp_manager
 import asyncio
 
+
+def _dedupe_final(text: str) -> str:
+    """检测并移除完全重复的内容（推理模型 think 块泄漏的兜底）。"""
+    text = text.strip()
+    if len(text) < 100:
+        return text
+    mid = len(text) // 2
+    if text[:mid].strip() == text[mid:].strip() and len(text[:mid].strip()) > 50:
+        log.warning("[xianzhi] 检测到 LLM 输出内容重复，已去重")
+        return text[:mid].strip()
+    return text
+
 from app.agent.xianzhi_workflow import XianzhiWorkflow, WorkflowChartContext, build_chart_context, render_full_fact_context
 
 
@@ -34,23 +46,26 @@ _BIRTH_INFO_RE2 = re.compile(
 )
 
 
-SYSTEM_PROMPT = """你是先知，一位精通八字命理的预测师，旨在解决用户提出的命理分析需求。
-你拥有多种工具可以调用，以高效完成复杂请求。
+SYSTEM_PROMPT = """你是先知，一位有几十年实战经验的八字命理师傅，性格像一位见多识广的老朋友。
 
-能力范围：
-- 根据出生时间排八字四柱（年柱、月柱、日柱、时柱）
-- 分析五行强弱、十神关系、用神喜忌
-- 推算大运（每10年一柱）、流年（逐年）、流月（逐月）、流日（逐日）
-- 合婚分析：对比两个人的八字，分析五行互补程度
-- 解答事业、感情、财运、健康等命理问题
-- 通过高德地图 MCP 工具查询地理/天气信息（如出生地相关分析）
-- 检索命理知识库（天干地支、五行生克、十神详解、用神喜忌等）
+身份与能力：
+- 精通四柱八字、五行十神、大运流年、合婚择日
+- 能调用排盘、知识库检索、地图天气等工具
+- 有传统文化底蕴，但说话不绕弯子
+
+说话风格（重要）：
+- 像真人聊天，不要用表格、不要分太多层级标题、不要用 emoji 结尾
+- 不同问题回答重点不同，不要重复论述之前的内容，并且要详略得当，有一针接血的效果
+- 长度控制：简单问题1-3句话（200字以内），复杂问题最多2-3段（350字以内），绝不可长篇大论
+- 该幽默时幽默（比如调侃桃花旺、财来财去），该严肃时严肃（比如健康、刑冲）
+- 有亲和力，像长辈或老朋友在跟你聊，而不是机器人在输出报告
+- 用"你"而不是"您"，自然口语化，可以适当用语气词
+- 不确定的事直说"这个要看具体情况"，不装懂、不绝对化
+- 避免AI味重的表达：不要"总结一下""需要注意的是""好消息/需要注意"这种模板腔
 
 回答原则：
-- 客观中立，不做绝对化断言
-- 引导用户理性看待命理，命由天定、运由己造
+- 客观中立，引导用户理性看待，命由天定、运由己造
 - 需要排盘时先调用工具获取准确四柱，再行分析
-
 - 排盘必须确认用户提供了：出生时间（年月日时）和性别
 """
 
@@ -86,7 +101,10 @@ FACT_GUARDRAILS = """
 """
 
 class Xianzhi(ToolCallAgent):
-    """先知智能体（对应 Java Manus）。"""
+    """先知智能体"""
+
+    # 排盘工具名集合：调用这些工具时，从参数中提取 birth_time/gender
+    _BAZI_TOOLS = {"bazi_chart", "bazi_full", "bazi_analysis", "bazi_dayun", "bazi_liunian", "bazi_liuyue", "bazi_liuri"}
 
     def __init__(self, chat_model, local_tools, max_steps=None):
         super().__init__(
@@ -109,10 +127,16 @@ class Xianzhi(ToolCallAgent):
         self._lock = asyncio.Lock()
 
     def set_conversation_id(self, conversation_id):
-        self._conversation_id = (
+        new_id = (
             conversation_id if conversation_id and conversation_id.strip()
             else "xianzhi-default"
         )
+        # 切换会话时清空命盘上下文，避免跨会话污染
+        if new_id != self._conversation_id:
+            self.chart_context = ""
+            self._workflow_context = None
+            self._last_birth_info = None
+        self._conversation_id = new_id
 
     def reset(self):
         """重置 Agent 运行状态（父类 run_stream 会调用，需补齐）。"""
@@ -125,6 +149,7 @@ class Xianzhi(ToolCallAgent):
         self._last_error = None
         self._sect = 2
         self._yun_sect = 1
+        self._history_len = 0
 
     def set_chart_context(self, birth_time: str, gender: str, sect: int = 2, yun_sect: int = 1):
         """由外部直接设置当前命盘上下文，AI 回答将基于该盘面。
@@ -199,7 +224,31 @@ class Xianzhi(ToolCallAgent):
         if mcp_manager.available:
             self.available_tools = list(self._local_tools) + mcp_manager.get_tools()
             self._llm_with_tools = self.chat_model.bind_tools(self.available_tools)
-        return super().think()
+        result = super().think()
+        # 拦截排盘工具调用，从参数中提取 birth_time/gender（覆盖自然语言输入场景）
+        self._capture_birth_from_tool_calls()
+        return result
+
+    def _capture_birth_from_tool_calls(self):
+        """从 LLM 的工具调用中提取 birth_time/gender，挂载命盘上下文。
+
+        当用户用自然语言（如"04年端午节辰时"）输入时，正则无法提取，
+        但 LLM 能理解并调用 bazi 工具，此时从工具参数中拿到标准格式的 birth_time。
+        """
+        if self._last_birth_info:
+            return  # 已有命盘上下文，无需重复提取
+        for msg in reversed(self.message_list):
+            tool_calls = getattr(msg, "tool_calls", None) or []
+            for tc in tool_calls:
+                name = tc.get("name", "")
+                args = tc.get("args", {}) or {}
+                if name in self._BAZI_TOOLS:
+                    bt = args.get("birth_time")
+                    gd = args.get("gender")
+                    if bt and gd:
+                        log.info("[xianzhi] 从工具调用提取出生信息: {} {}", bt, gd)
+                        self.set_chart_context(bt, gd, self._sect, self._yun_sect)
+                        return
 
     def _extract_chart_summary(self) -> str:
         """从已挂载的 chart_context 中提取「四柱」段，作为可视化兜底。"""
@@ -308,7 +357,8 @@ class Xianzhi(ToolCallAgent):
             verbose: True=透传 ReAct 步骤（调试用），False=只输出最终回答
         """
         self.reset()
-        self.mount_chart_context(user_prompt, self._sect, self._yun_sect)
+        if not self.chart_context:
+            self.mount_chart_context(user_prompt, self._sect, self._yun_sect)
         self._load_history()
         if self._workflow_context and not verbose:
             return self._workflow_stream(user_prompt)
@@ -347,7 +397,7 @@ class Xianzhi(ToolCallAgent):
             pass
         final = (self.final_answer or "").strip()
         if final:
-            yield final
+            yield _dedupe_final(final)
         elif self.state == AgentState.ERROR or self._last_error:
             err = (self._last_error or "未知错误").strip()
             log.warning("[xianzhi] 终止于错误: {}", err)
@@ -363,23 +413,26 @@ class Xianzhi(ToolCallAgent):
             selected = []
             for msg in reversed(history):
                 content = msg.content if hasattr(msg, "content") else str(msg)
-                token_count = len(content) // 4
+                # 中文场景下 1 字符 ≈ 1.5 token（英文≈0.25），取折中系数
+                cn_chars = sum(1 for c in content if '\u4e00' <= c <= '\u9fff')
+                en_chars = len(content) - cn_chars
+                token_count = int(cn_chars * 1.5 + en_chars * 0.25)
                 if total_tokens + token_count <= max_tokens:
                     selected.append(msg)
                     total_tokens += token_count
                 else:
                     break
             self.message_list = list(reversed(selected))
+        self._history_len = len(self.message_list)
 
     def _persist_history(self):
-        """持久化当前轮次新消息（追加模式，避免 clear+add 丢历史）。"""
-        if self.message_list:
-            self._memory.add(self._conversation_id, self.message_list)
+        """仅持久化本轮新增的消息，避免重复追加历史导致消息指数级重复。"""
+        new_messages = self.message_list[self._history_len:]
+        if new_messages:
+            self._memory.add(self._conversation_id, new_messages)
 
     def cleanup(self):
         self._persist_history()
-        # 清理当前轮次的命盘上下文，避免跨会话污染
-        self.chart_context = ""
-        self._workflow_context = None
-        self._last_birth_info = None
+        # 命盘上下文持久化到会话：不清空，下一轮同会话仍可用
+        # 仅在切换会话（set_conversation_id）时才主动清空
         super().cleanup()

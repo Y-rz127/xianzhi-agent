@@ -230,6 +230,12 @@ export const deleteSession = (type: 'xianzhi' | 'love', id: string) => {
   return del(`/ai/${endpoint}/sessions/${id}`)
 }
 
+/** 清空指定会话的消息记录，但保留会话本身（不新建会话） */
+export const clearSessionMessages = (type: 'xianzhi' | 'love', id: string) => {
+  const endpoint = type === 'xianzhi' ? 'xianzhi' : 'love_app'
+  return post(`/ai/${endpoint}/sessions/${id}/clear`, {})
+}
+
 export interface SessionMessage {
   role: 'user' | 'assistant'
   content: string

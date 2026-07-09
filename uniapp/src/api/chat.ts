@@ -21,6 +21,7 @@ export interface ChatWSCallbacks {
   onMessage: (data: string) => void
   onDone: () => void
   onError: (err: string) => void
+  onChartContext?: (birthTime: string, gender: string) => void
 }
 
 /** H5 dev 下走 vite proxy 的 path 前缀，prod 直连 */
@@ -54,6 +55,8 @@ function connectChatWS(path: string, payload: Record<string, any>, cb: ChatWSCal
       const data = JSON.parse(res.data as string)
       if (data.type === 'message') {
         cb.onMessage(data.data)
+      } else if (data.type === 'chart_context') {
+        cb.onChartContext?.(data.data?.birth_time, data.data?.gender)
       } else if (data.type === 'done') {
         cb.onDone()
       } else if (data.type === 'error') {

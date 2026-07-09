@@ -47,16 +47,17 @@
     <div class="chat-main">
       <header class="chat-header">
         <div class="header-left">
+          <button class="app-sidebar-toggle" @click="toggleAppSidebar" aria-label="切换导航">
+            <svg v-if="appSidebarOpen" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 18L18 6M6 6l12 12"/></svg>
+            <svg v-else viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+          </button>
           <button class="pc-sidebar-toggle" @click="toggleSidebar" :aria-label="sidebarCollapsed ? '展开历史会话' : '收起历史会话'">
             <svg v-if="sidebarCollapsed" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
             <svg v-else viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg>
           </button>
-          <div class="header-icon">
-            <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
-          </div>
           <div>
             <h2>{{ mode === "agent" ? "先知·八字命理" : "命理知识库" }}</h2>
-            <div class="header-info">{{ mode === "agent" ? "AI 推演大运流年" : "探索命理奥秘" }}</div>
+            <div class="header-info">{{ mode === "agent" ? "更懂你的AI命理师" : "探索命理奥秘" }}</div>
           </div>
         </div>
         <div class="header-right">
@@ -74,6 +75,10 @@
             <button :class="['tab', { active: mode === 'agent' }]" @click="switchMode('agent')" aria-label="智能体排盘">排盘</button>
             <button :class="['tab', { active: mode === 'rag' }]" @click="switchMode('rag')" aria-label="知识问答">问答</button>
           </div>
+          <button v-if="mode === 'agent'" class="btn header-btn btn-accent" @click="showBaziModal" title="命盘详情">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0z"/><path d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+            命盘
+          </button>
           <button class="btn header-btn" @click="clearChat" title="清空">
             <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
           </button>
@@ -103,8 +108,12 @@
           </div>
         </div>
 
-        <template v-for="(msg, i) in messages" :key="i">
-          <div :class="msgClass(msg.role)" :style="{ animationDelay: `${i * 0.05}s` }">
+        <div v-if="hasMoreHistory" class="load-more-bar">
+          <button class="load-more-btn" @click="loadMoreHistory">查看更多历史消息</button>
+        </div>
+
+        <template v-for="(msg, i) in visibleMessages" :key="messages.length - visibleMessages.length + i">
+          <div v-if="msg.content || !loading" :class="msgClass(msg.role)" :style="{ animationDelay: `${i * 0.05}s` }">
             <div class="msg-avatar-wrap">
               <div class="msg-avatar">
                 <svg v-if="msg.role === 'user'" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
@@ -120,7 +129,7 @@
                 <MarkdownRender v-if="msg.role === 'assistant'" :content="formatContent(msg.content)" />
                 <pre v-else>{{ msg.content }}</pre>
               </div>
-              <div v-if="mode === 'agent' && msg.role === 'assistant' && lastBirthInfo && i === messages.length - 1" class="report-bar">
+              <div v-if="mode === 'agent' && msg.role === 'assistant' && lastBirthInfo" class="report-bar">
                 <button class="report-btn" @click="showBaziModal" aria-label="查看命盘详情">
                   <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0z"/><path d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
                   查看命盘详情
@@ -133,6 +142,21 @@
             </div>
           </div>
         </template>
+
+        <div v-if="loading" class="msg assistant loading-msg">
+          <div class="msg-avatar-wrap">
+            <div class="msg-avatar">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/><path d="M2 12h20"/></svg>
+            </div>
+            <div class="msg-role">先知</div>
+          </div>
+          <div class="msg-body">
+            <div class="msg-content loading-content">
+              <span class="loading-text">正在为您推演分析，请稍候</span>
+              <div class="loading-dots"><span></span><span></span><span></span></div>
+            </div>
+          </div>
+        </div>
 
         <div v-if="showScrollTop" class="scroll-top-btn" @click="scrollToBottom" aria-label="回到底部">
           <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><polyline points="7 13 12 18 17 13"/><line x1="12" y1="18" x2="12" y2="3"/></svg>
@@ -210,8 +234,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, nextTick, computed, onMounted, onUnmounted } from "vue"
-import { chatWithXianzhi, chatWithRag, downloadReport, parsePillars, parseWuxing, parseDayun, parseShensha, fetchSessions, deleteSession as deleteSessionApi, getSessionMessages, fetchChartCases, createChartCase, deleteChartCase, getChart, type ChatSession, type SessionMessage, type ChartCase, type ChartData } from "../api"
+defineOptions({ name: 'Xianzhi' })
+import { ref, nextTick, computed, onMounted, onActivated, onUnmounted } from "vue"
+import { chatWithXianzhi, chatWithRag, downloadReport, parsePillars, parseWuxing, parseDayun, parseShensha, fetchSessions, deleteSession as deleteSessionApi, clearSessionMessages, getSessionMessages, fetchChartCases, createChartCase, deleteChartCase, getChart, type ChatSession, type SessionMessage, type ChartCase, type ChartData, type SSECallbacks } from "../api"
 import BaziCard from "../components/BaziCard.vue"
 import WuxingChart from "../components/WuxingChart.vue"
 import DayunTimeline from "../components/DayunTimeline.vue"
@@ -229,8 +254,9 @@ const lastBirthInfo = ref<BirthInfo | null>(null)
 const chartData = ref<ChartData | null>(null)
 const conversationId = ref("xianzhi-" + Date.now())
 const ragSessionId = ref("rag-" + Date.now())
-const sidebarCollapsed = ref(false)
+const sidebarCollapsed = ref(true)
 const isMobile = ref(false)
+const appSidebarOpen = ref(false)
 const sessions = ref<ChatSession[]>([])
 const showModal = ref(false)
 const chartCases = ref<ChartCase[]>([])
@@ -243,6 +269,14 @@ const caseGender = ref<"男" | "女">("男")
 const sect = ref(2)
 const yunSect = ref(1)
 const showScrollTop = ref(false)
+const pageSize = 30
+const visibleCount = ref(pageSize)
+const hasMoreHistory = computed(() => visibleCount.value < messages.value.length)
+const visibleMessages = computed(() => {
+  const total = messages.value.length
+  const start = Math.max(0, total - visibleCount.value)
+  return messages.value.slice(start)
+})
 
 const agentExamples = ["男，1990-05-20 14:30，排盘并分析事业", "女，1995-08-15 08:00，看近五年运势", "男，1988-12-01 23:30，大运流年推算"]
 const ragExamples = ["什么是七杀？有什么含义？", "用神怎么取？", "大运顺逆排的规则是什么？"]
@@ -288,6 +322,7 @@ const formatTime = (time: string) => time ? time.split("T")[0] : ""
 
 const scrollToBottom = async () => {
   await nextTick()
+  await new Promise(r => setTimeout(r, 100))
   if (messagesEl.value) {
     messagesEl.value.scrollTo({ top: messagesEl.value.scrollHeight, behavior: "smooth" })
     showScrollTop.value = false
@@ -297,12 +332,27 @@ const scrollToBottom = async () => {
 const onScroll = () => {
   if (!messagesEl.value) return
   const el = messagesEl.value
-  showScrollTop.value = el.scrollHeight - el.scrollTop - el.clientHeight > 100
+  const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 120
+  showScrollTop.value = !atBottom
+}
+
+const loadMoreHistory = async () => {
+  const el = messagesEl.value
+  if (!el) return
+  const prevHeight = el.scrollHeight
+  visibleCount.value = Math.min(visibleCount.value + pageSize, messages.value.length)
+  await nextTick()
+  // 保持视口位置不跳动
+  if (el) {
+    const newHeight = el.scrollHeight
+    el.scrollTop = newHeight - prevHeight
+  }
 }
 
 const handleKeydown = (e: KeyboardEvent) => {
-  if (e.key === "Enter" && !e.shiftKey && !e.ctrlKey) {
+  if (e.key === "Enter" && !e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {
     e.preventDefault()
+    e.stopPropagation()
     send()
   }
 }
@@ -343,7 +393,15 @@ const switchMode = (m: "agent" | "rag") => {
   lastBirthInfo.value = null
 }
 
-const clearChat = () => { messages.value = []; lastBirthInfo.value = null; chartData.value = null }
+const clearChat = async () => {
+  // 清空当前会话：删除数据库消息记录，保留会话ID与命盘上下文
+  if (conversationId.value) {
+    await clearSessionMessages("xianzhi", conversationId.value)
+  }
+  messages.value = []
+  input.value = ""
+  loadSessions()
+}
 
 const newSession = () => {
   conversationId.value = "xianzhi-" + Date.now()
@@ -373,7 +431,15 @@ const showBaziModal = async () => {
   }
   showModal.value = true
 }
-const toggleSidebar = () => { sidebarCollapsed.value = !sidebarCollapsed.value }
+const toggleSidebar = () => {
+  sidebarCollapsed.value = !sidebarCollapsed.value
+  localStorage.setItem("xianzhi-sidebar-collapsed", String(sidebarCollapsed.value))
+}
+const toggleAppSidebar = () => window.dispatchEvent(new CustomEvent("app-toggle-sidebar"))
+const onAppSidebarState = (e: Event) => {
+  const ev = e as CustomEvent
+  appSidebarOpen.value = !!ev.detail?.open
+}
 
 const loadSessions = async () => {
   sessions.value = await fetchSessions("xianzhi")
@@ -383,6 +449,13 @@ const loadSession = async (s: ChatSession) => {
   if (!s?.id) return
   conversationId.value = s.id
   messages.value = await getSessionMessages("xianzhi", s.id)
+  visibleCount.value = pageSize
+  // 从历史用户消息里恢复命盘上下文
+  lastBirthInfo.value = null
+  chartData.value = null
+  for (const m of messages.value) {
+    if (m.role === "user") tryExtractBirth(m.content)
+  }
   scrollToBottom()
 }
 
@@ -517,17 +590,42 @@ const send = () => {
   const sessionId = mode.value === "agent" ? conversationId.value : ragSessionId.value
   const chatFn = mode.value === "agent" ? chatWithXianzhi : chatWithRag
 
+  const opts = mode.value === "agent" && lastBirthInfo.value ? {
+    birth_time: lastBirthInfo.value.time,
+    gender: lastBirthInfo.value.gender,
+    sect: sect.value,
+    yun_sect: yunSect.value,
+  } : undefined
+
   chatFn(userMsg, sessionId, {
     onMessage: (data) => { aiMsg.content += data; scrollToBottom() },
     onError: () => { aiMsg.content += "\n[连接中断]"; loading.value = false },
     onDone: () => { loading.value = false; scrollToBottom(); loadSessions(); loadChartCases() },
-  })
+    // 后端从 LLM 工具调用中提取到出生信息时回调（覆盖自然语言输入场景）
+    onChartContext: async (birthTime, gender) => {
+      if (!birthTime || !gender) return
+      lastBirthInfo.value = { time: birthTime, gender }
+      await fetchChartData(birthTime, gender)
+    },
+  } as SSECallbacks, opts)
 }
 
-const checkMobile = () => { isMobile.value = window.innerWidth <= 768; if (isMobile.value) sidebarCollapsed.value = true }
+const checkMobile = () => {
+  isMobile.value = window.innerWidth <= 768
+}
 
-onMounted(() => { loadSessions(); loadChartCases(); checkMobile(); window.addEventListener("resize", checkMobile) })
-onUnmounted(() => { window.removeEventListener("resize", checkMobile) })
+onMounted(() => {
+  loadSessions(); loadChartCases(); checkMobile(); window.addEventListener("resize", checkMobile)
+  window.addEventListener("app-sidebar-state", onAppSidebarState)
+})
+onActivated(() => {
+  // keep-alive 切换回来时刷新会话列表，确保历史记录最新
+  loadSessions(); loadChartCases()
+})
+onUnmounted(() => {
+  window.removeEventListener("resize", checkMobile)
+  window.removeEventListener("app-sidebar-state", onAppSidebarState)
+})
 </script>
 
 <style scoped>
@@ -599,11 +697,12 @@ onUnmounted(() => { window.removeEventListener("resize", checkMobile) })
 .pc-sidebar-toggle:hover { border-color: var(--accent); color: var(--accent-light); background: rgba(212,175,55,0.08); }
 .pc-sidebar-toggle:active { transform: scale(0.96); }
 
-
-
-.header-icon { width: 44px; height: 44px; border-radius: 12px; display: flex; align-items: center;
-  justify-content: center; background: linear-gradient(135deg, rgba(212,175,55,0.15), rgba(139,92,246,0.1));
-  border: 1px solid rgba(212,175,55,0.3); color: var(--accent); }
+.app-sidebar-toggle {
+  padding: 8px; background: rgba(255,255,255,0.05); border: 1px solid var(--border); border-radius: 8px;
+  color: var(--text-dim); cursor: pointer; display: flex; transition: all 0.2s; align-items: center; justify-content: center;
+}
+.app-sidebar-toggle:hover { border-color: var(--accent); color: var(--accent-light); background: rgba(212,175,55,0.08); }
+.app-sidebar-toggle:active { transform: scale(0.96); }
 .chat-header h2 { font-size: 17px; color: var(--text); letter-spacing: 1px; margin-bottom: 2px; font-weight: 600; }
 .header-info { font-size: 12px; color: var(--text-muted); }
 
@@ -615,6 +714,7 @@ onUnmounted(() => { window.removeEventListener("resize", checkMobile) })
   border: 1px solid var(--border); border-radius: 8px; color: var(--text-dim); outline: none;
   cursor: pointer; }
 .sect-select:focus { border-color: var(--accent); color: var(--text); }
+.sect-select option { background: #0f1520; color: var(--text); }
 
 .mode-tabs { display: flex; background: rgba(255,255,255,0.03); border-radius: 8px; padding: 3px; }
 .tab { padding: 6px 16px; font-size: 12px; border: none; background: transparent;
@@ -623,6 +723,18 @@ onUnmounted(() => { window.removeEventListener("resize", checkMobile) })
 .tab.active { background: rgba(212,175,55,0.15); color: var(--accent-light); }
 
 .messages { flex: 1; overflow-y: auto; padding: 8px; min-height: 0; }
+
+.load-more-bar { display: flex; justify-content: center; padding: 12px 0 6px; }
+.load-more-btn { padding: 8px 18px; font-size: 12px; color: var(--text-dim);
+  background: rgba(255,255,255,0.05); border: 1px solid var(--border); border-radius: 20px;
+  cursor: pointer; transition: all 0.2s; }
+.load-more-btn:hover { color: var(--accent); border-color: var(--accent); background: rgba(212,175,55,0.08); }
+
+.scroll-top-btn { position: fixed; bottom: 120px; right: 32px;
+  width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  background: rgba(12,18,32,0.95); border: 1px solid var(--border); color: var(--accent);
+  cursor: pointer; z-index: 100; box-shadow: 0 4px 16px rgba(0,0,0,0.4); transition: all 0.2s; }
+.scroll-top-btn:hover { border-color: var(--accent); box-shadow: 0 0 16px rgba(212,175,55,0.3); }
 
 .empty-state { position: relative; text-align: center; padding: 60px 20px; display: flex;
   flex-direction: column; align-items: center; justify-content: center; min-height: 400px; }
@@ -666,6 +778,15 @@ onUnmounted(() => { window.removeEventListener("resize", checkMobile) })
 .msg.user .msg-content { background: linear-gradient(135deg, rgba(42,82,152,0.3), rgba(30,60,114,0.2));
   border-color: rgba(42,82,152,0.3); }
 .msg-content.thinking { opacity: 0.85; }
+
+.loading-msg { opacity: 1 !important; }
+.loading-content { display: flex; align-items: center; gap: 10px; min-width: 140px; }
+.loading-text { color: var(--accent); font-size: 13px; }
+.loading-dots { display: flex; gap: 4px; }
+.loading-dots span { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); animation: bounce 1.4s infinite ease-in-out; }
+.loading-dots span:nth-child(2) { animation-delay: 0.16s; }
+.loading-dots span:nth-child(3) { animation-delay: 0.32s; }
+@keyframes bounce { 0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; } 40% { transform: scale(1); opacity: 1; } }
 
 .report-bar { display: flex; gap: 10px; padding-top: 8px; }
 .report-btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 14px; font-size: 12px;
@@ -721,7 +842,8 @@ textarea:disabled { opacity: 0.5; cursor: not-allowed; }
   border-top: 1px solid var(--border); }
 
 @media (max-width: 768px) {
-  .pc-sidebar-toggle { display: none !important; }
+  .app-sidebar-toggle { display: none !important; }
+  .pc-sidebar-toggle { display: flex; }
   .chat-sidebar { position: fixed; left: 0; top: 0; bottom: 0; width: 260px; z-index: 100;
     box-shadow: 4px 0 24px rgba(0,0,0,0.5); transition: transform 0.35s ease; will-change: transform; }
   .chat-sidebar.collapsed { transform: translateX(-100%); width: 260px; }
@@ -751,7 +873,6 @@ textarea:disabled { opacity: 0.5; cursor: not-allowed; }
 
 @media (max-width: 480px) {
   .chat-header { padding: 10px 12px; }
-  .header-icon { width: 36px; height: 36px; }
   .chat-header h2 { font-size: 15px; }
   .header-info { font-size: 11px; }
   .examples { max-width: 100%; }

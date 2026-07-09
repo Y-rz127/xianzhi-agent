@@ -23,13 +23,14 @@
     <div class="chat-main">
       <header class="chat-header glass-card">
         <div class="header-left">
+          <button class="app-sidebar-toggle" @click="toggleAppSidebar" aria-label="切换导航">
+            <svg v-if="appSidebarOpen" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 18L18 6M6 6l12 12"/></svg>
+            <svg v-else viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+          </button>
           <button class="pc-sidebar-toggle" @click="toggleSidebar" :aria-label="sidebarCollapsed ? '展开历史会话' : '收起历史会话'">
             <svg v-if="sidebarCollapsed" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
             <svg v-else viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg>
           </button>
-          <div class="header-icon love-icon">
-            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
-          </div>
           <div>
             <h2 class="text-glow-soft">恋爱大师</h2>
             <div class="header-info">情感咨询 · 倾诉恋爱难题 · 守护你的缘分</div>
@@ -61,8 +62,12 @@
           </div>
         </div>
 
-        <template v-for="(msg, i) in messages" :key="i">
-          <div :class="msgClass(msg.role)" :style="{ animationDelay: `${i * 0.05}s` }">
+        <div v-if="hasMoreHistory" class="load-more-bar">
+          <button class="load-more-btn" @click="loadMoreHistory">查看更多历史消息</button>
+        </div>
+
+        <template v-for="(msg, i) in visibleMessages" :key="messages.length - visibleMessages.length + i">
+          <div v-if="msg.content || !loading" :class="msgClass(msg.role)" :style="{ animationDelay: `${i * 0.05}s` }">
             <div class="msg-avatar-wrap">
               <div class="msg-avatar">
                 <svg v-if="msg.role === 'user'" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
@@ -112,8 +117,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, nextTick, onMounted, onUnmounted } from "vue"
-import { chatWithLove, fetchSessions, deleteSession as deleteSessionApi, getSessionMessages, type ChatSession, type SessionMessage } from "../api"
+defineOptions({ name: 'Love' })
+import { ref, nextTick, onMounted, onUnmounted, computed } from "vue"
+import { chatWithLove, fetchSessions, deleteSession as deleteSessionApi, clearSessionMessages, getSessionMessages, type ChatSession, type SessionMessage } from "../api"
 import MarkdownRender from "../components/MarkdownRender.vue"
 
 const messages = ref<SessionMessage[]>([])
@@ -121,10 +127,19 @@ const input = ref("")
 const loading = ref(false)
 const messagesEl = ref<HTMLElement | null>(null)
 const chatId = ref("love-" + Date.now())
-const sidebarCollapsed = ref(false)
+const sidebarCollapsed = ref(true)
 const isMobile = ref(false)
+const appSidebarOpen = ref(false)
 const sessions = ref<ChatSession[]>([])
 const showScrollTop = ref(false)
+const pageSize = 30
+const visibleCount = ref(pageSize)
+const hasMoreHistory = computed(() => visibleCount.value < messages.value.length)
+const visibleMessages = computed(() => {
+  const total = messages.value.length
+  const start = Math.max(0, total - visibleCount.value)
+  return messages.value.slice(start)
+})
 
 const loveExamples = ["最近和喜欢的人聊天总是冷场，怎么办？", "分手后一直走不出来，该怎么调整心态？", "如何判断对方是不是对的人？"]
 
@@ -134,6 +149,7 @@ const formatTime = (time: string) => time ? time.split("T")[0] : ""
 
 const scrollToBottom = async () => {
   await nextTick()
+  await new Promise(r => setTimeout(r, 100))
   if (messagesEl.value) {
     messagesEl.value.scrollTo({ top: messagesEl.value.scrollHeight, behavior: "smooth" })
     showScrollTop.value = false
@@ -143,17 +159,38 @@ const scrollToBottom = async () => {
 const onScroll = () => {
   if (!messagesEl.value) return
   const el = messagesEl.value
-  showScrollTop.value = el.scrollHeight - el.scrollTop - el.clientHeight > 100
+  showScrollTop.value = el.scrollHeight - el.scrollTop - el.clientHeight > 120
+}
+
+const loadMoreHistory = async () => {
+  const el = messagesEl.value
+  if (!el) return
+  const prevHeight = el.scrollHeight
+  visibleCount.value = Math.min(visibleCount.value + pageSize, messages.value.length)
+  await nextTick()
+  if (el) {
+    const newHeight = el.scrollHeight
+    el.scrollTop = newHeight - prevHeight
+  }
 }
 
 const handleKeydown = (e: KeyboardEvent) => {
-  if (e.key === "Enter" && !e.shiftKey && !e.ctrlKey) {
+  if (e.key === "Enter" && !e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {
     e.preventDefault()
+    e.stopPropagation()
     send()
   }
 }
 
-const clearChat = () => { messages.value = [] }
+const clearChat = async () => {
+  // 清空当前会话：删除数据库消息记录，保留会话ID
+  if (chatId.value) {
+    await clearSessionMessages("love", chatId.value)
+  }
+  messages.value = []
+  input.value = ""
+  loadSessions()
+}
 const newSession = () => { chatId.value = "love-" + Date.now(); messages.value = []; input.value = ""; loadSessions() }
 const exportChat = () => {
   const text = messages.value.map(m => `${m.role === 'user' ? '你' : '恋爱大师'}：${m.content}`).join("\n\n")
@@ -166,9 +203,17 @@ const exportChat = () => {
   URL.revokeObjectURL(url)
 }
 
-const toggleSidebar = () => { sidebarCollapsed.value = !sidebarCollapsed.value }
+const toggleSidebar = () => {
+  sidebarCollapsed.value = !sidebarCollapsed.value
+  localStorage.setItem("love-sidebar-collapsed", String(sidebarCollapsed.value))
+}
+const toggleAppSidebar = () => window.dispatchEvent(new CustomEvent("app-toggle-sidebar"))
+const onAppSidebarState = (e: Event) => {
+  const ev = e as CustomEvent
+  appSidebarOpen.value = !!ev.detail?.open
+}
 const loadSessions = async () => { sessions.value = await fetchSessions("love") }
-const loadSession = async (s: ChatSession) => { chatId.value = s.id; messages.value = await getSessionMessages("love", s.id); scrollToBottom() }
+const loadSession = async (s: ChatSession) => { chatId.value = s.id; messages.value = await getSessionMessages("love", s.id); visibleCount.value = pageSize; scrollToBottom() }
 const deleteSessionItem = async (id: string) => { await deleteSessionApi("love", id); loadSessions() }
 
 const send = () => {
@@ -182,16 +227,27 @@ const send = () => {
   messages.value.push(aiMsg)
   scrollToBottom()
   chatWithLove(userMsg, chatId.value, {
-    onMessage: (data) => { aiMsg.content += data; loading.value = false; scrollToBottom() },
+    onMessage: (data) => { aiMsg.content += data; scrollToBottom() },
     onError: () => { aiMsg.content += "\n[连接中断]"; loading.value = false },
     onDone: () => { loading.value = false; scrollToBottom(); loadSessions() },
   })
 }
 
-const checkMobile = () => { isMobile.value = window.innerWidth <= 768; if (isMobile.value) sidebarCollapsed.value = true }
+const checkMobile = () => {
+  isMobile.value = window.innerWidth <= 768
+  if (isMobile.value) {
+    sidebarCollapsed.value = true
+  }
+}
 
-onMounted(() => { loadSessions(); checkMobile(); window.addEventListener("resize", checkMobile) })
-onUnmounted(() => { window.removeEventListener("resize", checkMobile) })
+onMounted(() => {
+  loadSessions(); checkMobile(); window.addEventListener("resize", checkMobile)
+  window.addEventListener("app-sidebar-state", onAppSidebarState)
+})
+onUnmounted(() => {
+  window.removeEventListener("resize", checkMobile)
+  window.removeEventListener("app-sidebar-state", onAppSidebarState)
+})
 </script>
 
 <style scoped>
@@ -234,14 +290,30 @@ onUnmounted(() => { window.removeEventListener("resize", checkMobile) })
 }
 .pc-sidebar-toggle:hover { border-color: var(--love); color: var(--love); background: rgba(232,139,139,0.08); }
 .pc-sidebar-toggle:active { transform: scale(0.96); }
-.header-icon { width: 42px; height: 42px; border-radius: 12px; display: flex; align-items: center; justify-content: center; border: 1px solid transparent; }
-.header-icon.love-icon { background: linear-gradient(135deg, rgba(232,139,139,0.15), rgba(184,84,84,0.1)); border-color: rgba(232,139,139,0.35); color: var(--love); }
+.app-sidebar-toggle {
+  padding: 8px; background: rgba(255,255,255,0.05); border: 1px solid var(--border); border-radius: 8px;
+  color: var(--text-dim); cursor: pointer; display: flex; transition: all 0.2s; align-items: center; justify-content: center;
+}
+.app-sidebar-toggle:hover { border-color: var(--love); color: var(--love); background: rgba(232,139,139,0.08); }
+.app-sidebar-toggle:active { transform: scale(0.96); }
 .chat-header h2 { font-size: 17px; color: var(--love); letter-spacing: 1px; margin-bottom: 2px; }
 .header-info { font-size: 12px; color: var(--text-dim); }
 .header-right { display: flex; align-items: center; gap: 10px; }
 .header-btn { padding: 7px 12px; font-size: 12px; }
 
 .messages { flex: 1; overflow-y: auto; padding: 8px 12px 20px; min-height: 0; }
+
+.load-more-bar { display: flex; justify-content: center; padding: 12px 0 6px; }
+.load-more-btn { padding: 8px 18px; font-size: 12px; color: var(--text-dim);
+  background: rgba(255,255,255,0.05); border: 1px solid var(--border); border-radius: 20px;
+  cursor: pointer; transition: all 0.2s; }
+.load-more-btn:hover { color: var(--love); border-color: var(--love); background: rgba(232,139,139,0.08); }
+
+.scroll-top-btn { position: fixed; bottom: 90px; right: 24px;
+  width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  background: rgba(12,18,32,0.95); border: 1px solid var(--border); color: var(--love);
+  cursor: pointer; z-index: 100; box-shadow: 0 4px 16px rgba(0,0,0,0.4); transition: all 0.2s; }
+.scroll-top-btn:hover { border-color: var(--love); box-shadow: 0 0 16px rgba(232,139,139,0.3); }
 .empty { position: relative; text-align: center; padding: 70px 20px; color: var(--text-dim); }
 .heart-pulse { position: absolute; left: 50%; top: 55px; transform: translateX(-50%); color: rgba(232,139,139,0.15); animation: heartbeat 2s ease-in-out infinite; }
 @keyframes heartbeat { 0%, 100% { transform: translateX(-50%) scale(1); } 50% { transform: translateX(-50%) scale(1.15); } }
@@ -308,7 +380,8 @@ onUnmounted(() => { window.removeEventListener("resize", checkMobile) })
 }
 
 @media (max-width: 768px) {
-  .pc-sidebar-toggle { display: none !important; }
+  .app-sidebar-toggle { display: none !important; }
+  .pc-sidebar-toggle { display: flex; }
   .sidebar-mask { display: block; }
   .chat-sidebar {
     position: fixed; left: 0; top: 0; bottom: 0; z-index: 100;
@@ -320,7 +393,6 @@ onUnmounted(() => { window.removeEventListener("resize", checkMobile) })
   .chat-main { padding: 10px; padding-top: 60px; }
   .chat-header { flex-wrap: wrap; gap: 8px; padding: 10px 12px; margin-bottom: 10px; }
   .header-left { flex: 1; align-items: center; }
-  .header-icon { width: 32px; height: 32px; }
   .chat-header h2 { font-size: 14px; }
   .header-info { font-size: 11px; }
   .header-right { gap: 4px; }

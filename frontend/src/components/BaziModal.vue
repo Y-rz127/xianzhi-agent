@@ -15,7 +15,7 @@
             </button>
           </div>
         </div>
-        <div class="tab-bar" role="tablist" aria-label="命盘分节">
+        <div class="tab-bar" role="tablist" aria-label="命盘分节" v-if="birthTime">
           <button
             v-for="tab in tabs"
             :key="tab.key"
@@ -28,7 +28,15 @@
             {{ tab.label }}
           </button>
         </div>
-        <div class="modal-body">
+        <div v-if="!birthTime" class="modal-body empty-state-modal">
+          <div class="empty-chart">
+            <div class="empty-chart-icon">易</div>
+            <h3>还没知道你的命盘</h3>
+            <p>请先提供你的出生时间（年月日时）和性别，我才能为你排盘分析。</p>
+            <div class="empty-chart-tip">例如：男 2004-06-22 08:00</div>
+          </div>
+        </div>
+        <div v-else class="modal-body">
           <div v-if="activeTab === 'pillars'" class="tab-panel" role="tabpanel">
             <div class="section-title">四柱命盘</div>
             <div class="pillars-grid">
@@ -415,6 +423,23 @@ const downloadFullPDF = () => {
 .tab-btn:hover { color: var(--text); }
 .tab-btn.active { color: var(--accent-light); border-bottom-color: var(--accent); }
 .modal-body { padding: 20px; overflow-y: auto; max-height: 55vh; }
+.empty-state-modal { display: flex; align-items: center; justify-content: center; min-height: 200px; }
+.empty-chart { text-align: center; padding: 20px; }
+.empty-chart-icon {
+  width: 56px; height: 56px; margin: 0 auto 14px;
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 24px; color: var(--accent);
+  border: 2px solid var(--border);
+  background: rgba(255, 255, 255, 0.03);
+}
+.empty-chart h3 { font-size: 16px; margin-bottom: 8px; color: var(--text); }
+.empty-chart p { font-size: 13px; color: var(--text-dim); line-height: 1.6; margin-bottom: 12px; }
+.empty-chart-tip {
+  display: inline-block; padding: 6px 14px;
+  font-size: 12px; color: var(--accent);
+  border: 1px dashed var(--border); border-radius: 6px;
+}
 .tab-panel { animation: fadeIn 0.25s ease; }
 .tab-empty { color: var(--text-dim); font-size: 13px; text-align: center; padding: 30px 20px; }
 .section-title { font-size: 13px; color: var(--accent); letter-spacing: 3px; margin-bottom: 14px;

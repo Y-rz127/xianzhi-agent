@@ -5,7 +5,6 @@ import Love from "../views/Love.vue"
 import Disclaimer from "../views/Disclaimer.vue"
 import Privacy from "../views/Privacy.vue"
 import Terms from "../views/Terms.vue"
-import Huangli from "../views/Huangli.vue"
 import Hehun from "../views/Hehun.vue"
 import Tarot from "../views/Tarot.vue"
 import RagManager from "../views/RagManager.vue"
@@ -19,7 +18,6 @@ const routes: RouteRecordRaw[] = [
   { path: "/disclaimer", name: "disclaimer", component: Disclaimer, meta: { title: "免责声明" } },
   { path: "/privacy", name: "privacy", component: Privacy, meta: { title: "隐私政策" } },
   { path: "/terms", name: "terms", component: Terms, meta: { title: "服务条款" } },
-  { path: "/huangli", name: "huangli", component: Huangli, meta: { title: "黄历 · 择日" } },
   { path: "/hehun", name: "hehun", component: Hehun, meta: { title: "八字合婚" } },
   { path: "/tarot", name: "tarot", component: Tarot, meta: { title: "每日塔罗" } },
   { path: "/rag-manager", name: "rag-manager", component: RagManager, meta: { title: "知识库管理" } },

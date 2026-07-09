@@ -15,6 +15,10 @@
           <text class="header-sub">探索心动的频率</text>
         </view>
       </view>
+      <view class="header-actions">
+        <text class="icon-btn" @tap="confirmClear">🗑</text>
+        <text class="icon-btn" @tap="confirmNew">+</text>
+      </view>
     </view>
 
     <!-- 消息列表 -->
@@ -28,9 +32,9 @@
       </view>
 
       <view v-for="(msg, i) in messages" :key="i" :class="['msg', msg.role]">
-        <view v-if="msg.role === 'assistant'" class="avatar">
-          <text class="avatar-dot"></text>
-          <text class="avatar-heart">♥</text>
+        <view class="avatar">
+          <text v-if="msg.role === 'assistant'" class="avatar-dot"></text>
+          <text class="avatar-heart">{{ msg.role === 'assistant' ? '♥' : '我' }}</text>
         </view>
         <view class="msg-body">
           <view class="msg-text">
@@ -89,6 +93,7 @@
 <script setup lang="ts">
 import { ref, nextTick } from 'vue'
 import { chatWithLoveWS } from '@/api/chat'
+import { clearSessionMessages } from '@/api'
 
 interface Message { role: 'user' | 'assistant'; content: string }
 
@@ -97,11 +102,13 @@ const inputText = ref('')
 const thinking = ref(false)
 const scrollTop = ref(0)
 const currentStreaming = ref(false)
+// 持久化会话ID，同一会话内多轮对话复用，避免上下文丢失
+const conversationId = ref('love-' + Date.now())
 
 // 状态栏高度
 const statusBarHeight = ref(20)
 try {
-  const sysInfo = uni.getSystemInfoSync()
+  const sysInfo = uni.getWindowInfo()
   statusBarHeight.value = sysInfo.statusBarHeight || 20
 } catch {}
 
@@ -129,7 +136,7 @@ function onSend() {
   const idx = messages.value.length - 1
 
   chatWithLoveWS(text, {
-    chatId: 'love-' + Date.now(),
+    chatId: conversationId.value,
     onMessage: (chunk) => {
       messages.value[idx].content += chunk
       scrollToBottom()
@@ -143,6 +150,40 @@ function onSend() {
       currentStreaming.value = false
       messages.value[idx].content = messages.value[idx].content || `[出错] ${err}`
     },
+  })
+}
+
+/** 清空当前会话的消息记录，保留会话ID */
+async function clearChat() {
+  try {
+    await clearSessionMessages('love', conversationId.value)
+  } catch {}
+  messages.value = []
+  inputText.value = ''
+}
+
+/** 清空前确认 */
+function confirmClear() {
+  uni.showModal({
+    title: '清空对话',
+    content: '确定清空当前会话的所有消息吗？',
+    success: (res) => { if (res.confirm) clearChat() },
+  })
+}
+
+/** 新建会话：生成新会话ID并清空对话 */
+function newSession() {
+  conversationId.value = 'love-' + Date.now()
+  messages.value = []
+  inputText.value = ''
+}
+
+/** 新建会话前确认 */
+function confirmNew() {
+  uni.showModal({
+    title: '新建会话',
+    content: '确定新建会话吗？当前对话将被清空。',
+    success: (res) => { if (res.confirm) newSession() },
   })
 }
 
@@ -172,9 +213,24 @@ messages.value.push({
 /* === 顶部粉紫渐变头 === */
 .header {
   position: relative;
-  padding: 18rpx 28rpx 22rpx;
+  padding: 24rpx 28rpx 28rpx;
   background: linear-gradient(135deg, #EC4899 0%, #8B5CF6 100%);
   overflow: hidden;
+}
+.header-actions {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 24rpx;
+  height: 60rpx;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 24rpx;
+  pointer-events: none;
+}
+.header-actions .icon-btn {
+  pointer-events: auto;
 }
 .header-glow {
   position: absolute;
@@ -206,6 +262,16 @@ messages.value.push({
   display: flex;
   flex-direction: column;
 }
+.icon-btn {
+  width: 56rpx;
+  height: 56rpx;
+  line-height: 56rpx;
+  text-align: center;
+  font-size: 30rpx;
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.18);
+  border-radius: 50%;
+}
 .header-title {
   font-size: 34rpx;
   font-weight: 600;
@@ -223,7 +289,10 @@ messages.value.push({
 .messages {
   flex: 1;
   min-height: 0;
-  padding: 20rpx 28rpx 16rpx;
+  padding: 64rpx 24rpx 20rpx;
+  overflow-x: hidden;
+  width: 100%;
+  box-sizing: border-box;
 }
 .empty-state {
   display: flex;
@@ -285,6 +354,10 @@ messages.value.push({
   display: flex;
   margin-bottom: 20rpx;
   gap: 14rpx;
+  align-items: flex-start;
+  padding: 0 8rpx;
+  width: 100%;
+  box-sizing: border-box;
 }
 .msg.user {
   flex-direction: row-reverse;
@@ -300,9 +373,18 @@ messages.value.push({
   border-radius: 50%;
   box-shadow: 0 0 20rpx rgba(236, 72, 153, 0.3);
 }
+.msg.user .avatar {
+  background: linear-gradient(135deg, #EC4899 0%, #8B5CF6 100%);
+  box-shadow: 0 0 20rpx rgba(236, 72, 153, 0.4);
+}
 .avatar-heart {
   color: #EC4899;
   font-size: 28rpx;
+}
+.msg.user .avatar-heart {
+  color: #ffffff;
+  font-size: 22rpx;
+  font-weight: 600;
 }
 .avatar-dot {
   position: absolute;
@@ -315,7 +397,9 @@ messages.value.push({
   box-shadow: 0 0 12rpx #EC4899;
 }
 .msg-body {
-  max-width: 82%;
+  flex: 1;
+  min-width: 0;
+  max-width: calc(100% - 66rpx);
   display: flex;
   flex-direction: column;
 }
@@ -327,12 +411,16 @@ messages.value.push({
   border-radius: 8rpx 28rpx 28rpx 28rpx;
   font-size: 26rpx;
   line-height: 1.55;
-  word-break: break-word;
+  word-break: break-all;
+  overflow-wrap: break-word;
   background: rgba(30, 22, 56, 0.7);
   backdrop-filter: blur(24rpx);
   -webkit-backdrop-filter: blur(24rpx);
   border: 1rpx solid rgba(236, 72, 153, 0.15);
   color: #E2E8F0;
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
 }
 .msg.user .msg-text {
   background: linear-gradient(135deg, #EC4899 0%, #8B5CF6 100%);

@@ -228,6 +228,24 @@ def delete_session(session_id: str):
         log.exception("删除会话失败: {}", session_id)
 
 
+def clear_session(session_id: str):
+    """清空指定会话的消息记录，但保留会话本身（session_metadata 保留）。
+
+    用于“清空当前会话”操作：会话仍出现在历史列表中，但消息数为 0。
+    """
+    try:
+        session_uuid = _resolve_session_uuid(session_id)
+        conn = _get_global_conn()
+        conn.execute("DELETE FROM message_store WHERE session_id = %s", (session_uuid,))
+        # 更新 updated_at，让该会话在列表中保持位置但消息数归零
+        conn.execute(
+            "UPDATE session_metadata SET updated_at = CURRENT_TIMESTAMP WHERE session_id = %s",
+            (session_uuid,),
+        )
+    except Exception as e:
+        log.exception("清空会话消息失败: {}", session_id)
+
+
 def get_messages(session_id: str) -> list:
     """获取指定会话的所有消息。"""
     try:

@@ -1,9 +1,8 @@
 <template>
   <div class="layout">
     <StarBackground />
-    <button class="sidebar-toggle-btn" @click="toggleSidebar" aria-label="切换侧边栏">
-      <svg v-if="sidebarCollapsed" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
-      <svg v-else viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 18L18 6M6 6l12 12"/></svg>
+     <button class="sidebar-toggle-btn" :class="{ 'sidebar-open': sidebarOpen }" @click="toggleSidebar" aria-label="切换侧边栏">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
     </button>
     <div class="sidebar-mask" v-if="sidebarOpen && isMobile" @click="sidebarOpen = false"></div>
     <aside class="sidebar" :class="{ 'open': sidebarOpen, 'collapsed': sidebarCollapsed }">
@@ -39,12 +38,6 @@
             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
           </span>
           <span v-if="!sidebarCollapsed">八字合婚</span>
-        </router-link>
-        <router-link to="/huangli" class="nav-item" active-class="active" @click="onNavClick">
-          <span class="nav-icon huangli-icon">
-            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-          </span>
-          <span v-if="!sidebarCollapsed">黄历择日</span>
         </router-link>
         <router-link to="/tarot" class="nav-item" active-class="active" @click="onNavClick">
           <span class="nav-icon tarot-icon">
@@ -84,7 +77,11 @@
       </div>
     </aside>
 
-    <main class="main"><router-view /></main>
+    <main class="main">
+      <keep-alive :include="['Xianzhi', 'Love']">
+        <router-view />
+      </keep-alive>
+    </main>
     <CommandPalette />
   </div>
 </template>
@@ -98,17 +95,25 @@ const sidebarCollapsed = ref(false)
 const sidebarOpen = ref(true)
 const isMobile = ref(false)
 
+const appSidebarOpen = () => isMobile.value ? sidebarOpen.value : !sidebarCollapsed.value
+
+const emitAppSidebarState = () => {
+  window.dispatchEvent(new CustomEvent("app-sidebar-state", { detail: { open: appSidebarOpen() } }))
+}
+
 const toggleSidebar = () => {
   if (isMobile.value) {
     sidebarOpen.value = !sidebarOpen.value
   } else {
     sidebarCollapsed.value = !sidebarCollapsed.value
   }
+  emitAppSidebarState()
 }
 
 const onNavClick = () => {
   if (isMobile.value) {
     sidebarOpen.value = false
+    emitAppSidebarState()
   }
 }
 
@@ -120,14 +125,19 @@ const checkMobile = () => {
   } else {
     sidebarOpen.value = true
   }
+  emitAppSidebarState()
 }
+
+const onAppToggleSidebar = () => toggleSidebar()
 
 onMounted(() => {
   checkMobile()
   window.addEventListener("resize", checkMobile)
+  window.addEventListener("app-toggle-sidebar", onAppToggleSidebar)
 })
 onUnmounted(() => {
   window.removeEventListener("resize", checkMobile)
+  window.removeEventListener("app-toggle-sidebar", onAppToggleSidebar)
 })
 </script>
 
@@ -140,7 +150,7 @@ onUnmounted(() => {
   background: linear-gradient(135deg, rgba(5, 8, 16, 0.92), rgba(10, 15, 26, 0.96));
 }
 .sidebar-toggle-btn {
-  position: fixed; top: 12px; left: 12px; z-index: 100;
+  position: fixed; top: 12px; left: 12px; z-index: 110;
   width: 44px; height: 44px; border-radius: 12px;
   background: rgba(12,18,32,0.98); border: 1px solid var(--border);
   color: var(--text); cursor: pointer; display: none; align-items: center; justify-content: center;
@@ -148,6 +158,9 @@ onUnmounted(() => {
 }
 .sidebar-toggle-btn:hover { border-color: var(--accent); color: var(--accent); }
 .sidebar-toggle-btn:active { transform: scale(0.96); }
+@media (max-width: 768px) {
+  .sidebar-toggle-btn { display: flex; }
+}
 .sidebar-mask {
   position: fixed; top: 0; left: 0; right: 0; bottom: 0;
   background: rgba(0,0,0,0.65); z-index: 90;
@@ -158,6 +171,8 @@ onUnmounted(() => {
   border-right: 1px solid var(--border); backdrop-filter: blur(16px);
   box-shadow: 4px 0 30px rgba(0,0,0,0.35);
   transition: width 0.35s ease, transform 0.35s ease;
+  overflow-y: auto;
+  min-height: 0;
 }
 .sidebar.collapsed { width: 72px; }
 .logo {
@@ -193,8 +208,6 @@ onUnmounted(() => {
 .nav-item.active .love-icon { background: rgba(232,139,139,0.15); color: var(--love); box-shadow: 0 0 12px rgba(232,139,139,0.2); }
 .hehun-icon { color: #e8b48b; }
 .nav-item.active .hehun-icon { background: rgba(232,180,139,0.15); color: #e8b48b; box-shadow: 0 0 12px rgba(232,180,139,0.2); }
-.huangli-icon { color: #8bc78b; }
-.nav-item.active .huangli-icon { background: rgba(139,199,139,0.15); color: #8bc78b; box-shadow: 0 0 12px rgba(139,199,139,0.2); }
 .tarot-icon { color: #b886e8; }
 .nav-item.active .tarot-icon { background: rgba(184,134,232,0.15); color: #b886e8; box-shadow: 0 0 12px rgba(184,134,232,0.2); }
 .cases-icon { color: #8bb8e8; }

@@ -1,0 +1,86 @@
+/**
+ * Design Tokens - Shared token reference
+ *
+ * This file re-exports the existing CSS custom properties from style.css
+ * in a structured, semantic grouping. It does not define new values;
+ * importing it ensures the token contract is explicit and discoverable.
+ *
+ * Cross-platform mapping:
+ *   --bg          -> $color-bg
+ *   --bg-2        -> $color-bg-warm
+ *   --card        -> $color-bg-card
+ *   --border      -> $color-border
+ *   --accent      -> $color-gold
+ *   --accent-light-> $color-gold-light
+ *   --love         -> $color-pink
+ *   --purple       -> $color-primary-light
+ *   --cyan         -> $color-energy-light
+ */
+
+@import url('../style.css');
+
+/* === Background === */
+:root {
+  --token-bg: var(--bg);
+  --token-bg-warm: var(--bg-2);
+  --token-bg-raised: var(--bg-3);
+}
+
+/* === Surface / Card === */
+:root {
+  --token-card: var(--card);
+  --token-card-hover: var(--card-hover);
+  --token-card-solid: var(--card-solid);
+}
+
+/* === Border === */
+:root {
+  --token-border: var(--border);
+  --token-border-hover: var(--border-hover);
+  --token-border-bright: var(--border-bright);
+}
+
+/* === Text === */
+:root {
+  --token-text: var(--text);
+  --token-text-dim: var(--text-dim);
+  --token-text-muted: var(--text-muted);
+}
+
+/* === Accent === */
+:root {
+  --token-accent: var(--accent);
+  --token-accent-light: var(--accent-light);
+  --token-accent-hover: var(--accent-hover);
+  --token-gold: var(--gold);
+  --token-love: var(--love);
+  --token-love-deep: var(--love-deep);
+  --token-purple: var(--purple);
+  --token-cyan: var(--cyan);
+  --token-danger: var(--danger);
+  --token-success: var(--success);
+}
+
+/* === Shape === */
+:root {
+  --token-radius: var(--radius);
+  --token-radius-sm: var(--radius-sm);
+  --token-radius-xs: var(--radius-xs);
+}
+
+/* === Elevation === */
+:root {
+  --token-shadow: var(--shadow);
+  --token-shadow-card: var(--shadow-card);
+  --token-shadow-glow: var(--shadow-glow);
+  --token-glow-accent: var(--glow-accent);
+}
+
+/* === Spacing === */
+:root {
+  --token-spacing-xs: var(--spacing-xs);
+  --token-spacing-sm: var(--spacing-sm);
+  --token-spacing-md: var(--spacing-md);
+  --token-spacing-lg: var(--spacing-lg);
+  --token-spacing-xl: var(--spacing-xl);
+}

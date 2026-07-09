@@ -234,6 +234,7 @@ async function generateReport() {
   display: flex;
   flex-direction: column;
   box-shadow: 0 24rpx 64rpx rgba(0, 0, 0, 0.6), 0 0 64rpx rgba(124, 58, 237, 0.2);
+  box-sizing: border-box;
 }
 .modal-header {
   display: flex;
@@ -256,6 +257,9 @@ async function generateReport() {
 .modal-body {
   padding: 28rpx 32rpx;
   max-height: 65vh;
+  box-sizing: border-box;
+  overflow-x: hidden;
+  width: 100%;
 }
 
 .section {
@@ -275,16 +279,18 @@ async function generateReport() {
 /* 四柱 */
 .pillars-grid {
   display: flex;
-  justify-content: space-between;
+  gap: 8rpx;
+  box-sizing: border-box;
 }
 .pillar-card {
   flex: 1;
-  margin: 0 6rpx;
+  min-width: 0;
   background: rgba(124, 58, 237, 0.06);
   border-radius: 16rpx;
   padding: 20rpx 8rpx;
   text-align: center;
   border: 1rpx solid rgba(124, 58, 237, 0.18);
+  box-sizing: border-box;
 }
 .pillar-card.day-master {
   background: linear-gradient(135deg, rgba(245, 158, 11, 0.12), rgba(124, 58, 237, 0.08));
@@ -363,14 +369,17 @@ async function generateReport() {
   display: flex;
   flex-wrap: wrap;
   gap: 12rpx;
+  box-sizing: border-box;
 }
 .dayun-card {
-  width: 23%;
+  width: calc(25% - 9rpx);
   background: rgba(124, 58, 237, 0.06);
   border-radius: 16rpx;
   padding: 16rpx 8rpx;
   text-align: center;
   border: 1rpx solid rgba(124, 58, 237, 0.18);
+  box-sizing: border-box;
+  min-width: 0;
 }
 .dayun-year {
   display: block;
@@ -395,6 +404,7 @@ async function generateReport() {
 .consult-grid {
   display: flex;
   gap: 12rpx;
+  box-sizing: border-box;
 }
 .consult-card {
   flex: 1;
@@ -403,6 +413,7 @@ async function generateReport() {
   border-radius: 16rpx;
   padding: 16rpx 12rpx;
   border: 1rpx solid rgba(124, 58, 237, 0.18);
+  box-sizing: border-box;
 }
 .consult-label {
   display: block;
@@ -437,13 +448,16 @@ async function generateReport() {
   flex-wrap: wrap;
   gap: 10rpx;
   margin-top: 12rpx;
+  box-sizing: border-box;
 }
 .liunian-pill {
-  width: 31%;
+  width: calc(33.33% - 7rpx);
   padding: 12rpx 10rpx;
   background: rgba(124, 58, 237, 0.06);
   border: 1rpx solid rgba(124, 58, 237, 0.18);
   border-radius: 14rpx;
+  box-sizing: border-box;
+  min-width: 0;
 }
 .ln-year,
 .ln-gz,
@@ -482,6 +496,7 @@ async function generateReport() {
   border-radius: 16rpx;
   padding: 16rpx;
   border: 1rpx solid rgba(124, 58, 237, 0.18);
+  box-sizing: border-box;
 }
 .shensha-name {
   display: block;
@@ -524,20 +539,22 @@ async function generateReport() {
   display: flex;
   flex-wrap: wrap;
   gap: 12rpx;
-  padding: 24rpx 32rpx;
+  padding: 20rpx 32rpx 24rpx;
   border-top: 1rpx solid rgba(124, 58, 237, 0.2);
+  flex-shrink: 0;
 }
 .btn {
-  flex: 1;
-  min-width: 180rpx;
+  flex: 1 1 calc(50% - 6rpx);
+  min-width: 0;
   text-align: center;
-  padding: 18rpx 16rpx;
+  padding: 16rpx 12rpx;
   background: rgba(196, 181, 253, 0.08);
   border: 1rpx solid rgba(124, 58, 237, 0.2);
   border-radius: 20rpx;
-  font-size: 26rpx;
+  font-size: 24rpx;
   color: #C4B5FD;
   letter-spacing: 2rpx;
+  box-sizing: border-box;
 }
 .btn-primary {
   background: linear-gradient(135deg, #7C3AED, #06B6D4);

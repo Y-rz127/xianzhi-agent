@@ -52,6 +52,23 @@ LIU_HE = {
     frozenset(("巳", "申")): "巳申合水",
     frozenset(("午", "未")): "午未合土",
 }
+# 天干五合（合化后的五行）
+GAN_HE = {
+    frozenset(("甲", "己")): "甲己合土",
+    frozenset(("乙", "庚")): "乙庚合金",
+    frozenset(("丙", "辛")): "丙辛合水",
+    frozenset(("丁", "壬")): "丁壬合木",
+    frozenset(("戊", "癸")): "戊癸合火",
+}
+# 天干相冲（方位对冲）
+GAN_CHONG = {
+    frozenset(("甲", "庚")): "甲庚冲",
+    frozenset(("乙", "辛")): "乙辛冲",
+    frozenset(("丙", "壬")): "丙壬冲",
+    frozenset(("丁", "癸")): "丁癸冲",
+    frozenset(("戊", "甲")): "戊甲冲",
+    frozenset(("己", "乙")): "己乙冲",
+}
 LIU_CHONG = {
     frozenset(("子", "午")): "子午冲",
     frozenset(("丑", "未")): "丑未冲",
@@ -73,6 +90,72 @@ SAN_XING = {
     frozenset(("丑", "未", "戌")): "丑未戌三刑",
 }
 SELF_XING = {"辰": "辰辰自刑", "午": "午午自刑", "酉": "酉酉自刑", "亥": "亥亥自刑"}
+
+# ===== 神煞查表 =====
+# 天乙贵人（以日干查）
+TIAN_YI = {
+    "甲": ("丑", "未"), "戊": ("丑", "未"), "庚": ("丑", "未"),
+    "乙": ("子", "申"), "己": ("子", "申"),
+    "丙": ("亥", "酉"), "丁": ("亥", "酉"),
+    "壬": ("卯", "巳"), "癸": ("卯", "巳"),
+    "辛": ("午", "寅"),
+}
+# 太极贵人（以日干查）
+TAI_JI = {
+    "甲": ("子", "午"), "乙": ("子", "午"),
+    "丙": ("卯", "酉"), "丁": ("卯", "酉"),
+    "戊": ("辰", "戌"), "己": ("辰", "戌"), "辛": ("辰", "戌"),
+    "壬": ("巳", "亥"), "癸": ("巳", "亥"),
+    "庚": ("寅", "申"),
+}
+# 文昌（以日干查）
+WEN_CHANG = {
+    "甲": "巳", "乙": "午", "丙": "申", "丁": "酉",
+    "戊": "申", "己": "酉", "庚": "亥", "辛": "子",
+    "壬": "寅", "癸": "卯",
+}
+# 羊刃（以日干查，帝旺地支）
+YANG_REN = {
+    "甲": "卯", "乙": "寅",  # 乙羊刃有争议，多数取寅
+    "丙": "午", "丁": "巳",
+    "戊": "午", "己": "巳",
+    "庚": "酉", "辛": "申",
+    "壬": "子", "癸": "亥",
+}
+# 华盖（以年支/日支查，三合局墓库）
+HUA_GAI = {
+    "寅": "戌", "午": "戌", "戌": "戌",
+    "巳": "丑", "酉": "丑", "丑": "丑",
+    "申": "辰", "子": "辰", "辰": "辰",
+    "亥": "未", "卯": "未", "未": "未",
+}
+# 桃花（以年支/日支查，四正地支）
+TAO_HUA = {
+    "寅": "卯", "午": "卯", "戌": "卯",
+    "巳": "午", "酉": "午", "丑": "午",
+    "申": "酉", "子": "酉", "辰": "酉",
+    "亥": "子", "卯": "子", "未": "子",
+}
+# 驿马（以年支/日支查，三合局长生对冲）
+YI_MA = {
+    "寅": "申", "午": "申", "戌": "申",
+    "巳": "亥", "酉": "亥", "丑": "亥",
+    "申": "寅", "子": "寅", "辰": "寅",
+    "亥": "巳", "卯": "巳", "未": "巳",
+}
+# 将星（以年支/日支查，三合局帝旺）
+JIANG_XING = {
+    "寅": "午", "午": "午", "戌": "午",
+    "巳": "酉", "酉": "酉", "丑": "酉",
+    "申": "子", "子": "子", "辰": "子",
+    "亥": "卯", "卯": "卯", "未": "卯",
+}
+# 禄神（以日干查，临官地支）
+LU_SHEN = {
+    "甲": "寅", "乙": "卯", "丙": "巳", "丁": "午",
+    "戊": "巳", "己": "午", "庚": "申", "辛": "酉",
+    "壬": "亥", "癸": "子",
+}
 SEASON_NOTES = {
     "寅": "春初木旺，重在疏土培木，兼看火来通明。",
     "卯": "仲春木旺，木气纯粹，宜看金土是否成器。",
@@ -185,7 +268,16 @@ class BaziChart:
 
 
 def parse_birth(birth_time: str) -> tuple[int, int, int, int, int]:
-    parts = birth_time.strip().replace("-", " ").replace("/", " ").replace(":", " ").split()
+    import re as _re
+    s = birth_time.strip()
+    # 兼容多种分隔符：中文冒号、中文年月日时分、点号、T、汉字等
+    s = s.replace("：", ":").replace("．", ".").replace("。", ".")
+    s = s.replace("年", "-").replace("月", "-").replace("日", " ").replace("号", " ")
+    s = s.replace("时", ":").replace("点", ":").replace("分", "").replace("T", " ")
+    # 移除多余空格，统一分隔符
+    s = s.replace("/", "-").replace(".", "-")
+    s = _re.sub(r"\s+", " ", s).strip()
+    parts = s.replace(":", " ").replace("-", " ").split()
     if len(parts) < 3:
         raise ValueError("请提供完整的出生时间，格式: YYYY-MM-DD HH:MM")
     year, month, day = int(parts[0]), int(parts[1]), int(parts[2])
@@ -225,6 +317,97 @@ def _controller_of(element: str) -> str:
 
 def _round_counts(counts: dict[str, float]) -> dict[str, float]:
     return {k: round(v, 2) for k, v in counts.items()}
+
+
+def _compute_shensha(pillars: list[Pillar]) -> list[dict[str, str]]:
+    """根据四柱干支计算传统神煞。
+
+    以日干、年支、日支为查表主键，遍历四柱地支判断是否带神煞。
+    返回 [{"name": "天乙贵人", "description": "日干甲见丑，逢凶化吉"}, ...]
+    """
+    if not pillars:
+        return []
+
+    day_gan = pillars[2].gan  # 日柱天干
+    year_zhi = pillars[0].zhi  # 年支
+    day_zhi = pillars[2].zhi  # 日支
+    all_zhi = [p.zhi for p in pillars]  # 四柱地支集合
+    all_gan = [p.gan for p in pillars]  # 四柱天干集合
+
+    result: list[dict[str, str]] = []
+    seen: set[str] = set()
+
+    def add(name: str, desc: str, pillar_name: str = ""):
+        key = f"{name}-{pillar_name}"
+        if key in seen:
+            return
+        seen.add(key)
+        full_desc = f"{pillar_name}：{desc}" if pillar_name else desc
+        result.append({"name": name, "description": full_desc})
+
+    # —— 以日干查 ——
+    tianyi = TIAN_YI.get(day_gan)
+    if tianyi:
+        for p in pillars:
+            if p.zhi in tianyi:
+                add("天乙贵人", "逢凶化吉，贵人相助", p.name)
+
+    taiji = TAI_JI.get(day_gan)
+    if taiji:
+        for p in pillars:
+            if p.zhi in taiji:
+                add("太极贵人", "聪明好学，近玄妙之学", p.name)
+
+    wenchang = WEN_CHANG.get(day_gan)
+    if wenchang:
+        for p in pillars:
+            if p.zhi == wenchang:
+                add("文昌", "学业聪明，文采出众", p.name)
+
+    lu = LU_SHEN.get(day_gan)
+    if lu:
+        for p in pillars:
+            if p.zhi == lu:
+                add("禄神", "衣食丰足，财禄有源", p.name)
+
+    yangren = YANG_REN.get(day_gan)
+    if yangren:
+        for p in pillars:
+            if p.zhi == yangren:
+                add("羊刃", "刚烈易伤，主血光破财", p.name)
+
+    # —— 以年支/日支查 ——
+    for key_zhi, label in ((year_zhi, "年"), (day_zhi, "日")):
+        huagai = HUA_GAI.get(key_zhi)
+        if huagai:
+            for p in pillars:
+                if p.zhi == huagai:
+                    add("华盖", f"聪明孤僻，近艺术宗教（{label}支起）", p.name)
+
+        taohua = TAO_HUA.get(key_zhi)
+        if taohua:
+            for p in pillars:
+                if p.zhi == taohua:
+                    add("桃花", f"人缘感情，异性缘佳（{label}支起）", p.name)
+
+        yima = YI_MA.get(key_zhi)
+        if yima:
+            for p in pillars:
+                if p.zhi == yima:
+                    add("驿马", f"迁动出行，奔波变化（{label}支起）", p.name)
+
+        jiang = JIANG_XING.get(key_zhi)
+        if jiang:
+            for p in pillars:
+                if p.zhi == jiang:
+                    add("将星", f"掌权威望，领导力强（{label}支起）", p.name)
+
+    # —— 魁罡（日柱为庚辰/壬辰/庚戌/戊戌）——
+    day_gz = pillars[2].ganzhi
+    if day_gz in ("庚辰", "壬辰", "庚戌", "戊戌"):
+        add("魁罡", "刚强果断，主掌权立威", "日柱")
+
+    return result
 
 
 def _build_wuxing_analysis(ec) -> WuxingAnalysis:
@@ -329,6 +512,20 @@ def _branch_relations(zhis: list[str]) -> tuple[list[str], list[str], list[str],
     return combinations, clashes, harms, punishments
 
 
+def _stem_relations(gans: list[str]) -> tuple[list[str], list[str]]:
+    """天干五合与相冲。返回 (合, 冲)。"""
+    combos: list[str] = []
+    clashes: list[str] = []
+    for i in range(len(gans)):
+        for j in range(i + 1, len(gans)):
+            pair = frozenset((gans[i], gans[j]))
+            if pair in GAN_HE:
+                combos.append(GAN_HE[pair])
+            if pair in GAN_CHONG:
+                clashes.append(GAN_CHONG[pair])
+    return combos, clashes
+
+
 def _build_domain_analysis(pillars: list[Pillar], wuxing: WuxingAnalysis) -> DomainAnalysis:
     day_master = wuxing.day_master
     visible_gans = [p.gan for p in pillars if p.gan]
@@ -337,6 +534,10 @@ def _build_domain_analysis(pillars: list[Pillar], wuxing: WuxingAnalysis) -> Dom
     rooted = sorted({day_master for stem in hidden_stems if stem == day_master})
     zhis = [p.zhi for p in pillars if p.zhi]
     combinations, clashes, harms, punishments = _branch_relations(zhis)
+    # 天干五合与相冲，合并到合/冲列表（前缀标注“干”以便区分）
+    gan_he, gan_chong = _stem_relations(visible_gans)
+    combinations = [f"{g}(干合)" for g in gan_he] + combinations
+    clashes = [f"{c}(干冲)" for c in gan_chong] + clashes
     month_zhi = pillars[1].zhi if len(pillars) > 1 else ""
     adjustment = SEASON_NOTES.get(month_zhi, "调候需结合月令、寒暖燥湿与全局五行再定。")
 
@@ -592,7 +793,7 @@ def chart_to_api_dict(chart: BaziChart) -> dict[str, Any]:
         "shensha": [
             {"name": "命宫", "description": f"{chart.ming_gong}（{chart.ming_gong_nayin}）"},
             {"name": "身宫", "description": f"{chart.shen_gong}（{chart.shen_gong_nayin}）"},
-        ],
+        ] + _compute_shensha(chart.pillars),
         "startYun": chart.start_yun,
         "warnings": chart.warnings,
     }
@@ -623,6 +824,11 @@ def format_chart_text(chart: BaziChart) -> str:
         f"  命宫: {chart.ming_gong} ({chart.ming_gong_nayin})",
         f"  身宫: {chart.shen_gong} ({chart.shen_gong_nayin})",
     ]
+    shensha = _compute_shensha(chart.pillars)
+    if shensha:
+        lines += ["", "【神煞】"]
+        for s in shensha:
+            lines.append(f"  {s['name']}: {s['description']}")
     if chart.warnings:
         lines += ["", "【校验提示】"] + [f"  - {w}" for w in chart.warnings]
     return "\n".join(lines)

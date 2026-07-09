@@ -199,7 +199,7 @@ const advice = computed(() => {
 // 状态栏高度
 const statusBarHeight = ref(20)
 try {
-  const sysInfo = uni.getSystemInfoSync()
+  const sysInfo = uni.getWindowInfo()
   statusBarHeight.value = sysInfo.statusBarHeight || 20
 } catch {}
 

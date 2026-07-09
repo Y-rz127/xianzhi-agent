@@ -27,11 +27,13 @@ async def lifespan(app: FastAPI):
     init_observability()
 
     # 1. LLM - 使用 OpenAI 兼容模式调用千问（langchain-dashscope 不支持 bind_tools）
+    # extra_body: 禁用 Qwen3 推理模型的 thinking 模式，避免 <think> 标签导致内容重复
     chat_model = ChatOpenAI(
         model=settings.dashscope_model,
         base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
         api_key=settings.dashscope_api_key,
         temperature=0.7,
+        extra_body={"enable_thinking": False},
     )
 
     # 2. 记忆

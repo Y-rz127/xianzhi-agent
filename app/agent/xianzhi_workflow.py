@@ -19,6 +19,20 @@ from app.logger import log
 from app.rag.vector_store import knowledge_base
 
 
+def _dedupe_content(content: str) -> str:
+    """检测并移除完全重复的内容（推理模型 think 块泄漏的兜底）。"""
+    content = content.strip()
+    if len(content) < 100:
+        return content
+    mid = len(content) // 2
+    first_half = content[:mid].strip()
+    second_half = content[mid:].strip()
+    if first_half == second_half and len(first_half) > 50:
+        log.warning("检测到 LLM 输出内容重复，已去重（长度 {}）", len(first_half))
+        return first_half
+    return content
+
+
 GANZHI_RE = re.compile(r"[甲乙丙丁戊己庚辛壬癸][子丑寅卯辰巳午未申酉戌亥]")
 YEAR_GANZHI_RE = re.compile(r"(?P<year>\d{4})年[^。；;，,、\n]{0,12}(?P<ganzhi>[甲乙丙丁戊己庚辛壬癸][子丑寅卯辰巳午未申酉戌亥])")
 
@@ -209,10 +223,12 @@ class XianzhiWorkflow:
         recent_history = self._compact_history(history)
         length_rule = "可以分段深入，但仍要围绕用户问题，不要堆砌全盘。" if intent.wants_report else "默认控制在3-6段，先结论后依据。"
         system = (
-            "你是先知，一位像真实命理师一样对话的八字咨询师。\n"
+            "你是先知，一位有几十年实战经验的八字命理师傅，性格像见多识广的老朋友。\n"
             "硬性规则：四柱、大运、流年、起运时间等事实只能使用【系统排盘事实】，不能自行改算或编造。\n"
-            "回答方式：先直接回答用户问题；再说明2-4个关键依据；最后给具体建议。缺关键信息时只追问一个最重要的问题。\n"
-            "不要输出ReAct过程，不要机械倾倒完整报告，不要恐吓或绝对化。"
+            "说话风格：像真人聊天，不要表格、不要多层标题、不要emoji结尾。先一句结论，再2-3个理由，最后一条建议。\n"
+            "简单问题3-5句，复杂问题最多2-3段。该幽默幽默，该严肃严肃，用'你'不用'您'。\n"
+            "避免AI腔：不要'总结一下''需要注意的是''好消息/需要注意'这种模板。不装懂，不绝对化。\n"
+            "不要输出ReAct过程，不要机械倾倒完整报告，不要恐吓。"
         )
         human = (
             f"【用户问题】\n{user_prompt}\n\n"
@@ -250,9 +266,14 @@ class XianzhiWorkflow:
     def _invoke(self, messages: list[BaseMessage]) -> str:
         response = self.chat_model.invoke(messages)
         content = (getattr(response, "content", "") or "").strip()
+        # 过滤 reasoning model 的 <think>...</think> 推理过程，避免重复显示
+        content = re.sub(r"<think>[\s\S]*?</think>\s*", "", content, flags=re.IGNORECASE)
+        # 处理未闭合的 <think> 标签（流式中断等场景）
+        content = re.sub(r"<think>[\s\S]*$", "", content, flags=re.IGNORECASE)
+        content = content.strip()
         if not content:
             return "我先看盘面，当前信息足够排盘，但模型没有生成有效解读。你可以换一个更具体的问题继续问。"
-        return content
+        return _dedupe_content(content)
 
     def _compact_history(self, history: list[BaseMessage]) -> str:
         if not history:
@@ -266,6 +287,7 @@ class XianzhiWorkflow:
         return "\n".join(chunks) if chunks else "（无）"
 
     def _compact_facts(self, chart: BaziChart, intent: QuestionIntent) -> str:
+        today = _dt.date.today()
         pillars = " ".join(f"{p.name}:{p.ganzhi}({p.nayin})" for p in chart.pillars)
         dayun_lines = [
             f"{item.ganzhi} {item.start_year}-{item.end_year} {item.start_age}-{item.end_age}岁"
@@ -274,7 +296,7 @@ class XianzhiWorkflow:
         if intent.target_years:
             liunian_items = [item for item in chart.liunian if item.year in set(intent.target_years)]
         else:
-            current_year = _dt.date.today().year
+            current_year = today.year
             liunian_items = [item for item in chart.liunian if current_year <= item.year <= current_year + 3]
             if not liunian_items:
                 liunian_items = chart.liunian[:4]
@@ -282,7 +304,20 @@ class XianzhiWorkflow:
             f"{item.year}年:{item.ganzhi} {item.age}虚岁 所在大运:{item.dayun_ganzhi or '-'}"
             for item in liunian_items
         ]
+        # 计算用户当前周岁，避免 LLM 自行推算出错
+        birth_str = chart.birth.solar or ""
+        current_age = ""
+        try:
+            import re as _re
+            m = _re.search(r"(\d{4})-(\d{1,2})-(\d{1,2})", birth_str)
+            if m:
+                by, bm, bd = int(m.group(1)), int(m.group(2)), int(m.group(3))
+                age = today.year - by - ((today.month, today.day) < (bm, bd))
+                current_age = f"; 当前周岁: {age}岁"
+        except Exception:
+            pass
         return "\n".join([
+            f"当前日期: {today.year}年{today.month}月{today.day}日{current_age}",
             f"出生: {chart.birth.solar}; 性别: {chart.birth.gender}; 农历: {chart.birth.lunar}; 生肖: {chart.birth.shengxiao}",
             f"四柱: {pillars}",
             f"日主: {chart.wuxing.day_master}({chart.wuxing.day_master_wuxing}); 强弱: {chart.wuxing.strength}; 分数: {chart.wuxing.strength_score}",
