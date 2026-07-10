@@ -1,7 +1,6 @@
-"""Optional LangGraph wrapper for Xianzhi workflow.
+"""可选的LangGraph封装，用于Xianzhi工作流。
 
-The app can run without langgraph installed. When available, this module builds
-a StateGraph that mirrors the deterministic workflow nodes.
+该应用无需安装langgraph即可运行。如果可用，此模块会构建一个StateGraph，以反映确定性的工作流节点。
 """
 from __future__ import annotations
 

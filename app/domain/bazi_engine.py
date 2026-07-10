@@ -1,8 +1,6 @@
-"""Structured Bazi chart engine.
-
-The public tools still return readable text, but this module is the factual
-source of truth for chart data used by APIs, chart cases and agent context.
-"""
+# 结构化Bazi图表引擎。
+#
+# 公共工具仍然返回可读的文本，但该模块是API、图表案例和代理上下文所使用的图表数据的事实来源。
 from __future__ import annotations
 
 import datetime as _dt
@@ -40,9 +38,9 @@ HIDDEN_STEMS = {
     "亥": (("壬", 0.7), ("甲", 0.3)),
 }
 
-GENERATES = {"木": "火", "火": "土", "土": "金", "金": "水", "水": "木"}
-CONTROLS = {"木": "土", "土": "水", "水": "火", "火": "金", "金": "木"}
-WUXING_ORDER = ("金", "木", "水", "火", "土")
+GENERATES = {"木": "火", "火": "土", "土": "金", "金": "水", "水": "木"}   #相生
+CONTROLS = {"木": "土", "土": "水", "水": "火", "火": "金", "金": "木"}    #相克
+WUXING_ORDER = ("金", "木", "水", "火", "土")      # 五行
 
 LIU_HE = {
     frozenset(("子", "丑")): "子丑合土",
@@ -66,8 +64,6 @@ GAN_CHONG = {
     frozenset(("乙", "辛")): "乙辛冲",
     frozenset(("丙", "壬")): "丙壬冲",
     frozenset(("丁", "癸")): "丁癸冲",
-    frozenset(("戊", "甲")): "戊甲冲",
-    frozenset(("己", "乙")): "己乙冲",
 }
 LIU_CHONG = {
     frozenset(("子", "午")): "子午冲",
@@ -86,8 +82,9 @@ LIU_HAI = {
     frozenset(("酉", "戌")): "酉戌害",
 }
 SAN_XING = {
-    frozenset(("寅", "巳", "申")): "寅巳申三刑",
-    frozenset(("丑", "未", "戌")): "丑未戌三刑",
+    frozenset(("寅", "巳", "申")): "寅巳申持势三刑",
+    frozenset(("丑", "未", "戌")): "丑未戌无恩三刑",
+    frozenset(("子","卯")):"子卯无礼刑"
 }
 SELF_XING = {"辰": "辰辰自刑", "午": "午午自刑", "酉": "酉酉自刑", "亥": "亥亥自刑"}
 

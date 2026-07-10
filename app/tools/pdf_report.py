@@ -1,4 +1,4 @@
-"""八字命理 PDF 报告生成（对应 Java 项目的 iText PDF 导出）。
+﻿"""八字命理 PDF 报告生成
 
 使用 reportlab 生成结构化命理报告 PDF。
 注册 Windows 系统中文字体（SimHei/SimSun）以支持中文显示。

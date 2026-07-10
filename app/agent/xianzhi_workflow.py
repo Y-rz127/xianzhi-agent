@@ -1,8 +1,6 @@
-"""Deterministic workflow for Xianzhi chart-based consultation.
+"""基于先知图表的确定性工作流。
 
-This is a lightweight state-machine style orchestration layer. It keeps hard
-chart facts outside the LLM and lets the model focus on interpretation and
-natural conversation.
+这是一个轻量级的状态机式编排层。它将复杂的图表信息保留在LLM之外，让模型专注于解读和自然对话。
 """
 from __future__ import annotations
 
@@ -225,8 +223,8 @@ class XianzhiWorkflow:
         system = (
             "你是先知，一位有几十年实战经验的八字命理师傅，性格像见多识广的老朋友。\n"
             "硬性规则：四柱、大运、流年、起运时间等事实只能使用【系统排盘事实】，不能自行改算或编造。\n"
-            "说话风格：像真人聊天，不要表格、不要多层标题、不要emoji结尾。先一句结论，再2-3个理由，最后一条建议。\n"
-            "简单问题3-5句，复杂问题最多2-3段。该幽默幽默，该严肃严肃，用'你'不用'您'。\n"
+            "说话风格：像真人聊天，不要表格、不要多层标题、不要emoji结尾。不同问题回答重点不同，不要重复论述之前的内容，并且要详略得当，有一针接血的效果\n"
+            "简单问题2-3句，复杂问题最多2-3段。该幽默幽默，该严肃严肃，用'你'不用'您'。\n"
             "避免AI腔：不要'总结一下''需要注意的是''好消息/需要注意'这种模板。不装懂，不绝对化。\n"
             "不要输出ReAct过程，不要机械倾倒完整报告，不要恐吓。"
         )

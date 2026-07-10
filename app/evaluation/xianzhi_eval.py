@@ -1,7 +1,6 @@
-"""Offline checks for Xianzhi answer quality.
-
-The checks are intentionally deterministic: they validate factual anchors,
-forbidden hallucinations and conversational shape without calling a model.
+"""基于先知图的咨询流程是确定性的。
+对先知答案质量进行离线检查。
+这些检查是故意设计为确定性的：它们验证事实性锚点、禁止的幻觉内容以及对话结构，而无需调用模型。
 """
 from __future__ import annotations
 
@@ -11,7 +10,7 @@ from typing import Any
 from app.agent.xianzhi_workflow import XianzhiWorkflow, build_chart_context
 
 
-REPORT_MARKERS = ("【基本信息】", "【四柱】", "【五行", "完整报告", "第一章", "第二章")
+REPORT_MARKERS = ("【基本信息】", "【四柱】", "【五行】", "完整报告", "第一章", "第二章")
 
 
 @dataclass(frozen=True)
