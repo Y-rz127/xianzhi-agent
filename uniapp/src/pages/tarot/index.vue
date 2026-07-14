@@ -130,8 +130,9 @@
 
 <script setup lang="ts">
 import { ref, computed, nextTick } from 'vue'
+import { onHide } from '@dcloudio/uni-app'
 // 塔罗两阶段：draw 抽牌 + interpret AI 流式解读
-import { drawTarotCards, interpretTarotWS } from '@/api/chat'
+import { drawTarotCards, interpretTarotWS, closeAllWS } from '@/api/chat'
 
 interface DrawnCard {
   name: string
@@ -153,6 +154,9 @@ const interpreting = ref(false)
 const cards = ref<DrawnCard[]>([])
 const interpretation = ref('')
 const scrollTop = ref(0)
+
+// 切走 tab / 页面隐藏时关闭 WS，避免 socket 累积超过小程序 5 个上限
+onHide(() => { closeAllWS() })
 
 const spreads = [
   { key: 'daily' as const, name: '每日一牌', desc: '看今日运势指引', icon: '☀' },

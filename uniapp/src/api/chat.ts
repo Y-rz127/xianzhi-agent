@@ -43,9 +43,28 @@ function wsPath(path: string): string {
  * @param cb 回调
  * @returns SocketTask，可调用 .close() 主动断开
  */
+
+// 模块级引用：新建连接前先关闭旧的，避免 socket 累积超过微信小程序 5 个上限
+let currentChatTask: UniApp.SocketTask | null = null
+let currentTarotTask: UniApp.SocketTask | null = null
+
+function closeTask(task: UniApp.SocketTask | null) {
+  if (!task) return
+  try { task.close({}) } catch {}
+}
+
+/** 关闭所有 WS 连接（页面 onHide / 切 tab 时调用） */
+export function closeAllWS() {
+  closeTask(currentChatTask); currentChatTask = null
+  closeTask(currentTarotTask); currentTarotTask = null
+}
+
 function connectChatWS(path: string, payload: Record<string, any>, cb: ChatWSCallbacks) {
+  // 发送前先关闭旧连接，保证同时只有 1 个聊天 socket
+  closeTask(currentChatTask)
   const url = resolveWsBase() + wsPath(path)
   const task = uni.connectSocket({ url, complete: () => {} })
+  currentChatTask = task
 
   task.onOpen(() => {
     task.send({ data: JSON.stringify(payload) })
@@ -71,7 +90,7 @@ function connectChatWS(path: string, payload: Record<string, any>, cb: ChatWSCal
   })
 
   task.onError(() => cb.onError('连接错误'))
-  task.onClose(() => {})
+  task.onClose(() => { if (currentChatTask === task) currentChatTask = null })
 
   return task
 }
@@ -142,8 +161,10 @@ export function drawTarotCards(
   spread: 'daily' | 'three_card' | 'relationship',
   cb: TarotDrawCallbacks
 ) {
+  closeTask(currentTarotTask)
   const url = resolveWsBase() + wsPath('/api/ai/tarot/ws')
   const task = uni.connectSocket({ url, complete: () => {} })
+  currentTarotTask = task
 
   task.onOpen(() => {
     task.send({ data: JSON.stringify({ action: 'draw', spread }) })
@@ -160,6 +181,7 @@ export function drawTarotCards(
   })
 
   task.onError(() => cb.onError('连接错误'))
+  task.onClose(() => { if (currentTarotTask === task) currentTarotTask = null })
   return task
 }
 
@@ -172,8 +194,10 @@ export function interpretTarotWS(
   },
   cb: TarotInterpretCallbacks
 ) {
+  closeTask(currentTarotTask)
   const url = resolveWsBase() + wsPath('/api/ai/tarot/ws')
   const task = uni.connectSocket({ url, complete: () => {} })
+  currentTarotTask = task
 
   task.onOpen(() => {
     task.send({
@@ -198,5 +222,6 @@ export function interpretTarotWS(
   })
 
   task.onError(() => cb.onError('连接错误'))
+  task.onClose(() => { if (currentTarotTask === task) currentTarotTask = null })
   return task
 }

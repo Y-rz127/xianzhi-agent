@@ -135,7 +135,8 @@
 
 <script setup lang="ts">
 import { ref, nextTick } from 'vue'
-import { chatWithLoveWS } from '@/api/chat'
+import { onHide } from '@dcloudio/uni-app'
+import { chatWithLoveWS, closeAllWS } from '@/api/chat'
 import {
   clearSessionMessages,
   fetchSessions, deleteSession as deleteSessionApi, getSessionMessages,
@@ -155,6 +156,9 @@ const conversationId = ref('mp-love-' + Date.now())
 const showHistoryDrawer = ref(false)
 const historySessions = ref<ChatSession[]>([])
 const historyLoading = ref(false)
+
+// 切走 tab / 页面隐藏时关闭 WS，避免 socket 累积超过小程序 5 个上限
+onHide(() => { closeAllWS() })
 
 async function loadHistorySessions() {
   historyLoading.value = true

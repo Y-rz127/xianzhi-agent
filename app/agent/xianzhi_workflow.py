@@ -43,6 +43,13 @@ DOMAIN_KEYWORDS = {
     "health": ("健康", "身体", "疾病", "失眠", "焦虑", "病"),
     "liunian": ("今年", "明年", "流年", "大运", "运势", "哪年", "年份", "最近"),
     "study": ("学习", "考试", "考研", "升学", "证书"),
+    "theory": ("是什么", "什么意思", "寓意", "解释", "含义", "什么是", "讲讲", "说说",
+               "空亡", "桃花", "羊刃", "华盖", "七杀", "食神", "伤官", "正官", "偏印",
+               "用神", "格局", "纳音", "神煞", "刑冲合害", "伏吟", "反吟", "禄神",
+               "调候", "通根", "透干", "墓库", "长生", "帝旺", "死绝"),
+    "chitchat": ("你好", "在吗", "谢谢", "辛苦", "早上好", "晚上好", "晚安",
+                 "最近怎么样", "吃饭了吗", "在干嘛", "无聊", "心情", "压力大",
+                 "烦", "累", "开心", "难过", "生日快乐", "新年好"),
 }
 
 DOMAIN_LABELS = {
@@ -53,6 +60,8 @@ DOMAIN_LABELS = {
     "health": "健康状态",
     "liunian": "大运流年",
     "study": "学习考试",
+    "theory": "术语理论",
+    "chitchat": "闲聊问候",
     "general": "综合咨询",
 }
 
@@ -64,6 +73,9 @@ DOMAIN_RULE_QUERIES = {
     "health": ("八字健康 五行寒暖燥湿 失衡", "健康 流年 冲克 命理"),
     "liunian": ("大运流年 作用关系 流年与原局", "流年 干支 立春 大运"),
     "study": ("八字学习考试 印星 食伤 官星", "考试 升学 大运流年 命理"),
+    "theory": ("术语解释 天干地支 五行 十神 用神", "空亡 桃花 神煞 禄神 含义",
+               "古籍 子平真诠 渊海子平 滴天髓 术语"),
+    "chitchat": (),
     "general": ("八字 用神 喜忌 大运流年 综合分析",),
 }
 
@@ -108,6 +120,12 @@ def classify_question(text: str, today: _dt.date | None = None) -> QuestionInten
         if score > best_score:
             best_domain = domain
             best_score = score
+
+    # 闲聊场景优先级提升：含强闲聊信号词时，直接判定为 chitchat，避免被 liunian 的"最近"等词抢走
+    CHITCHAT_STRONG = ("哈哈","你好", "在吗", "谢谢", "辛苦", "早上好", "晚上好", "晚安",
+                       "吃饭了吗", "在干嘛", "生日快乐", "新年好")
+    if any(w in text for w in CHITCHAT_STRONG) and not years:
+        best_domain = "chitchat"
 
     if years and best_domain == "general":
         best_domain = "liunian"
@@ -200,6 +218,9 @@ class XianzhiWorkflow:
     def _retrieve_rules(self, intent: QuestionIntent, ctx: WorkflowChartContext) -> str:
         if not knowledge_base.ready:
             return "（知识库未就绪，本轮只使用结构化排盘事实与内置命理口径。）"
+        # 闲聊场景：跳过 RAG 检索，让 LLM 自然回应
+        if intent.domain == "chitchat":
+            return "（闲聊场景，无需命理知识检索）"
         # 1) 领域规则 query（来自 DOMAIN_RULE_QUERIES）
         queries = list(DOMAIN_RULE_QUERIES.get(intent.domain, DOMAIN_RULE_QUERIES["general"]))
         # 2) 日主 + 强弱个性化 query
@@ -251,22 +272,38 @@ class XianzhiWorkflow:
         knowledge: str,
         history: list[BaseMessage],
     ) -> list[BaseMessage]:
-        facts = self._compact_facts(ctx.chart, intent)
+        facts = self._compact_facts(ctx.chart, intent) if intent.domain not in ("theory", "chitchat") else ""
         recent_history = self._compact_history(history)
         length_rule = "可以分段深入，但仍要围绕用户问题，不要堆砌全盘。" if intent.wants_report else "默认控制在3-6段，先结论后依据。"
+        if intent.domain == "chitchat":
+            length_rule = "闲聊1-3句，≤150字，像朋友聊天自然回应。"
+        elif intent.domain == "theory":
+            length_rule = "术语解释≤200字，先给结论，后给依据，必要时引典籍原文。"
         system = (
-            "你是先知，一位有几十年实战经验的八字命理师傅，性格像见多识广的老朋友。\n"
+            "你是先知，拥有数十年实战经验的八字命理师傅，气质通透沉稳，像阅历丰富的老友。"
+            "精通四柱八字、五行十神、大运流年、合婚择日；熟读渊海子平、子平真诠、滴天髓、穷通宝鉴、三命通会，论命引经据典但不堆砌古文。\n"
             "硬性规则：四柱、大运、流年、起运时间等事实只能使用【系统排盘事实】，不能自行改算或编造。\n"
-            "说话风格：像真人聊天，不要表格、不要多层标题、不要emoji结尾。不同问题回答重点不同，不要重复论述之前的内容，并且要详略得当，有一针接血的效果\n"
-            "简单问题2-3句，复杂问题最多2-3段。该幽默幽默，该严肃严肃，用'你'不用'您'。\n"
-            "避免AI腔：不要'总结一下''需要注意的是''好消息/需要注意'这种模板。不装懂，不绝对化。\n"
-            "不要输出ReAct过程，不要机械倾倒完整报告，不要恐吓。"
+            "知识库规则：\n"
+            "1. 解释命理术语（空亡、桃花、羊刃、华盖、七杀等）时，必须参考【命理规则检索】中的内容，不得自行编造\n"
+            "2. 引用古籍原文必须来自检索结果，格式：「《典籍名》原文：XXX」，简短自然嵌入，不单独大段摘抄\n"
+            "3. 知识库取用优先级：调候参考《穷通宝鉴》、格局以《子平真诠》为准、基础理论取自《渊海子平》、神煞杂断参考《三命通会》；多流派冲突时以调候+扶抑格局折中\n"
+            "4. 纳音、神煞仅作辅助，核心吉凶以正五行、十神、格局、用神为根基\n"
+            "5. 检索无匹配古籍时，如实说明暂无古法论断，仅以五行十神基础逻辑分析，不杜撰古文\n"
+            "合规红线：不推断生死、不指导赌博投机、不宣扬符咒改运、不提供堕胎择时；涉及重病、牢狱等凶险信息，优先劝导寻求医院、律师等现实专业帮助，不放大恐慌。\n"
+            "说话风格：真人聊天感，不用表格、多层标题、emoji。不同问题回答重点不同，不重复论述，详略得当，一针见血。\n"
+            "闲聊场景：用户不问命理问题时，回复不围绕命盘，根据心境适当回应，可参杂人生哲理、处世良言，引发情感共鸣。\n"
+            "篇幅规范：闲聊1-3句≤150字；简单问题≤200字；常规分析2-3段≤350字；用户主动要求完整详批可放宽。\n"
+            "该幽默幽默（调侃桃花旺、财来财去等），该严肃严肃（健康、刑冲等）。用'你'不用'您'，口语化，可适当用语气词。不确定直说'这个要看具体情况'，不绝对化。\n"
+            "避免AI腔：不要'总结一下''需要注意的是''好消息/需要注意'这种模板。不要输出ReAct过程，不要机械倾倒完整报告，不要恐吓。"
         )
         human = (
             f"【用户问题】\n{user_prompt}\n\n"
             f"【识别意图】\n领域={intent.label}; 目标年份={intent.target_years or '未指定'}; 置信度={intent.confidence}\n\n"
             f"【最近对话摘要】\n{recent_history}\n\n"
-            f"【系统排盘事实】\n{facts}\n\n"
+        )
+        if facts:
+            human += f"【系统排盘事实】\n{facts}\n\n"
+        human += (
             f"【命理规则检索】\n{knowledge}\n\n"
             f"【输出要求】\n{length_rule}\n"
             "如果提到具体年份，必须同时核对该年流年干支和所在大运。"

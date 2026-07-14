@@ -298,8 +298,8 @@
 
 <script setup lang="ts">
 import { ref, computed, nextTick, watch, reactive } from 'vue'
-import { onLoad } from '@dcloudio/uni-app'
-import { chatWithXianzhiWS, chatWithRagWS } from '@/api/chat'
+import { onLoad, onHide } from '@dcloudio/uni-app'
+import { chatWithXianzhiWS, chatWithRagWS, closeAllWS } from '@/api/chat'
 import {
   parsePillars, parseWuxing, parseDayun, parseShensha,
   downloadReport, getChart,
@@ -456,6 +456,9 @@ onLoad(async (query) => {
     onSend()
   }
 })
+
+// 切走 tab / 页面隐藏时关闭 WS，避免 socket 累积超过小程序 5 个上限
+onHide(() => { closeAllWS() })
 
 function onDateChange(e: any) { birthDate.value = e.detail.value }
 function onTimeChange(e: any) { birthTime.value = e.detail.value }
