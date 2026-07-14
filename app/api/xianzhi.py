@@ -143,9 +143,12 @@ async def chat_with_xianzhi_sync(
 
 
 @router.get("/sessions")
-async def list_xianzhi_sessions():
+async def list_xianzhi_sessions(prefix: str = "web-xianzhi"):
+    """获取先知会话列表。
+    prefix 可选值：web-xianzhi（默认，PC 端）/ mp-xianzhi（小程序端）。
+    """
     from app.memory.postgres_memory import get_session_info
-    return get_session_info("xianzhi")
+    return get_session_info(prefix)
 
 
 @router.delete("/sessions/{session_id}")

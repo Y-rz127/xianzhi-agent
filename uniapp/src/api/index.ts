@@ -221,8 +221,10 @@ export interface ChatSession {
 }
 
 export const fetchSessions = (type: 'xianzhi' | 'love') => {
+  // 小程序端固定使用 mp- 前缀，PC 端默认走后端 web- 前缀
   const endpoint = type === 'xianzhi' ? 'xianzhi' : 'love_app'
-  return get<ChatSession[]>(`/ai/${endpoint}/sessions`)
+  const prefix = type === 'xianzhi' ? 'mp-xianzhi' : 'mp-love'
+  return get<ChatSession[]>(`/ai/${endpoint}/sessions`, { prefix })
 }
 
 export const deleteSession = (type: 'xianzhi' | 'love', id: string) => {

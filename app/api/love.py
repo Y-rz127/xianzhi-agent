@@ -67,9 +67,12 @@ async def ws_chat_with_love_app(websocket: WebSocket):
 
 
 @router.get("/sessions")
-async def list_love_sessions():
+async def list_love_sessions(prefix: str = "web-love"):
+    """获取恋爱大师会话列表。
+    prefix 可选值：web-love（默认，PC 端）/ mp-love（小程序端）。
+    """
     from app.memory.postgres_memory import get_session_info
-    return get_session_info("love")
+    return get_session_info(prefix)
 
 
 @router.delete("/sessions/{session_id}")

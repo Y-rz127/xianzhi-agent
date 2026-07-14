@@ -83,7 +83,7 @@ class PostgresChatMemory:
             global _session_uuid_map
             _session_uuid_map[session_uuid] = conversation_id
             # 持久化 UUID -> conversation_id 映射
-            module = conversation_id.split("-")[0] if "-" in conversation_id else ""
+            module = _extract_module(conversation_id)
             conn = self._get_conn()
             conn.execute("""
                 INSERT INTO session_metadata (session_id, conversation_id, module)
@@ -141,6 +141,28 @@ def close_global_conn():
 _session_uuid_map: dict[str, str] = {}
 
 
+def _extract_module(conversation_id: str) -> str:
+    """从 conversation_id 提取模块前缀（取前两段）。
+
+    规则：
+      - "web-xianzhi-1783429404556" → "web-xianzhi"
+      - "mp-love-1783429404556"    → "mp-love"
+      - "xianzhi-1783429404556"    → "xianzhi"   （旧格式兼容，只有一段前缀）
+      - "default" / 无连字符       → ""
+
+    这样可以让 PC web 和小程序、先知和恋爱四端会话互不干扰。
+    """
+    if not conversation_id or "-" not in conversation_id:
+        return ""
+    parts = conversation_id.split("-")
+    # 第一段：端类型（web/mp）
+    first = parts[0]
+    # 第二段：模块名（xianzhi/love）。若第二段是纯数字时间戳，说明是旧格式（只取第一段）
+    if len(parts) >= 2 and not parts[1].isdigit():
+        return f"{first}-{parts[1]}"
+    return first
+
+
 def get_session_info(prefix: str = "") -> list:
     """获取所有会话信息（用于前端会话列表），按 prefix 过滤。"""
     try:
@@ -167,7 +189,7 @@ def get_session_info(prefix: str = "") -> list:
             # 如果 session_metadata 中没有记录（旧数据或尚未同步），使用内存映射
             if not conversation_id:
                 conversation_id = _session_uuid_map.get(session_uuid, session_uuid)
-                module = conversation_id.split("-")[0] if "-" in str(conversation_id) else ""
+                module = _extract_module(str(conversation_id))
             # 按 prefix 过滤
             if prefix and str(module) != prefix:
                 continue

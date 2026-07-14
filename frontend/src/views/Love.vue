@@ -126,7 +126,7 @@ const messages = ref<SessionMessage[]>([])
 const input = ref("")
 const loading = ref(false)
 const messagesEl = ref<HTMLElement | null>(null)
-const chatId = ref("love-" + Date.now())
+const chatId = ref("web-love-" + Date.now())
 const sidebarCollapsed = ref(true)
 const isMobile = ref(false)
 const appSidebarOpen = ref(false)
@@ -191,7 +191,7 @@ const clearChat = async () => {
   input.value = ""
   loadSessions()
 }
-const newSession = () => { chatId.value = "love-" + Date.now(); messages.value = []; input.value = ""; loadSessions() }
+const newSession = () => { chatId.value = "web-love-" + Date.now(); messages.value = []; input.value = ""; loadSessions() }
 const exportChat = () => {
   const text = messages.value.map(m => `${m.role === 'user' ? '你' : '恋爱大师'}：${m.content}`).join("\n\n")
   const blob = new Blob([text], { type: "text/plain;charset=utf-8" })

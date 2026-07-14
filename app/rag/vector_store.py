@@ -1,4 +1,4 @@
-﻿"""RAG 向量知识库管理。
+"""RAG 向量知识库管理。
 
 加载命理知识 markdown，切分、向量化、入库，提供检索能力。
 向量库支持：
@@ -15,7 +15,7 @@ from typing import Any
 
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
-from langchain_text_splitters import CharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from app.config import settings
 from app.logger import log
@@ -48,8 +48,17 @@ def _load_knowledge_docs() -> list[Document]:
 
 
 def _split_chunks(docs: list[Document]) -> list[Document]:
-    """切分文档为片段。"""
-    splitter = CharacterTextSplitter(chunk_size=500, chunk_overlap=50)
+    """切分文档为片段。
+
+    用 RecursiveCharacterTextSplitter 多级递归切分，针对中文命理文档优化：
+    - separators 优先按段落、句号、分号切分，保证语义完整
+    - chunk_size 适当放宽到 800，避免长段落（古籍原文、调候表）被强行截断
+    """
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=800,
+        chunk_overlap=100,
+        separators=["\n\n", "\n", "。", "；", "，", " ", ""],
+    )
     chunks = splitter.split_documents(docs)
     log.info("切分为 {} 个知识片段", len(chunks))
     return chunks

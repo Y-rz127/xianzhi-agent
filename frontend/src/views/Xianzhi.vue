@@ -252,7 +252,7 @@ const messagesEl = ref<HTMLElement | null>(null)
 const mode = ref<"agent" | "rag">("agent")
 const lastBirthInfo = ref<BirthInfo | null>(null)
 const chartData = ref<ChartData | null>(null)
-const conversationId = ref("xianzhi-" + Date.now())
+const conversationId = ref("web-xianzhi-" + Date.now())
 const ragSessionId = ref("rag-" + Date.now())
 const sidebarCollapsed = ref(true)
 const isMobile = ref(false)
@@ -404,7 +404,7 @@ const clearChat = async () => {
 }
 
 const newSession = () => {
-  conversationId.value = "xianzhi-" + Date.now()
+  conversationId.value = "web-xianzhi-" + Date.now()
   ragSessionId.value = "rag-" + Date.now()
   messages.value = []
   lastBirthInfo.value = null
