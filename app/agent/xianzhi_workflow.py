@@ -200,10 +200,44 @@ class XianzhiWorkflow:
     def _retrieve_rules(self, intent: QuestionIntent, ctx: WorkflowChartContext) -> str:
         if not knowledge_base.ready:
             return "（知识库未就绪，本轮只使用结构化排盘事实与内置命理口径。）"
+        # 1) 领域规则 query（来自 DOMAIN_RULE_QUERIES）
         queries = list(DOMAIN_RULE_QUERIES.get(intent.domain, DOMAIN_RULE_QUERIES["general"]))
-        queries.append(f"{intent.label} {ctx.chart.wuxing.day_master}日主 {ctx.chart.wuxing.strength} 大运流年")
+        # 2) 日主 + 强弱个性化 query
+        day_master = ctx.chart.wuxing.day_master or ""
+        strength = ctx.chart.wuxing.strength or ""
+        queries.append(f"{intent.label} {day_master}日主 {strength} 大运流年")
+        # 3) 命例查相似结构：根据日主强弱和十神倾向构造
+        if day_master and strength:
+            if "旺" in strength or "强" in strength:
+                queries.append(f"{day_master}日主身旺 命例 典型命局 古籍")
+            elif "弱" in strength or "衰" in strength:
+                queries.append(f"{day_master}日主身弱 命例 典型命局 古籍")
+        # 4) 按领域补古籍检索 query
+        ancient_query_map = {
+            "career": "渊海子平 论官杀 事业 官星",
+            "wealth": "渊海子平 论财 财星 食伤生财",
+            "marriage": "滴天髓 论婚姻 配偶宫 古籍",
+            "health": "三命通会 论疾病 五行 健康古籍",
+            "love": "子平真诠 论桃花 感情 古籍",
+        }
+        ancient_q = ancient_query_map.get(intent.domain)
+        if ancient_q:
+            queries.append(ancient_q)
+        # 5) 断法体系 query（针对具体断事方向）
+        duanfa_query_map = {
+            "health": "健康伤病 断法 五行失衡 疾病",
+            "wealth": "贫富层次 财星 断法 命理",
+            "career": "事业财运 官星 印星 断法",
+            "marriage": "婚恋关系 配偶宫 断法 命理",
+            "love": "婚恋关系 桃花 断法 命理",
+        }
+        duanfa_q = duanfa_query_map.get(intent.domain)
+        if duanfa_q:
+            queries.append(duanfa_q)
+
+        # 上限提到 5 条 query（原本 3 条太少，覆盖不到命例/古籍/断法）
         parts: list[str] = []
-        for query in queries[:3]:
+        for query in queries[:5]:
             text = knowledge_base.search_as_text(query)
             if text and text not in parts:
                 parts.append(f"【检索问题】{query}\n{text}")
