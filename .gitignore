@@ -37,6 +37,7 @@ logs/
 .pytest_cache/
 .coverage
 htmlcov/
+tests
 
 # 类型检查
 .mypy_cache/
