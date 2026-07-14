@@ -109,30 +109,30 @@ const nodes = computed(() => mdToHtml(props.content))
 .md-render {
   font-size: 28rpx;
   line-height: 1.7;
-  color: #E2E8F0;
+  color: inherit;
   word-break: break-all;
   overflow-wrap: break-word;
 }
 
 /* /deep/ 穿透 rich-text */
-.md-render :deep(.md-h1) { font-size: 36rpx; font-weight: bold; margin: 20rpx 0 12rpx; color: #C4B5FD; }
-.md-render :deep(.md-h2) { font-size: 32rpx; font-weight: bold; margin: 18rpx 0 10rpx; color: #C4B5FD; }
-.md-render :deep(.md-h3) { font-size: 30rpx; font-weight: bold; margin: 16rpx 0 8rpx; color: #A78BFA; }
-.md-render :deep(.md-h4) { font-size: 28rpx; font-weight: bold; margin: 12rpx 0 6rpx; color: #A78BFA; }
+.md-render :deep(.md-h1) { font-size: 36rpx; font-weight: bold; margin: 20rpx 0 12rpx; color: inherit; }
+.md-render :deep(.md-h2) { font-size: 32rpx; font-weight: bold; margin: 18rpx 0 10rpx; color: inherit; }
+.md-render :deep(.md-h3) { font-size: 30rpx; font-weight: bold; margin: 16rpx 0 8rpx; color: inherit; opacity: 0.9; }
+.md-render :deep(.md-h4) { font-size: 28rpx; font-weight: bold; margin: 12rpx 0 6rpx; color: inherit; opacity: 0.9; }
 .md-render :deep(.md-p) { margin: 8rpx 0; }
-.md-render :deep(.md-strong) { font-weight: bold; color: #FCD34D; }
+.md-render :deep(.md-strong) { font-weight: bold; color: inherit; opacity: 1; }
 .md-render :deep(.md-em) { font-style: italic; }
 .md-render :deep(.md-code) {
   font-family: monospace;
-  background: rgba(124, 58, 237, 0.2);
-  color: #FCD34D;
+  background: rgba(107, 123, 142, 0.1);
+  color: inherit;
   padding: 2rpx 8rpx;
   border-radius: 4rpx;
   font-size: 26rpx;
 }
 .md-render :deep(.md-pre) {
-  background: #1e293b;
-  color: #e2e8f0;
+  background: rgba(107, 123, 142, 0.12);
+  color: inherit;
   padding: 16rpx;
   border-radius: 8rpx;
   overflow-x: auto;
@@ -147,10 +147,11 @@ const nodes = computed(() => mdToHtml(props.content))
 .md-render :deep(.md-ol) { padding-left: 32rpx; margin: 8rpx 0; }
 .md-render :deep(.md-li) { margin: 4rpx 0; }
 .md-render :deep(.md-quote) {
-  border-left: 4rpx solid #7C3AED;
+  border-left: 4rpx solid currentColor;
   padding-left: 16rpx;
   margin: 12rpx 0;
-  color: #94A3B8;
-  background: rgba(124, 58, 237, 0.08);
+  color: inherit;
+  opacity: 0.85;
+  background: rgba(107, 123, 142, 0.06);
 }
 </style>

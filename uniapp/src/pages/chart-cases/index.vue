@@ -422,7 +422,7 @@ onMounted(load)
 <style lang="scss" scoped>
 .page {
   min-height: 100vh;
-  background: #0F0B1E;
+  background: $color-bg;
   display: flex;
   flex-direction: column;
 }
@@ -430,12 +430,12 @@ onMounted(load)
 /* 状态栏占位 */
 .status-bar { width: 100%; }
 
-/* 紫蓝渐变头部 */
+/* 水墨渐变头部 */
 .hero {
   position: relative;
   padding: 40rpx 32rpx 60rpx;
   overflow: hidden;
-  background: linear-gradient(135deg, #2D1B5E 0%, #1A1238 100%);
+  background: linear-gradient(135deg, $color-bg-warm 0%, $color-bg 100%);
   border-bottom-left-radius: 48rpx;
   border-bottom-right-radius: 48rpx;
 }
@@ -443,8 +443,8 @@ onMounted(load)
   position: absolute;
   top: 0; left: 0; right: 0; bottom: 0;
   background:
-    radial-gradient(circle at 20% 30%, rgba(124, 58, 237, 0.4), transparent 50%),
-    radial-gradient(circle at 80% 70%, rgba(6, 182, 212, 0.25), transparent 50%);
+    radial-gradient(circle at 20% 30%, rgba(107, 123, 142, 0.35), transparent 50%),
+    radial-gradient(circle at 80% 70%, rgba(184, 72, 60, 0.2), transparent 50%);
 }
 .hero-orb {
   position: absolute;
@@ -455,27 +455,27 @@ onMounted(load)
 .orb-1 {
   top: -60rpx; right: -40rpx;
   width: 200rpx; height: 200rpx;
-  background: rgba(124, 58, 237, 0.5);
+  background: rgba(107, 123, 142, 0.45);
 }
 .orb-2 {
   bottom: -80rpx; left: -60rpx;
   width: 220rpx; height: 220rpx;
-  background: rgba(6, 182, 212, 0.35);
+  background: rgba(184, 72, 60, 0.3);
 }
 .hero-content { position: relative; z-index: 1; }
 .hero-title {
   display: block;
   font-size: 52rpx;
   font-weight: 800;
-  color: #FFFFFF;
+  color: $color-paper;
   letter-spacing: 8rpx;
-  text-shadow: 0 0 24rpx rgba(124, 58, 237, 0.6);
+  text-shadow: 0 0 24rpx rgba(107, 123, 142, 0.6);
 }
 .hero-sub {
   display: block;
   margin-top: 12rpx;
   font-size: 24rpx;
-  color: rgba(196, 181, 253, 0.9);
+  color: $color-ink-light;
   letter-spacing: 4rpx;
 }
 .hero-meta {
@@ -484,13 +484,13 @@ onMounted(load)
   margin-top: 20rpx;
 }
 .meta-dot {
-  color: #06B6D4;
+  color: $color-vermilion;
   font-size: 20rpx;
   margin-right: 10rpx;
 }
 .meta-text {
   font-size: 22rpx;
-  color: rgba(196, 181, 253, 0.8);
+  color: $color-ink-light;
   letter-spacing: 2rpx;
 }
 .add-btn {
@@ -499,11 +499,11 @@ onMounted(load)
   right: 32rpx;
   z-index: 2;
   font-size: 26rpx;
-  color: #FFFFFF;
+  color: $color-bg;
   padding: 12rpx 28rpx;
-  background: linear-gradient(135deg, #7C3AED, #06B6D4);
+  background: linear-gradient(135deg, $color-primary, $color-primary-dark);
   border-radius: 32rpx;
-  box-shadow: 0 4rpx 20rpx rgba(124, 58, 237, 0.5);
+  box-shadow: $glow-gold;
   letter-spacing: 4rpx;
 }
 
@@ -522,19 +522,19 @@ onMounted(load)
 }
 .empty-icon {
   font-size: 80rpx;
-  color: #7C3AED;
+  color: $color-primary;
   margin-bottom: 24rpx;
-  text-shadow: 0 0 24rpx rgba(124, 58, 237, 0.6);
+  text-shadow: 0 0 24rpx rgba(107, 123, 142, 0.6);
 }
 .empty-text {
   font-size: 30rpx;
-  color: #C4B5FD;
+  color: $color-ink-light;
   margin-bottom: 8rpx;
   letter-spacing: 4rpx;
 }
 .empty-hint {
   font-size: 24rpx;
-  color: #6B7280;
+  color: $color-ink-lighter;
 }
 
 /* 命例卡片列表 */
@@ -545,10 +545,10 @@ onMounted(load)
 }
 .case-card {
   position: relative;
-  background: rgba(30, 22, 56, 0.8);
+  background: $color-bg-card;
   backdrop-filter: blur(24rpx);
   -webkit-backdrop-filter: blur(24rpx);
-  border: 1rpx solid rgba(124, 58, 237, 0.2);
+  border: 1rpx solid $color-border;
   border-radius: 32rpx;
   padding: 28rpx;
   overflow: hidden;
@@ -558,7 +558,7 @@ onMounted(load)
   position: absolute;
   top: 0; left: 0; right: 0;
   height: 2rpx;
-  background: linear-gradient(90deg, transparent, #7C3AED, #06B6D4, transparent);
+  background: linear-gradient(90deg, transparent, $color-primary, $color-vermilion, transparent);
 }
 .case-top {
   display: flex;
@@ -573,21 +573,21 @@ onMounted(load)
 .case-name {
   font-size: 32rpx;
   font-weight: 600;
-  color: #FFFFFF;
+  color: $color-ink;
   letter-spacing: 4rpx;
 }
 .case-gender {
   font-size: 22rpx;
-  color: #06B6D4;
-  background: rgba(6, 182, 212, 0.12);
-  border: 1rpx solid rgba(6, 182, 212, 0.4);
+  color: $color-primary;
+  background: rgba(107, 123, 142, 0.12);
+  border: 1rpx solid rgba(107, 123, 142, 0.4);
   padding: 6rpx 20rpx;
   border-radius: 24rpx;
 }
 .case-birth-row { display: flex; align-items: center; }
 .case-birth {
   font-size: 24rpx;
-  color: #C4B5FD;
+  color: $color-ink-light;
   letter-spacing: 2rpx;
 }
 
@@ -599,9 +599,9 @@ onMounted(load)
 }
 .tag {
   font-size: 20rpx;
-  color: #F59E0B;
-  background: rgba(245, 158, 11, 0.1);
-  border: 1rpx solid rgba(245, 158, 11, 0.3);
+  color: $color-vermilion;
+  background: rgba(184, 72, 60, 0.1);
+  border: 1rpx solid rgba(184, 72, 60, 0.3);
   padding: 4rpx 16rpx;
   border-radius: 20rpx;
   margin: 8rpx 12rpx 0 0;
@@ -615,7 +615,7 @@ onMounted(load)
   gap: 16rpx;
   margin-top: 20rpx;
   padding-top: 20rpx;
-  border-top: 1rpx solid rgba(124, 58, 237, 0.15);
+  border-top: 1rpx solid $color-surface-divider;
 }
 .action-btn {
   font-size: 24rpx;
@@ -624,19 +624,19 @@ onMounted(load)
   letter-spacing: 2rpx;
 }
 .view-btn {
-  color: #FFFFFF;
-  background: linear-gradient(135deg, #7C3AED, #06B6D4);
-  box-shadow: 0 4rpx 16rpx rgba(124, 58, 237, 0.4);
+  color: $color-bg;
+  background: linear-gradient(135deg, $color-primary, $color-primary-dark);
+  box-shadow: $glow-gold;
 }
 .export-btn {
-  color: #F59E0B;
-  background: rgba(245, 158, 11, 0.1);
-  border: 1rpx solid rgba(245, 158, 11, 0.3);
+  color: $color-primary;
+  background: rgba(107, 123, 142, 0.1);
+  border: 1rpx solid $color-border;
 }
 .delete-btn {
-  color: #9CA3AF;
-  background: rgba(156, 163, 175, 0.08);
-  border: 1rpx solid rgba(156, 163, 175, 0.2);
+  color: $color-ink-lighter;
+  background: rgba(184, 174, 158, 0.08);
+  border: 1rpx solid $color-border;
 }
 
 /* 隐藏画布 */
@@ -657,17 +657,17 @@ onMounted(load)
 .poster-modal {
   width: 84%;
   max-width: 640rpx;
-  background: linear-gradient(180deg, #1E1638 0%, #160F2E 100%);
-  border: 1rpx solid rgba(124, 58, 237, 0.3);
+  background: linear-gradient(180deg, $color-bg-warm 0%, $color-bg 100%);
+  border: 1rpx solid $color-border;
   border-radius: 32rpx;
   padding: 32rpx;
-  box-shadow: 0 24rpx 64rpx rgba(0, 0, 0, 0.6), 0 0 64rpx rgba(124, 58, 237, 0.2);
+  box-shadow: $shadow-elevated;
 }
 .poster-title {
   display: block;
   font-size: 32rpx;
   font-weight: 600;
-  color: #FFFFFF;
+  color: $color-ink;
   text-align: center;
   letter-spacing: 4rpx;
   margin-bottom: 24rpx;
@@ -675,7 +675,7 @@ onMounted(load)
 .poster-img {
   width: 100%;
   border-radius: 20rpx;
-  border: 1rpx solid rgba(124, 58, 237, 0.2);
+  border: 1rpx solid $color-border;
 }
 .poster-actions {
   display: flex;
@@ -687,7 +687,7 @@ onMounted(load)
 .modal-overlay {
   position: fixed;
   top: 0; left: 0; right: 0; bottom: 0;
-  background: rgba(15, 11, 30, 0.85);
+  background: rgba(26, 23, 20, 0.85);
   backdrop-filter: blur(20rpx);
   -webkit-backdrop-filter: blur(20rpx);
   display: flex;
@@ -698,11 +698,11 @@ onMounted(load)
 .modal-content {
   width: 90%;
   box-sizing: border-box;
-  background: linear-gradient(180deg, #1E1638 0%, #160F2E 100%);
-  border: 1rpx solid rgba(124, 58, 237, 0.3);
+  background: linear-gradient(180deg, $color-bg-warm 0%, $color-bg 100%);
+  border: 1rpx solid $color-border;
   border-radius: 32rpx;
   overflow: hidden;
-  box-shadow: 0 24rpx 64rpx rgba(0, 0, 0, 0.6), 0 0 64rpx rgba(124, 58, 237, 0.2);
+  box-shadow: $shadow-elevated;
 }
 .modal-header {
   display: flex;
@@ -711,17 +711,17 @@ onMounted(load)
   width: 100%;
   box-sizing: border-box;
   padding: 28rpx 32rpx;
-  border-bottom: 1rpx solid rgba(124, 58, 237, 0.2);
+  border-bottom: 1rpx solid $color-border;
 }
 .modal-title {
   font-size: 32rpx;
   font-weight: 600;
-  color: #FFFFFF;
+  color: $color-ink;
   letter-spacing: 4rpx;
 }
 .modal-close {
   font-size: 36rpx;
-  color: #C4B5FD;
+  color: $color-ink-light;
   padding: 8rpx 16rpx;
 }
 .modal-body {
@@ -739,7 +739,7 @@ onMounted(load)
 }
 .label {
   flex: 0 0 140rpx;
-  color: #C4B5FD;
+  color: $color-ink-light;
   letter-spacing: 2rpx;
 }
 .input {
@@ -750,10 +750,10 @@ onMounted(load)
   height: 68rpx;
   line-height: 68rpx;
   padding: 0 20rpx;
-  background: rgba(124, 58, 237, 0.08);
-  border: 1rpx solid rgba(124, 58, 237, 0.2);
+  background: rgba(107, 123, 142, 0.06);
+  border: 1rpx solid $color-border;
   border-radius: 16rpx;
-  color: #FFFFFF;
+  color: $color-ink;
   font-size: 26rpx;
 }
 .picker-wrap {
@@ -768,16 +768,16 @@ onMounted(load)
   height: 68rpx;
   line-height: 68rpx;
   padding: 0 20rpx;
-  background: rgba(124, 58, 237, 0.08);
-  border: 1rpx solid rgba(124, 58, 237, 0.2);
+  background: rgba(107, 123, 142, 0.06);
+  border: 1rpx solid $color-border;
   border-radius: 16rpx;
-  color: #FFFFFF;
+  color: $color-ink;
   font-size: 26rpx;
   overflow: hidden;
 }
 .picker.selected {
-  border-color: #7C3AED;
-  background: rgba(124, 58, 237, 0.18);
+  border-color: $color-primary;
+  background: rgba(107, 123, 142, 0.18);
 }
 .picker-text {
   display: block;
@@ -791,7 +791,7 @@ onMounted(load)
   flex: 1;
   min-width: 0;
   display: flex;
-  border: 1rpx solid rgba(124, 58, 237, 0.2);
+  border: 1rpx solid $color-border;
   border-radius: 16rpx;
   overflow: hidden;
 }
@@ -800,12 +800,12 @@ onMounted(load)
   text-align: center;
   padding: 16rpx 0;
   font-size: 26rpx;
-  color: #94A3B8;
-  background: rgba(124, 58, 237, 0.06);
+  color: $color-ink-lighter;
+  background: rgba(107, 123, 142, 0.04);
 }
 .gender.active {
-  background: rgba(124, 58, 237, 0.25);
-  color: #C4B5FD;
+  background: rgba(107, 123, 142, 0.2);
+  color: $color-primary;
 }
 .modal-footer {
   display: flex;
@@ -813,23 +813,23 @@ onMounted(load)
   width: 100%;
   box-sizing: border-box;
   padding: 24rpx 32rpx 32rpx;
-  border-top: 1rpx solid rgba(124, 58, 237, 0.2);
+  border-top: 1rpx solid $color-border;
 }
 .btn {
   flex: 1;
   text-align: center;
   padding: 20rpx 0;
-  color: #C4B5FD;
-  background: rgba(124, 58, 237, 0.1);
-  border: 1rpx solid rgba(124, 58, 237, 0.2);
+  color: $color-ink-light;
+  background: rgba(107, 123, 142, 0.08);
+  border: 1rpx solid $color-border;
   border-radius: 24rpx;
   font-size: 28rpx;
 }
 .btn-primary {
-  color: #FFFFFF;
-  background: linear-gradient(135deg, #7C3AED, #06B6D4);
+  color: $color-bg;
+  background: linear-gradient(135deg, $color-primary, $color-primary-dark);
   border: none;
-  box-shadow: 0 4rpx 20rpx rgba(124, 58, 237, 0.4);
+  box-shadow: $glow-gold;
 }
 .btn.disabled,
 .btn-primary.disabled {

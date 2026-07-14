@@ -54,23 +54,22 @@
     }
   ],
   "globalStyle": {
-    "navigationBarTextStyle": "white",
+    "navigationBarTextStyle": "black",
     "navigationBarTitleText": "先知",
-    "navigationBarBackgroundColor": "#160F2E",
-    "backgroundColor": "#0F0B1E",
-    "backgroundColorTop": "#160F2E",
-    "backgroundColorBottom": "#0F0B1E",
-    "backgroundTextStyle": "light"
+    "navigationBarBackgroundColor": "#FAFAF8",
+    "backgroundColor": "#FAFAF8",
+    "backgroundColorTop": "#FAFAF8",
+    "backgroundColorBottom": "#FAFAF8",
+    "backgroundTextStyle": "dark"
   },
   "tabBar": {
-    "color": "#64748B",
-    "selectedColor": "#7C3AED",
-    "backgroundColor": "#0F0B1E",
-    "borderStyle": "black",
+    "color": "#888888",
+    "selectedColor": "#2C2C2C",
+    "backgroundColor": "#FFFFFF",
+    "borderStyle": "white",
     "list": [
       { "pagePath": "pages/xianzhi/index", "text": "先知" },
       { "pagePath": "pages/love/index", "text": "恋爱" },
-      { "pagePath": "pages/hehun/index", "text": "合婚" },
       { "pagePath": "pages/tarot/index", "text": "塔罗" }
     ]
   }

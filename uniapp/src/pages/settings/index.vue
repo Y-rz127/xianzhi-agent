@@ -110,7 +110,7 @@ async function onSave() {
 <style lang="scss" scoped>
 .page {
   min-height: 100vh;
-  background: #0F0B1E;
+  background: $color-bg;
   display: flex;
   flex-direction: column;
 }
@@ -118,12 +118,12 @@ async function onSave() {
 /* 状态栏占位 */
 .status-bar { width: 100%; }
 
-/* 紫蓝渐变头部 */
+/* 水墨渐变头部 */
 .hero {
   position: relative;
   padding: 48rpx 32rpx 60rpx;
   overflow: hidden;
-  background: linear-gradient(135deg, #2D1B5E 0%, #1A1238 100%);
+  background: linear-gradient(135deg, $color-bg-warm 0%, $color-bg 100%);
   border-bottom-left-radius: 48rpx;
   border-bottom-right-radius: 48rpx;
 }
@@ -131,8 +131,8 @@ async function onSave() {
   position: absolute;
   top: 0; left: 0; right: 0; bottom: 0;
   background:
-    radial-gradient(circle at 20% 30%, rgba(124, 58, 237, 0.4), transparent 50%),
-    radial-gradient(circle at 80% 70%, rgba(6, 182, 212, 0.25), transparent 50%);
+    radial-gradient(circle at 20% 30%, rgba(107, 123, 142, 0.35), transparent 50%),
+    radial-gradient(circle at 80% 70%, rgba(184, 72, 60, 0.2), transparent 50%);
 }
 .hero-orb {
   position: absolute;
@@ -143,12 +143,12 @@ async function onSave() {
 .orb-1 {
   top: -60rpx; right: -40rpx;
   width: 200rpx; height: 200rpx;
-  background: rgba(124, 58, 237, 0.5);
+  background: rgba(107, 123, 142, 0.45);
 }
 .orb-2 {
   bottom: -80rpx; left: -60rpx;
   width: 220rpx; height: 220rpx;
-  background: rgba(6, 182, 212, 0.35);
+  background: rgba(184, 72, 60, 0.3);
 }
 .hero-content {
   position: relative;
@@ -159,21 +159,21 @@ async function onSave() {
 }
 .hero-icon {
   font-size: 56rpx;
-  color: #FFFFFF;
+  color: $color-paper;
   margin-bottom: 16rpx;
-  text-shadow: 0 0 24rpx rgba(124, 58, 237, 0.8);
+  text-shadow: 0 0 24rpx rgba(107, 123, 142, 0.8);
 }
 .hero-title {
   font-size: 44rpx;
   font-weight: 800;
-  color: #FFFFFF;
+  color: $color-paper;
   letter-spacing: 8rpx;
-  text-shadow: 0 0 24rpx rgba(124, 58, 237, 0.6);
+  text-shadow: 0 0 24rpx rgba(107, 123, 142, 0.6);
 }
 .hero-sub {
   margin-top: 10rpx;
   font-size: 24rpx;
-  color: rgba(196, 181, 253, 0.9);
+  color: $color-ink-light;
   letter-spacing: 4rpx;
 }
 
@@ -186,10 +186,10 @@ async function onSave() {
 /* 卡片 */
 .card {
   position: relative;
-  background: rgba(30, 22, 56, 0.8);
+  background: $color-bg-card;
   backdrop-filter: blur(24rpx);
   -webkit-backdrop-filter: blur(24rpx);
-  border: 1rpx solid rgba(124, 58, 237, 0.2);
+  border: 1rpx solid $color-border;
   border-radius: 32rpx;
   padding: 32rpx;
   margin-bottom: 28rpx;
@@ -200,7 +200,7 @@ async function onSave() {
   position: absolute;
   top: 0; left: 0; right: 0;
   height: 2rpx;
-  background: linear-gradient(90deg, transparent, #7C3AED, #06B6D4, transparent);
+  background: linear-gradient(90deg, transparent, $color-primary, $color-vermilion, transparent);
 }
 .card-title-row {
   display: flex;
@@ -208,14 +208,14 @@ async function onSave() {
   margin-bottom: 28rpx;
 }
 .card-dot {
-  color: #06B6D4;
+  color: $color-vermilion;
   font-size: 22rpx;
   margin-right: 12rpx;
 }
 .card-title {
   font-size: 28rpx;
   font-weight: 600;
-  color: #FFFFFF;
+  color: $color-ink;
   letter-spacing: 4rpx;
 }
 
@@ -227,39 +227,39 @@ async function onSave() {
 }
 .label {
   font-size: 24rpx;
-  color: #C4B5FD;
+  color: $color-ink-light;
   margin-bottom: 12rpx;
   letter-spacing: 2rpx;
 }
 .input {
   padding: 20rpx 24rpx;
-  background: rgba(124, 58, 237, 0.08);
-  border: 1rpx solid rgba(124, 58, 237, 0.25);
+  background: rgba(107, 123, 142, 0.06);
+  border: 1rpx solid $color-border;
   border-radius: 20rpx;
   font-size: 26rpx;
-  color: #FFFFFF;
+  color: $color-ink;
 }
 .ph {
-  color: rgba(196, 181, 253, 0.4);
+  color: $color-ink-lighter;
 }
 
 /* 提示卡 */
 .hint-card {
   margin-top: 8rpx;
   padding: 20rpx 24rpx;
-  background: rgba(245, 158, 11, 0.08);
-  border: 1rpx solid rgba(245, 158, 11, 0.25);
+  background: rgba(184, 72, 60, 0.08);
+  border: 1rpx solid rgba(184, 72, 60, 0.25);
   border-radius: 20rpx;
 }
 .hint-line {
   display: block;
   font-size: 22rpx;
-  color: #FCD34D;
+  color: $color-vermilion-light;
   line-height: 1.7;
   letter-spacing: 1rpx;
 }
 .hint-line.warn {
-  color: #F59E0B;
+  color: $color-vermilion;
   margin-top: 12rpx;
 }
 
@@ -278,14 +278,14 @@ async function onSave() {
   letter-spacing: 4rpx;
 }
 .btn-ghost {
-  color: #C4B5FD;
-  background: rgba(196, 181, 253, 0.08);
-  border: 1rpx solid rgba(124, 58, 237, 0.25);
+  color: $color-ink-light;
+  background: rgba(107, 123, 142, 0.08);
+  border: 1rpx solid $color-border;
 }
 .btn-primary {
-  color: #FFFFFF;
-  background: linear-gradient(135deg, #7C3AED, #06B6D4);
-  box-shadow: 0 4rpx 20rpx rgba(124, 58, 237, 0.5);
+  color: $color-bg;
+  background: linear-gradient(135deg, $color-primary, $color-primary-dark);
+  box-shadow: $glow-gold;
 }
 
 /* 测试结果 */
@@ -297,22 +297,22 @@ async function onSave() {
   font-size: 26rpx;
 }
 .test-result.ok {
-  background: rgba(16, 185, 129, 0.12);
-  border: 1rpx solid rgba(16, 185, 129, 0.4);
+  background: rgba(107, 142, 90, 0.12);
+  border: 1rpx solid rgba(107, 142, 90, 0.4);
 }
 .test-result.fail {
-  background: rgba(239, 68, 68, 0.12);
-  border: 1rpx solid rgba(239, 68, 68, 0.4);
+  background: rgba(184, 72, 60, 0.12);
+  border: 1rpx solid rgba(184, 72, 60, 0.4);
 }
 .test-icon {
   margin-right: 16rpx;
   font-size: 28rpx;
 }
-.test-result.ok .test-icon { color: #10B981; }
-.test-result.fail .test-icon { color: #EF4444; }
+.test-result.ok .test-icon { color: $state-success; }
+.test-result.fail .test-icon { color: $color-vermilion; }
 .test-text {
   flex: 1;
-  color: #FFFFFF;
+  color: $color-ink;
   word-break: break-word;
   white-space: pre-line;
   letter-spacing: 1rpx;

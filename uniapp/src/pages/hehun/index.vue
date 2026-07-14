@@ -6,6 +6,9 @@
 
       <!-- 页面头 -->
       <view class="page-header">
+        <view class="back-btn" @tap="goBack">
+          <text class="back-arrow">‹</text>
+        </view>
         <text class="page-title display-font">合婚分析</text>
         <text class="page-sub">输入双方出生信息，探寻命理姻缘</text>
       </view>
@@ -142,6 +145,10 @@ try {
   statusBarHeight.value = sysInfo.statusBarHeight || 20
 } catch {}
 
+function goBack() {
+  uni.navigateBack()
+}
+
 const canSubmit = computed(() => a.date && a.time && b.date && b.time)
 
 async function onAnalyze() {
@@ -168,8 +175,8 @@ async function onAnalyze() {
 .page {
   height: calc(100vh - var(--window-bottom));
   overflow: hidden;
-  background: linear-gradient(180deg, #160F2E 0%, #0F0B1E 100%);
-  color: #E2E8F0;
+  background: $color-bg;
+  color: $color-ink;
 }
 .scroll { height: 100%; }
 
@@ -178,88 +185,106 @@ async function onAnalyze() {
 
 /* === 页面头 === */
 .page-header {
-  padding: 40rpx 32rpx 28rpx;
+  position: relative;
+  padding: 88rpx 32rpx 48rpx;
   align-items: center;
   text-align: center;
 }
+.back-btn {
+  position: absolute;
+  left: 32rpx;
+  top: 88rpx;
+  width: 56rpx;
+  height: 56rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.back-arrow {
+  font-size: 48rpx;
+  color: $color-primary;
+  line-height: 1;
+}
 .page-title {
   display: block;
-  font-size: 40rpx;
+  font-family: $font-family-display;
+  font-size: 44rpx;
   font-weight: 600;
-  color: #C4B5FD;
-  text-shadow: 0 0 48rpx rgba(124, 58, 237, 0.4);
-  line-height: 1.25;
-  margin-bottom: 12rpx;
+  color: $color-primary;
+  line-height: 1.3;
+  margin-bottom: 16rpx;
+  letter-spacing: 0.12em;
 }
 .page-sub {
   display: block;
-  margin-top: 10rpx;
+  margin-top: 12rpx;
   font-size: 24rpx;
-  color: #94A3B8;
-  line-height: 1.5;
+  color: $color-ink-light;
+  line-height: 1.6;
+  letter-spacing: 0.04em;
 }
 
 /* === 人物卡片 === */
 .person-card {
-  margin: 0 28rpx;
-  background: rgba(30, 22, 56, 0.8);
-  backdrop-filter: blur(24rpx);
-  -webkit-backdrop-filter: blur(24rpx);
-  border: 1rpx solid rgba(124, 58, 237, 0.2);
-  border-radius: 32rpx;
+  margin: 0 32rpx;
+  background: $color-bg-card;
+  border: 1rpx solid $color-border;
+  border-radius: 24rpx;
   overflow: hidden;
+  box-shadow: $shadow-sm;
 }
 .card-gradient-top {
   height: 4rpx;
 }
 .gradient-a {
-  background: linear-gradient(90deg, transparent, #7C3AED, #06B6D4, transparent);
+  background: linear-gradient(90deg, transparent, $color-primary, $color-primary-lighter, transparent);
 }
 .gradient-b {
-  background: linear-gradient(90deg, transparent, #06B6D4, #7C3AED, transparent);
+  background: linear-gradient(90deg, transparent, $color-vermilion, $color-vermilion-light, transparent);
 }
 .gradient-result {
-  background: linear-gradient(90deg, transparent, #06B6D4, #F59E0B, transparent);
+  background: linear-gradient(90deg, transparent, $color-primary, $color-vermilion, transparent);
 }
-.card-body { padding: 32rpx; }
-.person-card .card-body { padding: 28rpx 28rpx 30rpx; }
+.card-body { padding: 36rpx; }
+.person-card .card-body { padding: 36rpx 32rpx 38rpx; }
 .card-head {
   display: flex;
   align-items: center;
-  gap: 16rpx;
-  margin-bottom: 24rpx;
+  gap: 18rpx;
+  margin-bottom: 32rpx;
 }
 .badge {
-  width: 52rpx;
-  height: 52rpx;
-  line-height: 52rpx;
+  width: 56rpx;
+  height: 56rpx;
+  line-height: 56rpx;
   text-align: center;
   border-radius: 50%;
-  font-size: 26rpx;
+  font-family: $font-family-display;
+  font-size: 28rpx;
   font-weight: 600;
   border: 1rpx solid;
 }
 .badge-a {
-  background: rgba(124, 58, 237, 0.2);
-  border-color: #7C3AED;
-  color: #C4B5FD;
-  box-shadow: 0 0 24rpx rgba(124, 58, 237, 0.3);
+  background: rgba(44, 44, 44, 0.06);
+  border-color: $color-primary;
+  color: $color-primary;
 }
 .badge-b {
-  background: rgba(6, 182, 212, 0.15);
-  border-color: #06B6D4;
-  color: #67E8F9;
-  box-shadow: 0 0 24rpx rgba(6, 182, 212, 0.3);
+  background: rgba(184, 72, 60, 0.06);
+  border-color: $color-vermilion;
+  color: $color-vermilion;
 }
 .badge-result {
-  background: rgba(245, 158, 11, 0.15);
-  border-color: rgba(245, 158, 11, 0.3);
-  color: #F59E0B;
+  background: rgba(44, 44, 44, 0.04);
+  border-color: $color-border;
+  color: $color-primary;
 }
 .card-title {
+  font-family: $font-family-display;
   font-size: 32rpx;
   font-weight: 600;
-  color: #E2E8F0;
+  color: $color-ink;
+  letter-spacing: 0.06em;
 }
 
 /* 表单 */
@@ -268,12 +293,13 @@ async function onAnalyze() {
   flex-direction: row;
   align-items: center;
   gap: 20rpx;
-  margin-bottom: 20rpx;
+  margin-bottom: 28rpx;
 }
 .label {
   flex: 0 0 140rpx;
   font-size: 24rpx;
-  color: #94A3B8;
+  color: $color-ink-light;
+  letter-spacing: 0.04em;
 }
 .form-row picker,
 .seg-group {
@@ -284,29 +310,29 @@ async function onAnalyze() {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: 72rpx;
-  padding: 0 20rpx;
-  background: rgba(124, 58, 237, 0.08);
-  border: 1rpx solid rgba(124, 58, 237, 0.1);
-  border-radius: 20rpx;
+  height: 76rpx;
+  padding: 0 24rpx;
+  background: $color-bg-warm;
+  border: 1rpx solid $color-border-light;
+  border-radius: 12rpx;
 }
 .person-b .picker {
-  background: rgba(6, 182, 212, 0.06);
-  border-color: rgba(6, 182, 212, 0.1);
+  background: rgba(184, 72, 60, 0.03);
+  border-color: rgba(184, 72, 60, 0.1);
 }
 .picker-text {
   font-size: 26rpx;
-  color: #E2E8F0;
+  color: $color-ink;
 }
 .picker-icon {
-  color: #64748B;
+  color: $color-ink-lighter;
   font-size: 28rpx;
 }
 .seg-group {
   display: flex;
-  height: 72rpx;
-  border: 1rpx solid rgba(124, 58, 237, 0.2);
-  border-radius: 20rpx;
+  height: 76rpx;
+  border: 1rpx solid $color-border;
+  border-radius: 12rpx;
   overflow: hidden;
 }
 .seg {
@@ -315,95 +341,93 @@ async function onAnalyze() {
   align-items: center;
   justify-content: center;
   font-size: 26rpx;
-  color: #94A3B8;
-  background: rgba(124, 58, 237, 0.06);
+  color: $color-ink-light;
+  background: $color-bg-warm;
 }
 .person-b .seg {
-  background: rgba(6, 182, 212, 0.06);
+  background: rgba(184, 72, 60, 0.03);
 }
 .seg.active {
-  background: rgba(124, 58, 237, 0.25);
-  color: #C4B5FD;
+  background: rgba(44, 44, 44, 0.08);
+  color: $color-primary;
 }
 .person-b .seg.active {
-  background: rgba(6, 182, 212, 0.2);
-  color: #67E8F9;
+  background: rgba(184, 72, 60, 0.08);
+  color: $color-vermilion;
 }
 
 /* === 能量连接器 === */
 .connector {
   display: flex;
   align-items: center;
-  padding: 24rpx 32rpx;
+  padding: 32rpx 32rpx;
 }
 .line {
   flex: 1;
   height: 2rpx;
 }
 .line-left {
-  background: linear-gradient(90deg, transparent, rgba(6, 182, 212, 0.5));
+  background: linear-gradient(90deg, transparent, rgba(44, 44, 44, 0.2));
 }
 .line-right {
-  background: linear-gradient(270deg, transparent, rgba(6, 182, 212, 0.5));
+  background: linear-gradient(270deg, transparent, rgba(44, 44, 44, 0.2));
 }
 .connector-icon {
   margin: 0 24rpx;
-  width: 56rpx;
-  height: 56rpx;
-  line-height: 56rpx;
+  width: 60rpx;
+  height: 60rpx;
+  line-height: 60rpx;
   text-align: center;
   border-radius: 50%;
-  border: 3rpx solid #06B6D4;
-  background: rgba(6, 182, 212, 0.1);
-  box-shadow: 0 0 24rpx rgba(6, 182, 212, 0.3);
+  border: 2rpx solid $color-primary;
+  background: rgba(44, 44, 44, 0.04);
 }
 .connector-glyph {
-  color: #67E8F9;
+  color: $color-primary;
   font-size: 30rpx;
 }
 
 /* === CTA 按钮 === */
 .cta-wrap {
-  padding: 28rpx 28rpx 32rpx;
+  padding: 40rpx 32rpx 48rpx;
 }
 .cta-btn {
-  height: 88rpx;
+  height: 92rpx;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 16rpx;
-  background: linear-gradient(135deg, #7C3AED 0%, #6D28D9 100%);
-  border-radius: 24rpx;
-  box-shadow: 0 0 40rpx rgba(124, 58, 237, 0.3);
+  background: $color-primary;
+  border-radius: 16rpx;
 }
 .cta-btn.disabled { opacity: 0.5; }
 .cta-glyph {
-  color: #ffffff;
+  color: $color-bg;
   font-size: 30rpx;
 }
 .cta-text {
-  color: #ffffff;
+  color: $color-bg;
   font-size: 30rpx;
   font-weight: 600;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.12em;
 }
 
 /* === 结果卡片 === */
 .result-card {
-  margin: 0 28rpx 40rpx;
-  background: rgba(30, 22, 56, 0.8);
-  backdrop-filter: blur(24rpx);
-  -webkit-backdrop-filter: blur(24rpx);
-  border: 1rpx solid rgba(124, 58, 237, 0.2);
-  border-radius: 32rpx;
+  margin: 0 32rpx 48rpx;
+  background: $color-bg-card;
+  border: 1rpx solid $color-border;
+  border-radius: 24rpx;
   overflow: hidden;
+  box-shadow: $shadow-sm;
 }
 .result-text {
   font-size: 28rpx;
-  line-height: 1.7;
-  color: #E2E8F0;
+  line-height: 1.8;
+  color: $color-ink;
   white-space: pre-wrap;
+  letter-spacing: 0.02em;
 }
 
-.bottom-spacer { height: 40rpx; }
+.bottom-spacer { height: 48rpx; }
 </style>

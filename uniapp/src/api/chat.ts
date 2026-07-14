@@ -22,6 +22,7 @@ export interface ChatWSCallbacks {
   onDone: () => void
   onError: (err: string) => void
   onChartContext?: (birthTime: string, gender: string) => void
+  onCards?: (cards: any[]) => void
 }
 
 /** H5 dev 下走 vite proxy 的 path 前缀，prod 直连 */
@@ -55,6 +56,8 @@ function connectChatWS(path: string, payload: Record<string, any>, cb: ChatWSCal
       const data = JSON.parse(res.data as string)
       if (data.type === 'message') {
         cb.onMessage(data.data)
+      } else if (data.type === 'cards') {
+        cb.onCards?.(data.data)
       } else if (data.type === 'chart_context') {
         cb.onChartContext?.(data.data?.birth_time, data.data?.gender)
       } else if (data.type === 'done') {
@@ -121,4 +124,79 @@ export function chatWithRagWS(message: string, opts: RagChatOptions) {
     { message, session_id: opts.sessionId },
     opts
   )
+}
+
+export interface TarotDrawCallbacks {
+  onCards: (cards: any[]) => void
+  onError: (err: string) => void
+}
+
+export interface TarotInterpretCallbacks {
+  onMessage: (chunk: string) => void
+  onDone: () => void
+  onError: (err: string) => void
+}
+
+/** 塔罗阶段一：抽牌（不调用 LLM） */
+export function drawTarotCards(
+  spread: 'daily' | 'three_card' | 'relationship',
+  cb: TarotDrawCallbacks
+) {
+  const url = resolveWsBase() + wsPath('/api/ai/tarot/ws')
+  const task = uni.connectSocket({ url, complete: () => {} })
+
+  task.onOpen(() => {
+    task.send({ data: JSON.stringify({ action: 'draw', spread }) })
+  })
+
+  task.onMessage((res) => {
+    try {
+      const data = JSON.parse(res.data as string)
+      if (data.type === 'cards') cb.onCards(data.data || [])
+      else if (data.type === 'error') cb.onError(data.data || '抽牌失败')
+    } catch {
+      cb.onError('解析消息失败')
+    }
+  })
+
+  task.onError(() => cb.onError('连接错误'))
+  return task
+}
+
+/** 塔罗阶段二：LLM 流式解读（需要把抽到的牌组回传） */
+export function interpretTarotWS(
+  opts: {
+    spread: 'daily' | 'three_card' | 'relationship'
+    question?: string
+    cards: any[]
+  },
+  cb: TarotInterpretCallbacks
+) {
+  const url = resolveWsBase() + wsPath('/api/ai/tarot/ws')
+  const task = uni.connectSocket({ url, complete: () => {} })
+
+  task.onOpen(() => {
+    task.send({
+      data: JSON.stringify({
+        action: 'interpret',
+        spread: opts.spread,
+        question: opts.question || '',
+        cards: opts.cards,
+      }),
+    })
+  })
+
+  task.onMessage((res) => {
+    try {
+      const data = JSON.parse(res.data as string)
+      if (data.type === 'message') cb.onMessage(data.data)
+      else if (data.type === 'done') cb.onDone()
+      else if (data.type === 'error') cb.onError(data.data || '解读失败')
+    } catch {
+      cb.onError('解析消息失败')
+    }
+  })
+
+  task.onError(() => cb.onError('连接错误'))
+  return task
 }

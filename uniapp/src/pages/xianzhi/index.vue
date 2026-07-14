@@ -1,5 +1,19 @@
 <template>
   <view class="page">
+    <!-- 水墨山水背景 -->
+    <view class="landscape" aria-hidden="true">
+      <view class="mountain mountain-far"></view>
+      <view class="mountain mountain-mid"></view>
+      <view class="mountain-mist"></view>
+      <view class="mountain mountain-near"></view>
+      <!-- 飞鸟 -->
+      <view class="bird bird-1"></view>
+      <view class="bird bird-2"></view>
+      <view class="bird bird-3"></view>
+      <!-- 落款印章 -->
+      <!-- <view class="seal">易</view> -->
+    </view>
+
     <!-- 状态栏占位 -->
     <view class="status-bar" :style="{ height: statusBarHeight + 'px' }"></view>
 
@@ -8,6 +22,7 @@
       <view class="header-top">
         <text class="header-title display-font">先知</text>
         <view class="header-icons">
+          <text class="icon-btn" @tap="openHistoryDrawer">☰</text>
           <text class="icon-btn" @tap="goSettings">⚙</text>
           <text class="icon-btn" @tap="confirmClear">🗑</text>
           <text class="icon-btn" @tap="confirmNew">+</text>
@@ -26,6 +41,7 @@
           :class="['tab', mode === 'rag' && 'active']"
           @tap="switchMode('rag')"
         >问答</text>
+        <text class="tab" @tap="goHehun">合婚</text>
       </view>
     </view>
 
@@ -75,8 +91,8 @@
       </view>
     </view>
 
-    <!-- 消息列表 -->
-    <scroll-view class="messages" scroll-y :scroll-top="scrollTop" scroll-with-animation>
+    <!-- 消息列表 - 命例 tab 有自己的页面，不显示聊天 -->
+    <scroll-view v-if="mode !== 'cases'" class="messages" scroll-y :scroll-top="scrollTop" scroll-with-animation>
       <view v-if="!messages.length" class="empty-state">
         <view class="empty-avatar display-font">{{ mode === 'agent' ? '易' : '问' }}</view>
         <text class="empty-title">{{ mode === 'agent' ? '先知命理' : '命理问答' }}</text>
@@ -115,8 +131,8 @@
       </view>
     </scroll-view>
 
-    <!-- 输入栏：深色玻璃 + 紫色渐变发送按钮 -->
-    <view v-if="mode !== 'cases'" class="input-bar">
+    <!-- 输入栏：命例 tab 不显示 -->
+    <view v-if="mode === 'agent' || mode === 'rag'" class="input-bar">
       <view class="input-wrap">
         <textarea
           class="input"
@@ -244,6 +260,39 @@
       :gender="lastBirthInfo?.gender"
       @close="showBaziModal = false"
     />
+
+    <!-- 历史会话抽屉 -->
+    <view v-if="showHistoryDrawer" class="drawer-mask" @tap="closeHistoryDrawer">
+      <view class="drawer-panel" @tap.stop>
+        <view class="drawer-header">
+          <text class="drawer-title">历史会话</text>
+          <text class="drawer-close" @tap="closeHistoryDrawer">✕</text>
+        </view>
+        <view v-if="historyLoading" class="drawer-loading">加载中…</view>
+        <view v-else-if="historySessions.length === 0" class="drawer-empty">暂无历史会话</view>
+        <scroll-view v-else scroll-y class="drawer-list">
+          <view
+            v-for="s in historySessions"
+            :key="s.id"
+            :class="['drawer-item', s.id === conversationId && 'active']"
+            @tap="switchToSession(s)"
+          >
+            <view class="drawer-item-top">
+              <text class="drawer-item-title">{{ s.title || '新会话' }}</text>
+              <text class="drawer-item-del" @tap.stop="deleteHistorySession(s.id)">✕</text>
+            </view>
+            <text class="drawer-item-msg">{{ s.lastMessage || '（暂无消息）' }}</text>
+            <view class="drawer-item-meta">
+              <text class="drawer-item-time">{{ formatSessionTime(s.lastTime) }}</text>
+              <text class="drawer-item-count">{{ s.messageCount }} 条</text>
+            </view>
+          </view>
+        </scroll-view>
+        <view class="drawer-footer">
+          <text class="drawer-new-btn" @tap="closeHistoryDrawer(); newSession()">+ 新建会话</text>
+        </view>
+      </view>
+    </view>
   </view>
 </template>
 
@@ -255,8 +304,8 @@ import {
   parsePillars, parseWuxing, parseDayun, parseShensha,
   downloadReport, getChart,
   fetchChartCases, createChartCase, deleteChartCase,
-  clearSessionMessages,
-  type ChartData, type ChartCase,
+  fetchSessions, deleteSession as deleteSessionApi, clearSessionMessages, getSessionMessages,
+  type ChartData, type ChartCase, type ChatSession,
 } from '@/api'
 import { getLocalDateString } from '@/utils/datetimePicker'
 
@@ -271,13 +320,89 @@ const gender = ref<'男' | '女'>('男')
 const sect = ref<number>(2)
 const inputText = ref('')
 const thinking = ref(false)
-const messages = ref<Message[]>([])
+// 排盘与问答使用独立的会话历史，互不干扰
+const agentMessages = ref<Message[]>([])
+const ragMessages = ref<Message[]>([])
+// 命例 tab 单独有页面，cases 模式下不显示聊天
+const messages = computed(() => mode.value === 'rag' ? ragMessages.value : agentMessages.value)
 const scrollTop = ref(0)
 const lastBirthInfo = ref<BirthInfo | null>(null)
 const showBaziModal = ref(false)
 const chartData = ref<ChartData | null>(null)
 // 会话ID：同一会话内多轮对话保持一致，切换/新建会话时才重新生成
-const conversationId = ref('mp-' + Date.now())
+const conversationId = ref('mp-xianzhi-' + Date.now())
+
+// 历史会话抽屉
+const showHistoryDrawer = ref(false)
+const historySessions = ref<ChatSession[]>([])
+const historyLoading = ref(false)
+
+async function loadHistorySessions() {
+  historyLoading.value = true
+  try {
+    historySessions.value = await fetchSessions('xianzhi')
+  } catch (e) {
+    uni.showToast({ title: '加载历史失败', icon: 'none' })
+    historySessions.value = []
+  } finally {
+    historyLoading.value = false
+  }
+}
+
+function openHistoryDrawer() {
+  showHistoryDrawer.value = true
+  loadHistorySessions()
+}
+
+function closeHistoryDrawer() {
+  showHistoryDrawer.value = false
+}
+
+async function switchToSession(session: ChatSession) {
+  if (!session?.id) return
+  conversationId.value = session.id
+  // 拉取该会话的历史消息
+  try {
+    const msgs = await getSessionMessages('xianzhi', session.id)
+    const target: Message[] = msgs.map(m => ({ role: m.role, content: m.content }))
+    if (mode.value === 'rag') {
+      ragMessages.value = target
+    } else {
+      agentMessages.value = target
+      lastBirthInfo.value = null
+      chartData.value = null
+    }
+  } catch (e) {
+    uni.showToast({ title: '加载消息失败', icon: 'none' })
+  }
+  closeHistoryDrawer()
+}
+
+async function deleteHistorySession(id: string) {
+  uni.showModal({
+    title: '删除会话',
+    content: '确定删除该会话的所有记录吗？',
+    success: async (res) => {
+      if (!res.confirm) return
+      try {
+        await deleteSessionApi('xianzhi', id)
+        // 如果删除的是当前会话，新建一个
+        if (id === conversationId.value) {
+          newSession()
+        }
+        await loadHistorySessions()
+      } catch (e) {
+        uni.showToast({ title: '删除失败', icon: 'none' })
+      }
+    },
+  })
+}
+
+function formatSessionTime(t: string): string {
+  if (!t) return ''
+  // 后端返回形如 "2026-07-14 12:34:56+08:00"，截取到分钟
+  return t.replace('T', ' ').slice(0, 16)
+}
 
 // 状态栏高度（自定义导航栏需要）
 const statusBarHeight = ref(20)
@@ -336,7 +461,7 @@ function onDateChange(e: any) { birthDate.value = e.detail.value }
 function onTimeChange(e: any) { birthTime.value = e.detail.value }
 function goDisclaimer() { uni.navigateTo({ url: '/pages/legal/disclaimer' }) }
 function goSettings() { uni.navigateTo({ url: '/pages/settings/index' }) }
-function useExample(ex: string) { inputText.value = ex }
+function useExample(ex: string) { inputText.value = ex; onSend() }
 
 function switchMode(m: 'agent' | 'cases' | 'rag') {
   if (mode.value === m) return
@@ -347,12 +472,19 @@ function switchMode(m: 'agent' | 'cases' | 'rag') {
   }
 }
 
+/** 跳转合婚页面 */
+function goHehun() {
+  uni.navigateTo({ url: '/pages/hehun/index' })
+}
+
 /** 清空当前会话的消息记录，保留会话ID与命盘上下文 */
 async function clearChat() {
   try {
     await clearSessionMessages('xianzhi', conversationId.value)
   } catch {}
-  messages.value = []
+  // 按当前 mode 清空对应的会话数组
+  const target = mode.value === 'rag' ? ragMessages.value : agentMessages.value
+  target.splice(0, target.length)
   inputText.value = ''
 }
 
@@ -367,8 +499,9 @@ function confirmClear() {
 
 /** 新建会话：生成新会话ID并清空命盘上下文 */
 function newSession() {
-  conversationId.value = 'mp-' + Date.now()
-  messages.value = []
+  conversationId.value = 'mp-xianzhi-' + Date.now()
+  agentMessages.value.splice(0, agentMessages.value.length)
+  ragMessages.value.splice(0, ragMessages.value.length)
   inputText.value = ''
   lastBirthInfo.value = null
   chartData.value = null
@@ -465,7 +598,7 @@ function loadChartCase(c: ChartCase) {
   gender.value = (c.gender as '男' | '女') || '男'
   lastBirthInfo.value = { time: c.birthTime, gender: c.gender }
   mode.value = 'agent'
-  messages.value = []
+  agentMessages.value.splice(0, agentMessages.value.length)
   inputText.value = `${c.gender}，${c.birthTime}，排盘并分析（来自命例：${c.name}）`
   uni.showToast({ title: `已载入：${c.name}`, icon: 'none' })
   // 自动发起排盘
@@ -550,24 +683,26 @@ function downloadPdfReport() {
 function onSend() {
   const text = inputText.value.trim()
   if (!text || thinking.value) return
-  messages.value.push({ role: 'user', content: text })
+  // 排盘 / 问答 写入不同的会话数组
+  const targetList = mode.value === 'rag' ? ragMessages.value : agentMessages.value
+  targetList.push({ role: 'user', content: text })
   inputText.value = ''
   if (mode.value === 'agent') tryExtractBirth(text)
   thinking.value = true
   scrollToBottom()
 
   const assistantMsg: Message = { role: 'assistant', content: '' }
-  messages.value.push(assistantMsg)
-  const idx = messages.value.length - 1
+  targetList.push(assistantMsg)
+  const idx = targetList.length - 1
 
   const onMessage = (chunk: string) => {
-    messages.value[idx].content += chunk
+    targetList[idx].content += chunk
     scrollToBottom()
   }
   const onDone = () => { thinking.value = false }
   const onError = (err: string) => {
     thinking.value = false
-    messages.value[idx].content = messages.value[idx].content || `[出错] ${err}`
+    targetList[idx].content = targetList[idx].content || `[出错] ${err}`
   }
   // 后端从 LLM 工具调用中提取到出生信息时回调（覆盖自然语言输入场景）
   const onChartContext = async (bt: string, g: string) => {
@@ -611,30 +746,184 @@ messages.value.push({
 </script>
 
 <style lang="scss">
+/* === 先知 · 白底黑字水墨风 + 太极图背景 === */
 .page {
+  position: relative;
   display: flex;
   flex-direction: column;
   width: 100%;
   height: 100vh;
   box-sizing: border-box;
   overflow-x: hidden;
-  background: linear-gradient(180deg, #160F2E 0%, #0F0B1E 100%);
-  color: #E2E8F0;
+  background: $color-bg;
+  color: $color-ink;
 }
 
-/* 状态栏占位 - 紫青渐变 */
+/* === 水墨山水背景 === */
+.landscape {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  overflow: hidden;
+}
+
+/* 山的通用样式 */
+.mountain {
+  position: absolute;
+  left: 0;
+  right: 0;
+  pointer-events: none;
+}
+
+/* 远山 - 最浅、最低起伏 */
+.mountain-far {
+  bottom: 0;
+  height: 45%;
+  background: linear-gradient(to top,
+    rgba(26, 26, 26, 0.22) 0%,
+    rgba(26, 26, 26, 0.12) 60%,
+    rgba(26, 26, 26, 0) 100%);
+  clip-path: polygon(
+    0% 100%,
+    0% 75%, 8% 68%, 15% 72%, 22% 60%, 30% 65%, 38% 55%, 45% 62%, 52% 50%, 60% 58%, 68% 52%, 75% 60%, 82% 55%, 90% 62%, 100% 58%,
+    100% 100%
+  );
+}
+
+/* 中山 - 中等深度 */
+.mountain-mid {
+  bottom: 0;
+  height: 38%;
+  background: linear-gradient(to top,
+    rgba(26, 26, 26, 0.38) 0%,
+    rgba(26, 26, 26, 0.22) 50%,
+    rgba(26, 26, 26, 0.08) 100%);
+  clip-path: polygon(
+    0% 100%,
+    0% 70%, 6% 60%, 14% 68%, 20% 55%, 28% 62%, 35% 50%, 42% 58%, 50% 45%, 58% 55%, 65% 48%, 72% 58%, 80% 52%, 88% 60%, 95% 55%, 100% 62%,
+    100% 100%
+  );
+}
+
+/* 山间云雾 */
+.mountain-mist {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 28%;
+  height: 12%;
+  background: linear-gradient(to bottom,
+    rgba(250, 250, 248, 0.85) 0%,
+    rgba(250, 250, 248, 0.4) 50%,
+    rgba(250, 250, 248, 0) 100%);
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* 近山 - 最深、最高 */
+.mountain-near {
+  bottom: 0;
+  height: 32%;
+  background: linear-gradient(to top,
+    rgba(26, 26, 26, 0.6) 0%,
+    rgba(26, 26, 26, 0.35) 50%,
+    rgba(26, 26, 26, 0.1) 100%);
+  clip-path: polygon(
+    0% 100%,
+    0% 65%, 10% 50%, 18% 58%, 28% 42%, 38% 52%, 48% 38%, 56% 48%, 66% 40%, 74% 52%, 84% 45%, 92% 55%, 100% 48%,
+    100% 100%
+  );
+}
+
+/* 飞鸟 - V 形 */
+.bird {
+  position: absolute;
+  width: 28rpx;
+  height: 16rpx;
+  pointer-events: none;
+  z-index: 2;
+}
+.bird::before,
+.bird::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  width: 14rpx;
+  height: 14rpx;
+  border: 2rpx solid rgba(26, 26, 26, 0.45);
+  border-bottom: none;
+  border-right: none;
+  border-radius: 50% 0 0 0;
+}
+.bird::before { left: 0; transform: rotate(45deg); }
+.bird::after { right: 0; transform: rotate(135deg) scaleX(-1); transform-origin: top right; }
+
+.bird-1 {
+  top: 22%;
+  left: 20%;
+  animation: birdDrift 18s ease-in-out infinite;
+}
+.bird-2 {
+  top: 18%;
+  left: 55%;
+  transform: scale(0.8);
+  opacity: 0.7;
+  animation: birdDrift 20s ease-in-out infinite -6s;
+}
+.bird-3 {
+  top: 28%;
+  right: 18%;
+  transform: scale(0.9);
+  opacity: 0.5;
+  animation: birdDrift 22s ease-in-out infinite -12s;
+}
+@keyframes birdDrift {
+  0% { transform: translate(0, 0) scale(var(--s, 1)); }
+  50% { transform: translate(40rpx, -20rpx) scale(var(--s, 1)); }
+  100% { transform: translate(0, 0) scale(var(--s, 1)); }
+}
+
+/* 落款印章 */
+.seal {
+  position: absolute;
+  bottom: 10%;
+  right: 6%;
+  width: 56rpx;
+  height: 56rpx;
+  line-height: 52rpx;
+  text-align: center;
+  background: $color-vermilion;
+  color: $color-bg;
+  font-size: 32rpx;
+  font-weight: 600;
+  font-family: $font-family-display;
+  border: 2rpx solid $color-vermilion;
+  box-shadow: 0 0 12rpx rgba(184, 72, 60, 0.25);
+  opacity: 0.78;
+  transform: rotate(-3deg);
+  pointer-events: none;
+  z-index: 2;
+}
+
+/* 状态栏占位 */
 .status-bar {
-  background: linear-gradient(135deg, #6D28D9 0%, #0891B2 100%);
+  background: $color-bg;
   width: 100%;
+  position: relative;
+  z-index: 1;
 }
 
-/* === 顶部能量渐变头 === */
+/* === 顶部标题头 === */
 .header {
   width: 100%;
   box-sizing: border-box;
-  background: linear-gradient(135deg, #6D28D9 0%, #7C3AED 50%, #0891B2 100%);
+  background: $color-bg;
+  border-bottom: 1rpx solid $color-border;
   padding: 16rpx 32rpx 28rpx;
   overflow: hidden;
+  position: relative;
+  z-index: 1;
 }
 .header-top {
   position: relative;
@@ -657,9 +946,8 @@ messages.value.push({
 .header-title {
   font-size: 40rpx;
   font-weight: 600;
-  color: #ffffff;
-  letter-spacing: 0.1em;
-  text-shadow: 0 0 24rpx rgba(124, 58, 237, 0.5);
+  color: $color-primary;
+  letter-spacing: 0.12em;
 }
 .header-actions { display: flex; }
 .icon-btn {
@@ -667,7 +955,7 @@ messages.value.push({
   height: 64rpx;
   line-height: 60rpx;
   text-align: center;
-  color: rgba(255, 255, 255, 0.85);
+  color: $color-ink-light;
   font-size: 36rpx;
 }
 
@@ -684,28 +972,27 @@ messages.value.push({
 .tab {
   flex: 1;
   min-width: 0;
-  max-width: 140rpx;
+  max-width: 160rpx;
   padding: 12rpx 0;
   font-size: 26rpx;
   text-align: center;
-  color: rgba(255, 255, 255, 0.7);
+  color: $color-ink-light;
   border-radius: 9999rpx;
-  border: 1rpx solid rgba(255, 255, 255, 0.3);
+  border: 1rpx solid $color-border;
 }
 .tab.active {
-  background: rgba(255, 255, 255, 0.95);
-  color: #5B21B6;
+  background: $color-primary;
+  color: $color-bg;
   font-weight: 600;
   border: none;
-  box-shadow: 0 0 24rpx rgba(124, 58, 237, 0.4);
 }
 
-/* === 出生信息玻璃面板 === */
+/* === 出生信息面板 === */
 .birth-panel {
-  background: rgba(30, 22, 56, 0.8);
-  backdrop-filter: blur(24rpx);
-  -webkit-backdrop-filter: blur(24rpx);
-  border-bottom: 1rpx solid rgba(124, 58, 237, 0.1);
+  background: $color-bg-card;
+  border-bottom: 1rpx solid $color-border;
+  position: relative;
+  z-index: 1;
 }
 .birth-bar {
   display: flex;
@@ -719,16 +1006,16 @@ messages.value.push({
   gap: 16rpx;
 }
 .birth-icon {
-  color: #06B6D4;
+  color: $color-vermilion;
   font-size: 28rpx;
 }
 .birth-summary {
-  color: #E2E8F0;
+  color: $color-ink;
   font-size: 26rpx;
   letter-spacing: 0.05em;
 }
 .arrow {
-  color: #64748B;
+  color: $color-ink-lighter;
   font-size: 22rpx;
 }
 .birth-form {
@@ -743,7 +1030,7 @@ messages.value.push({
 .label {
   width: 140rpx;
   font-size: 24rpx;
-  color: #64748B;
+  color: $color-ink-lighter;
 }
 .picker {
   flex: 1;
@@ -751,22 +1038,22 @@ messages.value.push({
   align-items: center;
   justify-content: space-between;
   padding: 18rpx 24rpx;
-  background: rgba(15, 11, 30, 0.6);
+  background: $color-bg-warm;
   border-radius: 20rpx;
-  border: 1rpx solid rgba(124, 58, 237, 0.2);
+  border: 1rpx solid $color-border;
 }
 .picker-text {
   font-size: 26rpx;
-  color: #E2E8F0;
+  color: $color-ink;
 }
 .picker-icon {
-  color: #64748B;
+  color: $color-ink-lighter;
   font-size: 28rpx;
 }
 .seg-group {
   flex: 1;
   display: flex;
-  border: 1rpx solid rgba(124, 58, 237, 0.2);
+  border: 1rpx solid $color-border;
   border-radius: 20rpx;
   overflow: hidden;
 }
@@ -775,16 +1062,16 @@ messages.value.push({
   text-align: center;
   padding: 16rpx 0;
   font-size: 26rpx;
-  color: #94A3B8;
-  background: rgba(124, 58, 237, 0.06);
+  color: $color-ink-light;
+  background: $color-bg-warm;
 }
 .seg.active {
-  background: rgba(124, 58, 237, 0.25);
-  color: #C4B5FD;
+  background: rgba(44, 44, 44, 0.08);
+  color: $color-primary;
 }
 .legal-link {
   font-size: 22rpx;
-  color: #94A3B8;
+  color: $color-ink-light;
   margin-top: 8rpx;
 }
 
@@ -795,6 +1082,8 @@ messages.value.push({
   overflow-x: hidden;
   width: 100%;
   box-sizing: border-box;
+  position: relative;
+  z-index: 1;
 }
 .empty-state {
   display: flex;
@@ -807,24 +1096,24 @@ messages.value.push({
   height: 128rpx;
   line-height: 128rpx;
   text-align: center;
-  background: linear-gradient(135deg, #7C3AED 0%, #8B5CF6 100%);
-  color: #ffffff;
+  background: $color-primary;
+  color: $color-bg;
   border-radius: 50%;
   font-size: 56rpx;
   font-weight: 600;
   margin-bottom: 24rpx;
-  box-shadow: 0 0 40rpx rgba(124, 58, 237, 0.3);
+  border: 1rpx solid $color-primary;
 }
 .empty-title {
   font-size: 34rpx;
   font-weight: 600;
-  color: #E2E8F0;
+  color: $color-ink;
   margin-bottom: 12rpx;
   letter-spacing: 0.05em;
 }
 .empty-desc {
   font-size: 24rpx;
-  color: #64748B;
+  color: $color-ink-lighter;
 }
 
 .examples {
@@ -833,7 +1122,7 @@ messages.value.push({
 .examples-title {
   display: block;
   font-size: 22rpx;
-  color: #64748B;
+  color: $color-ink-lighter;
   margin-bottom: 16rpx;
 }
 .examples-list {
@@ -845,9 +1134,9 @@ messages.value.push({
   display: inline-block;
   padding: 12rpx 24rpx;
   font-size: 24rpx;
-  color: #94A3B8;
-  background: rgba(124, 58, 237, 0.1);
-  border: 1rpx solid rgba(124, 58, 237, 0.2);
+  color: $color-ink-light;
+  background: rgba(44, 44, 44, 0.04);
+  border: 1rpx solid $color-border;
   border-radius: 28rpx;
 }
 
@@ -870,15 +1159,18 @@ messages.value.push({
   height: 64rpx;
   line-height: 64rpx;
   text-align: center;
-  background: linear-gradient(135deg, #7C3AED 0%, #8B5CF6 100%);
-  color: #ffffff;
+  background: $color-primary;
+  color: $color-bg;
   border-radius: 50%;
   font-size: 24rpx;
   font-weight: 600;
-  box-shadow: 0 0 24rpx rgba(124, 58, 237, 0.3);
+  border: 1rpx solid $color-primary;
+  position: relative;
+  z-index: 2;
 }
 .msg.user .avatar {
-  background: linear-gradient(135deg, #6D28D9 0%, #5B21B6 100%);
+  background: $color-vermilion;
+  border-color: $color-vermilion;
 }
 .msg-body {
   flex: 1;
@@ -886,6 +1178,8 @@ messages.value.push({
   max-width: calc(100% - 80rpx);
   display: flex;
   flex-direction: column;
+  overflow-x: hidden;
+  box-sizing: border-box;
 }
 .msg.user .msg-body {
   align-items: flex-end;
@@ -897,35 +1191,37 @@ messages.value.push({
   line-height: 1.6;
   word-break: break-all;
   overflow-wrap: break-word;
-  background: rgba(30, 22, 56, 0.8);
-  backdrop-filter: blur(16rpx);
-  -webkit-backdrop-filter: blur(16rpx);
-  border: 1rpx solid rgba(124, 58, 237, 0.1);
-  color: #E2E8F0;
+  background: $color-bg-card;
+  border: 1rpx solid $color-border;
+  color: $color-ink;
+  width: 100%;
   max-width: 100%;
   box-sizing: border-box;
   overflow: hidden;
+  box-shadow: $shadow-sm;
 }
 .msg.user .msg-text {
-  background: linear-gradient(135deg, #6D28D9 0%, #7C3AED 100%);
+  background: $color-primary;
   border-radius: 28rpx 8rpx 28rpx 28rpx;
-  color: #ffffff;
+  color: $color-bg;
   border: none;
 }
 .msg-text.thinking { opacity: 0.7; }
-.typing { color: #94A3B8; }
+.typing { color: $color-ink-light; }
 
 .report-bar {
   margin-top: 16rpx;
   display: flex;
   gap: 16rpx;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 .report-btn {
   padding: 12rpx 24rpx;
   font-size: 22rpx;
-  color: #C4B5FD;
-  background: rgba(124, 58, 237, 0.1);
-  border: 1rpx solid rgba(124, 58, 237, 0.3);
+  color: $color-primary;
+  background: rgba(44, 44, 44, 0.04);
+  border: 1rpx solid $color-border;
   border-radius: 20rpx;
 }
 
@@ -933,19 +1229,19 @@ messages.value.push({
 .input-bar {
   display: flex;
   align-items: flex-end;
-  padding: 20rpx 32rpx;
-  background: rgba(30, 22, 56, 0.8);
-  backdrop-filter: blur(24rpx);
-  -webkit-backdrop-filter: blur(24rpx);
-  border-top: 1rpx solid rgba(124, 58, 237, 0.1);
-  padding-bottom: calc(20rpx + env(safe-area-inset-bottom));
+  padding: 16rpx 32rpx 16rpx;
+  background: $color-bg-card;
+  border-top: 1rpx solid $color-border;
   gap: 16rpx;
+  position: relative;
+  z-index: 1;
+  margin-bottom: -16rpx;
 }
 .input-wrap {
   flex: 1;
-  background: rgba(15, 11, 30, 0.6);
+  background: $color-bg-warm;
   border-radius: 32rpx;
-  border: 1rpx solid rgba(124, 58, 237, 0.2);
+  border: 1rpx solid $color-border;
   padding: 8rpx 28rpx;
 }
 .input {
@@ -954,10 +1250,10 @@ messages.value.push({
   max-height: 200rpx;
   padding: 14rpx 0;
   font-size: 28rpx;
-  color: #E2E8F0;
+  color: $color-ink;
 }
 .input-placeholder {
-  color: #64748B;
+  color: $color-ink-lighter;
 }
 .send-btn {
   flex-shrink: 0;
@@ -965,13 +1261,13 @@ messages.value.push({
   height: 80rpx;
   line-height: 80rpx;
   text-align: center;
-  background: linear-gradient(135deg, #7C3AED 0%, #6D28D9 100%);
+  background: $color-primary;
   border-radius: 50%;
-  box-shadow: 0 0 32rpx rgba(124, 58, 237, 0.3);
+  border: 1rpx solid $color-primary;
 }
 .send-btn.disabled { opacity: 0.5; }
 .send-icon {
-  color: #ffffff;
+  color: $color-bg;
   font-size: 32rpx;
 }
 
@@ -982,6 +1278,8 @@ messages.value.push({
   box-sizing: border-box;
   padding: 24rpx 32rpx env(safe-area-inset-bottom);
   overflow-x: hidden;
+  position: relative;
+  z-index: 1;
 }
 .cases-header {
   display: flex;
@@ -999,13 +1297,13 @@ messages.value.push({
 .cases-title {
   font-size: 36rpx;
   font-weight: 600;
-  color: #FFFFFF;
+  color: $color-ink;
   letter-spacing: 2rpx;
 }
 .cases-sub {
   display: block;
   font-size: 22rpx;
-  color: #94A3B8;
+  color: $color-ink-light;
   margin-top: 4rpx;
 }
 .cases-add-btn {
@@ -1015,10 +1313,9 @@ messages.value.push({
   padding: 12rpx 28rpx;
   font-size: 26rpx;
   line-height: 1.2;
-  color: #FFFFFF;
-  background: linear-gradient(135deg, #7C3AED, #06B6D4);
+  color: $color-bg;
+  background: $color-primary;
   border-radius: 32rpx;
-  box-shadow: 0 4rpx 16rpx rgba(124, 58, 237, 0.35);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1032,16 +1329,16 @@ messages.value.push({
 }
 .cases-empty-icon {
   font-size: 96rpx;
-  color: #7C3AED;
-  opacity: 0.4;
+  color: $color-primary;
+  opacity: 0.3;
 }
 .cases-empty-text {
   font-size: 30rpx;
-  color: #C4B5FD;
+  color: $color-primary-light;
 }
 .cases-empty-hint {
   font-size: 24rpx;
-  color: #64748B;
+  color: $color-ink-lighter;
 }
 .cases-list {
   display: flex;
@@ -1055,13 +1352,14 @@ messages.value.push({
   min-width: 0;
   box-sizing: border-box;
   padding: 24rpx;
-  background: rgba(30, 22, 56, 0.6);
-  border: 1rpx solid rgba(124, 58, 237, 0.2);
+  background: $color-bg-card;
+  border: 1rpx solid $color-border;
   border-radius: 24rpx;
+  box-shadow: $shadow-sm;
 }
 .case-card.active {
-  border-color: #06B6D4;
-  box-shadow: 0 0 0 2rpx rgba(6, 182, 212, 0.3);
+  border-color: $color-vermilion;
+  box-shadow: 0 0 0 2rpx rgba(184, 72, 60, 0.15);
 }
 .case-head {
   display: flex;
@@ -1075,7 +1373,7 @@ messages.value.push({
   min-width: 0;
   font-size: 30rpx;
   font-weight: 500;
-  color: #FFFFFF;
+  color: $color-ink;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1084,15 +1382,15 @@ messages.value.push({
   flex: 0 0 auto;
   padding: 4rpx 16rpx;
   font-size: 22rpx;
-  color: #C4B5FD;
-  background: rgba(124, 58, 237, 0.2);
+  color: $color-primary;
+  background: rgba(44, 44, 44, 0.06);
   border-radius: 16rpx;
 }
 .case-birth {
   display: block;
   width: 100%;
   font-size: 24rpx;
-  color: #94A3B8;
+  color: $color-ink-light;
   font-family: monospace;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1107,8 +1405,8 @@ messages.value.push({
 .case-tag {
   padding: 4rpx 12rpx;
   font-size: 20rpx;
-  color: #94A3B8;
-  background: rgba(6, 182, 212, 0.1);
+  color: $color-vermilion;
+  background: rgba(184, 72, 60, 0.06);
   border-radius: 12rpx;
 }
 .case-actions {
@@ -1118,7 +1416,7 @@ messages.value.push({
   box-sizing: border-box;
   margin-top: 16rpx;
   padding-top: 16rpx;
-  border-top: 1rpx solid rgba(124, 58, 237, 0.1);
+  border-top: 1rpx solid $color-border;
 }
 .case-action {
   flex: 1;
@@ -1133,19 +1431,19 @@ messages.value.push({
   white-space: nowrap;
 }
 .case-action.view {
-  color: #FFFFFF;
-  background: linear-gradient(135deg, #7C3AED, #06B6D4);
+  color: $color-bg;
+  background: $color-primary;
 }
 .case-action.del {
-  color: #94A3B8;
-  background: rgba(124, 58, 237, 0.1);
+  color: $color-ink-light;
+  background: rgba(44, 44, 44, 0.04);
 }
 
 /* === 命例弹窗 === */
 .case-modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.65);
+  background: rgba(0, 0, 0, 0.5);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1156,8 +1454,8 @@ messages.value.push({
   max-width: 640rpx;
   max-height: 86vh;
   box-sizing: border-box;
-  background: linear-gradient(160deg, rgba(30, 22, 56, 0.98), rgba(15, 11, 30, 0.98));
-  border: 1rpx solid rgba(124, 58, 237, 0.3);
+  background: $color-bg;
+  border: 1rpx solid $color-border;
   border-radius: 32rpx;
   display: flex;
   flex-direction: column;
@@ -1170,17 +1468,17 @@ messages.value.push({
   width: 100%;
   box-sizing: border-box;
   padding: 28rpx 32rpx 16rpx;
-  border-bottom: 1rpx solid rgba(124, 58, 237, 0.15);
+  border-bottom: 1rpx solid $color-border;
 }
 .case-modal-title {
   font-size: 32rpx;
   font-weight: 600;
-  color: #FFFFFF;
+  color: $color-primary;
   letter-spacing: 2rpx;
 }
 .case-modal-close {
   font-size: 32rpx;
-  color: #94A3B8;
+  color: $color-ink-light;
   padding: 8rpx 16rpx;
 }
 .case-modal-body {
@@ -1197,7 +1495,7 @@ messages.value.push({
   box-sizing: border-box;
   padding: 20rpx 32rpx;
   padding-bottom: calc(20rpx + env(safe-area-inset-bottom));
-  border-top: 1rpx solid rgba(124, 58, 237, 0.15);
+  border-top: 1rpx solid $color-border;
 }
 .cm-btn {
   flex: 1;
@@ -1205,13 +1503,12 @@ messages.value.push({
   padding: 20rpx 0;
   font-size: 28rpx;
   border-radius: 24rpx;
-  color: #94A3B8;
-  background: rgba(124, 58, 237, 0.1);
+  color: $color-ink-light;
+  background: rgba(44, 44, 44, 0.04);
 }
 .cm-btn-primary {
-  background: linear-gradient(135deg, #7C3AED, #06B6D4);
-  color: #FFFFFF;
-  box-shadow: 0 4rpx 16rpx rgba(124, 58, 237, 0.4);
+  background: $color-primary;
+  color: $color-bg;
 }
 .cm-btn.disabled,
 .cm-btn-primary.disabled {
@@ -1228,7 +1525,7 @@ messages.value.push({
 .cm-label {
   flex: 0 0 120rpx;
   font-size: 26rpx;
-  color: #C4B5FD;
+  color: $color-primary;
 }
 .cm-input {
   flex: 1;
@@ -1238,11 +1535,11 @@ messages.value.push({
   height: 68rpx;
   line-height: 68rpx;
   padding: 0 20rpx;
-  background: rgba(124, 58, 237, 0.08);
-  border: 1rpx solid rgba(124, 58, 237, 0.2);
+  background: $color-bg-warm;
+  border: 1rpx solid $color-border;
   border-radius: 16rpx;
   font-size: 26rpx;
-  color: #FFFFFF;
+  color: $color-ink;
 }
 .cm-picker-wrap {
   flex: 1;
@@ -1256,16 +1553,16 @@ messages.value.push({
   height: 68rpx;
   line-height: 68rpx;
   padding: 0 20rpx;
-  background: rgba(124, 58, 237, 0.08);
-  border: 1rpx solid rgba(124, 58, 237, 0.2);
+  background: $color-bg-warm;
+  border: 1rpx solid $color-border;
   border-radius: 16rpx;
   font-size: 26rpx;
-  color: #FFFFFF;
+  color: $color-ink;
   overflow: hidden;
 }
 .cm-picker.selected {
-  border-color: #7C3AED;
-  background: rgba(124, 58, 237, 0.18);
+  border-color: $color-primary;
+  background: rgba(44, 44, 44, 0.06);
 }
 .cm-picker-text {
   display: block;
@@ -1279,7 +1576,7 @@ messages.value.push({
   flex: 1;
   min-width: 0;
   display: flex;
-  border: 1rpx solid rgba(124, 58, 237, 0.2);
+  border: 1rpx solid $color-border;
   border-radius: 16rpx;
   overflow: hidden;
 }
@@ -1288,11 +1585,116 @@ messages.value.push({
   text-align: center;
   padding: 16rpx 0;
   font-size: 26rpx;
-  color: #94A3B8;
-  background: rgba(124, 58, 237, 0.06);
+  color: $color-ink-light;
+  background: $color-bg-warm;
 }
 .cm-seg.active {
-  background: rgba(124, 58, 237, 0.25);
-  color: #C4B5FD;
+  background: rgba(44, 44, 44, 0.08);
+  color: $color-primary;
+}
+
+/* ============ 历史会话抽屉 ============ */
+.drawer-mask {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0, 0, 0, 0.4);
+  z-index: 1000;
+}
+.drawer-panel {
+  position: fixed;
+  top: 0; left: 0; bottom: 0;
+  width: 80%;
+  max-width: 600rpx;
+  background: $color-bg-warm;
+  display: flex;
+  flex-direction: column;
+  z-index: 1001;
+  box-shadow: 4rpx 0 24rpx rgba(0, 0, 0, 0.15);
+}
+.drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 30rpx 32rpx 20rpx;
+  border-bottom: 1rpx solid rgba(44, 44, 44, 0.1);
+}
+.drawer-title {
+  font-size: 34rpx;
+  font-weight: 600;
+  color: $color-primary;
+  font-family: 'STKaiti', 'KaiTi', serif;
+}
+.drawer-close {
+  font-size: 36rpx;
+  color: $color-ink-light;
+  padding: 8rpx 16rpx;
+}
+.drawer-loading, .drawer-empty {
+  padding: 60rpx 0;
+  text-align: center;
+  font-size: 26rpx;
+  color: $color-ink-light;
+}
+.drawer-list {
+  flex: 1;
+  padding: 12rpx 0;
+}
+.drawer-item {
+  padding: 24rpx 32rpx;
+  border-bottom: 1rpx solid rgba(44, 44, 44, 0.06);
+  transition: background 0.2s;
+}
+.drawer-item.active {
+  background: rgba(44, 44, 44, 0.04);
+}
+.drawer-item-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8rpx;
+}
+.drawer-item-title {
+  font-size: 28rpx;
+  color: $color-ink;
+  font-weight: 500;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.drawer-item-del {
+  font-size: 28rpx;
+  color: $color-ink-light;
+  padding: 4rpx 12rpx;
+}
+.drawer-item-msg {
+  display: block;
+  font-size: 24rpx;
+  color: $color-ink-light;
+  margin-bottom: 6rpx;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.drawer-item-meta {
+  display: flex;
+  justify-content: space-between;
+}
+.drawer-item-time, .drawer-item-count {
+  font-size: 22rpx;
+  color: $color-ink-light;
+}
+.drawer-footer {
+  padding: 20rpx 32rpx 30rpx;
+  border-top: 1rpx solid rgba(44, 44, 44, 0.08);
+}
+.drawer-new-btn {
+  display: block;
+  text-align: center;
+  padding: 18rpx 0;
+  font-size: 28rpx;
+  color: $color-bg-warm;
+  background: $color-primary;
+  border-radius: 12rpx;
 }
 </style>

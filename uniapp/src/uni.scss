@@ -1,75 +1,64 @@
 /**
  * uni.scss - 全局样式变量
- * 先知 - 玄幻科幻命理 App 品牌风格
- * 深空背景 + 紫蓝能量渐变 + 灵动光晕 + 未来感排版
+ * 先知 - 白底黑字水墨风格
+ * 宣纸白底 + 墨黑文字 + 朱砂点缀
  */
 
-/* === 品牌主色系（紫蓝能量） === */
-$color-primary: #7C3AED;
-$color-primary-light: #8B5CF6;
-$color-primary-lighter: #A78BFA;
-$color-primary-lightest: #C4B5FD;
-$color-primary-dark: #6D28D9;
-$color-primary-darker: #5B21B6;
+/* === 品牌主色系（墨色 - 深黑） === */
+$color-primary: #2C2C2C;
+$color-primary-light: #555555;
+$color-primary-lighter: #888888;
+$color-primary-lightest: #AAAAAA;
+$color-primary-dark: #1A1A1A;
+$color-primary-darker: #111111;
 
-/* === 能量青色（辅助色） === */
-$color-energy: #06B6D4;
-$color-energy-light: #22D3EE;
-$color-energy-lighter: #67E8F9;
-$color-energy-dark: #0891B2;
+/* === 墨色系（文字） === */
+$color-ink: #1A1A1A;
+$color-ink-light: #555555;
+$color-ink-lighter: #888888;
+$color-ink-lightest: #AAAAAA;
 
-/* === 星光白 === */
-$color-ink: #E2E8F0;
-$color-ink-light: #94A3B8;
-$color-ink-lighter: #64748B;
-$color-ink-lightest: #475569;
+/* === 朱砂红（点缀，用于警示/重要） === */
+$color-vermilion: #B8483C;
+$color-vermilion-light: #D45D4F;
 
-/* === 能量金（点缀）- 与 Web 端 accent gold 对齐 === */
-$color-gold: #d4af37;
-$color-gold-light: #f0d878;
-$color-gold-lighter: #FDE68A;
-
-/* === 灵动绿 === */
-$color-green: #10B981;
-$color-green-light: #34D399;
-$color-green-lighter: #A7F3D0;
-
-/* === 恋爱粉（love 页面专用） === */
-$color-pink: #EC4899;
+/* === 宣纸色（背景） === */
+$color-paper: #FAFAF8;
+$color-paper-warm: #F5F3EF;
+$color-paper-dark: #E8E4DC;
 
 /* === 状态色 === */
-$state-success: #10B981;
-$state-warning: #F59E0B;
-$state-error: #EF4444;
-$state-info: #06B6D4;
+$state-success: #4A7A3A;
+$state-warning: #8B7D3A;
+$state-error: #B8483C;
+$state-info: #3A6B7A;
 
-/* === 中性色（深空系）- 核心背景/卡片/边框与 Web 端对齐 === */
-$color-bg: #050810;
-$color-bg-warm: #0a0f1a;
-$color-bg-card: rgba(15, 21, 32, 0.85);
-$color-bg-elevated: rgba(40, 30, 72, 0.9);
-$color-bg-inverse: #E2E8F0;
-$color-border: rgba(138, 180, 220, 0.12);
-$color-border-light: rgba(138, 180, 220, 0.08);
-$color-surface-divider: rgba(148, 163, 184, 0.12);
+/* === 中性色（白底系） === */
+$color-bg: #FAFAF8;
+$color-bg-warm: #F5F3EF;
+$color-bg-card: #FFFFFF;
+$color-bg-elevated: #FFFFFF;
+$color-bg-inverse: #1A1A1A;
+$color-border: rgba(0, 0, 0, 0.08);
+$color-border-light: rgba(0, 0, 0, 0.04);
+$color-surface-divider: rgba(0, 0, 0, 0.06);
 
-/* === 阴影（能量光晕） === */
-$shadow-sm: 0 2rpx 6rpx rgba(124, 58, 237, 0.08);
-$shadow-md: 0 8rpx 24rpx rgba(124, 58, 237, 0.12);
-$shadow-elevated: 0 16rpx 64rpx rgba(124, 58, 237, 0.18);
-$glow-primary: 0 0 40rpx rgba(124, 58, 237, 0.3);
-$glow-energy: 0 0 40rpx rgba(6, 182, 212, 0.3);
-$glow-gold: 0 0 32rpx rgba(212, 175, 55, 0.25);
+/* === 阴影（水墨） === */
+$shadow-sm: 0 2rpx 8rpx rgba(0, 0, 0, 0.06);
+$shadow-md: 0 8rpx 24rpx rgba(0, 0, 0, 0.08);
+$shadow-elevated: 0 16rpx 48rpx rgba(0, 0, 0, 0.1);
+$glow-primary: 0 0 32rpx rgba(44, 44, 44, 0.08);
+$glow-gold: 0 0 24rpx rgba(44, 44, 44, 0.06);
 
-/* === 字体（未来感） === */
-$font-family-display: 'Orbitron', 'Rajdhani', 'PingFang SC', 'Noto Sans SC', sans-serif;
-$font-family-body: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', 'Noto Sans SC', sans-serif;
+/* === 字体（书法感） === */
+$font-family-display: 'STKaiti', 'KaiTi', 'PingFang SC', 'Noto Serif SC', serif;
+$font-family-body: 'PingFang SC', 'Microsoft YaHei', 'Noto Sans SC', sans-serif;
 
 /* === 圆角 === */
-$radius-sm: 12rpx;
-$radius-md: 20rpx;
-$radius-lg: 28rpx;
-$radius-xl: 32rpx;
+$radius-sm: 8rpx;
+$radius-md: 12rpx;
+$radius-lg: 16rpx;
+$radius-xl: 20rpx;
 $radius-full: 9999rpx;
 
 /* === 间距 === */
@@ -83,12 +72,12 @@ $spacing-2xl: 64rpx;
 
 /* === 旧变量兼容（保持 uni-app 内置组件主题色） === */
 $uni-color-primary: $color-primary;
-$uni-color-success: $color-green;
-$uni-color-warning: $color-gold;
+$uni-color-success: $state-success;
+$uni-color-warning: $color-primary;
 $uni-color-error: $state-error;
 
 $uni-text-color: $color-ink;
-$uni-text-color-inverse: #ffffff;
+$uni-text-color-inverse: #FAFAF8;
 $uni-text-color-grey: $color-ink-light;
 $uni-text-color-placeholder: $color-ink-lighter;
 

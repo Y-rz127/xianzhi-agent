@@ -372,3 +372,79 @@ export async function getSessionMessages(type: "xianzhi" | "love", id: string): 
     }))
   } catch { return [] }
 }
+
+// ========== 塔罗占卜 ==========
+
+export type TarotSpread = "daily" | "three_card" | "relationship"
+
+export interface TarotDrawnCard {
+  name: string
+  nameEn: string
+  emblem: string
+  arcana: string
+  suit: string
+  isReversed: boolean
+  meaning: string
+}
+
+export interface TarotInterpretCallbacks {
+  onMessage?: (chunk: string) => void
+  onDone?: () => void
+  onError?: (err: string) => void
+}
+
+/** 通过 WebSocket 抽牌（后端 Fisher-Yates 洗牌，不可预测） */
+export function drawTarotCardsWS(
+  spread: TarotSpread,
+  cb: { onCards?: (cards: TarotDrawnCard[]) => void; onError?: (err: string) => void }
+): WebSocket {
+  const wsBase = API_BASE.replace(/^http/, "ws")
+  const url = `${wsBase}/ai/tarot/ws`
+  const ws = new WebSocket(url)
+
+  ws.onopen = () => {
+    ws.send(JSON.stringify({ action: "draw", spread }))
+  }
+  ws.onmessage = (e) => {
+    try {
+      const data = JSON.parse(e.data)
+      if (data.type === "cards") cb.onCards?.(data.data || [])
+      else if (data.type === "error") cb.onError?.(data.data || "抽牌失败")
+    } catch {
+      cb.onError?.("解析消息失败")
+    }
+  }
+  ws.onerror = () => cb.onError?.("连接错误")
+  return ws
+}
+
+/** 通过 WebSocket 获取 AI 流式解读 */
+export function interpretTarotWS(
+  opts: { spread: TarotSpread; question?: string; cards: TarotDrawnCard[] },
+  cb: TarotInterpretCallbacks
+): WebSocket {
+  const wsBase = API_BASE.replace(/^http/, "ws")
+  const url = `${wsBase}/ai/tarot/ws`
+  const ws = new WebSocket(url)
+
+  ws.onopen = () => {
+    ws.send(JSON.stringify({
+      action: "interpret",
+      spread: opts.spread,
+      question: opts.question || "",
+      cards: opts.cards,
+    }))
+  }
+  ws.onmessage = (e) => {
+    try {
+      const data = JSON.parse(e.data)
+      if (data.type === "message") cb.onMessage?.(data.data)
+      else if (data.type === "done") cb.onDone?.()
+      else if (data.type === "error") cb.onError?.(data.data || "解读失败")
+    } catch {
+      cb.onError?.("解析消息失败")
+    }
+  }
+  ws.onerror = () => cb.onError?.("连接错误")
+  return ws
+}

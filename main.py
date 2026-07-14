@@ -18,6 +18,7 @@ from app.observability import init_observability, record_request
 from app.logger import log
 from app.rag.vector_store import knowledge_base
 from app.rag.rag_chain import RagChatChain
+from app.tarot_app import TarotApp
 from app.tools.mcp_client import mcp_manager
 
 
@@ -61,7 +62,10 @@ async def lifespan(app: FastAPI):
     # 7. 恋爱大师分支
     love_app = LoveApp(chat_model=chat_model, memory=memory)
 
-    set_instances(xianzhi, love_app, rag_chain)
+    # 8. 塔罗占卜
+    tarot_app = TarotApp(chat_model=chat_model)
+
+    set_instances(xianzhi, love_app, rag_chain, tarot_app)
 
     # 暖启动：预热排盘缓存
     log.info("正在预热排盘缓存...")
