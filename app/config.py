@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     # 大模型
+    dashscope_url: str = Field(default="",alias="DASHSCOPE_BASE_URL")
     dashscope_api_key: str = Field(default="", alias="DASHSCOPE_API_KEY")
     dashscope_model: str = Field(default="qwen-plus", alias="DASHSCOPE_MODEL")
 

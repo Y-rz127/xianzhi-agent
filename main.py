@@ -31,7 +31,7 @@ async def lifespan(app: FastAPI):
     # extra_body: 禁用 Qwen3 推理模型的 thinking 模式，避免 <think> 标签导致内容重复
     chat_model = ChatOpenAI(
         model=settings.dashscope_model,
-        base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+        base_url=settings.dashscope_url,
         api_key=settings.dashscope_api_key,
         temperature=0.7,
         extra_body={"enable_thinking": False},
