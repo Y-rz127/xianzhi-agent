@@ -257,6 +257,18 @@ export const getSessionMessages = async (type: 'xianzhi' | 'love', id: string): 
   }))
 }
 
+export interface BirthInfo { time: string | null; gender: string | null }
+
+/** 从会话历史中的排盘工具调用提取出生信息（支持农历/节日/时辰等自然语言输入场景）。 */
+export const getSessionBirthInfo = async (id: string): Promise<BirthInfo> => {
+  if (!id) return { time: null, gender: null }
+  try {
+    return await get<BirthInfo>(`/ai/xianzhi/sessions/${id}/birth-info`)
+  } catch {
+    return { time: null, gender: null }
+  }
+}
+
 /* ============ 文本解析工具（与 Web 端 frontend/src/api 一致） ============ */
 
 export interface Pillar { name: string; ganzhi: string; nayin: string }

@@ -3,7 +3,7 @@
     <view class="modal-content" @tap.stop>
       <!-- 头部 -->
       <view class="modal-header">
-        <text class="modal-title">命盘详情</text>
+        <text class="modal-title display-font">命盘详情</text>
         <text class="modal-close" @tap="close">✕</text>
       </view>
 
@@ -213,12 +213,15 @@ async function generateReport() {
 </script>
 
 <style lang="scss" scoped>
+/* === 水墨风格：宣纸白底 + 墨黑文字 + 朱砂点缀 === */
+.display-font {
+  font-family: $font-family-display;
+}
+
 .modal-overlay {
   position: fixed;
   top: 0; left: 0; right: 0; bottom: 0;
-  background: rgba(15, 11, 30, 0.85);
-  backdrop-filter: blur(20rpx);
-  -webkit-backdrop-filter: blur(20rpx);
+  background: rgba(26, 26, 26, 0.5);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -227,13 +230,13 @@ async function generateReport() {
 .modal-content {
   width: 92%;
   max-height: 85vh;
-  background: linear-gradient(180deg, #1E1638 0%, #160F2E 100%);
-  border: 1rpx solid rgba(124, 58, 237, 0.3);
-  border-radius: 32rpx;
+  background: $color-paper;
+  border: 1rpx solid $color-border;
+  border-radius: 24rpx;
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  box-shadow: 0 24rpx 64rpx rgba(0, 0, 0, 0.6), 0 0 64rpx rgba(124, 58, 237, 0.2);
+  box-shadow: $shadow-elevated;
   box-sizing: border-box;
 }
 .modal-header {
@@ -241,18 +244,20 @@ async function generateReport() {
   justify-content: space-between;
   align-items: center;
   padding: 28rpx 32rpx;
-  border-bottom: 1rpx solid rgba(124, 58, 237, 0.2);
+  border-bottom: 1rpx solid $color-border;
+  background: $color-paper-warm;
 }
 .modal-title {
   font-size: 32rpx;
   font-weight: 600;
-  color: #FFFFFF;
-  letter-spacing: 4rpx;
+  color: $color-ink;
+  letter-spacing: 6rpx;
 }
 .modal-close {
   font-size: 36rpx;
-  color: #C4B5FD;
+  color: $color-ink-light;
   padding: 8rpx 16rpx;
+  line-height: 1;
 }
 .modal-body {
   padding: 28rpx 32rpx;
@@ -260,6 +265,7 @@ async function generateReport() {
   box-sizing: border-box;
   overflow-x: hidden;
   width: 100%;
+  background: $color-paper;
 }
 
 .section {
@@ -268,12 +274,24 @@ async function generateReport() {
 .section-title {
   display: block;
   font-size: 26rpx;
-  color: #06B6D4;
+  color: $color-ink;
   letter-spacing: 6rpx;
   font-weight: 600;
   margin-bottom: 20rpx;
   padding-bottom: 12rpx;
-  border-bottom: 1rpx solid rgba(124, 58, 237, 0.15);
+  border-bottom: 1rpx solid $color-border;
+  position: relative;
+}
+/* 标题左侧朱砂竖线 */
+.section-title::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  bottom: 12rpx;
+  width: 6rpx;
+  height: 24rpx;
+  background: $color-vermilion;
+  border-radius: 3rpx;
 }
 
 /* 四柱 */
@@ -285,22 +303,23 @@ async function generateReport() {
 .pillar-card {
   flex: 1;
   min-width: 0;
-  background: rgba(124, 58, 237, 0.06);
-  border-radius: 16rpx;
+  background: $color-bg-card;
+  border-radius: 12rpx;
   padding: 20rpx 8rpx;
   text-align: center;
-  border: 1rpx solid rgba(124, 58, 237, 0.18);
+  border: 1rpx solid $color-border;
   box-sizing: border-box;
 }
 .pillar-card.day-master {
-  background: linear-gradient(135deg, rgba(245, 158, 11, 0.12), rgba(124, 58, 237, 0.08));
-  border-color: rgba(245, 158, 11, 0.4);
-  box-shadow: 0 0 16rpx rgba(245, 158, 11, 0.15);
+  background: $color-paper-warm;
+  border-color: $color-vermilion;
+  border-width: 2rpx;
+  box-shadow: 0 2rpx 8rpx rgba(184, 72, 60, 0.12);
 }
 .pillar-name {
   display: block;
   font-size: 20rpx;
-  color: #94A3B8;
+  color: $color-ink-light;
   margin-bottom: 12rpx;
   letter-spacing: 2rpx;
 }
@@ -308,23 +327,25 @@ async function generateReport() {
   display: block;
   font-size: 40rpx;
   font-weight: bold;
-  color: #FFFFFF;
+  color: $color-ink;
+  font-family: $font-family-display;
   letter-spacing: 4rpx;
   margin-bottom: 4rpx;
 }
-.pillar-card.day-master .pillar-gan { color: #F59E0B; }
+.pillar-card.day-master .pillar-gan { color: $color-vermilion; }
 .pillar-zhi {
   display: block;
   font-size: 32rpx;
-  color: #C4B5FD;
+  color: $color-ink;
+  font-family: $font-family-display;
   margin-bottom: 8rpx;
   letter-spacing: 4rpx;
 }
-.pillar-card.day-master .pillar-zhi { color: #F59E0B; }
+.pillar-card.day-master .pillar-zhi { color: $color-vermilion; }
 .pillar-nayin {
   display: block;
   font-size: 20rpx;
-  color: #6B7280;
+  color: $color-ink-lighter;
 }
 
 /* 五行 */
@@ -345,13 +366,13 @@ async function generateReport() {
   height: 140rpx;
   display: flex;
   align-items: flex-end;
-  background: rgba(124, 58, 237, 0.06);
-  border-radius: 12rpx 12rpx 0 0;
+  background: $color-paper-warm;
+  border-radius: 8rpx 8rpx 0 0;
   overflow: hidden;
 }
 .wuxing-bar {
   width: 100%;
-  border-radius: 12rpx 12rpx 0 0;
+  border-radius: 8rpx 8rpx 0 0;
   min-height: 6rpx;
 }
 .wuxing-label {
@@ -361,7 +382,7 @@ async function generateReport() {
 }
 .wuxing-count {
   font-size: 22rpx;
-  color: #94A3B8;
+  color: $color-ink-light;
 }
 
 /* 大运 */
@@ -373,11 +394,11 @@ async function generateReport() {
 }
 .dayun-card {
   width: calc(25% - 9rpx);
-  background: rgba(124, 58, 237, 0.06);
-  border-radius: 16rpx;
+  background: $color-bg-card;
+  border-radius: 12rpx;
   padding: 16rpx 8rpx;
   text-align: center;
-  border: 1rpx solid rgba(124, 58, 237, 0.18);
+  border: 1rpx solid $color-border;
   box-sizing: border-box;
   min-width: 0;
 }
@@ -385,20 +406,21 @@ async function generateReport() {
   display: block;
   font-size: 30rpx;
   font-weight: bold;
-  color: #06B6D4;
+  color: $color-ink;
+  font-family: $font-family-display;
   margin-bottom: 6rpx;
   letter-spacing: 2rpx;
 }
 .dayun-range {
   display: block;
   font-size: 20rpx;
-  color: #94A3B8;
+  color: $color-ink-light;
   margin-bottom: 2rpx;
 }
 .dayun-age {
   display: block;
   font-size: 20rpx;
-  color: #6B7280;
+  color: $color-ink-lighter;
 }
 
 .consult-grid {
@@ -409,37 +431,39 @@ async function generateReport() {
 .consult-card {
   flex: 1;
   min-width: 0;
-  background: rgba(124, 58, 237, 0.06);
-  border-radius: 16rpx;
+  background: $color-bg-card;
+  border-radius: 12rpx;
   padding: 16rpx 12rpx;
-  border: 1rpx solid rgba(124, 58, 237, 0.18);
+  border: 1rpx solid $color-border;
   box-sizing: border-box;
 }
 .consult-label {
   display: block;
   font-size: 20rpx;
-  color: #94A3B8;
+  color: $color-ink-light;
   margin-bottom: 6rpx;
 }
 .consult-main {
   display: block;
   font-size: 28rpx;
-  color: #F59E0B;
+  color: $color-vermilion;
   font-weight: 700;
+  font-family: $font-family-display;
   margin-bottom: 4rpx;
 }
 .consult-sub {
   display: block;
   font-size: 20rpx;
-  color: #94A3B8;
+  color: $color-ink-light;
 }
 .consult-note {
   margin-top: 12rpx;
   padding: 14rpx 16rpx;
-  background: rgba(245, 158, 11, 0.06);
-  border: 1rpx solid rgba(245, 158, 11, 0.16);
-  border-radius: 16rpx;
-  color: #C4B5FD;
+  background: $color-paper-warm;
+  border: 1rpx solid $color-border;
+  border-left: 4rpx solid $color-vermilion;
+  border-radius: 8rpx;
+  color: $color-ink;
   font-size: 22rpx;
   line-height: 1.55;
 }
@@ -453,9 +477,9 @@ async function generateReport() {
 .liunian-pill {
   width: calc(33.33% - 7rpx);
   padding: 12rpx 10rpx;
-  background: rgba(124, 58, 237, 0.06);
-  border: 1rpx solid rgba(124, 58, 237, 0.18);
-  border-radius: 14rpx;
+  background: $color-bg-card;
+  border: 1rpx solid $color-border;
+  border-radius: 10rpx;
   box-sizing: border-box;
   min-width: 0;
 }
@@ -465,9 +489,9 @@ async function generateReport() {
   display: block;
   text-align: center;
 }
-.ln-year { font-size: 20rpx; color: #94A3B8; }
-.ln-gz { font-size: 26rpx; color: #FFFFFF; font-weight: 700; margin: 4rpx 0; }
-.ln-dy { font-size: 20rpx; color: #06B6D4; }
+.ln-year { font-size: 20rpx; color: $color-ink-light; }
+.ln-gz { font-size: 26rpx; color: $color-ink; font-family: $font-family-display; font-weight: 700; margin: 4rpx 0; }
+.ln-dy { font-size: 20rpx; color: $color-ink-light; }
 .warning-list {
   display: flex;
   flex-direction: column;
@@ -476,10 +500,11 @@ async function generateReport() {
 }
 .warning-item {
   padding: 12rpx 14rpx;
-  background: rgba(245, 158, 11, 0.06);
-  border: 1rpx solid rgba(245, 158, 11, 0.16);
-  border-radius: 14rpx;
-  color: #FDE68A;
+  background: $color-paper-warm;
+  border: 1rpx solid $color-border;
+  border-left: 4rpx solid $state-warning;
+  border-radius: 8rpx;
+  color: $color-ink;
   font-size: 22rpx;
   line-height: 1.5;
 }
@@ -492,16 +517,16 @@ async function generateReport() {
 }
 .shensha-item {
   width: 48%;
-  background: rgba(124, 58, 237, 0.06);
-  border-radius: 16rpx;
+  background: $color-bg-card;
+  border-radius: 12rpx;
   padding: 16rpx;
-  border: 1rpx solid rgba(124, 58, 237, 0.18);
+  border: 1rpx solid $color-border;
   box-sizing: border-box;
 }
 .shensha-name {
   display: block;
   font-size: 24rpx;
-  color: #F59E0B;
+  color: $color-vermilion;
   font-weight: 600;
   margin-bottom: 6rpx;
   letter-spacing: 2rpx;
@@ -509,7 +534,7 @@ async function generateReport() {
 .shensha-desc {
   display: block;
   font-size: 22rpx;
-  color: #C4B5FD;
+  color: $color-ink-light;
   line-height: 1.5;
 }
 
@@ -517,20 +542,20 @@ async function generateReport() {
 .report-loading {
   padding: 32rpx;
   text-align: center;
-  color: #06B6D4;
+  color: $color-ink-light;
   font-size: 26rpx;
   letter-spacing: 2rpx;
 }
 .report-placeholder {
   padding: 32rpx;
   text-align: center;
-  color: #6B7280;
+  color: $color-ink-lighter;
   font-size: 24rpx;
 }
 .report-content {
-  background: rgba(124, 58, 237, 0.06);
-  border: 1rpx solid rgba(124, 58, 237, 0.18);
-  border-radius: 16rpx;
+  background: $color-paper-warm;
+  border: 1rpx solid $color-border;
+  border-radius: 12rpx;
   padding: 24rpx;
 }
 
@@ -540,27 +565,27 @@ async function generateReport() {
   flex-wrap: wrap;
   gap: 12rpx;
   padding: 20rpx 32rpx 24rpx;
-  border-top: 1rpx solid rgba(124, 58, 237, 0.2);
+  border-top: 1rpx solid $color-border;
   flex-shrink: 0;
+  background: $color-paper-warm;
 }
 .btn {
   flex: 1 1 calc(50% - 6rpx);
   min-width: 0;
   text-align: center;
   padding: 16rpx 12rpx;
-  background: rgba(196, 181, 253, 0.08);
-  border: 1rpx solid rgba(124, 58, 237, 0.2);
-  border-radius: 20rpx;
+  background: $color-bg-card;
+  border: 1rpx solid $color-border;
+  border-radius: 16rpx;
   font-size: 24rpx;
-  color: #C4B5FD;
+  color: $color-ink;
   letter-spacing: 2rpx;
   box-sizing: border-box;
 }
 .btn-primary {
-  background: linear-gradient(135deg, #7C3AED, #06B6D4);
-  color: #FFFFFF;
-  border-color: transparent;
-  box-shadow: 0 4rpx 16rpx rgba(124, 58, 237, 0.5);
+  background: $color-vermilion;
+  color: $color-paper;
+  border-color: $color-vermilion;
 }
 .btn.disabled { opacity: 0.4; }
 </style>

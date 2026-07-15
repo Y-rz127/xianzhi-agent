@@ -291,8 +291,8 @@ def get_messages(session_id: str) -> list:
             # 过滤：工具调用结果、推理片段、系统消息
             if raw_role in ("tool", "system"):
                 continue
-            # 过滤 next_step_prompt 占位消息
-            if raw_role == "human" and "根据用户需求，主动选择最合适的工具" in content:
+            # 过滤 next_step_prompt 占位消息（tool_call_agent 注入的 HumanMessage）
+            if raw_role == "human" and "根据用户需求选择最合适的工具" in content:
                 continue
             # 过滤无内容的空消息
             if not content.strip():
@@ -308,3 +308,44 @@ def get_messages(session_id: str) -> list:
     except Exception as e:
         log.exception("获取会话消息失败: {}", session_id)
         return []
+
+
+# 排盘工具名集合（与 app.agent.xianzhi._BAZI_TOOLS 保持一致）
+_BAZI_TOOL_NAMES = {
+    "bazi_chart", "bazi_analysis", "bazi_dayun", "bazi_liunian",
+    "bazi_liuyue", "bazi_liuri", "bazi_hehun", "bazi_full",
+}
+
+
+def get_birth_info_from_session(session_id: str) -> dict | None:
+    """从会话消息历史中的排盘工具调用参数提取出生信息。
+
+    用户可能用农历/节日/时辰等自然语言输入（如"2004年端午节 辰时 男"），
+    前端正则无法提取。此函数从 AIMessage 的 tool_calls 中提取 LLM 已解析的
+    标准 birth_time/gender，供前端从历史会话恢复时使用。
+    """
+    try:
+        session_uuid = _resolve_session_uuid(session_id)
+        conn = _get_global_conn()
+        cur = conn.execute("""
+            SELECT message FROM message_store
+            WHERE session_id = %s ORDER BY created_at
+        """, (session_uuid,))
+        rows = cur.fetchall()
+        for row in reversed(rows):  # 逆序：取最近一次排盘
+            msg = row[0]
+            if msg.get("type") != "ai":
+                continue
+            tool_calls = msg.get("data", {}).get("tool_calls", []) or []
+            for tc in tool_calls:
+                name = tc.get("name", "")
+                args = tc.get("args", {}) or {}
+                if name in _BAZI_TOOL_NAMES:
+                    bt = args.get("birth_time")
+                    gd = args.get("gender")
+                    if bt and gd:
+                        return {"time": bt, "gender": gd}
+        return None
+    except Exception as e:
+        log.warning("提取会话出生信息失败 {} : {}", session_id, e)
+        return None
