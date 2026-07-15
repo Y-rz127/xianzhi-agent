@@ -269,20 +269,39 @@ def clear_session(session_id: str):
 
 
 def get_messages(session_id: str) -> list:
-    """获取指定会话的所有消息。"""
+    """获取指定会话的所有消息。
+
+    返回前端期望的 role 格式：user / assistant。
+    过滤掉 tool/system 类型消息（工具调用结果、推理片段）以及
+    tool_call_agent.think 注入的 next_step_prompt 占位 HumanMessage，
+    防止历史会话恢复时显示无效内容。
+    """
     try:
         session_uuid = _resolve_session_uuid(session_id)
         conn = _get_global_conn()
         cur = conn.execute("""
-            SELECT message, created_at FROM message_store 
+            SELECT message, created_at FROM message_store
             WHERE session_id = %s ORDER BY created_at
         """, (session_uuid,))
         messages = []
         for row in cur:
             msg = row[0]
+            content = msg.get("data", {}).get("content", "") or ""
+            raw_role = msg.get("type", "").replace("_message", "")
+            # 过滤：工具调用结果、推理片段、系统消息
+            if raw_role in ("tool", "system"):
+                continue
+            # 过滤 next_step_prompt 占位消息
+            if raw_role == "human" and "根据用户需求，主动选择最合适的工具" in content:
+                continue
+            # 过滤无内容的空消息
+            if not content.strip():
+                continue
+            # 映射 role 为前端期望的格式
+            role = "user" if raw_role == "human" else "assistant"
             messages.append({
-                "role": msg.get("type", "").replace("_message", ""),
-                "content": msg.get("data", {}).get("content", ""),
+                "role": role,
+                "content": content,
                 "time": str(row[1]) if row[1] else "",
             })
         return messages

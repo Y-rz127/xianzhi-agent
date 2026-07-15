@@ -248,8 +248,10 @@ export const getSessionMessages = async (type: 'xianzhi' | 'love', id: string): 
   if (!id) return []
   const endpoint = type === 'xianzhi' ? 'xianzhi' : 'love_app'
   const data = await get<any[]>(`/ai/${endpoint}/sessions/${id}/messages`)
+  // 后端 get_messages 已统一返回 'user'/'assistant'，并已过滤 tool/system/next_step_prompt
+  // 前端只需直接透传，避免二次映射导致 user 被错分成 assistant
   return (data || []).map((m: any) => ({
-    role: m.role === 'user' ? 'user' : 'assistant',
+    role: (m.role === 'user' || m.role === 'assistant') ? m.role : 'assistant',
     content: typeof m.content === 'string' ? m.content : '',
     time: m.time || undefined,
   }))

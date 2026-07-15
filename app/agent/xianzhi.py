@@ -487,10 +487,22 @@ class Xianzhi(ToolCallAgent):
         self._history_len = len(self.message_list)
 
     def _persist_history(self):
-        """仅持久化本轮新增的消息，避免重复追加历史导致消息指数级重复。"""
+        """仅持久化本轮新增的消息，避免重复追加历史导致消息指数级重复。
+        同时过滤掉 next_step_prompt 占位消息（tool_call_agent.think 注入的 HumanMessage），
+        防止历史会话恢复时把"工具指引"内容当作用户消息显示在左边。
+        """
+        from app.agent.tool_call_agent import ToolCallAgent
         new_messages = self.message_list[self._history_len:]
         if new_messages:
-            self._memory.add(self._conversation_id, new_messages)
+            # 过滤 next_step_prompt 注入的 HumanMessage（其内容以工具调度模板开头）
+            filtered = [
+                m for m in new_messages
+                if not (m.__class__.__name__ == "HumanMessage"
+                        and isinstance(getattr(m, "content", ""), str)
+                        and "根据用户需求，主动选择最合适的工具" in m.content)
+            ]
+            if filtered:
+                self._memory.add(self._conversation_id, filtered)
 
     def cleanup(self):
         self._persist_history()
