@@ -32,7 +32,7 @@ def _dedupe_final(text: str) -> str:
         return text[:mid].strip()
     return text
 
-from app.agent.xianzhi_workflow import XianzhiWorkflow, WorkflowChartContext, build_chart_context, render_full_fact_context
+from app.agent.xianzhi_workflow import XianzhiWorkflow, WorkflowChartContext, build_chart_context, render_full_fact_context, classify_question
 
 
 # 用于从用户输入中尝试提取出生时间与性别
@@ -351,6 +351,55 @@ class Xianzhi(ToolCallAgent):
         finally:
             self.cleanup()
 
+    def _is_chitchat(self, user_prompt: str) -> bool:
+        """判断是否为闲聊场景（无命盘时短路 ReAct，避免无谓工具调用）。"""
+        if self._workflow_context:
+            return False  # 有命盘走 workflow，chitchat 由 workflow 内部处理
+        intent = classify_question(user_prompt)
+        return intent.domain == "chitchat"
+
+    def _chitchat_reply(self, user_prompt: str) -> str:
+        """闲聊短路：直接调一次 LLM，不走 ReAct 循环，不调任何工具。"""
+        log.info("[xianzhi] 闲聊短路，跳过 ReAct 工具调用")
+        self.state = AgentState.RUNNING
+        self.message_list.append(HumanMessage(content=user_prompt))
+        try:
+            history_ctx = "\n".join(
+                f"{m.__class__.__name__.replace('Message','')}: {str(getattr(m,'content',''))[:180]}"
+                for m in self.message_list[-6:]
+                if str(getattr(m, "content", "")).strip()
+            ) or "（无）"
+            messages = [
+                SystemMessage(content=(
+                    "你是先知，一位通透沉稳、阅历丰富的老友。"
+                    "用户现在和你闲聊，不问命理问题。"
+                    "根据用户心境自然回应，可参杂人生哲理、处世良言，引发情感共鸣。"
+                    "1-3句，≤150字，像朋友聊天，不用表格、标题、emoji。"
+                    "用'你'不用'您'，口语化。不要'总结一下'这种AI腔。"
+                )),
+                HumanMessage(content=(
+                    f"【最近对话】\n{history_ctx}\n\n"
+                    f"【用户说】\n{user_prompt}\n\n"
+                    "请自然回应。"
+                )),
+            ]
+            response = self.chat_model.invoke(messages)
+            content = (getattr(response, "content", "") or "").strip()
+            content = re.sub(r"<think>[\s\S]*?</think>\s*", "", content, flags=re.IGNORECASE)
+            content = re.sub(r"<think>[\s\S]*$", "", content, flags=re.IGNORECASE)
+            content = _dedupe_final(content) if content else ""
+            if not content:
+                content = "嗯，我在听，你继续说。"
+            self.final_answer = content
+            self.message_list.append(AIMessage(content=content))
+            self.state = AgentState.FINISHED
+            return content
+        except Exception as e:
+            self.state = AgentState.ERROR
+            self._last_error = str(e)
+            log.exception("[xianzhi] 闲聊短路失败")
+            return "我刚才走神了，你再说一遍？"
+
     def run_stream(self, user_prompt, verbose: bool = False):
         """同步流式执行。
 
@@ -364,6 +413,11 @@ class Xianzhi(ToolCallAgent):
         self._load_history()
         if self._workflow_context and not verbose:
             return self._workflow_stream(user_prompt)
+        # 闲聊短路：无命盘 + 闲聊意图 → 直接调一次 LLM，不走 ReAct 工具循环
+        if not verbose and self._is_chitchat(user_prompt):
+            def _chitchat_gen():
+                yield self._chitchat_reply(user_prompt)
+            return _chitchat_gen()
         # 直接调用 BaseAgent.run_stream（绕开 ToolCallAgent.run_stream 的二次 reset，
         # 避免历史被清空；同时让 step 输出走 BaseAgent 的日志逻辑）
         base_stream = BaseAgent.run_stream(self, user_prompt)
@@ -384,6 +438,11 @@ class Xianzhi(ToolCallAgent):
         if self._workflow_context and not verbose:
             async for chunk in self._aworkflow_stream(user_prompt):
                 yield chunk
+            return
+        # 闲聊短路：无命盘 + 闲聊意图 → 直接调一次 LLM，不走 ReAct 工具循环
+        if not verbose and self._is_chitchat(user_prompt):
+            reply = await asyncio.to_thread(self._chitchat_reply, user_prompt)
+            yield reply
             return
         if verbose:
             async for chunk in super().arun_stream(user_prompt):

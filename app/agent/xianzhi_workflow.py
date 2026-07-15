@@ -104,6 +104,169 @@ class FactCheckResult:
     issues: list[str] = field(default_factory=list)
 
 
+# ============================================================
+# 多 Agent 协作架构：Supervisor(本类) + 专业 Worker + Reviewer
+# 参考 学习资料/智能体开发笔记/16_多Agent协作
+#   - WorkerResult 最小结果协议（多Agent状态边界.md）
+#   - 专业 Worker 按领域拆分断法 prompt + 专属检索 query
+#   - Reviewer 独立交叉校验（事实 + 古籍真实性 + 合规）
+# ============================================================
+
+
+@dataclass(frozen=True)
+class WorkerResult:
+    """Worker 返回的最小结果协议（不返回完整对话历史，避免上下文爆炸）。"""
+    status: str  # "done" | "blocked" | "failed"
+    summary: str  # 断语结论
+    evidence: list[str] = field(default_factory=list)  # 古籍引用 + 检索片段
+    risks: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class DomainWorker:
+    """领域 Worker 配置：专属断法 prompt + 额外检索 query。
+
+    Supervisor（XianzhiWorkflow.answer）按 intent.domain 分派给对应 Worker。
+    Worker 只持有"专业领域知识"，执行逻辑复用 Supervisor 的 _retrieve_rules / _build_messages / _invoke。
+    """
+    domain: str
+    label: str
+    expertise_prompt: str  # 追加到通用 system prompt 末尾的领域断法规则
+    extra_queries: tuple[str, ...] = ()  # 叠加到 DOMAIN_RULE_QUERIES 之外的领域专属检索
+    length_rule: str = "默认控制在3-6段，先结论后依据。"
+    skip_facts: bool = False  # theory/chitchat 跳过命盘事实注入
+
+
+# 专业 Worker 注册表（Supervisor 按 domain 查表分派）
+WORKERS: dict[str, DomainWorker] = {
+    "career": DomainWorker(
+        domain="career",
+        label="事业工作",
+        expertise_prompt=(
+            "【事业专项断法】\n"
+            "- 官杀为事业主星：正官主稳定公职、体制内；七杀主开创、变动、武职、创业\n"
+            "- 印星为权力依托：印星生扶则职位稳、有靠山；印星受克则失权、降职\n"
+            "- 食伤为才干技能：食伤生财凭技术赚钱；食伤制杀能压住压力、掌权\n"
+            "- 大运流年遇官杀旺地、印星生扶，多为升职/创业良机\n"
+            "- 官杀混杂、伤官见官、劫财夺财，多主事业动荡、口舌是非\n"
+            "- 判断事业层次看格局清浊：清格主贵，浊格主劳碌"
+        ),
+        extra_queries=("官星 印星 食伤 事业 升职 断法", "伤官见官 官杀混杂 事业动荡 命理"),
+    ),
+    "wealth": DomainWorker(
+        domain="wealth",
+        label="财运收入",
+        expertise_prompt=(
+            "【财运专项断法】\n"
+            "- 正财主工薪稳定收入，偏财主投资、横财、经营之财\n"
+            "- 食伤生财为正道：有食伤生财则财源绵长；财星无源则财来财去\n"
+            "- 财库主积蓄：辰戌丑未为四库，财入库主能守财；财库逢冲则破财\n"
+            "- 比劫夺财：比劫旺则破财、分财，须见官杀制或食伤化\n"
+            "- 身旺财旺为富格，身弱财旺则富屋贫人，反主求财辛苦\n"
+            "- 大运流年走财旺之乡、食伤生扶之地，主进财；走比劫、印星夺食之地主破财"
+        ),
+        extra_queries=("正财 偏财 食伤生财 财库 断法", "比劫夺财 破财 身弱财旺 命理"),
+    ),
+    "love": DomainWorker(
+        domain="love",
+        label="恋爱感情",
+        expertise_prompt=(
+            "【感情桃花专项断法】\n"
+            "- 男以财星为配偶星，女以官杀为配偶星；配偶星透干有力、得位则缘分稳\n"
+            "- 日支为配偶宫：日支坐财官印多为得配偶助力；坐比劫羊刃主争合、分离\n"
+            "- 桃花星（子午卯酉）旺相主异性缘好；桃花逢冲合多主动婚恋\n"
+            "- 红艳、咸池主感情纠葛；孤辰寡宿主孤独\n"
+            "- 大运流年遇配偶星、桃花、合入日支，多为动婚恋之期\n"
+            "- 配偶星被冲合化、坐比劫，多主感情波折、第三者"
+        ),
+        extra_queries=("桃花 配偶星 日支 感情 断法", "咸池 红艳 孤辰寡宿 感情 命理"),
+    ),
+    "marriage": DomainWorker(
+        domain="marriage",
+        label="婚姻关系",
+        expertise_prompt=(
+            "【婚姻专项断法】\n"
+            "- 配偶宫（日支）宜静不宜动：逢冲合刑害则婚姻动荡\n"
+            "- 男看财星、女看官杀为夫妻星：透干有气、不被刑冲为吉\n"
+            "- 夫妻星得位（月支/日支）为正配；偏位或他柱多为晚婚或再婚\n"
+            "- 婚姻看大运流年引动：逢合入配偶宫、夫妻星透出，多为动婚之期\n"
+            "- 比劫成群夺财（男）、伤官见官（女）多主克配偶、离婚\n"
+            "- 古籍依据：《滴天髓》论婚姻、《三命通会》论夫妻宫"
+        ),
+        extra_queries=("配偶宫 夫妻星 合冲刑害 婚姻 断法", "克配偶 离婚 晚婚 命理 古籍"),
+    ),
+    "health": DomainWorker(
+        domain="health",
+        label="健康状态",
+        expertise_prompt=(
+            "【健康专项断法】\n"
+            "- 五行失衡主病：木主肝胆、火主心血、土主脾胃、金主肺肠、水主肾膀胱\n"
+            "- 寒暖燥湿失宜主病：冬生水旺无火调候主寒证；夏生火旺无水润局主燥证\n"
+            "- 日主受克太过主病：金多克木主肝疾，火多克金主肺疾\n"
+            "- 七杀攻身、羊刃冲合，多主外伤、手术、急症\n"
+            "- 刑冲入本命盘的宫位，对应脏腑易病\n"
+            "合规提示：命理健康参考仅供参考，涉及重病必须劝导就医，不替代医疗诊断。"
+        ),
+        extra_queries=("五行失衡 寒暖燥湿 疾病 健康 断法", "七杀攻身 羊刃 外伤 手术 命理"),
+    ),
+    "study": DomainWorker(
+        domain="study",
+        label="学习考试",
+        expertise_prompt=(
+            "【学业专项断法】\n"
+            "- 印星主学业文凭：印星为用神、生扶日主则学业有成\n"
+            "- 食伤主才智发挥：食伤旺相则思维敏捷、善表达\n"
+            "- 官星主功名：官印相生主考试顺利、得功名\n"
+            "- 文昌星、华盖主聪明好学；空亡华盖主孤高\n"
+            "- 大运流年走印星、官星、食伤生扶之地，主考试升学之机\n"
+            "- 印星受克、官杀混杂，多主学业分心、考试不利"
+        ),
+        extra_queries=("印星 食伤 官星 文昌 学习考试 断法",),
+    ),
+    "liunian": DomainWorker(
+        domain="liunian",
+        label="大运流年",
+        expertise_prompt=(
+            "【大运流年专项断法】\n"
+            "- 大运看十年大势，流年看一年吉凶；大运定基调，流年定应期\n"
+            "- 大运与原局关系：生扶用神则吉，克伐用神则凶\n"
+            "- 流年与大运、原局形成合冲刑害，多主当年重大事件\n"
+            "- 太岁当头、岁运并临，主变动重大\n"
+            "- 流年透出配偶星、财星、官星，多主当年婚恋、进财、升职\n"
+            "- 流年走比劫、伤官、七杀攻身，主破财、口舌、疾病\n"
+            "- 立春换年口径：流年以立春为界，不以正月初一"
+        ),
+        extra_queries=("大运流年 作用关系 流年断法 应期", "太岁 岁运并临 立春换年 命理"),
+    ),
+    "theory": DomainWorker(
+        domain="theory",
+        label="术语理论",
+        expertise_prompt=(
+            "【术语解释规范】\n"
+            "- 术语定义必须以知识库检索内容为准，不得自行编造\n"
+            "- 解释顺序：先给标准定义 → 再给命理含义 → 必要时引古籍原文\n"
+            "- 古籍引用格式：「《典籍名》原文：XXX」，简短自然嵌入\n"
+            "- 涉及多流派解释时，说明主流观点与分歧\n"
+            "- 不结合具体命盘断事，只做术语理论说明"
+        ),
+        length_rule="术语解释≤200字，先给结论，后给依据，必要时引典籍原文。",
+        skip_facts=True,
+    ),
+    "chitchat": DomainWorker(
+        domain="chitchat",
+        label="闲聊问候",
+        expertise_prompt="",
+        length_rule="闲聊1-3句，≤150字，像朋友聊天自然回应。",
+        skip_facts=True,
+    ),
+    "general": DomainWorker(
+        domain="general",
+        label="综合咨询",
+        expertise_prompt="",
+    ),
+}
+
+
 def classify_question(text: str, today: _dt.date | None = None) -> QuestionIntent:
     today = today or _dt.date.today()
     years = sorted({int(y) for y in re.findall(r"(?:19|20)\d{2}", text)})
@@ -152,9 +315,82 @@ def build_chart_context(birth_time: str, gender: str, sect: int = 2, yun_sect: i
     )
 
 
+class ReviewerWorker:
+    """Reviewer 独立审核员：对 Worker 产出做三重交叉校验。
+
+    参考 学习资料/16_多Agent协作/SupervisorWorker协作说明.md 的 Review Worker 角色。
+    独立于 Worker，用不同视角审视，避免 Worker 自己的盲区。
+
+    三重校验：
+    1. 事实校验：四柱/大运/流年/起运是否与系统排盘一致（复用 check_facts）
+    2. 古籍真实性：回答中「《XXX》原文：」标注的古籍是否真的在检索结果中出现（防杜撰）
+    3. 合规校验：扫描生死/赌博/符咒/堕胎等红线关键词
+
+    不通过 → 触发 Reflextion 回退修复。
+    """
+
+    # 合规红线关键词（命中即需人工提示，不直接拒答）
+    COMPLIANCE_RISKS = (
+        "死期", "寿命", "何时死", "什么时候死", "堕胎择时", "择日堕胎",
+        "符咒", "改运", "改命", "诅咒", "下蛊", "邪术",
+        "买彩票", "赌博必赢", "包赚", "稳赚不赔",
+    )
+
+    # 古籍真实性校验：抽取回答中「《XXX》原文：...」标注
+    ANCIENT_CITATION_RE = re.compile(r"《[^》]{1,12}》[^。；;\n]{0,6}原文[：:]")
+
+    def review(self, answer: str, chart: BaziChart, knowledge: str, fact_checker) -> FactCheckResult:
+        """对 Worker 产出做三重校验。
+
+        Args:
+            answer: Worker 生成的回答
+            chart: 系统排盘事实
+            knowledge: Worker 检索到的知识片段（用于古籍真实性比对）
+            fact_checker: 复用 XianzhiWorkflow.check_facts 方法
+        """
+        issues: list[str] = []
+
+        # 1) 事实校验（四柱/大运/流年）
+        fact_result = fact_checker(answer, chart)
+        issues.extend(fact_result.issues)
+
+        # 2) 古籍真实性校验：标注了「《XXX》原文」的引用必须在检索知识中出现
+        citations = self.ANCIENT_CITATION_RE.findall(answer)
+        if citations and knowledge and "未检索到相关知识" not in knowledge and "闲聊场景" not in knowledge:
+            # 提取检索知识里的书名（粗粒度比对）
+            cited_books = set()
+            for m in re.finditer(r"《([^》]{1,12})》", knowledge):
+                cited_books.add(m.group(1))
+            # 比对回答中标注的书是否在检索结果里
+            for citation in citations:
+                book_match = re.match(r"《([^》]{1,12})》", citation)
+                if book_match:
+                    book = book_match.group(1)
+                    # 允许常见经典古籍直接通过（知识库已收录，检索可能未命中但属合理引用）
+                    classic_books = {"渊海子平", "子平真诠", "滴天髓", "穷通宝鉴", "三命通会", "神峰通考", "千里命稿"}
+                    if book not in cited_books and book not in classic_books:
+                        issues.append(f"引用《{book}》原文未在检索结果中出现，疑似杜撰古籍")
+
+        # 3) 合规红线扫描
+        risks_found = [kw for kw in self.COMPLIANCE_RISKS if kw in answer]
+        if risks_found:
+            issues.append(f"命中合规红线关键词：{','.join(risks_found)}；若涉及凶险断言需劝导寻求专业帮助")
+
+        return FactCheckResult(ok=not issues, issues=issues)
+
+
 class XianzhiWorkflow:
+    """Supervisor：意图分类 → 分派专业 Worker → Reviewer 审核 → Reflextion 修复。
+
+    架构参考 学习资料/智能体开发笔记/16_多Agent协作：
+    - Supervisor（本类）：决策、分派、验收、合并结果
+    - 专业 Worker（WORKERS 注册表）：按领域专注单一断法
+    - Reviewer（ReviewerWorker）：独立交叉校验
+    """
+
     def __init__(self, chat_model: BaseChatModel):
         self.chat_model = chat_model
+        self._reviewer = ReviewerWorker()
         self._graph = None
         try:
             from app.agent.xianzhi_langgraph import create_xianzhi_graph
@@ -181,20 +417,37 @@ class XianzhiWorkflow:
             if final:
                 return final
 
+        # ===== Supervisor 分派阶段 =====
+        worker = WORKERS.get(intent.domain, WORKERS["general"])
+        log.info("[Supervisor] 意图={} 置信度={} → 分派给 {} Worker",
+                 intent.label, intent.confidence, worker.label)
+
         chart_context = self._extend_chart_if_needed(chart_context, intent)
-        knowledge = self._retrieve_rules(intent, chart_context)
-        messages = self._build_messages(user_prompt, intent, chart_context, knowledge, history or [])
+
+        # ===== Worker 执行阶段 =====
+        knowledge = self._retrieve_rules(intent, chart_context, worker)
+        messages = self._build_messages(user_prompt, intent, chart_context, knowledge, history or [], worker)
         raw_answer = self._invoke(messages)
-        checked = self.check_facts(raw_answer, chart_context.chart)
-        if checked.ok:
+
+        # ===== Reviewer 审核阶段（三重校验：事实+古籍真实性+合规） =====
+        review = self._reviewer.review(raw_answer, chart_context.chart, knowledge, self.check_facts)
+        if review.ok:
+            log.info("[Reviewer] {} Worker 产出通过三重校验", worker.label)
             return raw_answer
-        log.warning("Xianzhi workflow fact check failed: {}", checked.issues)
-        repair_messages = self._build_repair_messages(raw_answer, checked, user_prompt, intent, chart_context, knowledge)
+        log.warning("[Reviewer] {} Worker 产出未通过校验，触发 Reflextion 修复: {}",
+                    worker.label, review.issues)
+
+        # ===== Reflextion 回退修复 =====
+        repair_messages = self._build_repair_messages(
+            raw_answer, review, user_prompt, intent, chart_context, knowledge, worker
+        )
         repaired = self._invoke(repair_messages)
-        repaired_check = self.check_facts(repaired, chart_context.chart)
-        if repaired_check.ok:
+        repaired_review = self._reviewer.review(repaired, chart_context.chart, knowledge, self.check_facts)
+        if repaired_review.ok:
+            log.info("[Reflextion] {} Worker 修复后通过校验", worker.label)
             return repaired
-        return repaired.rstrip() + "\n\n口径校验：本次回答以系统排盘为准；" + "；".join(repaired_check.issues)
+        log.warning("[Reflextion] {} Worker 修复后仍未通过，附加口径说明", worker.label)
+        return repaired.rstrip() + "\n\n口径校验：本次回答以系统排盘为准；" + "；".join(repaired_review.issues)
 
     def _extend_chart_if_needed(self, ctx: WorkflowChartContext, intent: QuestionIntent) -> WorkflowChartContext:
         if not intent.target_years:
@@ -215,14 +468,17 @@ class XianzhiWorkflow:
         )
         return WorkflowChartContext(ctx.birth_time, ctx.gender, ctx.sect, ctx.yun_sect, chart)
 
-    def _retrieve_rules(self, intent: QuestionIntent, ctx: WorkflowChartContext) -> str:
-        if not knowledge_base.ready:
-            return "（知识库未就绪，本轮只使用结构化排盘事实与内置命理口径。）"
-        # 闲聊场景：跳过 RAG 检索，让 LLM 自然回应
+    def _retrieve_rules(self, intent: QuestionIntent, ctx: WorkflowChartContext, worker: DomainWorker | None = None) -> str:
+        # 闲聊场景：最优先短路，不依赖知识库，让 LLM 自然回应
         if intent.domain == "chitchat":
             return "（闲聊场景，无需命理知识检索）"
+        if not knowledge_base.ready:
+            return "（知识库未就绪，本轮只使用结构化排盘事实与内置命理口径。）"
         # 1) 领域规则 query（来自 DOMAIN_RULE_QUERIES）
         queries = list(DOMAIN_RULE_QUERIES.get(intent.domain, DOMAIN_RULE_QUERIES["general"]))
+        # 1.5) Worker 专属额外检索 query（叠加在领域规则之后，提升专业深度）
+        if worker and worker.extra_queries:
+            queries.extend(worker.extra_queries)
         # 2) 日主 + 强弱个性化 query
         day_master = ctx.chart.wuxing.day_master or ""
         strength = ctx.chart.wuxing.strength or ""
@@ -257,11 +513,18 @@ class XianzhiWorkflow:
             queries.append(duanfa_q)
 
         # 上限提到 5 条 query（原本 3 条太少，覆盖不到命例/古籍/断法）
+        final_queries = queries[:5]
+        log.info("[workflow检索] 领域={} 命主={}{} 构造query数={}",
+                 intent.domain, day_master, strength, len(final_queries))
         parts: list[str] = []
-        for query in queries[:5]:
+        for idx, query in enumerate(final_queries, 1):
             text = knowledge_base.search_as_text(query)
+            preview = (text[:200] + "…") if text and len(text) > 200 else (text or "（无匹配）")
+            log.info("[workflow检索] [{}/{}] query={}\n  返回={}", idx, len(final_queries), query, preview)
             if text and text not in parts:
                 parts.append(f"【检索问题】{query}\n{text}")
+        if not parts:
+            log.info("[workflow检索] 全部query无匹配结果")
         return "\n\n".join(parts) if parts else "（未检索到相关知识）"
 
     def _build_messages(
@@ -271,14 +534,18 @@ class XianzhiWorkflow:
         ctx: WorkflowChartContext,
         knowledge: str,
         history: list[BaseMessage],
+        worker: DomainWorker | None = None,
     ) -> list[BaseMessage]:
-        facts = self._compact_facts(ctx.chart, intent) if intent.domain not in ("theory", "chitchat") else ""
+        # Worker 配置优先（专业 Worker 提供 length_rule 和 skip_facts）
+        if worker is None:
+            worker = WORKERS.get(intent.domain, WORKERS["general"])
+        facts = "" if worker.skip_facts else self._compact_facts(ctx.chart, intent)
         recent_history = self._compact_history(history)
-        length_rule = "可以分段深入，但仍要围绕用户问题，不要堆砌全盘。" if intent.wants_report else "默认控制在3-6段，先结论后依据。"
-        if intent.domain == "chitchat":
-            length_rule = "闲聊1-3句，≤150字，像朋友聊天自然回应。"
-        elif intent.domain == "theory":
-            length_rule = "术语解释≤200字，先给结论，后给依据，必要时引典籍原文。"
+        # 篇幅规则：详批优先 → Worker 专属规则
+        if intent.wants_report:
+            length_rule = "可以分段深入，但仍要围绕用户问题，不要堆砌全盘。"
+        else:
+            length_rule = worker.length_rule
         system = (
             "你是先知，拥有数十年实战经验的八字命理师傅，气质通透沉稳，像阅历丰富的老友。"
             "精通四柱八字、五行十神、大运流年、合婚择日；熟读渊海子平、子平真诠、滴天髓、穷通宝鉴、三命通会，论命引经据典但不堆砌古文。\n"
@@ -296,6 +563,9 @@ class XianzhiWorkflow:
             "该幽默幽默（调侃桃花旺、财来财去等），该严肃严肃（健康、刑冲等）。用'你'不用'您'，口语化，可适当用语气词。不确定直说'这个要看具体情况'，不绝对化。\n"
             "避免AI腔：不要'总结一下''需要注意的是''好消息/需要注意'这种模板。不要输出ReAct过程，不要机械倾倒完整报告，不要恐吓。"
         )
+        # 追加 Worker 专属断法规则（专业 Worker 的领域知识）
+        if worker.expertise_prompt:
+            system += "\n" + worker.expertise_prompt
         human = (
             f"【用户问题】\n{user_prompt}\n\n"
             f"【识别意图】\n领域={intent.label}; 目标年份={intent.target_years or '未指定'}; 置信度={intent.confidence}\n\n"
@@ -318,16 +588,23 @@ class XianzhiWorkflow:
         intent: QuestionIntent,
         ctx: WorkflowChartContext,
         knowledge: str,
+        worker: DomainWorker | None = None,
     ) -> list[BaseMessage]:
-        facts = self._compact_facts(ctx.chart, intent)
+        if worker is None:
+            worker = WORKERS.get(intent.domain, WORKERS["general"])
+        facts = "" if worker.skip_facts else self._compact_facts(ctx.chart, intent)
+        # Reflextion 改写器：带上 Worker 专属断法，确保修复后仍符合领域规范
+        sys_content = "你是事实校验后的改写器。只修正事实错误，保持自然命理师口吻，不要解释校验过程。"
+        if worker.expertise_prompt:
+            sys_content += "\n" + worker.expertise_prompt
         return [
-            SystemMessage(content="你是事实校验后的改写器。只修正事实错误，保持自然命理师口吻，不要解释校验过程。"),
+            SystemMessage(content=sys_content),
             HumanMessage(content=(
                 f"【用户问题】\n{user_prompt}\n\n"
                 f"【原回答】\n{raw_answer}\n\n"
                 f"【发现的问题】\n" + "\n".join(f"- {issue}" for issue in checked.issues) + "\n\n"
-                f"【正确排盘事实】\n{facts}\n\n"
-                f"【可用规则】\n{knowledge}\n\n"
+                + (f"【正确排盘事实】\n{facts}\n\n" if facts else "")
+                + f"【可用规则】\n{knowledge}\n\n"
                 "请输出修正后的最终回答。"
             )),
         ]
