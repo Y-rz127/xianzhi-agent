@@ -373,6 +373,18 @@ export async function getSessionMessages(type: "xianzhi" | "love", id: string): 
   } catch { return [] }
 }
 
+export interface SessionBirthInfo { time: string | null; gender: string | null }
+
+/** 从会话历史中的排盘工具调用提取出生信息（支持农历/节日/时辰等自然语言输入场景）。 */
+export async function getSessionBirthInfo(id: string): Promise<SessionBirthInfo> {
+  if (!id) return { time: null, gender: null }
+  try {
+    const res = await fetch(`${API_BASE}/ai/xianzhi/sessions/${id}/birth-info`)
+    if (!res.ok) return { time: null, gender: null }
+    return await res.json()
+  } catch { return { time: null, gender: null } }
+}
+
 // ========== 塔罗占卜 ==========
 
 export type TarotSpread = "daily" | "three_card" | "relationship"

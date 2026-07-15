@@ -305,12 +305,29 @@ import {
   downloadReport, getChart,
   fetchChartCases, createChartCase, deleteChartCase,
   fetchSessions, deleteSession as deleteSessionApi, clearSessionMessages, getSessionMessages,
+  getSessionBirthInfo,
   type ChartData, type ChartCase, type ChatSession,
 } from '@/api'
 import { getLocalDateString } from '@/utils/datetimePicker'
 
 interface Message { role: 'user' | 'assistant'; content: string }
 interface BirthInfo { time: string; gender: string }
+
+// 十二时辰 → HH:MM（用于把后端返回的"辰时"等标准化为 time picker 友好的格式）
+const ZHI_HOUR_MAP: Record<string, string> = {
+  '子': '00:00', '丑': '02:00', '寅': '04:00', '卯': '06:00',
+  '辰': '08:00', '巳': '10:00', '午': '12:00', '未': '14:00',
+  '申': '16:00', '酉': '18:00', '戌': '20:00', '亥': '22:00',
+}
+function zhiHourToHHMM(t?: string): string {
+  if (!t) return ''
+  // 已是 HH:MM 格式（如 "08:00"）
+  if (/^\d{1,2}:\d{2}$/.test(t)) return t
+  // 提取"辰时"中的"辰"
+  const m = t.match(/([子丑寅卯辰巳午未申酉戌亥])/)
+  if (m) return ZHI_HOUR_MAP[m[1]] || ''
+  return t
+}
 
 const mode = ref<'agent' | 'cases' | 'rag'>('agent')
 const showBirth = ref(false)
@@ -369,8 +386,22 @@ async function switchToSession(session: ChatSession) {
       ragMessages.value = target
     } else {
       agentMessages.value = target
+      // 从后端恢复命盘上下文（支持农历/节日/时辰等自然语言输入场景）
       lastBirthInfo.value = null
       chartData.value = null
+      birthDate.value = ''
+      birthTime.value = ''
+      gender.value = '男' as '男' | '女'
+      const bi = await getSessionBirthInfo(session.id)
+      if (bi.time && bi.gender) {
+        lastBirthInfo.value = { time: bi.time, gender: bi.gender }
+        const [d, t] = bi.time.split(' ')
+        birthDate.value = d || ''
+        // 时辰（如"辰时"）映射为 HH:MM，确保 time picker 能正常显示
+        birthTime.value = zhiHourToHHMM(t)
+        gender.value = bi.gender as '男' | '女'
+        try { chartData.value = await getChart(bi.time, bi.gender, 2, 1) } catch { chartData.value = null }
+      }
     }
   } catch (e) {
     uni.showToast({ title: '加载消息失败', icon: 'none' })
@@ -441,7 +472,7 @@ onLoad(async (query) => {
   if (bt && g) {
     const [d, t] = bt.split(' ')
     birthDate.value = d || ''
-    birthTime.value = t || ''
+    birthTime.value = zhiHourToHHMM(t)
     gender.value = g
     lastBirthInfo.value = { time: bt, gender: g }
     // 主动拉取结构化命盘
@@ -597,7 +628,7 @@ function loadChartCase(c: ChartCase) {
   // 把命例信息塞回 agent 模式出生信息，并切换到排盘 tab
   const [d, t] = c.birthTime.split(' ')
   birthDate.value = d || ''
-  birthTime.value = t || ''
+  birthTime.value = zhiHourToHHMM(t)
   gender.value = (c.gender as '男' | '女') || '男'
   lastBirthInfo.value = { time: c.birthTime, gender: c.gender }
   mode.value = 'agent'
@@ -659,17 +690,19 @@ function openBaziModal() {
 }
 
 /** 从用户消息中提取出生信息，同步更新顶部表单（watch 会自动拉取 chartData 并设置 lastBirthInfo） */
-function tryExtractBirth(text: string) {
+async function tryExtractBirth(text: string) {
   const m = text.match(/(男|女)/)
   const t = text.match(/(\d{4}[-年/]\d{1,2}[-月/]\d{1,2}[日 ]+\d{1,2}[:：]\d{1,2})/)
   if (m && t) {
-    const time = t[1].replace(/年|月/g, '-').replace('日', ' ').replace('：', ':').trim()
+    const time = t[1].replace(/年|月/g, '-').replace('日', '').replace('：', ':').trim()
+    // 同步设置 lastBirthInfo + 表单字段，确保按钮立即显示
+    lastBirthInfo.value = { time, gender: m[1] as '男' | '女' }
     const [d, tm] = time.split(' ')
     birthDate.value = d || ''
-    birthTime.value = tm || ''
+    birthTime.value = zhiHourToHHMM(tm)
     gender.value = m[1] as '男' | '女'
-    // 同步设置 lastBirthInfo，确保按钮立即显示；watch 会异步拉取 chartData
-    lastBirthInfo.value = { time, gender: m[1] as '男' | '女' }
+    // 主动拉取 chartData（对齐 web 端 tryExtractBirth + fetchChartData 行为）
+    try { chartData.value = await getChart(time, m[1] as '男' | '女', 2, 1) } catch { chartData.value = null }
   }
 }
 
@@ -712,7 +745,7 @@ function onSend() {
     if (!bt || !g) return
     const [d, t] = bt.split(' ')
     birthDate.value = d || ''
-    birthTime.value = t || ''
+    birthTime.value = zhiHourToHHMM(t)
     gender.value = g as '男' | '女'
     lastBirthInfo.value = { time: bt, gender: g as '男' | '女' }
     // 主动拉取结构化命盘数据（命盘详情弹窗内容）

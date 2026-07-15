@@ -236,7 +236,7 @@
 <script setup lang="ts">
 defineOptions({ name: 'Xianzhi' })
 import { ref, nextTick, computed, onMounted, onActivated, onUnmounted } from "vue"
-import { chatWithXianzhi, chatWithRag, downloadReport, parsePillars, parseWuxing, parseDayun, parseShensha, fetchSessions, deleteSession as deleteSessionApi, clearSessionMessages, getSessionMessages, fetchChartCases, createChartCase, deleteChartCase, getChart, type ChatSession, type SessionMessage, type ChartCase, type ChartData, type SSECallbacks } from "../api"
+import { chatWithXianzhi, chatWithRag, downloadReport, parsePillars, parseWuxing, parseDayun, parseShensha, fetchSessions, deleteSession as deleteSessionApi, clearSessionMessages, getSessionMessages, getSessionBirthInfo, fetchChartCases, createChartCase, deleteChartCase, getChart, type ChatSession, type SessionMessage, type ChartCase, type ChartData, type SSECallbacks } from "../api"
 import BaziCard from "../components/BaziCard.vue"
 import WuxingChart from "../components/WuxingChart.vue"
 import DayunTimeline from "../components/DayunTimeline.vue"
@@ -297,6 +297,20 @@ function extractAnswer(text: string): string {
   const parts = [answer ? answer[1] : ""]
   observations.forEach(o => parts.push(o.replace(/^\[观察\]\s*/, "")))
   return parts.join("\n").trim()
+}
+
+// 时辰 → HH:MM（与小程序端同步）
+const ZHI_HOUR_MAP: Record<string, string> = {
+  '子': '00:00', '丑': '02:00', '寅': '04:00', '卯': '06:00',
+  '辰': '08:00', '巳': '10:00', '午': '12:00', '未': '14:00',
+  '申': '16:00', '酉': '18:00', '戌': '20:00', '亥': '22:00',
+}
+function zhiHourToHHMM(t?: string): string {
+  if (!t) return ''
+  if (/^\d{1,2}:\d{2}$/.test(t)) return t
+  const m = t.match(/([子丑寅卯辰巳午未申酉戌亥])/)
+  if (m) return ZHI_HOUR_MAP[m[1]] || ''
+  return t
 }
 
 const pillars = computed(() => lastAssistantMsg.value ? parsePillars(extractAnswer(lastAssistantMsg.value.content)) : [])
@@ -450,11 +464,14 @@ const loadSession = async (s: ChatSession) => {
   conversationId.value = s.id
   messages.value = await getSessionMessages("xianzhi", s.id)
   visibleCount.value = pageSize
-  // 从历史用户消息里恢复命盘上下文
+  // 从后端恢复命盘上下文（支持农历/节日/时辰等自然语言输入场景）
   lastBirthInfo.value = null
   chartData.value = null
-  for (const m of messages.value) {
-    if (m.role === "user") tryExtractBirth(m.content)
+  const bi = await getSessionBirthInfo(s.id)
+  if (bi.time && bi.gender) {
+    const time = zhiHourToHHMM(bi.time)
+    lastBirthInfo.value = { time, gender: bi.gender }
+    await fetchChartData(time, bi.gender)
   }
   scrollToBottom()
 }
@@ -473,7 +490,7 @@ const openCaseModal = () => {
   caseModalMode.value = "save"
   caseName.value = lastBirthInfo.value.time + " " + lastBirthInfo.value.gender + "命盘"
   caseTags.value = ""
-  caseBirthTime.value = lastBirthInfo.value.time
+  caseBirthTime.value = zhiHourToHHMM(lastBirthInfo.value.time)
   caseGender.value = lastBirthInfo.value.gender === "女" ? "女" : "男"
   showCaseModal.value = true
 }
@@ -604,8 +621,9 @@ const send = () => {
     // 后端从 LLM 工具调用中提取到出生信息时回调（覆盖自然语言输入场景）
     onChartContext: async (birthTime, gender) => {
       if (!birthTime || !gender) return
-      lastBirthInfo.value = { time: birthTime, gender }
-      await fetchChartData(birthTime, gender)
+      const time = zhiHourToHHMM(birthTime)
+      lastBirthInfo.value = { time, gender }
+      await fetchChartData(time, gender)
     },
   } as SSECallbacks, opts)
 }

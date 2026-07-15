@@ -172,6 +172,14 @@ async def get_xianzhi_session_messages(session_id: str):
     return get_messages(session_id)
 
 
+@router.get("/sessions/{session_id}/birth-info")
+async def get_xianzhi_session_birth_info(session_id: str):
+    """从会话历史中的排盘工具调用提取出生信息，供前端恢复命盘上下文。"""
+    from app.memory.postgres_memory import get_birth_info_from_session
+    info = get_birth_info_from_session(session_id)
+    return info or {"time": None, "gender": None}
+
+
 @router.get("/cache_stats")
 async def cache_stats():
     """获取排盘缓存统计。"""
@@ -192,7 +200,10 @@ async def get_chart(birth_time: str, gender: str, sect: int = 2, yun_sect: int =
         parse_birth,
         parse_gender,
     )
+    from app.tools.bazi import _normalize_birth_time
     try:
+        # 标准化出生时间（支持公历+时辰、农历、节日等格式，与 bazi_chart 工具入口一致）
+        birth_time = _normalize_birth_time(birth_time)
         parse_birth(birth_time)
         parse_gender(gender)
     except Exception as e:
