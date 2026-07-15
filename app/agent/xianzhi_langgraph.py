@@ -30,7 +30,11 @@ def create_xianzhi_graph(workflow):
         return None
 
     def classify_node(state: XianzhiGraphState) -> XianzhiGraphState:
-        intent = classify_question(state["user_prompt"])
+        # 优先使用 answer() 入口已通过 LLM 拆解得到的 intent（含 queries/needs_chart），
+        # 没有时才 fallback 到关键词分类
+        intent = state.get("intent")
+        if intent is None:
+            intent = classify_question(state["user_prompt"])
         worker = WORKERS.get(intent.domain, WORKERS["general"])
         return {"intent": intent, "worker": worker}
 
@@ -39,7 +43,7 @@ def create_xianzhi_graph(workflow):
         return {"chart_context": ctx}
 
     def retrieve_node(state: XianzhiGraphState) -> XianzhiGraphState:
-        return {"knowledge": workflow._retrieve_rules(state["intent"], state["chart_context"], state.get("worker"))}
+        return {"knowledge": workflow._retrieve_rules(state["intent"], state["chart_context"], state.get("worker"), state["user_prompt"])}
 
     def generate_node(state: XianzhiGraphState) -> XianzhiGraphState:
         messages = workflow._build_messages(

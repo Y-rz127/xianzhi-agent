@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import datetime as _dt
+import json
 import re
 from dataclasses import dataclass, field
 from typing import Any
@@ -15,6 +16,23 @@ from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from app.domain.bazi_engine import BaziChart, build_bazi_chart, format_fact_context
 from app.logger import log
 from app.rag.vector_store import knowledge_base
+
+
+def _parse_json(text: str) -> Any:
+    """容错 JSON 解析：处理 LLM 输出的各种格式问题。"""
+    text = text.strip()
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+    # 尝试提取第一个 {...} 块
+    m = re.search(r"\{[\s\S]*\}", text)
+    if m:
+        try:
+            return json.loads(m.group(0))
+        except json.JSONDecodeError:
+            pass
+    return None
 
 
 def _dedupe_content(content: str) -> str:
@@ -46,7 +64,14 @@ DOMAIN_KEYWORDS = {
     "theory": ("是什么", "什么意思", "寓意", "解释", "含义", "什么是", "讲讲", "说说",
                "空亡", "桃花", "羊刃", "华盖", "七杀", "食神", "伤官", "正官", "偏印",
                "用神", "格局", "纳音", "神煞", "刑冲合害", "伏吟", "反吟", "禄神",
-               "调候", "通根", "透干", "墓库", "长生", "帝旺", "死绝"),
+               "调候", "通根", "透干", "墓库", "长生", "帝旺", "死绝",
+               # 复合术语 / 格局断法（用户常问）
+               "枭神", "夺食", "枭神夺食", "食神制杀", "制杀", "伤官见官",
+               "官杀混杂", "杀印相生", "财星破印", "财破印", "贪合忘生", "贪合",
+               "化气", "合化", "从格", "从强", "从弱", "从财", "从杀",
+               "身旺", "身弱", "任财官", "建禄", "月刃", "泄秀", "食伤泄秀",
+               "比劫夺财", "劫财", "印星", "食伤", "官星", "财星",
+               "是不是", "算不算", "算是", "有没有"),
     "chitchat": ("你好", "在吗", "谢谢", "辛苦", "早上好", "晚上好", "晚安",
                  "最近怎么样", "吃饭了吗", "在干嘛", "无聊", "心情", "压力大",
                  "烦", "累", "开心", "难过", "生日快乐", "新年好"),
@@ -73,10 +98,105 @@ DOMAIN_RULE_QUERIES = {
     "health": ("八字健康 五行寒暖燥湿 失衡", "健康 流年 冲克 命理"),
     "liunian": ("大运流年 作用关系 流年与原局", "流年 干支 立春 大运"),
     "study": ("八字学习考试 印星 食伤 官星", "考试 升学 大运流年 命理"),
-    "theory": ("术语解释 天干地支 五行 十神 用神", "空亡 桃花 神煞 禄神 含义",
-               "古籍 子平真诠 渊海子平 滴天髓 术语"),
+    # theory 走精准概念路径，default 仅作兜底（未识别到具体术语时使用）
+    "theory": ("命理 术语 概念 解释",),
     "chitchat": (),
     "general": ("八字 用神 喜忌 大运流年 综合分析",),
+}
+
+
+# 理论术语 → 精准检索 query 映射。
+# 设计原则：单一概念 + 必要的同义/近义扩展，避免一次拉一堆无关主题。
+THEORY_TOPIC_QUERIES: dict[str, str] = {
+    # 取用体系
+    "用神": "用神 取用 喜忌 调候 扶抑 病药",
+    "喜神": "喜神 用神 喜忌",
+    "忌神": "忌神 用神 喜忌 仇神",
+    "仇神": "仇神 忌神 用神",
+    "格局": "格局 取格 月令 用神 成格 破格",
+    "调候": "调候 用神 寒暖燥湿",
+    # 十神
+    "十神": "十神 正官 七杀 正印 偏印 食神 伤官 正财 偏财 比肩 劫财",
+    "正官": "正官 官星 含义 作用",
+    "七杀": "七杀 偏官 含义 制化",
+    "正印": "正印 印星 含义 作用",
+    "偏印": "偏印 枭神 含义 夺食",
+    "食神": "食神 含义 作用 制杀",
+    "伤官": "伤官 含义 作用 伤官见官",
+    "正财": "正财 财星 含义",
+    "偏财": "偏财 财星 含义",
+    "比肩": "比肩 含义",
+    "劫财": "劫财 含义",
+    # 复合术语 / 格局断法
+    "枭神夺食": "枭神夺食 偏印 食神 条件 判断",
+    "枭神": "枭神 偏印 含义 夺食",
+    "夺食": "枭神夺食 偏印 食神",
+    "食神制杀": "食神制杀 七杀 食神 条件",
+    "制杀": "食神制杀 七杀 食神",
+    "伤官见官": "伤官见官 伤官 正官 为祸百端",
+    "官杀混杂": "官杀混杂 七杀 正官 条件 影响",
+    "杀印相生": "杀印相生 七杀 印星 化杀",
+    "财星破印": "财星破印 财 印星 破印",
+    "财破印": "财星破印 财 印星",
+    "贪合忘生": "贪合忘生 合化 忘生",
+    "贪合": "贪合忘生 合化",
+    "化气": "化气 化合 五行化气",
+    "合化": "合化 化气 条件",
+    "从格": "从格 从强 从弱 专旺",
+    "从强": "从强 从格 专旺",
+    "从弱": "从弱 从格",
+    "从财": "从财格 从格 财星",
+    "从杀": "从杀格 从格 七杀",
+    "身旺": "身旺 日主强 根气 旺衰",
+    "身弱": "身弱 日主弱 根气 旺衰",
+    "任财官": "任财官 身旺 财官",
+    "建禄": "建禄格 月令 比肩",
+    "月刃": "月刃格 羊刃 月令",
+    "泄秀": "食伤泄秀 日主 泄秀",
+    "食伤泄秀": "食伤泄秀 日主 泄秀",
+    "比劫夺财": "比劫夺财 比肩 劫财 财星",
+    "印星": "印星 正印 偏印 含义",
+    "食伤": "食伤 食神 伤官 含义",
+    "官星": "官星 正官 七杀 含义",
+    "财星": "财星 正财 偏财 含义",
+    # 神煞
+    "空亡": "空亡 旬空 含义",
+    "桃花": "桃花 咸池 子午卯酉 含义",
+    "神煞": "神煞 吉神 凶煞 含义",
+    "禄神": "禄神 禄 含义",
+    "羊刃": "羊刃 刃 含义",
+    "华盖": "华盖 含义 孤寡",
+    "天乙贵人": "天乙 贵人 含义",
+    "天乙": "天乙 贵人",
+    "驿马": "驿马 含义",
+    "将星": "将星 含义",
+    # 地支关系
+    "刑冲合害": "刑 冲 合 害 地支关系",
+    "六合": "六合 地支合 含义",
+    "三合": "三合 地支合 局",
+    "六冲": "六冲 地支冲 含义",
+    "相刑": "相刑 地支刑 含义",
+    "相害": "相害 地支害 六害",
+    # 长生体系
+    "长生": "长生 十二长生 帝旺 墓库",
+    "十二长生": "长生 沐浴 冠带 临官 帝旺 衰 病 死 墓 绝 胎 养",
+    "长生十二宫": "长生 帝旺 衰 死 墓",
+    "通根": "通根 根气 强弱",
+    "透干": "透干 含义",
+    "墓库": "墓库 库 含义 刑冲",
+    "纳音": "纳音 含义 甲子",
+    "伏吟": "伏吟 反吟 含义",
+    "反吟": "反吟 伏吟 含义",
+    # 基础
+    "天干": "天干 甲乙丙丁戊己庚辛壬癸 含义",
+    "地支": "地支 子丑寅卯辰巳午未申酉戌亥 含义",
+    "五行": "五行 金木水火土 相生相克",
+    "大运": "大运 起运 顺排 逆排 排法",
+    "流年": "流年 太岁 作用 关系",
+    "小运": "小运 含义 排法",
+    "四柱": "四柱 年柱 月柱 日柱 时柱 含义",
+    "日柱": "日柱 日主 命主 含义",
+    "月令": "月令 令 提纲 含义",
 }
 
 
@@ -87,6 +207,8 @@ class QuestionIntent:
     target_years: list[int] = field(default_factory=list)
     wants_report: bool = False
     confidence: float = 0.5
+    needs_chart: bool = False  # 用户是否在问自己命盘的具体判断（如"我是不是枭神夺食"）
+    queries: tuple[str, ...] = ()  # LLM 拆解出的精准检索词（空=走硬编码 fallback）
 
 
 @dataclass
@@ -247,9 +369,9 @@ WORKERS: dict[str, DomainWorker] = {
             "- 解释顺序：先给标准定义 → 再给命理含义 → 必要时引古籍原文\n"
             "- 古籍引用格式：「《典籍名》原文：XXX」，简短自然嵌入\n"
             "- 涉及多流派解释时，说明主流观点与分歧\n"
-            "- 不结合具体命盘断事，只做术语理论说明"
+            "- 如果提供了【系统排盘事实】，用户问'是不是XX'时，需结合命盘事实做判断：先解释术语成立条件，再对照命盘给出结论"
         ),
-        length_rule="术语解释≤200字，先给结论，后给依据，必要时引典籍原文。",
+        length_rule="术语解释≤200字；结合命盘判断时≤350字，先给结论，后给依据。",
         skip_facts=True,
     ),
     "chitchat": DomainWorker(
@@ -302,6 +424,32 @@ def classify_question(text: str, today: _dt.date | None = None) -> QuestionInten
         wants_report=wants_report,
         confidence=round(confidence, 2),
     )
+
+
+# 理论术语识别：key 越长越具体，优先匹配
+_THEORY_TOPIC_SORTED: tuple[tuple[str, str], ...] = tuple(
+    sorted(THEORY_TOPIC_QUERIES.items(), key=lambda x: -len(x[0]))
+)
+
+
+def detect_theory_topic(text: str) -> tuple[str, str] | None:
+    """从用户问题中识别具体理论术语。
+
+    Returns:
+        (topic, query) 元组，未识别到返回 None。
+
+    Examples:
+        >>> detect_theory_topic("请问用神是什么意思")
+        ('用神', '用神 取用 喜忌 调候 扶抑 病药')
+        >>> detect_theory_topic("今天天气真好")
+        None
+    """
+    if not text:
+        return None
+    for topic, query in _THEORY_TOPIC_SORTED:
+        if topic in text:
+            return topic, query
+    return None
 
 
 def build_chart_context(birth_time: str, gender: str, sect: int = 2, yun_sect: int = 1) -> WorkflowChartContext:
@@ -399,13 +547,81 @@ class XianzhiWorkflow:
         except Exception as e:
             log.debug("LangGraph workflow unavailable: {}", e)
 
+    # ===== LLM 意图拆解 =====
+    _DECOMPOSE_SYSTEM = (
+        "你是命理问答系统的意图分析模块。分析用户问题，输出JSON：\n"
+        '{"domain":"...","queries":["...","..."],"needs_chart":true/false}\n\n'
+        "domain 取值：theory=术语/概念/格局解释与判断, career=事业工作, wealth=财运, "
+        "love=恋爱, marriage=婚姻, health=健康, liunian=大运流年, study=学习考试, "
+        "chitchat=闲聊问候, general=综合咨询\n"
+        "queries：1-3条精准检索词，用于知识库语义检索，每条≤30字，紧密围绕用户核心问题。"
+        "不要泛化，不要堆砌无关概念。例如用户问'枭神夺食'就只给枭神夺食相关的词。\n"
+        "needs_chart：用户是否在问自己命盘的具体判断（如'我是不是XX''我命盘XX'）。\n"
+        "只输出JSON，不要解释，不要markdown代码块。"
+    )
+
+    def _decompose_query(self, user_prompt: str) -> QuestionIntent | None:
+        """用 LLM 拆解用户问题 → 意图分类 + 精准检索词。
+
+        失败时返回 None，调用方 fallback 到 classify_question。
+        """
+        if not self.chat_model:
+            return None
+        try:
+            messages = [
+                SystemMessage(content=self._DECOMPOSE_SYSTEM),
+                HumanMessage(content=user_prompt),
+            ]
+            resp = self.chat_model.invoke(messages)
+            raw = (getattr(resp, "content", "") or "").strip()
+            # 去除可能存在的 markdown 代码块包裹
+            raw = re.sub(r"^```(?:json)?\s*", "", raw)
+            raw = re.sub(r"\s*```$", "", raw)
+            data = _parse_json(raw)
+            if not data or not isinstance(data, dict):
+                return None
+            domain = str(data.get("domain", "")).strip()
+            if domain not in DOMAIN_LABELS:
+                domain = "general"
+            queries_raw = data.get("queries", [])
+            if not isinstance(queries_raw, list):
+                return None
+            queries = tuple(str(q).strip() for q in queries_raw if str(q).strip())[:3]
+            if not queries:
+                return None
+            needs_chart = bool(data.get("needs_chart", False))
+            # 年份提取复用原逻辑
+            years = sorted({int(y) for y in re.findall(r"(?:19|20)\d{2}", user_prompt)})
+            today = _dt.date.today()
+            if "今年" in user_prompt:
+                years.append(today.year)
+            if "明年" in user_prompt:
+                years.append(today.year + 1)
+            years = sorted(set(years))
+            wants_report = any(w in user_prompt for w in ("完整报告", "详细报告", "全面分析", "完整分析", "从头到尾"))
+            intent = QuestionIntent(
+                domain=domain,
+                label=DOMAIN_LABELS.get(domain, "综合咨询"),
+                target_years=years,
+                wants_report=wants_report,
+                confidence=0.9,
+                needs_chart=needs_chart,
+                queries=queries,
+            )
+            log.info("[LLM拆解] domain={} needs_chart={} queries={}", domain, needs_chart, list(queries))
+            return intent
+        except Exception as e:
+            log.warning("[LLM拆解] 失败，fallback到关键词分类: {}", e)
+            return None
+
     def answer(
         self,
         user_prompt: str,
         chart_context: WorkflowChartContext,
         history: list[BaseMessage] | None = None,
     ) -> str:
-        intent = classify_question(user_prompt)
+        # LLM 拆解优先，失败 fallback 到关键词分类
+        intent = self._decompose_query(user_prompt) or classify_question(user_prompt)
         if self._graph is not None:
             result = self._graph.invoke({
                 "user_prompt": user_prompt,
@@ -425,7 +641,7 @@ class XianzhiWorkflow:
         chart_context = self._extend_chart_if_needed(chart_context, intent)
 
         # ===== Worker 执行阶段 =====
-        knowledge = self._retrieve_rules(intent, chart_context, worker)
+        knowledge = self._retrieve_rules(intent, chart_context, worker, user_prompt)
         messages = self._build_messages(user_prompt, intent, chart_context, knowledge, history or [], worker)
         raw_answer = self._invoke(messages)
 
@@ -468,28 +684,103 @@ class XianzhiWorkflow:
         )
         return WorkflowChartContext(ctx.birth_time, ctx.gender, ctx.sect, ctx.yun_sect, chart)
 
-    def _retrieve_rules(self, intent: QuestionIntent, ctx: WorkflowChartContext, worker: DomainWorker | None = None) -> str:
+    # 单 query 检索结果最大字符数（避免单次拉爆 token；≈ 2-3 个 chunk）
+    _MAX_TEXT_PER_QUERY = 1500
+    # 累计送入 prompt 的总检索字符上限（截断兜底）
+    _MAX_KNOWLEDGE_TOTAL = 5000
+
+    def _retrieve_rules(
+        self,
+        intent: QuestionIntent,
+        ctx: WorkflowChartContext,
+        worker: DomainWorker | None = None,
+        user_text: str = "",
+    ) -> str:
         # 闲聊场景：最优先短路，不依赖知识库，让 LLM 自然回应
         if intent.domain == "chitchat":
             return "（闲聊场景，无需命理知识检索）"
         if not knowledge_base.ready:
             return "（知识库未就绪，本轮只使用结构化排盘事实与内置命理口径。）"
-        # 1) 领域规则 query（来自 DOMAIN_RULE_QUERIES）
-        queries = list(DOMAIN_RULE_QUERIES.get(intent.domain, DOMAIN_RULE_QUERIES["general"]))
-        # 1.5) Worker 专属额外检索 query（叠加在领域规则之后，提升专业深度）
-        if worker and worker.extra_queries:
-            queries.extend(worker.extra_queries)
-        # 2) 日主 + 强弱个性化 query
+
         day_master = ctx.chart.wuxing.day_master or ""
         strength = ctx.chart.wuxing.strength or ""
+
+        # ===== LLM 拆解的 queries 优先（精准、自适应） =====
+        if intent.queries:
+            queries = list(intent.queries)
+            log.info("[workflow检索] LLM拆解路径 queries={}", queries)
+        elif intent.domain == "theory":
+            queries, log_meta = self._build_theory_queries(user_text)
+            log.info("[workflow检索] 理论路径 meta={} 构造query数={}", log_meta, len(queries))
+        else:
+            queries, log_meta = self._build_duxing_queries(intent, ctx, worker)
+            log.info("[workflow检索] 断事路径 meta={} 构造query数={}", log_meta, len(queries))
+
+        log.info("[workflow检索] 领域={} 命主={}{} 构造query数={}",
+                 intent.domain, day_master, strength, len(queries))
+
+        parts: list[str] = []
+        total_chars = 0
+        for idx, query in enumerate(queries, 1):
+            text = knowledge_base.search_as_text(query)
+            # 单 query 结果截断，防止长片段（古籍原文）吃光预算
+            if text and len(text) > self._MAX_TEXT_PER_QUERY:
+                text = text[:self._MAX_TEXT_PER_QUERY] + "…"
+            preview = (text[:200] + "…") if text and len(text) > 200 else (text or "（无匹配）")
+            log.info("[workflow检索] [{}/{}] query={}\n  返回={}", idx, len(queries), query, preview)
+            if not text:
+                continue
+            block = f"【检索问题】{query}\n{text}"
+            # 总字符截断兜底
+            if total_chars + len(block) > self._MAX_KNOWLEDGE_TOTAL:
+                remain = self._MAX_KNOWLEDGE_TOTAL - total_chars
+                if remain > 200:
+                    block = block[:remain] + "…"
+                    parts.append(block)
+                    total_chars += len(block)
+                log.info("[workflow检索] 累计字符已达上限，截断后续结果")
+                break
+            parts.append(block)
+            total_chars += len(block)
+        if not parts:
+            log.info("[workflow检索] 全部query无匹配结果")
+        return "\n\n".join(parts) if parts else "（未检索到相关知识）"
+
+    def _build_theory_queries(self, user_text: str) -> tuple[list[str], str]:
+        """理论问题 query 构造：精准单概念，规避泛化检索。
+
+        1) 命中具体术语 → 单条精准 query
+        2) 未命中 → 走兜底 query
+        3) 严格限制 1-2 条 query，不叠加个性化/命例/古籍/断法
+        """
+        match = detect_theory_topic(user_text)
+        if match:
+            topic, query = match
+            return [query], f"topic={topic}"
+        return ["命理 术语 概念 解释"], "fallback"
+
+    def _build_duxing_queries(
+        self,
+        intent: QuestionIntent,
+        ctx: WorkflowChartContext,
+        worker: DomainWorker | None,
+    ) -> tuple[list[str], str]:
+        """断事问题 query 构造：领域规则 + 个性化 + 命例 + 古籍 + 断法。"""
+        queries: list[str] = list(DOMAIN_RULE_QUERIES.get(intent.domain, DOMAIN_RULE_QUERIES["general"]))
+        # 1) Worker 专属额外检索 query
+        if worker and worker.extra_queries:
+            queries.extend(worker.extra_queries)
+        day_master = ctx.chart.wuxing.day_master or ""
+        strength = ctx.chart.wuxing.strength or ""
+        # 2) 日主 + 强弱个性化 query
         queries.append(f"{intent.label} {day_master}日主 {strength} 大运流年")
-        # 3) 命例查相似结构：根据日主强弱和十神倾向构造
+        # 3) 命例查相似结构
         if day_master and strength:
             if "旺" in strength or "强" in strength:
                 queries.append(f"{day_master}日主身旺 命例 典型命局 古籍")
             elif "弱" in strength or "衰" in strength:
                 queries.append(f"{day_master}日主身弱 命例 典型命局 古籍")
-        # 4) 按领域补古籍检索 query
+        # 4) 按领域补古籍检索
         ancient_query_map = {
             "career": "渊海子平 论官杀 事业 官星",
             "wealth": "渊海子平 论财 财星 食伤生财",
@@ -500,7 +791,7 @@ class XianzhiWorkflow:
         ancient_q = ancient_query_map.get(intent.domain)
         if ancient_q:
             queries.append(ancient_q)
-        # 5) 断法体系 query（针对具体断事方向）
+        # 5) 断法体系 query
         duanfa_query_map = {
             "health": "健康伤病 断法 五行失衡 疾病",
             "wealth": "贫富层次 财星 断法 命理",
@@ -511,21 +802,8 @@ class XianzhiWorkflow:
         duanfa_q = duanfa_query_map.get(intent.domain)
         if duanfa_q:
             queries.append(duanfa_q)
-
-        # 上限提到 5 条 query（原本 3 条太少，覆盖不到命例/古籍/断法）
-        final_queries = queries[:5]
-        log.info("[workflow检索] 领域={} 命主={}{} 构造query数={}",
-                 intent.domain, day_master, strength, len(final_queries))
-        parts: list[str] = []
-        for idx, query in enumerate(final_queries, 1):
-            text = knowledge_base.search_as_text(query)
-            preview = (text[:200] + "…") if text and len(text) > 200 else (text or "（无匹配）")
-            log.info("[workflow检索] [{}/{}] query={}\n  返回={}", idx, len(final_queries), query, preview)
-            if text and text not in parts:
-                parts.append(f"【检索问题】{query}\n{text}")
-        if not parts:
-            log.info("[workflow检索] 全部query无匹配结果")
-        return "\n\n".join(parts) if parts else "（未检索到相关知识）"
+        # 上限 5 条
+        return queries[:5], "duxing"
 
     def _build_messages(
         self,
@@ -539,7 +817,9 @@ class XianzhiWorkflow:
         # Worker 配置优先（专业 Worker 提供 length_rule 和 skip_facts）
         if worker is None:
             worker = WORKERS.get(intent.domain, WORKERS["general"])
-        facts = "" if worker.skip_facts else self._compact_facts(ctx.chart, intent)
+        # needs_chart 覆盖 skip_facts：用户问"我命盘是不是XX"时需要注入命盘事实
+        skip = worker.skip_facts and not intent.needs_chart
+        facts = "" if skip else self._compact_facts(ctx.chart, intent)
         recent_history = self._compact_history(history)
         # 篇幅规则：详批优先 → Worker 专属规则
         if intent.wants_report:
