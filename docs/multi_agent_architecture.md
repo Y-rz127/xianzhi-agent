@@ -13,8 +13,9 @@
           ┌────────┬───────┼────────┬────────┐
           ▼        ▼       ▼        ▼        ▼
       ┌──────┐┌──────┐┌──────┐┌──────┐┌──────┐
-      │事业   ││财运   ││婚姻   ││健康   ││理论   │  ← 专业 Worker
+      │事业   ││财运   ││婚姻   ││健康   ││理论   │  ← 专业 Worker（示意）
       │Worker ││Worker ││Worker ││Worker ││Worker │  专属断法 prompt
+      │  …（实际共 18 个领域 Worker，见下方注册表）…                       │
       └───┬──┘└───┬──┘└───┬──┘└───┬──┘└───┬──┘  专属检索 query
           └────────┴───┬──┴────────┴────────┘
                        ▼
@@ -55,10 +56,12 @@ class WorkerResult:
 
 ### 2. DomainWorker（领域 Worker 配置）
 
-每个 Worker 有四样专属配置：
+每个 Worker 有六样专属配置（`domain`/`label` 为身份字段，其余为行为配置）：
 
 | 字段 | 说明 |
 |------|------|
+| `domain` | 领域标识（如 `"career"`），与 `WORKERS` 注册表的 key 一致 |
+| `label` | 领域中文名（如 `"事业工作"`），用于日志与展示 |
 | `expertise_prompt` | 追加到通用 system prompt 末尾的领域断法规则 |
 | `extra_queries` | 叠加到 `DOMAIN_RULE_QUERIES` 之外的领域专属检索 query |
 | `length_rule` | 领域专属篇幅规则 |
@@ -66,7 +69,7 @@ class WorkerResult:
 
 ### 3. 专业 Worker 注册表
 
-共 10 个领域 Worker：
+共 18 个领域 Worker：
 
 | Worker | 领域 | 专属断法覆盖 |
 |--------|------|------------|
@@ -76,9 +79,17 @@ class WorkerResult:
 | `marriage` | 婚姻关系 | 配偶宫/夫妻星/合冲刑害/克配偶 |
 | `health` | 健康状态 | 五行失衡/寒暖燥湿/七杀攻身 |
 | `study` | 学习考试 | 印星/食伤/官星/文昌 |
+| `social` | 社交人际 | 比劫/贵人星/七杀小人/日支合化 |
+| `family` | 六亲关系 | 十神六亲/宫位/印财比劫食伤官杀 |
 | `liunian` | 大运流年 | 大运流年作用/太岁/立春换年 |
 | `theory` | 术语理论 | 术语解释规范/古籍引用格式 |
 | `chitchat` | 闲聊问候 | 空（跳过检索+命盘） |
+| `personality` | 性格心性 | 日主/十神组合/强弱/格局 |
+| `migration` | 方位迁移 | 用神方位/驿马/迁移 |
+| `naming` | 起名改名 | 用神喜忌/日主强弱/字形字义/调候 |
+| `auspicious` | 择吉择日 | 用事人喜用神/事项用神/避凶煞/吉神 |
+| `match` | 合婚配对 | 双盘对比/配偶宫夫妻星/刑冲合害/五行互补 |
+| `children` | 子女生育 | 子女星/子女宫/生育时机/受克 |
 | `general` | 综合咨询 | 兜底 |
 
 ### 4. ReviewerWorker（三重校验）
@@ -89,7 +100,7 @@ class WorkerResult:
 | **古籍真实性** | 比对 `《XXX》原文：` 标注是否在检索结果中出现 | 检索结果无《XX书》，回答却引用了 |
 | **合规校验** | 扫描死期/赌博/符咒/堕胎等红线关键词 | 回答含"死期""买彩票必赢" |
 
-**古籍白名单**：渊海子平、子平真诠、滴天髓、穷通宝鉴、三命通会、神峰通考、千里命稿——这些经典古籍即使未命中检索也允许引用（知识库已收录，检索可能未命中但属合理引用）。
+**古籍白名单**：渊海子平、子平真诠、滴天髓、穷通宝鉴、三命通会、神峰通考、盲派口诀——这些经典古籍即使未命中检索也允许引用（知识库已收录，检索可能未命中但属合理引用）。
 
 ## 执行流程
 
@@ -149,10 +160,10 @@ if intent.domain == "chitchat":
 
 ### 闲聊判定规则
 
-`classify_question` 的 chitchat 优先判定（[xianzhi_workflow.py L296-L302](app/agent/xianzhi_workflow.py#L296-L302)）：
+`classify_question` 的 chitchat 优先判定（[xianzhi_workflow.py L436-L437](app/agent/xianzhi_workflow.py#L436-L437)）：
 
 ```python
-CHITCHAT_STRONG = ("你好", "在吗", "谢谢", "辛苦", "早上好", "晚上好", "晚安",
+CHITCHAT_STRONG = ("哈哈", "你好", "在吗", "谢谢", "辛苦", "早上好", "晚上好", "晚安",
                    "吃饭了吗", "在干嘛", "生日快乐", "新年好")
 if any(w in text for w in CHITCHAT_STRONG) and not years:
     best_domain = "chitchat"
@@ -213,7 +224,7 @@ app/agent/
 ├── xianzhi_workflow.py          # Supervisor + Worker + Reviewer 核心
 │   ├── WorkerResult             # 最小结果协议
 │   ├── DomainWorker             # Worker 配置 dataclass
-│   ├── WORKERS                  # 10 个领域 Worker 注册表
+│   ├── WORKERS                  # 18 个领域 Worker 注册表
 │   ├── ReviewerWorker           # 三重校验审核员
 │   └── XianzhiWorkflow          # Supervisor（answer 方法）
 └── xianzhi_langgraph.py         # 可选 LangGraph 封装（已接入新架构）
@@ -269,12 +280,12 @@ WORKERS["new_domain"] = DomainWorker(
 运行架构测试（不依赖真实 LLM）：
 
 ```powershell
-.venv\Scripts\python.exe test_multi_agent.py
+.venv\Scripts\python.exe -m pytest tests/test_xianzhi_workflow.py -q
 ```
 
 测试覆盖：
 1. 模块导入完整性
-2. Worker 注册表完整性（10 个领域）
+2. Worker 注册表完整性（18 个领域）
 3. ReviewerWorker 三重校验（事实/古籍真实性/合规）
 4. classify_question 闲聊判定
 5. XianzhiWorkflow 实例化 + Reviewer 注入

@@ -24,9 +24,9 @@
 | **大模型** | 阿里云百炼 DashScope（Qwen3，OpenAI 兼容模式） |
 | **Agent 框架** | LangChain + LangGraph（可选） |
 | **Web 框架** | FastAPI + WebSocket（小程序兼容） |
-| **RAG** | Chroma 向量库 + DashScope Embedding |
-| **记忆持久化** | File（默认） / PostgreSQL |
-| **数据库** | SQLite（用户/档案/收藏/反馈） |
+| **RAG** | PostgreSQL pgvector（可切 Chroma / Milvus）+ DashScope Embedding |
+| **记忆持久化** | PostgreSQL（生产）/ File（本地兜底） |
+| **数据库** | PostgreSQL（用户/档案/收藏/反馈） |
 | **MCP** | 高德地图 MCP |
 | **可观测性** | LangSmith + Prometheus |
 | **前端** | Vue3 + UniApp（小程序） / Vite（Web） |
@@ -225,7 +225,7 @@ xianzhi-agent/
 │   ├── domain/                  # 领域逻辑
 │   │   └── bazi_engine.py        # 八字排盘引擎（神煞查表）
 │   ├── tools/                   # 工具集
-│   │   ├── bazi.py               # 八字工具（7个）
+│   │   ├── bazi.py               # 八字工具（8个）
 │   │   ├── rag_search.py         # 知识库检索工具
 │   │   ├── web_search.py         # 联网搜索（Serper.dev）
 │   │   ├── terminate.py          # 终止工具
@@ -241,7 +241,7 @@ xianzhi-agent/
 │   ├── memory/                  # 记忆系统
 │   │   ├── chat_memory.py        # 对话记忆
 │   │   └── postgres_memory.py    # PostgreSQL 持久化
-│   ├── db/                      # SQLite 数据访问层
+│   ├── db/                      # PostgreSQL 数据访问层
 │   ├── evaluation/              # 离线评估
 │   │   └── xianzhi_eval.py       # 答案质量检查
 │   ├── tarot_app.py             # 塔罗 App
@@ -394,9 +394,9 @@ Supervisor (XianzhiWorkflow)
     └─ Reflextion 回退修复
 ```
 
-### 10 个专业 Worker
+### 18 个专业 Worker
 
-事业 / 财运 / 恋爱 / 婚姻 / 健康 / 学业 / 大运流年 / 术语理论 / 闲聊 / 综合
+事业 / 财运 / 恋爱 / 婚姻 / 健康 / 学业 / 社交 / 六亲 / 大运流年 / 术语理论 / 闲聊 / 性格 / 迁移 / 起名 / 择吉 / 合婚 / 子女 / 综合
 
 每个 Worker 带专属断法 prompt 和检索 query，专注单一领域。
 
@@ -412,8 +412,8 @@ Supervisor (XianzhiWorkflow)
 | `APP_PORT` | 服务端口 | `8123` |
 | `CORS_ORIGINS` | CORS 允许源 | `http://localhost:5173,...` |
 | `AGENT_MAX_STEPS` | ReAct 最大步数 | `5` |
-| `MEMORY_STORE_TYPE` | 记忆存储 | `file` |
-| `VECTOR_STORE_TYPE` | 向量库类型 | `chroma` |
+| `MEMORY_STORE_TYPE` | 记忆存储 | `postgres`（本地兜底 `file`） |
+| `VECTOR_STORE_TYPE` | 向量库类型 | `postgres`（pgvector；本地兜底 `chroma`） |
 | `JWT_SECRET` | JWT 签名密钥 | 随机生成 |
 | `SEARCH_API_KEY` | Serper.dev Key | 空 |
 | `AMAP_MAPS_API_KEY` | 高德 MCP Key | 空 |
