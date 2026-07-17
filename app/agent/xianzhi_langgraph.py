@@ -78,6 +78,8 @@ def create_xianzhi_graph(workflow):
             state["chart_context"].chart,
             state.get("knowledge", ""),
             workflow.check_facts,
+            getattr(state.get("intent"), "second_chart", None).chart
+            if getattr(state.get("intent"), "second_chart", None) else None,
         )
         if review.ok:
             log.info("[Reviewer] {} Worker 产出通过三重校验 ✓", getattr(worker, "label", "?"))
@@ -110,6 +112,8 @@ def create_xianzhi_graph(workflow):
             state["chart_context"].chart,
             state.get("knowledge", ""),
             workflow.check_facts,
+            getattr(state.get("intent"), "second_chart", None).chart
+            if getattr(state.get("intent"), "second_chart", None) else None,
         )
         if repaired_review.ok:
             log.info("[Reflextion] {} Worker 修复后通过校验 ✓", getattr(worker, "label", "?"))

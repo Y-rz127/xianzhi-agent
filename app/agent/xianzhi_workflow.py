@@ -7,7 +7,7 @@ from __future__ import annotations
 import datetime as _dt
 import json
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from langchain_core.language_models import BaseChatModel
@@ -56,6 +56,17 @@ def _dedupe_content(content: str) -> str:
 GANZHI_RE = re.compile(r"[甲乙丙丁戊己庚辛壬癸][子丑寅卯辰巳午未申酉戌亥]")
 YEAR_GANZHI_RE = re.compile(r"(?P<year>\d{4})年[^。；;，,、\n]{0,12}(?P<ganzhi>[甲乙丙丁戊己庚辛壬癸][子丑寅卯辰巳午未申酉戌亥])")
 
+# 从用户问题里抽取「对方」出生信息（合婚场景）：支持 男/女 在数字前后两种顺序，时分可缺省
+# 注意：不允许在「性别→日期」之间跨过另一个 男/女，否则会把用户自己的性别误配给对方日期
+_OTHER_BIRTH_RE1 = re.compile(
+    r"(?P<gender>男|女)(?:(?!男|女)[^\d])*?(?P<year>\d{4})[-年/](?P<month>\d{1,2})[-月/](?P<day>\d{1,2})"
+    r"(?:[日\s]*(?P<hour>\d{1,2})[:：]?(?P<minute>\d{1,2})?)?"
+)
+_OTHER_BIRTH_RE2 = re.compile(
+    r"(?P<year>\d{4})[-年/](?P<month>\d{1,2})[-月/](?P<day>\d{1,2})"
+    r"(?:[日\s]*(?P<hour>\d{1,2})[:：]?(?P<minute>\d{1,2})?)?[^\d]*?(?P<gender>男|女)"
+)
+
 
 DOMAIN_LABELS = {
     "career": "事业工作",
@@ -67,6 +78,12 @@ DOMAIN_LABELS = {
     "study": "学习考试",
     "social": "社交人际",
     "family": "六亲关系",
+    "personality": "性格心性",
+    "migration": "方位迁移",
+    "naming": "起名改名",
+    "auspicious": "择吉择日",
+    "match": "合婚配对",
+    "children": "子女生育",
     "theory": "术语理论",
     "chitchat": "闲聊问候",
     "general": "综合咨询",
@@ -81,6 +98,10 @@ class QuestionIntent:
     confidence: float = 0.5
     needs_chart: bool = False  # 用户是否在问自己命盘的具体判断（如"我是不是枭神夺食"）
     queries: tuple[str, ...] = ()  # LLM 拆解出的精准检索词（空=走硬编码 fallback）
+    other_birth_time: str = ""  # match 合婚：用户问题中提供的「对方」出生时间
+    other_gender: str = ""      # match 合婚：对方的性别（男/女）
+    second_chart: Any = None    # match 合婚：解析出的对方命盘（WorkflowChartContext）
+    match_basis: str = ""       # match 合婚：系统规则合婚基础数据（bazi_hehun 产出）
 
 
 @dataclass
@@ -284,6 +305,90 @@ WORKERS: dict[str, DomainWorker] = {
         length_rule="闲聊1-3句，≤150字，像朋友聊天自然回应。",
         skip_facts=True,
     ),
+    "personality": DomainWorker(
+        domain="personality",
+        label="性格心性",
+        expertise_prompt=(
+            "【性格心性专项断法】\n"
+            "- 日主定底色：日主五行（甲乙木/丙丁火等）决定基本气质与行事风格\n"
+            "- 十神组合定性格：比劫主果敢仗义、食伤主聪慧外露、正印主沉稳仁厚、偏印主孤僻机巧、"
+            "正官主规矩自律、七杀主果决狠劲、正财主务实、偏财主慷慨\n"
+            "- 强弱看精神面貌：身旺者主动外放、身弱者内敛保守；日主得令得地者自信，失令者易怯\n"
+            "- 格局看层次：伤官佩印主才华内敛、杀印相生主谋略、食神制杀主魄力、官印相生主稳重\n"
+            "- 适合什么人：看夫妻星/配偶宫十神与日主生克，以及桃花星、贵人星，给出互补型人格建议\n"
+            "- 避免贴标签式下定论，结合用神喜忌说明性格的可成长方向"
+        ),
+        extra_queries=("日主 十神 性格 心性 断法", "用神 性格 天赋 为人 命理"),
+    ),
+    "migration": DomainWorker(
+        domain="migration",
+        label="方位迁移",
+        expertise_prompt=(
+            "【方位迁移专项断法】\n"
+            "- 用神定吉方：用神五行对应方位（木东、火南、金西、水北、土中/本地），宜向用神方位发展\n"
+            "- 驿马定动象：驿马星（寅午戌见申、申子辰见寅、巳酉丑见亥、亥卯未见巳）主奔波动迁，逢冲更明显\n"
+            "- 大运流年引动：走驿马运、向外地之运，或流年冲动日支/驿马，多为外出发展之期\n"
+            "- 本地 vs 外地：日主强、驿马旺、用神在他方者宜外出；日主弱、用神在本地者宜守\n"
+            "- 合规提示：迁移仅为命理趋势参考，实际决策结合现实条件（工作、家庭、政策）"
+        ),
+        extra_queries=("用神方位 驿马 迁移 出行 断法", "外地发展 本地 大运 流年 命理"),
+    ),
+    "naming": DomainWorker(
+        domain="naming",
+        label="起名改名",
+        expertise_prompt=(
+            "【起名改名专项断法】\n"
+            "- 以用神喜忌为核心：名字五行宜补用神、喜神所缺，忌神之五行尽量回避\n"
+            "- 日主强弱定补法：身弱补印比（生扶日主），身强宜泄耗（食伤财官）\n"
+            "- 字形字义为辅：在五行补益前提下选寓意积极、音律和谐的字，不与长辈重字\n"
+            "- 调候优先：寒命（冬生水旺）喜火调候、燥命（夏生火旺）喜水润局\n"
+            "- 合规提示：起名改名仅为文化民俗参考，不保证改运；最终以家长与户籍规定为准"
+        ),
+        extra_queries=("喜用神 起名 改名 五行补缺 命理", "八字命名 用神 古籍"),
+    ),
+    "auspicious": DomainWorker(
+        domain="auspicious",
+        label="择吉择日",
+        expertise_prompt=(
+            "【择吉择日专项断法】\n"
+            "- 以用事人八字喜用神为择日根基：所选日课干支五行宜助旺用神、避开忌神\n"
+            "- 事项定用神侧重：开业重财官、嫁娶重合婚、搬迁重印比安稳、动土重印星护身\n"
+            "- 避凶煞：避开与用事人年命刑冲、三煞、月破、四离四绝等凶日\n"
+            "- 选吉神当值：天德、月德、天赦、三合、六合等吉神值日优先\n"
+            "- 合规提示：择日为传统民俗参考，重大事宜（医疗、法律）务必以专业意见为准"
+        ),
+        extra_queries=("择日 择吉 黄道吉日 用事 命理", "开业 嫁娶 搬迁 择日 古籍"),
+    ),
+    "match": DomainWorker(
+        domain="match",
+        label="合婚配对",
+        expertise_prompt=(
+            "【合婚配对专项断法】（已提供双方命盘：用户命盘 + 对方命盘）\n"
+            "- 双盘对比：年柱生肖/纳音生克、日柱干支生克（男命看财星、女命看官星是否得力）、双方用神是否互补\n"
+            "- 配偶宫（日支）十神、夫妻星状态、桃花/红鸾天喜/孤辰寡宿等神煞，两盘分别看再对比\n"
+            "- 刑冲合害：两盘地支有无冲克（子午冲、卯酉冲、寅申冲等）、有无三合六合化解\n"
+            "- 五行互补：双方最旺/最弱五行能否互济（参考【合婚基础数据（系统规则）】的互补评分）\n"
+            "- 大运流年引动：双方当前及近年的婚恋应期是否同步\n"
+            "- 若【合婚基础数据（系统规则）】已给出五行互补评分，作为参考锚点，结合十神格局做综合判断\n"
+            "- 结论风格：讲清'合'与'需磨合'的维度，不绝对断吉凶；提醒婚姻经营重于命数\n"
+            "- 若【对方命盘事实】缺失（用户未提供对方出生时间），说明需要对方出生年月日时+性别才能合婚，"
+            "并先用单盘讲清本方配偶宫/夫妻星维度"
+        ),
+        extra_queries=("八字合婚 配偶宫 夫妻星 双盘 命理", "生肖 纳音 刑冲 合婚 古籍"),
+    ),
+    "children": DomainWorker(
+        domain="children",
+        label="子女生育",
+        expertise_prompt=(
+            "【子女生育专项断法】\n"
+            "- 子女星看男女：男命以官杀为子女（官为女、杀为子），女命以食伤为子女（食为女、伤为子）\n"
+            "- 子女宫看时柱：时柱干支与子女星状态定子女缘分厚薄、得力与否\n"
+            "- 生育时机：大运流年引动子女星、子女宫（透出/得生/逢合），多为生育之机\n"
+            "- 子女星受克（被冲合、入墓、空亡）多主缘分较浅或迟得，需结合大运看应期\n"
+            "- 合规提示：生育规划仅为命理参考，健康与医学建议以医院为准"
+        ),
+        extra_queries=("子女星 子女宫 食伤 官杀 生育 断法", "何年生子 大运流年 子女 命理"),
+    ),
     "general": DomainWorker(
         domain="general",
         label="综合咨询",
@@ -364,7 +469,7 @@ class ReviewerWorker:
     # 古籍真实性校验：抽取回答中「《XXX》原文：...」标注
     ANCIENT_CITATION_RE = re.compile(r"《[^》]{1,12}》[^。；;\n]{0,6}原文[：:]")
 
-    def review(self, answer: str, chart: BaziChart, knowledge: str, fact_checker) -> FactCheckResult:
+    def review(self, answer: str, chart: BaziChart, knowledge: str, fact_checker, second_chart: Any = None) -> FactCheckResult:
         """对 Worker 产出做三重校验。
 
         Args:
@@ -372,12 +477,17 @@ class ReviewerWorker:
             chart: 系统排盘事实
             knowledge: Worker 检索到的知识片段（用于古籍真实性比对）
             fact_checker: 复用 XianzhiWorkflow.check_facts 方法
+            second_chart: 合婚双盘时的对方命盘（可选，同样做事实校验）
         """
         issues: list[str] = []
 
         # 1) 事实校验（四柱/大运/流年）
-        fact_result = fact_checker(answer, chart)
+        # 双盘场景：两张盘的合法干支互为「容错集」，避免把对方盘的正确陈述误判为本盘错误
+        fact_result = fact_checker(answer, chart, second_chart)
         issues.extend(fact_result.issues)
+        if second_chart is not None:
+            fact_result2 = fact_checker(answer, second_chart, chart)
+            issues.extend(fact_result2.issues)
 
         # 2) 古籍真实性校验：标注了「《XXX》原文」的引用必须在检索知识中出现
         citations = self.ANCIENT_CITATION_RE.findall(answer)
@@ -444,10 +554,16 @@ class XianzhiWorkflow:
         "domain 取值：theory=术语/概念/格局解释与判断, career=事业工作, wealth=财运, "
         "love=恋爱, marriage=婚姻, health=健康, liunian=大运流年, study=学习考试, "
         "social=社交人际/朋友/贵人/小人, family=六亲关系/父母/子女/兄弟姐妹, "
+        "personality=性格心性/天赋为人/适合什么人, migration=方位迁移/去哪发展/本地外地, "
+        "naming=起名改名/用神取名, auspicious=择吉择日/开业搬家结婚选日, "
+        "match=合婚配对/两人八字合不合, children=子女生育时机/何年生子, "
         "chitchat=闲聊问候, general=综合咨询\n"
         "queries：1-3条精准检索词，用于知识库语义检索，每条≤30字，紧密围绕用户核心问题。"
         "不要泛化，不要堆砌无关概念。例如用户问'枭神夺食'就只给枭神夺食相关的词。\n"
         "needs_chart：用户是否在问自己命盘的具体判断（如'我是不是XX''我命盘XX'）。\n"
+        "若 domain=match 且用户问题中给出了对方出生时间，请额外返回 other_birth_time"
+        "（格式 YYYY-MM-DD HH:MM 或含时辰，如'1990-05-20 14:30'/'男1990年五月初五辰时'）和 "
+        "other_gender（男/女）；只填'对方/另一半'的出生时间，不要填用户自己的。没有则留空字符串。\n"
         "只输出JSON，不要解释，不要markdown代码块。"
     )
 
@@ -481,6 +597,8 @@ class XianzhiWorkflow:
             if not queries:
                 return None
             needs_chart = bool(data.get("needs_chart", False))
+            other_birth_time = str(data.get("other_birth_time", "") or "").strip()
+            other_gender = str(data.get("other_gender", "") or "").strip()
             # 年份提取复用原逻辑
             years = sorted({int(y) for y in re.findall(r"(?:19|20)\d{2}", user_prompt)})
             today = _dt.date.today()
@@ -498,6 +616,8 @@ class XianzhiWorkflow:
                 confidence=0.9,
                 needs_chart=needs_chart,
                 queries=queries,
+                other_birth_time=other_birth_time,
+                other_gender=other_gender,
             )
             log.info("[LLM拆解] domain={} needs_chart={} queries={}", domain, needs_chart, list(queries))
             return intent
@@ -518,6 +638,29 @@ class XianzhiWorkflow:
             log.info("[LLM拆解] 闲聊识别，跳过 LLM 拆解 → domain={}", intent.domain)
         else:
             intent = self._decompose_query(user_prompt) or classify_question(user_prompt)
+        # ===== 合婚双盘：解析对方命盘（用户已挂载自己的盘，问题中给出对方盘）=====
+        # 必须在 LangGraph 调用之前完成，否则图内节点读取不到 second_chart/match_basis
+        if intent.domain == "match":
+            ob, og = self._parse_other_birth(user_prompt)
+            # LLM 拆解出的优先，正则兜底
+            if not (ob and og) and intent.other_birth_time and intent.other_gender:
+                ob, og = intent.other_birth_time, intent.other_gender
+            if ob and og:
+                try:
+                    from app.tools.bazi import _normalize_birth_time
+                    ob_n = _normalize_birth_time(ob)
+                    # 避免把用户自己的盘当成对方盘
+                    if ob_n != chart_context.birth_time:
+                        other_ctx = build_chart_context(ob_n, og, chart_context.sect, chart_context.yun_sect)
+                        basis = self._build_match_basis(chart_context, other_ctx)
+                        intent = replace(intent, second_chart=other_ctx, match_basis=basis)
+                        log.info("[match] 已解析对方命盘 {} {}，合婚基础数据{}字",
+                                 ob_n, og, len(basis))
+                    else:
+                        log.info("[match] 解析出的对方命盘与用户自身盘相同，跳过")
+                except Exception as e:
+                    log.warning("[match] 解析对方命盘失败: {}", e)
+
         if self._graph is not None:
             result = self._graph.invoke({
                 "user_prompt": user_prompt,
@@ -545,7 +688,8 @@ class XianzhiWorkflow:
 
         # ===== Reviewer 审核阶段（三重校验：事实+古籍真实性+合规） =====
         log.info("[Reviewer] 开始审核 {} Worker 产出 ({}字)...", worker.label, len(raw_answer))
-        review = self._reviewer.review(raw_answer, chart_context.chart, knowledge, self.check_facts)
+        review = self._reviewer.review(raw_answer, chart_context.chart, knowledge, self.check_facts,
+                                       getattr(intent, "second_chart", None).chart if getattr(intent, "second_chart", None) else None)
         if review.ok:
             log.info("[Reviewer] {} Worker 产出通过三重校验 ✓", worker.label)
             return raw_answer
@@ -558,7 +702,8 @@ class XianzhiWorkflow:
             raw_answer, review, user_prompt, intent, chart_context, knowledge, worker
         )
         repaired = self._invoke(repair_messages)
-        repaired_review = self._reviewer.review(repaired, chart_context.chart, knowledge, self.check_facts)
+        repaired_review = self._reviewer.review(repaired, chart_context.chart, knowledge, self.check_facts,
+                                                getattr(intent, "second_chart", None).chart if getattr(intent, "second_chart", None) else None)
         if repaired_review.ok:
             log.info("[Reflextion] {} Worker 修复后通过校验 ✓", worker.label)
             return repaired
@@ -585,6 +730,39 @@ class XianzhiWorkflow:
             liunian_years=max(1, end - start + 1),
         )
         return WorkflowChartContext(ctx.birth_time, ctx.gender, ctx.sect, ctx.yun_sect, chart)
+
+    def _parse_other_birth(self, text: str) -> tuple[str, str]:
+        """从用户问题中正则抽取「对方」出生信息（合婚兜底）。
+
+        返回 (birth_time, gender)，无匹配返回 ("", "")。
+        birth_time 标准化为 YYYY-MM-DD HH:MM（时分缺省补 00:00）。
+        """
+        for pattern in (_OTHER_BIRTH_RE1, _OTHER_BIRTH_RE2):
+            m = pattern.search(text)
+            if m:
+                d = m.groupdict()
+                year, month, day = int(d["year"]), int(d["month"]), int(d["day"])
+                hour = int(d["hour"]) if d.get("hour") else 0
+                minute = int(d["minute"]) if d.get("minute") else 0
+                birth_time = "{}-{:02d}-{:02d} {:02d}:{:02d}".format(year, month, day, hour, minute)
+                return birth_time, d["gender"]
+        return "", ""
+
+    def _build_match_basis(self, self_ctx: WorkflowChartContext, other_ctx: WorkflowChartContext) -> str:
+        """复用规则合婚工具 bazi_hehun，生成双盘基础数据，作为 LLM 综合判断的锚点。"""
+        try:
+            from app.tools.bazi import bazi_hehun
+            # bazi_hehun 是 @tool 装饰的 StructuredTool，需用 .func 取底层函数直接调用
+            base = bazi_hehun.func(
+                self_ctx.birth_time, self_ctx.gender,
+                other_ctx.birth_time, other_ctx.gender,
+                self_ctx.sect,
+            )
+            if base and not base.startswith("合婚分析失败"):
+                return base
+        except Exception as e:
+            log.warning("[match] 规则合婚基础数据生成失败: {}", e)
+        return ""
 
     # 单 query 检索结果最大字符数（避免单次拉爆 token；≈ 2-3 个 chunk）
     _MAX_TEXT_PER_QUERY = 1000
@@ -708,6 +886,12 @@ class XianzhiWorkflow:
             "marriage": "滴天髓 论婚姻 配偶宫 古籍",
             "health": "三命通会 论疾病 五行 健康古籍",
             "love": "子平真诠 论桃花 感情 古籍",
+            "personality": "滴天髓 论性情 日主 十神 性格 古籍",
+            "migration": "滴天髓 论迁移 驿马 方位 古籍",
+            "naming": "渊海子平 论命名 用神 起名 古籍",
+            "auspicious": "星命 择日 择吉 用事 古籍",
+            "match": "三命通会 论合婚 夫妻宫 合婚 古籍",
+            "children": "三命通会 论子息 子女 食伤 古籍",
         }
         ancient_q = ancient_query_map.get(intent.domain)
         if ancient_q:
@@ -719,6 +903,12 @@ class XianzhiWorkflow:
             "career": "事业财运 官星 印星 断法",
             "marriage": "婚恋关系 配偶宫 断法 命理",
             "love": "婚恋关系 桃花 断法 命理",
+            "personality": "性格心性 十神 日主 为人 断法",
+            "migration": "方位迁移 用神方位 驿马 断法",
+            "naming": "起名改名 喜用神 五行 断法",
+            "auspicious": "择吉择日 用事 黄道 断法",
+            "match": "合婚 夫妻宫 刑冲合害 断法",
+            "children": "子女生育 食伤 子女宫 时机 断法",
         }
         duanfa_q = duanfa_query_map.get(intent.domain)
         if duanfa_q:
@@ -774,6 +964,9 @@ class XianzhiWorkflow:
         )
         if facts:
             human += f"【系统排盘事实】\n{facts}\n\n"
+        match_basis = getattr(intent, "match_basis", "")
+        if match_basis:
+            human += f"【合婚基础数据（系统规则）】\n{match_basis}\n\n"
         human += (
             f"【命理规则检索】\n{knowledge}\n\n"
             f"【输出要求】\n{length_rule}\n"
@@ -805,6 +998,8 @@ class XianzhiWorkflow:
                 f"【原回答】\n{raw_answer}\n\n"
                 f"【发现的问题】\n" + "\n".join(f"- {issue}" for issue in checked.issues) + "\n\n"
                 + (f"【正确排盘事实】\n{facts}\n\n" if facts else "")
+                + (f"【合婚基础数据（系统规则）】\n{getattr(intent, 'match_basis', '')}\n\n"
+                   if getattr(intent, "match_basis", "") else "")
                 + f"【可用规则】\n{knowledge}\n\n"
                 "请输出修正后的最终回答。"
             )),
@@ -830,7 +1025,8 @@ class XianzhiWorkflow:
                 chunks.append(f"{role}: {content[:180]}")
         return "\n".join(chunks) if chunks else "（无）"
 
-    def _compact_facts(self, chart: BaziChart, intent: QuestionIntent) -> str:
+    def _fact_block(self, chart: BaziChart, intent: QuestionIntent) -> str:
+        """单张命盘的紧凑事实块（不含对方盘逻辑，供 _compact_facts 复用）。"""
         today = _dt.date.today()
         pillars = " ".join(f"{p.name}:{p.ganzhi}({p.nayin})" for p in chart.pillars)
         dayun_lines = [
@@ -877,9 +1073,25 @@ class XianzhiWorkflow:
             "口径: " + "；".join(chart.warnings),
         ])
 
-    def check_facts(self, answer: str, chart: BaziChart) -> FactCheckResult:
+    def _compact_facts(self, chart: BaziChart, intent: QuestionIntent) -> str:
+        facts = self._fact_block(chart, intent)
+        # 合婚双盘：追加对方命盘事实
+        second = getattr(intent, "second_chart", None)
+        if second is not None:
+            facts += "\n\n【对方命盘事实】\n" + self._fact_block(second.chart, intent)
+        return facts
+
+    def check_facts(self, answer: str, chart: BaziChart, other_chart: BaziChart | None = None) -> FactCheckResult:
+        """校验回答中的四柱/大运/流年是否与系统排盘一致。
+
+        other_chart 为合婚双盘时的对方命盘：同一干支若出现在任一张合法盘上即视为正确，
+        避免把回答中对「对方/自己」各自正确的陈述误判为对方盘错误。
+        """
         issues: list[str] = []
-        year_to_gz = {item.year: item.ganzhi for item in chart.liunian}
+        year_to_gz: dict[int, str] = {item.year: item.ganzhi for item in chart.liunian}
+        if other_chart is not None:
+            for item in other_chart.liunian:
+                year_to_gz.setdefault(item.year, item.ganzhi)
         for match in YEAR_GANZHI_RE.finditer(answer):
             year = int(match.group("year"))
             stated = match.group("ganzhi")
@@ -887,13 +1099,20 @@ class XianzhiWorkflow:
             if expected and stated != expected:
                 issues.append(f"{year}年流年应为{expected}，回答写成了{stated}")
 
-        pillar_names = {p.name: p.ganzhi for p in chart.pillars}
-        for name, expected in pillar_names.items():
+        # 每个柱名下，两张盘各自合法的干支都算正确
+        valid: dict[str, set[str]] = {}
+        for p in chart.pillars:
+            valid.setdefault(p.name, set()).add(p.ganzhi)
+        if other_chart is not None:
+            for p in other_chart.pillars:
+                valid.setdefault(p.name, set()).add(p.ganzhi)
+        primary = {p.name: p.ganzhi for p in chart.pillars}
+        for name, expected_set in valid.items():
             pattern = re.compile(rf"{name}[^。；;，,、\n]{{0,8}}(?P<ganzhi>{GANZHI_RE.pattern})")
             for match in pattern.finditer(answer):
                 stated = match.group("ganzhi")
-                if stated != expected:
-                    issues.append(f"{name}应为{expected}，回答写成了{stated}")
+                if stated not in expected_set:
+                    issues.append(f"{name}应为{primary[name]}，回答写成了{stated}")
 
         return FactCheckResult(ok=not issues, issues=issues)
 
