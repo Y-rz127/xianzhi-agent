@@ -11,7 +11,14 @@
       <scroll-view class="modal-body" scroll-y>
         <!-- 四柱 -->
         <view class="section" v-if="pillars.length">
-          <text class="section-title">四柱命盘</text>
+          <view class="section-title-row">
+            <text class="section-title">四柱命盘</text>
+            <text v-if="mingGong || shenGong" class="gong-info">
+              <template v-if="mingGong">命宫 {{ mingGong }}</template>
+              <template v-if="mingGong && shenGong"> · </template>
+              <template v-if="shenGong">身宫 {{ shenGong }}</template>
+            </text>
+          </view>
           <view class="pillars-grid">
             <view
               v-for="p in pillars"
@@ -22,6 +29,16 @@
               <text class="pillar-gan">{{ p.ganzhi[0] }}</text>
               <text class="pillar-zhi">{{ p.ganzhi[1] }}</text>
               <text class="pillar-nayin">{{ p.nayin }}</text>
+              <!-- 该柱神煞竖排（点击查看寓意） -->
+              <view v-if="shenshaByPillar[p.name]?.length" class="pillar-shensha">
+                <text
+                  v-for="(s, i) in shenshaByPillar[p.name]"
+                  :key="i"
+                  class="ps-tag"
+                  :class="'ps-' + s._cat"
+                  @tap="showShenshaDesc(s)"
+                >{{ s.name }}</text>
+              </view>
             </view>
           </view>
         </view>
@@ -95,17 +112,6 @@
           </view>
         </view>
 
-        <!-- 神煞 -->
-        <view class="section" v-if="shensha.length">
-          <text class="section-title">神煞</text>
-          <view class="shensha-list">
-            <view v-for="(s, i) in shensha" :key="i" class="shensha-item">
-              <text class="shensha-name">{{ s.name }}</text>
-              <text class="shensha-desc">{{ s.description }}</text>
-            </view>
-          </view>
-        </view>
-
         <!-- AI 报告 -->
         <view class="section">
           <text class="section-title">AI 命理报告</text>
@@ -139,6 +145,7 @@
 import { ref, computed } from 'vue'
 import type { Pillar, WuxingItem, DayunItem, ShenshaItem, LiuNianItem, ChartAnalysis } from '@/api'
 import { generateFullReport, downloadReport, downloadFullReportPdf } from '@/api'
+import MarkdownRender from '@/components/MarkdownRender/MarkdownRender.vue'
 
 const props = defineProps<{
   visible: boolean
@@ -152,6 +159,8 @@ const props = defineProps<{
   warnings?: string[]
   birthTime?: string
   gender?: string
+  mingGong?: string
+  shenGong?: string
 }>()
 const emit = defineEmits<{ close: [] }>()
 
@@ -180,8 +189,52 @@ const hasConsultationContext = computed(() =>
   !!props.analysis || !!props.startYun || liunian.value.length > 0 || warnings.value.length > 0
 )
 
+function classifyShensha(item: ShenshaItem): string {
+  const text = `${item.name} ${item.description}`
+  if (/桃花|红鸾|天喜|沐浴|咸池|红艳|情缘|感情|姻缘|婚/.test(text)) return 'love'
+  if (/羊刃|劫煞|亡神|灾煞|元辰|空亡|十恶大败|阴差阳错|天罗地网|飞刃|勾绞|孤辰|寡宿|丧门|吊客|白虎|血刃|截路|悬针|冲|刑|害|破/.test(text)) return 'bad'
+  if (/驿马|禄神|将星|国印|金舆|官|财|事业|职场/.test(text)) return 'career'
+  if (/天乙|太极|文昌|福星|月德|天德|学堂|词馆|贵人|三奇|魁罡/.test(text)) return 'good'
+  return 'other'
+}
+
+/** 按柱子归属分组神煞 */
+const shenshaByPillar = computed(() => {
+  const pillarNames = ['年柱', '月柱', '日柱', '时柱']
+  const groups: Record<string, (ShenshaItem & { _cat: string })[]> = {}
+  // 每柱独立去重：同一柱内同名神煞只保留一条
+  const seenByPillar: Record<string, Set<string>> = {}
+  for (const s of props.shensha) {
+    // 从 description 中提取柱名（后端格式："{pillar_name}：{desc}"）
+    let pillarName = ''
+    for (const pn of pillarNames) {
+      if (s.description.includes(pn)) {
+        pillarName = pn
+        break
+      }
+    }
+    if (!pillarName) pillarName = '日柱'
+    const seen = seenByPillar[pillarName] ??= new Set<string>()
+    if (seen.has(s.name)) continue
+    seen.add(s.name)
+    const tagged = { ...s, _cat: classifyShensha(s) }
+    ;(groups[pillarName] ||= []).push(tagged)
+  }
+  return groups
+})
+
 function close() {
   emit('close')
+}
+
+/** 点击神煞标签查看寓意（uni 原生弹窗） */
+function showShenshaDesc(s: ShenshaItem & { _cat: string }) {
+  uni.showModal({
+    title: s.name,
+    content: s.description,
+    showCancel: false,
+    confirmText: '知道了',
+  })
 }
 
 function handleDownloadPdf() {
@@ -270,6 +323,18 @@ async function generateReport() {
 
 .section {
   margin-bottom: 32rpx;
+}
+.section-title-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 20rpx;
+  padding-bottom: 12rpx;
+  border-bottom: 1rpx solid $color-border;
+}
+.gong-info {
+  font-size: 20rpx;
+  color: $color-ink-light;
 }
 .section-title {
   display: block;
@@ -509,34 +574,33 @@ async function generateReport() {
   line-height: 1.5;
 }
 
-/* 神煞 */
-.shensha-list {
+/* 每柱神煞竖排 */
+.pillar-shensha {
   display: flex;
   flex-wrap: wrap;
-  gap: 12rpx;
+  gap: 6rpx;
+  justify-content: center;
+  margin-top: 12rpx;
+  padding-top: 10rpx;
+  border-top: 1rpx solid $color-border;
 }
-.shensha-item {
-  width: 48%;
-  background: $color-bg-card;
-  border-radius: 12rpx;
-  padding: 16rpx;
-  border: 1rpx solid $color-border;
-  box-sizing: border-box;
+.ps-tag {
+  font-size: 18rpx;
+  padding: 3rpx 12rpx;
+  border-radius: 8rpx;
+  line-height: 1.6;
+  /* 点击查看寓意反馈 */
+  opacity: 0.85;
 }
-.shensha-name {
-  display: block;
-  font-size: 24rpx;
-  color: $color-vermilion;
-  font-weight: 600;
-  margin-bottom: 6rpx;
-  letter-spacing: 2rpx;
+.ps-tag:active {
+  opacity: 1;
+  transform: scale(0.96);
 }
-.shensha-desc {
-  display: block;
-  font-size: 22rpx;
-  color: $color-ink-light;
-  line-height: 1.5;
-}
+.ps-good { color: #38a169; background: rgba(56,161,105,0.1); }
+.ps-bad { color: #c53030; background: rgba(197,48,48,0.1); }
+.ps-love { color: #b83280; background: rgba(184,50,128,0.1); }
+.ps-career { color: #2b6cb0; background: rgba(43,108,176,0.1); }
+.ps-other { color: #718096; background: rgba(113,128,150,0.1); }
 
 /* 报告 */
 .report-loading {

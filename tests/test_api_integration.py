@@ -7,7 +7,7 @@
     pytest tests/test_api_integration.py
 
 说明：
-- 标记为 `@pytest.mark.integration` 的测试依赖完整的应用栈（xianzhi、love_app、rag_chain）。
+- 标记为 `@pytest.mark.integration` 的测试依赖完整的应用栈（xianzhi、rag_chain）。
 - 如果应用无法启动，或某个所需单例未初始化，相关测试会被跳过，而不是失败。
 - 测试保持确定性且快速：SSE 接口只校验状态码与响应头，不消费完整流。
 """
@@ -121,20 +121,6 @@ def test_rag_sync(client: TestClient) -> None:
 
 
 @pytest.mark.integration
-def test_love_app_chat_sse(client: TestClient) -> None:
-    _skip_if_uninitialized("_love_app")
-    with client.get(
-        "/api/ai/love_app/chat/sse",
-        params={"message": "你好", "chat_id": "integration-test"},
-        headers={"Accept": "text/event-stream"},
-        stream=True,
-    ) as response:
-        assert response.status_code == 200
-        content_type = response.headers.get("content-type", "")
-        assert "text/event-stream" in content_type
-
-
-@pytest.mark.integration
 def test_report_pdf(client: TestClient) -> None:
     response = client.get(
         "/api/ai/xianzhi/report",
@@ -148,7 +134,8 @@ def test_report_pdf(client: TestClient) -> None:
 
 @pytest.mark.integration
 def test_full_report(client: TestClient) -> None:
-    _skip_if_uninitialized("_xianzhi")
+    if app_state.get_chat_model() is None:
+        pytest.skip("chat_model 未初始化，跳过集成测试")
     response = client.get(
         "/api/ai/xianzhi/full_report",
         params={"birth_time": BIRTH_TIME, "gender": GENDER},

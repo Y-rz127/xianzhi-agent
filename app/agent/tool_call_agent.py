@@ -6,6 +6,7 @@ from langchain_core.language_models import BaseChatModel
 from app.agent.base_agent import AgentState
 from app.agent.react_agent import ReActAgent
 from app.logger import log
+from app.utils.text_clean import clean_think_tags
 
 
 class ToolCallAgent(ReActAgent):
@@ -25,9 +26,7 @@ class ToolCallAgent(ReActAgent):
             ai_msg = self._llm_with_tools.invoke(messages)
             # 过滤 reasoning model 的 <think>...</think> 推理过程
             raw_content = ai_msg.content or ""
-            import re as _re
-            cleaned = _re.sub(r"<think>[\s\S]*?</think>\s*", "", raw_content, flags=_re.IGNORECASE)
-            cleaned = _re.sub(r"<think>[\s\S]*$", "", cleaned, flags=_re.IGNORECASE).strip()
+            cleaned = clean_think_tags(raw_content)
             if cleaned:
                 ai_msg.content = cleaned
             self.final_answer = cleaned or raw_content

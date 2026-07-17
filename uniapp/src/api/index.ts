@@ -4,6 +4,7 @@
  * 基址来自 config.ts，运行时可调用 setConfig({ apiBase }) 覆盖（小程序切局域网 IP 用）
  */
 import { getConfig } from '@/config'
+import { getToken } from '@/utils/storage'
 
 function getApiBase(): string {
   return getConfig().apiBase
@@ -19,8 +20,12 @@ export function refreshApiBase() {
 /** 统一请求封装 */
 function request<T = any>(options: UniApp.RequestOptions): Promise<T> {
   return new Promise((resolve, reject) => {
+    const token = getToken()
+    const header = { ...(options.header || {}) }
+    if (token) header['Authorization'] = 'Bearer ' + token
     uni.request({
       ...options,
+      header,
       url: getApiBase() + options.url,
       success: (res) => {
         if (res.statusCode >= 200 && res.statusCode < 300) {
@@ -38,27 +43,37 @@ function request<T = any>(options: UniApp.RequestOptions): Promise<T> {
   })
 }
 
+/** 给 URL 追加用户 token（部分接口从 query 读取 token） */
+function withToken(url: string): string {
+  const token = getToken()
+  if (!token) return url
+  return url + (url.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(token)
+}
+
 function get<T = any>(url: string, params?: Record<string, any>): Promise<T> {
   let qs = ''
-  if (params) {
-    const entries = Object.keys(params)
-      .filter((k) => params[k] !== undefined && params[k] !== null && params[k] !== '')
-      .map((k) => `${encodeURIComponent(k)}=${encodeURIComponent(String(params[k]))}`)
+  const merged: Record<string, any> = { ...(params || {}) }
+  const token = getToken()
+  if (token) merged['token'] = token
+  if (Object.keys(merged).length) {
+    const entries = Object.keys(merged)
+      .filter((k) => merged[k] !== undefined && merged[k] !== null && merged[k] !== '')
+      .map((k) => `${encodeURIComponent(k)}=${encodeURIComponent(String(merged[k]))}`)
     if (entries.length) qs = '?' + entries.join('&')
   }
   return request<T>({ url: url + qs, method: 'GET' })
 }
 
 function post<T = any>(url: string, data?: any): Promise<T> {
-  return request<T>({ url, method: 'POST', data, header: { 'Content-Type': 'application/json' } })
+  return request<T>({ url: withToken(url), method: 'POST', data, header: { 'Content-Type': 'application/json' } })
 }
 
 function put<T = any>(url: string, data?: any): Promise<T> {
-  return request<T>({ url, method: 'PUT', data, header: { 'Content-Type': 'application/json' } })
+  return request<T>({ url: withToken(url), method: 'PUT', data, header: { 'Content-Type': 'application/json' } })
 }
 
 function del<T = any>(url: string): Promise<T> {
-  return request<T>({ url, method: 'DELETE' })
+  return request<T>({ url: withToken(url), method: 'DELETE' })
 }
 
 /* ============ 同步聊天（小程序兜底，无流式） ============ */
@@ -113,6 +128,8 @@ export interface ChartData {
   analysisText?: string
   dayunText?: string
   liunianText?: string
+  mingGong?: string
+  shenGong?: string
 }
 
 export const getChart = (birthTime: string, gender: string, sect = 2, yunSect = 1) =>
@@ -186,6 +203,7 @@ export interface ChartCase {
   gender: string
   createdAt: string
   updatedAt: string
+  bazi?: string
   chartData?: any
 }
 
@@ -220,22 +238,19 @@ export interface ChatSession {
   messageCount: number
 }
 
-export const fetchSessions = (type: 'xianzhi' | 'love') => {
-  // 小程序端固定使用 mp- 前缀，PC 端默认走后端 web- 前缀
-  const endpoint = type === 'xianzhi' ? 'xianzhi' : 'love_app'
-  const prefix = type === 'xianzhi' ? 'mp-xianzhi' : 'mp-love'
+export const fetchSessions = (type: 'xianzhi') => {
+  const endpoint = 'xianzhi'
+  const prefix = 'mp-xianzhi'
   return get<ChatSession[]>(`/ai/${endpoint}/sessions`, { prefix })
 }
 
-export const deleteSession = (type: 'xianzhi' | 'love', id: string) => {
-  const endpoint = type === 'xianzhi' ? 'xianzhi' : 'love_app'
-  return del(`/ai/${endpoint}/sessions/${id}`)
+export const deleteSession = (type: 'xianzhi', id: string) => {
+  return del(`/ai/xianzhi/sessions/${id}`)
 }
 
 /** 清空指定会话的消息记录，但保留会话本身（不新建会话） */
-export const clearSessionMessages = (type: 'xianzhi' | 'love', id: string) => {
-  const endpoint = type === 'xianzhi' ? 'xianzhi' : 'love_app'
-  return post(`/ai/${endpoint}/sessions/${id}/clear`, {})
+export const clearSessionMessages = (type: 'xianzhi', id: string) => {
+  return post(`/ai/xianzhi/sessions/${id}/clear`, {})
 }
 
 export interface SessionMessage {
@@ -244,10 +259,9 @@ export interface SessionMessage {
   time?: string
 }
 
-export const getSessionMessages = async (type: 'xianzhi' | 'love', id: string): Promise<SessionMessage[]> => {
+export const getSessionMessages = async (type: 'xianzhi', id: string): Promise<SessionMessage[]> => {
   if (!id) return []
-  const endpoint = type === 'xianzhi' ? 'xianzhi' : 'love_app'
-  const data = await get<any[]>(`/ai/${endpoint}/sessions/${id}/messages`)
+  const data = await get<any[]>(`/ai/xianzhi/sessions/${id}/messages`)
   // 后端 get_messages 已统一返回 'user'/'assistant'，并已过滤 tool/system/next_step_prompt
   // 前端只需直接透传，避免二次映射导致 user 被错分成 assistant
   return (data || []).map((m: any) => ({
@@ -345,3 +359,105 @@ export function parseShensha(text: string): ShenshaItem[] {
   }
   return result.slice(0, 8)
 }
+
+/* ============ 账号登录 ============ */
+
+export interface XzUser { id: string; nickname: string; avatar: string }
+
+export const register = (nickname: string, password: string) =>
+  post<{ token: string; user: XzUser }>('/ai/auth/register', { nickname, password })
+
+export const login = (nickname: string, password: string) =>
+  post<{ token: string; user: XzUser }>('/ai/auth/login', { nickname, password })
+
+export const wxLogin = (code: string) =>
+  post<{ token: string; user: XzUser }>('/ai/auth/wx-login', { code })
+
+export const fetchMe = () => get<{ user: XzUser }>('/ai/auth/me')
+
+export const updateMe = (body: { nickname?: string; avatar?: string; password?: string }) =>
+  put<{ user: XzUser }>('/ai/auth/me', body)
+
+/* ============ 八字档案（按用户隔离） ============ */
+
+export interface BaziProfile {
+  id: string
+  name: string
+  relation: string
+  birthTime: string
+  gender: string
+  sect: number
+  yunSect: number
+  chartData?: any
+  createdAt: string
+}
+
+export const fetchProfiles = () => get<BaziProfile[]>('/ai/profiles')
+
+export const createProfile = (p: Partial<BaziProfile>) =>
+  post<{ id: string }>('/ai/profiles', {
+    name: p.name,
+    relation: p.relation,
+    birth_time: p.birthTime,
+    gender: p.gender,
+    sect: p.sect ?? 2,
+    yun_sect: p.yunSect ?? 1,
+    chart_data: p.chartData,
+  })
+
+export const updateProfile = (id: string, p: Partial<BaziProfile>) =>
+  put(`/ai/profiles/${id}`, {
+    name: p.name,
+    relation: p.relation,
+    birth_time: p.birthTime,
+    gender: p.gender,
+    sect: p.sect ?? 2,
+    yun_sect: p.yunSect ?? 1,
+    chart_data: p.chartData,
+  })
+
+export const deleteProfile = (id: string) => del(`/ai/profiles/${id}`)
+
+/* ============ 命例收藏（按用户隔离） ============ */
+
+export interface FavoriteCase {
+  caseId: string
+  name: string
+  tags: string[]
+  birthTime: string
+  gender: string
+  chartData?: any
+  createdAt: string
+}
+
+export const fetchFavorites = () => get<FavoriteCase[]>('/ai/favorites')
+export const addFavorite = (caseId: string) => post('/ai/favorites', { case_id: caseId })
+export const removeFavorite = (caseId: string) => del(`/ai/favorites/${caseId}`)
+export const favoriteStatus = (caseId: string) =>
+  get<{ favorited: boolean }>(`/ai/favorites/${caseId}/status`)
+
+/* ============ 塔罗记录（按用户隔离） ============ */
+
+export interface TarotRecord {
+  id: string
+  spread: string
+  question: string
+  cards: any[]
+  interpretation: string
+  createdAt: string
+}
+
+export const fetchTarotRecords = () => get<TarotRecord[]>('/ai/tarot_records')
+export const createTarotRecord = (r: { spread: string; question?: string; cards: any[]; interpretation: string }) =>
+  post<{ id: string }>('/ai/tarot_records', r)
+export const deleteTarotRecord = (id: string) => del(`/ai/tarot_records/${id}`)
+
+/* ============ 我的聚合 + 我的对话 ============ */
+
+export const fetchMyOverview = () => get<{ user: XzUser; stats: any }>('/ai/me')
+export const fetchMySessions = () => get<ChatSession[]>('/ai/xianzhi/sessions/mine')
+
+/* ============ 问题反馈 ============ */
+
+export const submitFeedback = (content: string, contact?: string) =>
+  post('/ai/feedback', { content, contact })

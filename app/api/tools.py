@@ -1,9 +1,13 @@
 """命理工具接口（合婚）。"""
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import APIRouter, HTTPException
 
+from app.api.common import client_error
 from app.logger import log
+from app.utils.text_clean import clean_think_tags
 
 router = APIRouter(prefix="/xianzhi", tags=["Tools"])
 
@@ -38,8 +42,8 @@ async def hehun(birth_time_a: str, gender_a: str, birth_time_b: str, gender_b: s
     from fastapi import HTTPException
     from app.tools.bazi import bazi_hehun
     try:
-        # 1. 规则层：排盘 + 五行互补评分
-        base_result = bazi_hehun.invoke({
+        # 1. 规则层：排盘 + 五行互补评分（同步阻塞计算，放线程池避免卡住事件循环）
+        base_result = await asyncio.to_thread(bazi_hehun.invoke, {
             "birth_time_a": birth_time_a, "gender_a": gender_a,
             "birth_time_b": birth_time_b, "gender_b": gender_b,
         })
@@ -48,8 +52,7 @@ async def hehun(birth_time_a: str, gender_a: str, birth_time_b: str, gender_b: s
 
         # 2. LLM 层：基于规则结果做综合解读
         from app.api import state
-        xianzhi_inst = getattr(state, "_xianzhi", None)
-        llm = getattr(xianzhi_inst, "chat_model", None) if xianzhi_inst else None
+        llm = state.get_chat_model()
         if llm is None:
             # 兜底：LLM 不可用时只返回规则结果
             return {"result": base_result}
@@ -64,12 +67,10 @@ async def hehun(birth_time_a: str, gender_a: str, birth_time_b: str, gender_b: s
             )),
         ]
         try:
-            resp = llm.invoke(messages)
+            resp = await asyncio.to_thread(llm.invoke, messages)
             content = (getattr(resp, "content", "") or "").strip()
             # 过滤推理模型的 think 块
-            import re
-            content = re.sub(r"<think>[\s\S]*?</think>\s*", "", content, flags=re.IGNORECASE)
-            content = re.sub(r"<think>[\s\S]*$", "", content, flags=re.IGNORECASE).strip()
+            content = clean_think_tags(content)
             if content:
                 return {"result": content}
             return {"result": base_result}
@@ -80,6 +81,6 @@ async def hehun(birth_time_a: str, gender_a: str, birth_time_b: str, gender_b: s
         raise
     except Exception as e:
         log.exception("合婚分析失败")
-        raise HTTPException(status_code=500, detail="合婚分析失败: {}".format(e))
+        raise HTTPException(status_code=500, detail=client_error(e))
 
 

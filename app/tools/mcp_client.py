@@ -1,4 +1,4 @@
-﻿"""MCP 客户端封装（对应 Java 项目的 ToolCallbackProvider + mcp-servers.json）。
+"""MCP 客户端封装（对应 Java 项目的 ToolCallbackProvider + mcp-servers.json）。
 
 将 MCP 服务端工具动态包装成 LangChain BaseTool，供 Agent 统一调用。
 当前接入高德地图 MCP（地理/天气/导航），与 Java 项目 mcp-servers.json 配置一致。
@@ -40,11 +40,18 @@ class MCPToolWrapper(BaseTool):
         if args is None:
             args = kwargs
         try:
-            loop = asyncio.new_event_loop()
+            # MCP session 绑定在启动时的主事件循环上（stdio 流跨 loop 调用会报错），
+            # 同步路径必须把协程调度回主 loop 执行，而不是新建 loop。
+            loop = self._manager.loop
+            if loop is not None and loop.is_running():
+                future = asyncio.run_coroutine_threadsafe(self._call_mcp(args), loop)
+                return future.result(timeout=35)
+            # 主 loop 不可用（未启动/已关闭）：session 大概率也不可用，走本地 loop 兜底
+            local = asyncio.new_event_loop()
             try:
-                return loop.run_until_complete(self._call_mcp(args))
+                return local.run_until_complete(self._call_mcp(args))
             finally:
-                loop.close()
+                local.close()
         except Exception as e:
             return "MCP 工具 {} 调用失败: {}".format(self._tool_name, e)
 
@@ -84,12 +91,18 @@ class MCPManager:
         self._stop = asyncio.Event()
         self._tools: list[BaseTool] = []
         self._available = False
+        self._loop = None  # 启动时所在的主事件循环（同步工具调用调度回此 loop）
+
+    @property
+    def loop(self):
+        return self._loop
 
     async def start(self) -> None:
         """启动 MCP server 并建立长连接。失败不抛异常，仅标记不可用。"""
         if not settings.amap_maps_api_key:
             log.warning("未配置 AMAP_MAPS_API_KEY，跳过 MCP")
             return
+        self._loop = asyncio.get_running_loop()
         try:
             from mcp import ClientSession
             from mcp.client.stdio import stdio_client, StdioServerParameters

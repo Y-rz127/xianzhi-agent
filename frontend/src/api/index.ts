@@ -52,9 +52,6 @@ export const chatWithXianzhi = (message: string, conversationId: string, cb: SSE
     yun_sect: opts?.yun_sect !== undefined ? String(opts.yun_sect) : undefined,
   }, cb)
 
-export const chatWithLove = (message: string, chatId: string, cb: SSECallbacks) =>
-  connectSSE("/ai/love_app/chat/sse", { message, chat_id: chatId }, cb)
-
 export const chatWithRag = (message: string, sessionId: string, cb: SSECallbacks) =>
   connectSSE("/ai/xianzhi/rag", { message, session_id: sessionId }, cb)
 
@@ -106,9 +103,11 @@ export interface ChartData {
   analysisText?: string
   dayunText?: string
   liunianText?: string
+  mingGong?: string
+  shenGong?: string
 }
 
-export interface ChartCase { id: string; name: string; tags: string[]; birthTime: string; gender: string; createdAt: string; updatedAt: string; chartData?: ChartData }
+export interface ChartCase { id: string; name: string; tags: string[]; birthTime: string; gender: string; createdAt: string; updatedAt: string; bazi?: string; chartData?: ChartData }
 
 export async function getChart(birthTime: string, gender: string, sect = 2, yunSect = 1): Promise<ChartData> {
   const params = new URLSearchParams({
@@ -257,28 +256,25 @@ export function parseShensha(text: string): ShenshaItem[] {
 }
 
 export interface ChatSession { id: string; title: string; lastMessage: string; lastTime: string; messageCount: number }
-export async function fetchSessions(type: "xianzhi" | "love"): Promise<ChatSession[]> {
+export async function fetchSessions(type: "xianzhi"): Promise<ChatSession[]> {
   try {
-    const endpoint = type === "xianzhi" ? "xianzhi" : "love_app"
-    const res = await fetch(`${API_BASE}/ai/${endpoint}/sessions`)
+    const res = await fetch(`${API_BASE}/ai/xianzhi/sessions`)
     if (!res.ok) throw new Error("Not found")
     return res.json()
   } catch { return [] }
 }
 
-export async function deleteSession(type: "xianzhi" | "love", id: string): Promise<void> {
+export async function deleteSession(type: "xianzhi", id: string): Promise<void> {
   if (!id) return
   try {
-    const endpoint = type === "xianzhi" ? "xianzhi" : "love_app"
-    await fetch(`${API_BASE}/ai/${endpoint}/sessions/${id}`, { method: "DELETE" })
+    await fetch(`${API_BASE}/ai/xianzhi/sessions/${id}`, { method: "DELETE" })
   } catch {}
 }
 
-export async function clearSessionMessages(type: "xianzhi" | "love", id: string): Promise<void> {
+export async function clearSessionMessages(type: "xianzhi", id: string): Promise<void> {
   if (!id) return
   try {
-    const endpoint = type === "xianzhi" ? "xianzhi" : "love_app"
-    await fetch(`${API_BASE}/ai/${endpoint}/sessions/${id}/clear`, { method: "POST" })
+    await fetch(`${API_BASE}/ai/xianzhi/sessions/${id}/clear`, { method: "POST" })
   } catch {}
 }
 
@@ -358,11 +354,10 @@ export async function rebuildRagIndex(): Promise<{ ready: boolean }> {
   return await res.json()
 }
 
-export async function getSessionMessages(type: "xianzhi" | "love", id: string): Promise<SessionMessage[]> {
+export async function getSessionMessages(type: "xianzhi", id: string): Promise<SessionMessage[]> {
   if (!id) return []
   try {
-    const endpoint = type === "xianzhi" ? "xianzhi" : "love_app"
-    const res = await fetch(`${API_BASE}/ai/${endpoint}/sessions/${id}/messages`)
+    const res = await fetch(`${API_BASE}/ai/xianzhi/sessions/${id}/messages`)
     if (!res.ok) return []
     const data = await res.json()
     return data.map((m: any) => ({
@@ -459,4 +454,81 @@ export function interpretTarotWS(
   }
   ws.onerror = () => cb.onError?.("连接错误")
   return ws
+}
+
+// ========== 管理后台：用户管理 ==========
+
+export interface AdminUser {
+  id: string
+  nickname: string
+  avatar: string
+  createdAt: string
+  lastActiveAt: string
+  stats: { profiles: number; favorites: number; tarotRecords: number; sessions: number }
+}
+
+export interface AdminUserDetail {
+  user: { id: string; nickname: string; avatar: string }
+  profiles: any[]
+  favorites: any[]
+  tarotRecords: any[]
+  sessions: any[]
+}
+
+export async function listAdminUsers(limit = 200, offset = 0): Promise<{ total: number; users: AdminUser[] }> {
+  const params = new URLSearchParams({ limit: String(limit), offset: String(offset) })
+  const res = await fetch(`${API_BASE}/ai/admin/users?${params.toString()}`)
+  if (!res.ok) throw new Error("获取用户列表失败")
+  return await res.json()
+}
+
+export async function getAdminUser(user_id: string): Promise<AdminUserDetail> {
+  const res = await fetch(`${API_BASE}/ai/admin/users/${encodeURIComponent(user_id)}`)
+  if (!res.ok) throw new Error("获取用户详情失败")
+  return await res.json()
+}
+
+// ========== 用户反馈 ==========
+
+export interface FeedbackItem {
+  id: string
+  user_id: string | null
+  user_nickname?: string | null
+  content: string
+  contact: string
+  created_at: string
+}
+
+export async function submitFeedback(content: string, contact?: string): Promise<{ id: string }> {
+  const params = new URLSearchParams({ content })
+  if (contact) params.set("contact", contact)
+  const token = localStorage.getItem("XZ_TOKEN")
+  const headers: Record<string, string> = { "Content-Type": "application/x-www-form-urlencoded" }
+  if (token) headers["Authorization"] = `Bearer ${token}`
+  const res = await fetch(`${API_BASE}/ai/feedback?${params.toString()}`, {
+    method: "POST",
+    headers,
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: `提交失败 ${res.status}` }))
+    throw new Error(err.detail || `提交失败 ${res.status}`)
+  }
+  return res.json()
+}
+
+/** 管理员获取反馈列表 */
+export async function fetchFeedbacks(limit = 200): Promise<FeedbackItem[]> {
+  const res = await fetch(`${API_BASE}/ai/feedback?limit=${limit}`)
+  if (!res.ok) throw new Error("获取反馈列表失败")
+  const data = await res.json()
+  return data.items || []
+}
+
+/** 管理员删除反馈 */
+export async function deleteFeedback(fid: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/ai/feedback/${fid}`, { method: "DELETE" })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: `删除失败 ${res.status}` }))
+    throw new Error(err.detail || `删除失败 ${res.status}`)
+  }
 }

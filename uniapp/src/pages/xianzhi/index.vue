@@ -34,10 +34,6 @@
           @tap="switchMode('agent')"
         >排盘</text>
         <text
-          :class="['tab', mode === 'cases' && 'active']"
-          @tap="switchMode('cases')"
-        >命例</text>
-        <text
           :class="['tab', mode === 'rag' && 'active']"
           @tap="switchMode('rag')"
         >问答</text>
@@ -91,8 +87,8 @@
       </view>
     </view>
 
-    <!-- 消息列表 - 命例 tab 有自己的页面，不显示聊天 -->
-    <scroll-view v-if="mode !== 'cases'" class="messages" scroll-y :scroll-top="scrollTop" scroll-with-animation>
+    <!-- 消息列表 -->
+    <scroll-view class="messages" scroll-y :scroll-top="scrollTop" scroll-with-animation>
       <view v-if="!messages.length" class="empty-state">
         <view class="empty-avatar display-font">{{ mode === 'agent' ? '易' : '问' }}</view>
         <text class="empty-title">{{ mode === 'agent' ? '先知命理' : '命理问答' }}</text>
@@ -131,8 +127,8 @@
       </view>
     </scroll-view>
 
-    <!-- 输入栏：命例 tab 不显示 -->
-    <view v-if="mode === 'agent' || mode === 'rag'" class="input-bar">
+    <!-- 输入栏 -->
+    <view class="input-bar">
       <view class="input-wrap">
         <textarea
           class="input"
@@ -153,98 +149,6 @@
       </view>
     </view>
 
-    <!-- 命例列表（cases 模式） -->
-    <scroll-view v-if="mode === 'cases'" class="cases-scroll" scroll-y>
-      <view class="cases-header">
-        <view>
-          <text class="cases-title">命例库</text>
-          <text class="cases-sub">共 {{ cases.length }} 条命例</text>
-        </view>
-        <text class="cases-add-btn" @tap="openCreateCase">+ 新建</text>
-      </view>
-
-      <view v-if="loadingCases && !cases.length" class="cases-empty">
-        <text class="cases-empty-icon">✦</text>
-        <text class="cases-empty-text">加载中…</text>
-      </view>
-      <view v-else-if="!cases.length" class="cases-empty">
-        <text class="cases-empty-icon">✦</text>
-        <text class="cases-empty-text">尚无命例</text>
-        <text class="cases-empty-hint">点击右上「新建」收藏命盘</text>
-      </view>
-
-      <view v-else class="cases-list">
-        <view
-          v-for="c in cases"
-          :key="c.id"
-          :class="['case-card', lastBirthInfo?.time === c.birthTime && 'active']"
-          @tap="loadChartCase(c)"
-        >
-          <view class="case-head">
-            <text class="case-name">{{ c.name }}</text>
-            <text class="case-gender">{{ c.gender }}</text>
-          </view>
-          <text class="case-birth">◷ {{ c.birthTime }}</text>
-          <view v-if="c.tags?.length" class="case-tags">
-            <text v-for="(t, i) in c.tags" :key="i" class="case-tag">{{ t }}</text>
-          </view>
-          <view class="case-actions">
-            <text class="case-action view" @tap.stop="loadChartCase(c)">去排盘 ➤</text>
-            <text class="case-action del" @tap.stop="deleteCase(c)">删除</text>
-          </view>
-        </view>
-      </view>
-    </scroll-view>
-
-    <!-- 新建命例弹窗（cases 模式） -->
-    <view v-if="showCreateCase" class="case-modal-overlay" @tap="closeCreateCase">
-      <view class="case-modal" @tap.stop>
-        <view class="case-modal-header">
-          <text class="case-modal-title">新建命例</text>
-          <text class="case-modal-close" @tap="closeCreateCase">✕</text>
-        </view>
-        <view class="case-modal-body">
-          <view class="cm-row">
-            <text class="cm-label">名称</text>
-            <input class="cm-input" v-model="caseForm.name" placeholder="如：我的命盘" cursor-spacing="120" confirm-type="next" @tap.stop />
-          </view>
-          <view class="cm-row">
-            <text class="cm-label">出生日期</text>
-            <picker class="cm-picker-wrap" mode="date" :value="caseForm.date || today" :end="today" @change="onCaseDateChange">
-              <view :class="['cm-picker', caseForm.date && 'selected']">
-                <text class="cm-picker-text">{{ caseForm.date || '选择日期' }}</text>
-              </view>
-            </picker>
-          </view>
-
-          <view class="cm-row">
-            <text class="cm-label">出生时辰</text>
-            <picker class="cm-picker-wrap" mode="time" :value="caseForm.time || '00:00'" @change="onCaseTimeChange">
-              <view :class="['cm-picker', caseForm.time && 'selected']">
-                <text class="cm-picker-text">{{ caseForm.time || '选择时间' }}</text>
-              </view>
-            </picker>
-          </view>
-
-          <view class="cm-row">
-            <text class="cm-label">性别</text>
-            <view class="cm-seg-group">
-              <text :class="['cm-seg', caseForm.gender === '男' && 'active']" @tap="caseForm.gender = '男'">男</text>
-              <text :class="['cm-seg', caseForm.gender === '女' && 'active']" @tap="caseForm.gender = '女'">女</text>
-            </view>
-          </view>
-          <view class="cm-row">
-            <text class="cm-label">标签</text>
-            <input class="cm-input" v-model="caseForm.tags" placeholder="逗号分隔，如：事业,婚姻" cursor-spacing="120" confirm-type="done" @tap.stop />
-          </view>
-        </view>
-        <view class="case-modal-footer">
-          <text class="cm-btn" @tap="closeCreateCase">取消</text>
-          <text :class="['cm-btn', 'cm-btn-primary', !canSaveCase && 'disabled']" @tap="onSaveCase">保存</text>
-        </view>
-      </view>
-    </view>
-
     <!-- 命盘详情弹窗 -->
     <BaziModal
       :visible="showBaziModal"
@@ -258,6 +162,8 @@
       :warnings="chartData?.warnings || []"
       :birthTime="lastBirthInfo?.time"
       :gender="lastBirthInfo?.gender"
+      :mingGong="chartData?.mingGong"
+      :shenGong="chartData?.shenGong"
       @close="showBaziModal = false"
     />
 
@@ -298,17 +204,18 @@
 
 <script setup lang="ts">
 import { ref, computed, nextTick, watch, reactive } from 'vue'
-import { onLoad, onHide } from '@dcloudio/uni-app'
+import { onLoad, onHide, onShow } from '@dcloudio/uni-app'
+import { requireLogin } from '@/utils/authGuard'
 import { chatWithXianzhiWS, chatWithRagWS, closeAllWS } from '@/api/chat'
 import {
   parsePillars, parseWuxing, parseDayun, parseShensha,
   downloadReport, getChart,
-  fetchChartCases, createChartCase, deleteChartCase,
-  fetchSessions, deleteSession as deleteSessionApi, clearSessionMessages, getSessionMessages,
+  fetchSessions, fetchMySessions, deleteSession as deleteSessionApi, clearSessionMessages, getSessionMessages,
   getSessionBirthInfo,
-  type ChartData, type ChartCase, type ChatSession,
+  type ChartData, type ChatSession,
 } from '@/api'
 import { getLocalDateString } from '@/utils/datetimePicker'
+import { currentUserId, isLoggedIn } from '@/utils/storage'
 
 interface Message { role: 'user' | 'assistant'; content: string }
 interface BirthInfo { time: string; gender: string }
@@ -329,7 +236,7 @@ function zhiHourToHHMM(t?: string): string {
   return t
 }
 
-const mode = ref<'agent' | 'cases' | 'rag'>('agent')
+const mode = ref<'agent' | 'rag'>('agent')
 const showBirth = ref(false)
 const birthDate = ref('')
 const birthTime = ref('')
@@ -344,10 +251,16 @@ const ragMessages = ref<Message[]>([])
 const messages = computed(() => mode.value === 'rag' ? ragMessages.value : agentMessages.value)
 const scrollTop = ref(0)
 const lastBirthInfo = ref<BirthInfo | null>(null)
+// 防止 watch 与显式 getChart 调用重复请求的标志
+let _skipNextChartWatch = false
 const showBaziModal = ref(false)
 const chartData = ref<ChartData | null>(null)
-// 会话ID：同一会话内多轮对话保持一致，切换/新建会话时才重新生成
-const conversationId = ref('mp-xianzhi-' + Date.now())
+// 会话ID：编码 user_id（mp-xianzhi__<userId>__<ts>），实现多用户会话隔离
+function genConversationId(): string {
+  const uid = currentUserId()
+  return `mp-xianzhi__${uid || 'guest'}__${Date.now()}`
+}
+const conversationId = ref(genConversationId())
 
 // 历史会话抽屉
 const showHistoryDrawer = ref(false)
@@ -357,7 +270,8 @@ const historyLoading = ref(false)
 async function loadHistorySessions() {
   historyLoading.value = true
   try {
-    historySessions.value = await fetchSessions('xianzhi')
+    // 登录后只显示自己的会话，避免多人共享后端时串号
+    historySessions.value = isLoggedIn() ? await fetchMySessions() : await fetchSessions('xianzhi')
   } catch (e) {
     uni.showToast({ title: '加载历史失败', icon: 'none' })
     historySessions.value = []
@@ -400,6 +314,7 @@ async function switchToSession(session: ChatSession) {
         // 时辰（如"辰时"）映射为 HH:MM，确保 time picker 能正常显示
         birthTime.value = zhiHourToHHMM(t)
         gender.value = bi.gender as '男' | '女'
+        _skipNextChartWatch = true
         try { chartData.value = await getChart(bi.time, bi.gender, 2, 1) } catch { chartData.value = null }
       }
     }
@@ -457,6 +372,9 @@ const placeholderText = computed(() => mode.value === 'agent' ? '如：男，199
 
 // 出生信息面板手动修改时，自动重拉 chartData
 watch([birthDate, birthTime, gender], async ([d, t, g]) => {
+  // 显式调用 getChart 的地方（applyBirth/onChartContext/switchToSession/tryExtractBirth）
+  // 已自行处理 chartData，跳过 watch 避免重复请求
+  if (_skipNextChartWatch) { _skipNextChartWatch = false; return }
   if (d && t && g) {
     const time = `${d} ${t}`
     lastBirthInfo.value = { time, gender: g }
@@ -464,27 +382,40 @@ watch([birthDate, birthTime, gender], async ([d, t, g]) => {
   }
 })
 
+/** 预填出生信息并自动发起排盘（来自命例/档案带入） */
+async function applyBirth(bt: string, g: '男' | '女', name?: string) {
+  const [d, t] = bt.split(' ')
+  birthDate.value = d || ''
+  birthTime.value = zhiHourToHHMM(t)
+  gender.value = g
+  lastBirthInfo.value = { time: bt, gender: g }
+  _skipNextChartWatch = true
+  try { chartData.value = await getChart(bt, g, 2, 1) } catch { chartData.value = null }
+  const autoMsg = name
+    ? `${g}，${bt}，排盘并分析（来自：${name}）`
+    : `${g}，${bt}，排盘并分析整体命盘`
+  inputText.value = autoMsg
+  onSend()
+}
+
 // 接收命例页跳转参数，自动预填并排盘
 onLoad(async (query) => {
-  const bt = query?.birthTime as string | undefined
-  const g = query?.gender as '男' | '女' | undefined
-  const name = query?.name as string | undefined
-  if (bt && g) {
-    const [d, t] = bt.split(' ')
-    birthDate.value = d || ''
-    birthTime.value = zhiHourToHHMM(t)
-    gender.value = g
-    lastBirthInfo.value = { time: bt, gender: g }
-    // 主动拉取结构化命盘
-    try {
-      chartData.value = await getChart(bt, g, 2, 1)
-    } catch { chartData.value = null }
-    // 自动发起排盘请求
-    const autoMsg = name
-      ? `${g}，${bt}，排盘并分析（来自命例：${name}）`
-      : `${g}，${bt}，排盘并分析整体命盘`
-    inputText.value = autoMsg
-    onSend()
+  if (query?.birthTime && query?.gender) {
+    await applyBirth(query.birthTime as string, query.gender as '男' | '女', query.name as string | undefined)
+  }
+})
+
+// 从「我的」页带入对话 / 继续会话：通过本地存储传递参数（tabBar 页无法用 navigateTo 传参）
+onShow(() => {
+  if (!requireLogin()) return
+  const lp = uni.getStorageSync('XZ_LAUNCH')
+  if (!lp) return
+  uni.removeStorageSync('XZ_LAUNCH')
+  if (lp.conversationId) {
+    switchToSession({ id: lp.conversationId } as ChatSession)
+  } else if (lp.birthTime && lp.gender) {
+    newSession()
+    applyBirth(lp.birthTime, lp.gender, lp.name)
   }
 })
 
@@ -497,13 +428,9 @@ function goDisclaimer() { uni.navigateTo({ url: '/pages/legal/disclaimer' }) }
 function goSettings() { uni.navigateTo({ url: '/pages/settings/index' }) }
 function useExample(ex: string) { inputText.value = ex; onSend() }
 
-function switchMode(m: 'agent' | 'cases' | 'rag') {
+function switchMode(m: 'agent' | 'rag') {
   if (mode.value === m) return
   mode.value = m
-  if (m === 'cases') {
-    // 进入命例 tab 时拉取最新列表
-    loadCases()
-  }
 }
 
 /** 跳转合婚页面 */
@@ -533,7 +460,7 @@ function confirmClear() {
 
 /** 新建会话：生成新会话ID并清空命盘上下文 */
 function newSession() {
-  conversationId.value = 'mp-xianzhi-' + Date.now()
+  conversationId.value = genConversationId()
   agentMessages.value.splice(0, agentMessages.value.length)
   ragMessages.value.splice(0, ragMessages.value.length)
   inputText.value = ''
@@ -551,94 +478,6 @@ function confirmNew() {
     success: (res) => { if (res.confirm) newSession() },
   })
 }
-
-// =================== 命例管理 ===================
-const cases = ref<ChartCase[]>([])
-const loadingCases = ref(false)
-const showCreateCase = ref(false)
-
-const caseForm = reactive({
-  name: '',
-  date: '',
-  time: '',
-  gender: '男' as '男' | '女',
-  tags: '',
-})
-const canSaveCase = computed(() => caseForm.name.trim() && caseForm.date && caseForm.time)
-
-async function loadCases() {
-  loadingCases.value = true
-  try { cases.value = await fetchChartCases() }
-  catch { cases.value = [] }
-  finally { loadingCases.value = false }
-}
-
-function openCreateCase() {
-  caseForm.name = ''
-  caseForm.date = ''
-  caseForm.time = ''
-  caseForm.gender = '男'
-  caseForm.tags = ''
-  showCreateCase.value = true
-}
-function closeCreateCase() { showCreateCase.value = false }
-
-function onCaseDateChange(e: any) { caseForm.date = e.detail.value }
-function onCaseTimeChange(e: any) { caseForm.time = e.detail.value }
-
-async function onSaveCase() {
-  if (!canSaveCase.value) return
-  const birthTime = `${caseForm.date} ${caseForm.time}`
-  try {
-    uni.showLoading({ title: '排盘中…' })
-    await createChartCase({
-      name: caseForm.name.trim(),
-      birthTime,
-      gender: caseForm.gender,
-      tags: caseForm.tags.split(/[,，]/).map((s) => s.trim()).filter(Boolean),
-    })
-    uni.hideLoading()
-    uni.showToast({ title: '保存成功', icon: 'success' })
-    showCreateCase.value = false
-    loadCases()
-  } catch (e: any) {
-    uni.hideLoading()
-    uni.showToast({ title: e?.message || '保存失败', icon: 'none' })
-  }
-}
-
-function deleteCase(c: ChartCase) {
-  uni.showModal({
-    title: '确认删除',
-    content: `删除命例「${c.name}」？`,
-    success: async (r) => {
-      if (!r.confirm) return
-      try {
-        await deleteChartCase(c.id)
-        uni.showToast({ title: '已删除', icon: 'success' })
-        loadCases()
-      } catch (e: any) {
-        uni.showToast({ title: e?.message || '删除失败', icon: 'none' })
-      }
-    },
-  })
-}
-
-function loadChartCase(c: ChartCase) {
-  // 把命例信息塞回 agent 模式出生信息，并切换到排盘 tab
-  const [d, t] = c.birthTime.split(' ')
-  birthDate.value = d || ''
-  birthTime.value = zhiHourToHHMM(t)
-  gender.value = (c.gender as '男' | '女') || '男'
-  lastBirthInfo.value = { time: c.birthTime, gender: c.gender }
-  mode.value = 'agent'
-  agentMessages.value.splice(0, agentMessages.value.length)
-  inputText.value = `${c.gender}，${c.birthTime}，排盘并分析（来自命例：${c.name}）`
-  uni.showToast({ title: `已载入：${c.name}`, icon: 'none' })
-  // 自动发起排盘
-  nextTick(() => onSend())
-}
-// ==================================================
 
 /** 从 ReAct 输出中提取 [回答] 部分（用于解析可视化数据） */
 function extractAnswer(text: string): string {
@@ -702,6 +541,7 @@ async function tryExtractBirth(text: string) {
     birthTime.value = zhiHourToHHMM(tm)
     gender.value = m[1] as '男' | '女'
     // 主动拉取 chartData（对齐 web 端 tryExtractBirth + fetchChartData 行为）
+    _skipNextChartWatch = true
     try { chartData.value = await getChart(time, m[1] as '男' | '女', 2, 1) } catch { chartData.value = null }
   }
 }
@@ -749,6 +589,7 @@ function onSend() {
     gender.value = g as '男' | '女'
     lastBirthInfo.value = { time: bt, gender: g as '男' | '女' }
     // 主动拉取结构化命盘数据（命盘详情弹窗内容）
+    _skipNextChartWatch = true
     try {
       chartData.value = await getChart(bt, g, 2, 1)
     } catch {
@@ -985,7 +826,6 @@ messages.value.push({
   color: $color-primary;
   letter-spacing: 0.12em;
 }
-.header-actions { display: flex; }
 .icon-btn {
   width: 64rpx;
   height: 64rpx;
@@ -1305,328 +1145,6 @@ messages.value.push({
 .send-icon {
   color: $color-bg;
   font-size: 32rpx;
-}
-
-/* === 命例列表 === */
-.cases-scroll {
-  flex: 1;
-  width: 100%;
-  box-sizing: border-box;
-  padding: 24rpx 32rpx env(safe-area-inset-bottom);
-  overflow-x: hidden;
-  position: relative;
-  z-index: 1;
-}
-.cases-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
-  box-sizing: border-box;
-  gap: 20rpx;
-  margin-bottom: 24rpx;
-}
-.cases-header > view {
-  flex: 1;
-  min-width: 0;
-}
-.cases-title {
-  font-size: 36rpx;
-  font-weight: 600;
-  color: $color-ink;
-  letter-spacing: 2rpx;
-}
-.cases-sub {
-  display: block;
-  font-size: 22rpx;
-  color: $color-ink-light;
-  margin-top: 4rpx;
-}
-.cases-add-btn {
-  flex: 0 0 auto;
-  max-width: 180rpx;
-  box-sizing: border-box;
-  padding: 12rpx 28rpx;
-  font-size: 26rpx;
-  line-height: 1.2;
-  color: $color-bg;
-  background: $color-primary;
-  border-radius: 32rpx;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.cases-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 120rpx 0;
-  gap: 16rpx;
-}
-.cases-empty-icon {
-  font-size: 96rpx;
-  color: $color-primary;
-  opacity: 0.3;
-}
-.cases-empty-text {
-  font-size: 30rpx;
-  color: $color-primary-light;
-}
-.cases-empty-hint {
-  font-size: 24rpx;
-  color: $color-ink-lighter;
-}
-.cases-list {
-  display: flex;
-  flex-direction: column;
-  gap: 20rpx;
-  width: 100%;
-  box-sizing: border-box;
-}
-.case-card {
-  width: 100%;
-  min-width: 0;
-  box-sizing: border-box;
-  padding: 24rpx;
-  background: $color-bg-card;
-  border: 1rpx solid $color-border;
-  border-radius: 24rpx;
-  box-shadow: $shadow-sm;
-}
-.case-card.active {
-  border-color: $color-vermilion;
-  box-shadow: 0 0 0 2rpx rgba(184, 72, 60, 0.15);
-}
-.case-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16rpx;
-  margin-bottom: 12rpx;
-}
-.case-name {
-  flex: 1;
-  min-width: 0;
-  font-size: 30rpx;
-  font-weight: 500;
-  color: $color-ink;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.case-gender {
-  flex: 0 0 auto;
-  padding: 4rpx 16rpx;
-  font-size: 22rpx;
-  color: $color-primary;
-  background: rgba(44, 44, 44, 0.06);
-  border-radius: 16rpx;
-}
-.case-birth {
-  display: block;
-  width: 100%;
-  font-size: 24rpx;
-  color: $color-ink-light;
-  font-family: monospace;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.case-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8rpx;
-  margin-top: 12rpx;
-}
-.case-tag {
-  padding: 4rpx 12rpx;
-  font-size: 20rpx;
-  color: $color-vermilion;
-  background: rgba(184, 72, 60, 0.06);
-  border-radius: 12rpx;
-}
-.case-actions {
-  display: flex;
-  gap: 16rpx;
-  width: 100%;
-  box-sizing: border-box;
-  margin-top: 16rpx;
-  padding-top: 16rpx;
-  border-top: 1rpx solid $color-border;
-}
-.case-action {
-  flex: 1;
-  min-width: 0;
-  box-sizing: border-box;
-  text-align: center;
-  padding: 10rpx 0;
-  font-size: 24rpx;
-  border-radius: 16rpx;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.case-action.view {
-  color: $color-bg;
-  background: $color-primary;
-}
-.case-action.del {
-  color: $color-ink-light;
-  background: rgba(44, 44, 44, 0.04);
-}
-
-/* === 命例弹窗 === */
-.case-modal-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.5);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 999;
-}
-.case-modal {
-  width: 86vw;
-  max-width: 640rpx;
-  max-height: 86vh;
-  box-sizing: border-box;
-  background: $color-bg;
-  border: 1rpx solid $color-border;
-  border-radius: 32rpx;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-.case-modal-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
-  box-sizing: border-box;
-  padding: 28rpx 32rpx 16rpx;
-  border-bottom: 1rpx solid $color-border;
-}
-.case-modal-title {
-  font-size: 32rpx;
-  font-weight: 600;
-  color: $color-primary;
-  letter-spacing: 2rpx;
-}
-.case-modal-close {
-  font-size: 32rpx;
-  color: $color-ink-light;
-  padding: 8rpx 16rpx;
-}
-.case-modal-body {
-  flex: 1;
-  width: 100%;
-  box-sizing: border-box;
-  padding: 16rpx 32rpx;
-  max-height: 60vh;
-}
-.case-modal-footer {
-  display: flex;
-  gap: 20rpx;
-  width: 100%;
-  box-sizing: border-box;
-  padding: 20rpx 32rpx;
-  padding-bottom: calc(20rpx + env(safe-area-inset-bottom));
-  border-top: 1rpx solid $color-border;
-}
-.cm-btn {
-  flex: 1;
-  text-align: center;
-  padding: 20rpx 0;
-  font-size: 28rpx;
-  border-radius: 24rpx;
-  color: $color-ink-light;
-  background: rgba(44, 44, 44, 0.04);
-}
-.cm-btn-primary {
-  background: $color-primary;
-  color: $color-bg;
-}
-.cm-btn.disabled,
-.cm-btn-primary.disabled {
-  opacity: 0.4;
-}
-.cm-row {
-  display: flex;
-  align-items: center;
-  gap: 20rpx;
-  padding: 16rpx 0;
-  width: 100%;
-  box-sizing: border-box;
-}
-.cm-label {
-  flex: 0 0 120rpx;
-  font-size: 26rpx;
-  color: $color-primary;
-}
-.cm-input {
-  flex: 1;
-  min-width: 0;
-  width: 100%;
-  box-sizing: border-box;
-  height: 68rpx;
-  line-height: 68rpx;
-  padding: 0 20rpx;
-  background: $color-bg-warm;
-  border: 1rpx solid $color-border;
-  border-radius: 16rpx;
-  font-size: 26rpx;
-  color: $color-ink;
-}
-.cm-picker-wrap {
-  flex: 1;
-  min-width: 0;
-  display: block;
-}
-.cm-picker {
-  width: 100%;
-  min-width: 0;
-  box-sizing: border-box;
-  height: 68rpx;
-  line-height: 68rpx;
-  padding: 0 20rpx;
-  background: $color-bg-warm;
-  border: 1rpx solid $color-border;
-  border-radius: 16rpx;
-  font-size: 26rpx;
-  color: $color-ink;
-  overflow: hidden;
-}
-.cm-picker.selected {
-  border-color: $color-primary;
-  background: rgba(44, 44, 44, 0.06);
-}
-.cm-picker-text {
-  display: block;
-  height: 68rpx;
-  line-height: 68rpx;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.cm-seg-group {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  border: 1rpx solid $color-border;
-  border-radius: 16rpx;
-  overflow: hidden;
-}
-.cm-seg {
-  flex: 1;
-  text-align: center;
-  padding: 16rpx 0;
-  font-size: 26rpx;
-  color: $color-ink-light;
-  background: $color-bg-warm;
-}
-.cm-seg.active {
-  background: rgba(44, 44, 44, 0.08);
-  color: $color-primary;
 }
 
 /* ============ 历史会话抽屉 ============ */

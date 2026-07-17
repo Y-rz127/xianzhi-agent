@@ -21,19 +21,9 @@ from app.tools.mcp_client import mcp_manager
 import asyncio
 
 
-def _dedupe_final(text: str) -> str:
-    """检测并移除完全重复的内容（推理模型 think 块泄漏的兜底）。"""
-    text = text.strip()
-    if len(text) < 100:
-        return text
-    mid = len(text) // 2
-    if text[:mid].strip() == text[mid:].strip() and len(text[:mid].strip()) > 50:
-        log.warning("[xianzhi] 检测到 LLM 输出内容重复，已去重")
-        return text[:mid].strip()
-    return text
-
-from app.agent.xianzhi_workflow import XianzhiWorkflow, WorkflowChartContext, build_chart_context, render_full_fact_context, classify_question
+from app.agent.xianzhi_workflow import XianzhiWorkflow, WorkflowChartContext, build_chart_context, render_full_fact_context, classify_question, _dedupe_content
 from app.tools.bazi import _normalize_birth_time
+from app.utils.text_clean import clean_think_tags
 
 
 # 用于从用户输入中尝试提取出生时间与性别
@@ -111,7 +101,7 @@ class Xianzhi(ToolCallAgent):
     # 排盘工具名集合：调用这些工具时，从参数中提取 birth_time/gender
     _BAZI_TOOLS = {"bazi_chart", "bazi_full", "bazi_analysis", "bazi_dayun", "bazi_liunian", "bazi_liuyue", "bazi_liuri"}
 
-    def __init__(self, chat_model, local_tools, max_steps=None):
+    def __init__(self, chat_model, local_tools, memory=None, conversation_id="xianzhi-default", max_steps=None):
         super().__init__(
             name="Xianzhi",
             chat_model=chat_model,
@@ -121,8 +111,9 @@ class Xianzhi(ToolCallAgent):
             max_steps=max_steps or settings.agent_max_steps,
         )
         self._local_tools = local_tools
-        self._conversation_id = "xianzhi-default"
-        self._memory = create_chat_memory()
+        self._conversation_id = conversation_id
+        # 记忆实例由会话池共享注入（避免每 Agent 各持一个 PG 连接）；未注入时自建（测试场景）
+        self._memory = memory if memory is not None else create_chat_memory()
         self.chart_context = ""
         self._workflow = XianzhiWorkflow(chat_model)
         self._workflow_context: WorkflowChartContext | None = None
@@ -130,6 +121,11 @@ class Xianzhi(ToolCallAgent):
         self._sect = 2
         self._yun_sect = 1
         self._lock = asyncio.Lock()
+
+    @property
+    def lock(self) -> asyncio.Lock:
+        """实例级锁：同一会话串行，不同会话（不同实例）并行。"""
+        return self._lock
 
     def set_conversation_id(self, conversation_id):
         new_id = (
@@ -391,9 +387,8 @@ class Xianzhi(ToolCallAgent):
             ]
             response = self.chat_model.invoke(messages)
             content = (getattr(response, "content", "") or "").strip()
-            content = re.sub(r"<think>[\s\S]*?</think>\s*", "", content, flags=re.IGNORECASE)
-            content = re.sub(r"<think>[\s\S]*$", "", content, flags=re.IGNORECASE)
-            content = _dedupe_final(content) if content else ""
+            content = clean_think_tags(content)
+            content = _dedupe_content(content) if content else ""
             if not content:
                 content = "嗯，我在听，你继续说。"
             self.final_answer = content
@@ -464,7 +459,7 @@ class Xianzhi(ToolCallAgent):
             pass
         final = (self.final_answer or "").strip()
         if final:
-            yield _dedupe_final(final)
+            yield _dedupe_content(final)
         elif self.state == AgentState.ERROR or self._last_error:
             err = (self._last_error or "未知错误").strip()
             log.warning("[xianzhi] 终止于错误: {}", err)

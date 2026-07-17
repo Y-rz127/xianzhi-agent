@@ -73,14 +73,6 @@ const items: CmdItem[] = [
     action: () => router.push("/xianzhi"),
   },
   {
-    id: "love",
-    title: "恋爱大师",
-    desc: "八字合婚、缘分分析、情感咨询",
-    icon: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>',
-    shortcut: "Ctrl+2",
-    action: () => router.push("/love"),
-  },
-  {
     id: "rag",
     title: "知识问答",
     desc: "命理知识库检索，古籍经典查询",

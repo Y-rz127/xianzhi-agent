@@ -27,12 +27,6 @@
           </span>
           <span v-if="!sidebarCollapsed">命理分析</span>
         </router-link>
-        <router-link to="/love" class="nav-item" active-class="active" @click="onNavClick">
-          <span class="nav-icon love-icon">
-            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
-          </span>
-          <span v-if="!sidebarCollapsed">恋爱大师</span>
-        </router-link>
         <router-link to="/hehun" class="nav-item" active-class="active" @click="onNavClick">
           <span class="nav-icon hehun-icon">
             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
@@ -63,6 +57,18 @@
           </span>
           <span v-if="!sidebarCollapsed">可观测性</span>
         </router-link>
+        <router-link to="/user-admin" class="nav-item" active-class="active" @click="onNavClick">
+          <span class="nav-icon admin-icon">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+          </span>
+          <span v-if="!sidebarCollapsed">用户管理</span>
+        </router-link>
+        <router-link to="/feedback" class="nav-item feedback-nav" active-class="active" @click="onNavClick">
+          <span class="nav-icon feedback-icon">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+          </span>
+          <span v-if="!sidebarCollapsed">问题反馈</span>
+        </router-link>
       </nav>
 
       <div class="sidebar-footer" v-if="!sidebarCollapsed">
@@ -78,7 +84,7 @@
     </aside>
 
     <main class="main">
-      <keep-alive :include="['Xianzhi', 'Love']">
+      <keep-alive :include="['Xianzhi']">
         <router-view />
       </keep-alive>
     </main>
@@ -204,8 +210,6 @@ onUnmounted(() => {
 .nav-item.active::before { opacity: 1; }
 .nav-icon { width: 40px; height: 40px; border-radius: 10px; display: flex; align-items: center; justify-content: center; background: rgba(255,255,255,0.04); flex-shrink: 0; }
 .nav-item.active .nav-icon { background: rgba(212,175,55,0.15); color: var(--accent-light); box-shadow: 0 0 12px rgba(212,175,55,0.2); }
-.love-icon { color: var(--love); }
-.nav-item.active .love-icon { background: rgba(232,139,139,0.15); color: var(--love); box-shadow: 0 0 12px rgba(232,139,139,0.2); }
 .hehun-icon { color: #e8b48b; }
 .nav-item.active .hehun-icon { background: rgba(232,180,139,0.15); color: #e8b48b; box-shadow: 0 0 12px rgba(232,180,139,0.2); }
 .tarot-icon { color: #b886e8; }
@@ -216,6 +220,10 @@ onUnmounted(() => {
 .nav-item.active .rag-icon { background: rgba(139,232,199,0.15); color: #8be8c7; box-shadow: 0 0 12px rgba(139,232,199,0.2); }
 .observability-icon { color: #d4af37; }
 .nav-item.active .observability-icon { background: rgba(212,175,55,0.15); color: #d4af37; box-shadow: 0 0 12px rgba(212,175,55,0.2); }
+.admin-icon { color: #e88bb8; }
+.nav-item.active .admin-icon { background: rgba(232,139,184,0.15); color: #e88bb8; box-shadow: 0 0 12px rgba(232,139,184,0.2); }
+.feedback-icon { color: #7ec8e3; }
+.nav-item.active .feedback-icon { background: rgba(126,200,227,0.15); color: #7ec8e3; box-shadow: 0 0 12px rgba(126,200,227,0.2); }
 .sidebar-footer { padding: 16px 4px 0; }
 .divider { height: 1px; background: linear-gradient(90deg, transparent, var(--border), transparent); margin-bottom: 14px; }
 .motto { font-size: 12px; color: var(--text-dim); text-align: center; letter-spacing: 2px; margin-bottom: 6px; }

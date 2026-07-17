@@ -11,7 +11,12 @@ router = APIRouter(tags=["Observability"])
 
 @router.get("/health")
 async def health():
-    return {"status": "ok", "rag_ready": state._rag_chain is not None}
+    return {
+        "status": "ok",
+        "rag_ready": state._rag_chain is not None,
+        "workflow_backend": state.workflow_backend(),
+        "agent_pool": state.agent_pool_stats(),
+    }
 
 
 @router.get("/observability/status")

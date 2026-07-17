@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import Any, TypedDict
 
 from app.agent.xianzhi_workflow import DomainWorker, WORKERS, QuestionIntent, WorkflowChartContext, classify_question
+from app.logger import log
 
 
 class XianzhiGraphState(TypedDict, total=False):
@@ -43,9 +44,17 @@ def create_xianzhi_graph(workflow):
         return {"chart_context": ctx}
 
     def retrieve_node(state: XianzhiGraphState) -> XianzhiGraphState:
-        return {"knowledge": workflow._retrieve_rules(state["intent"], state["chart_context"], state.get("worker"), state["user_prompt"])}
+        # 闲聊场景短路：无需检索知识库
+        intent = state.get("intent")
+        if intent and getattr(intent, "domain", "") == "chitchat":
+            log.info("[RAG] 闲聊意图，跳过知识检索")
+            return {"knowledge": "（闲聊场景，无需命理知识检索）"}
+        knowledge = workflow._retrieve_rules(state["intent"], state["chart_context"], state.get("worker"), state["user_prompt"])
+        log.info("[RAG] 检索完成，知识片段 {}字", len(knowledge))
+        return {"knowledge": knowledge}
 
     def generate_node(state: XianzhiGraphState) -> XianzhiGraphState:
+        worker = state.get("worker")
         messages = workflow._build_messages(
             state["user_prompt"],
             state["intent"],
@@ -54,21 +63,35 @@ def create_xianzhi_graph(workflow):
             state.get("history", []),
             state.get("worker"),
         )
-        return {"raw_answer": workflow._invoke(messages)}
+        raw = workflow._invoke(messages)
+        log.info("[Worker] {} 生成回答 {}字", getattr(worker, "label", "?"), len(raw))
+        return {"raw_answer": raw}
 
     def check_node(state: XianzhiGraphState) -> XianzhiGraphState:
         # 新架构：用 ReviewerWorker 做三重校验（事实+古籍真实性+合规），替代旧的 check_facts
+        raw = state.get("raw_answer", "")
+        worker = state.get("worker")
+        log.info("[Reviewer] 开始审核 {} Worker 产出 ({}字)...",
+                 getattr(worker, "label", "?"), len(raw))
         review = workflow._reviewer.review(
-            state.get("raw_answer", ""),
+            raw,
             state["chart_context"].chart,
             state.get("knowledge", ""),
             workflow.check_facts,
         )
-        return {"issues": review.issues, "final_answer": state.get("raw_answer", "") if review.ok else ""}
+        if review.ok:
+            log.info("[Reviewer] {} Worker 产出通过三重校验 ✓", getattr(worker, "label", "?"))
+        else:
+            log.warning("[Reviewer] {} Worker 产出未通过校验 ✗", getattr(worker, "label", "?"))
+            for i, issue in enumerate(review.issues, 1):
+                log.warning("[Reviewer]   issue[{}]: {}", i, issue)
+        return {"issues": review.issues, "final_answer": raw if review.ok else ""}
 
     def repair_node(state: XianzhiGraphState) -> XianzhiGraphState:
         from app.agent.xianzhi_workflow import FactCheckResult
 
+        worker = state.get("worker")
+        log.info("[Reflextion] {} Worker 开始修复...", getattr(worker, "label", "?"))
         checked = FactCheckResult(ok=False, issues=state.get("issues", []))
         messages = workflow._build_repair_messages(
             state.get("raw_answer", ""),
@@ -80,6 +103,8 @@ def create_xianzhi_graph(workflow):
             state.get("worker"),
         )
         repaired = workflow._invoke(messages)
+        log.info("[Reflextion] {} Worker 修复完成 ({}字)，二次审核中...",
+                 getattr(worker, "label", "?"), len(repaired))
         repaired_review = workflow._reviewer.review(
             repaired,
             state["chart_context"].chart,
@@ -87,7 +112,11 @@ def create_xianzhi_graph(workflow):
             workflow.check_facts,
         )
         if repaired_review.ok:
+            log.info("[Reflextion] {} Worker 修复后通过校验 ✓", getattr(worker, "label", "?"))
             return {"final_answer": repaired, "issues": []}
+        log.warning("[Reflextion] {} Worker 修复后仍未通过 ✗", getattr(worker, "label", "?"))
+        for i, issue in enumerate(repaired_review.issues, 1):
+            log.warning("[Reflextion]   残留issue[{}]: {}", i, issue)
         return {"final_answer": repaired.rstrip() + "\n\n口径校验：" + "；".join(repaired_review.issues), "issues": repaired_review.issues}
 
     def route_after_check(state: XianzhiGraphState) -> str:

@@ -130,9 +130,12 @@
 
 <script setup lang="ts">
 import { ref, computed, nextTick } from 'vue'
-import { onHide } from '@dcloudio/uni-app'
+import { onShow, onHide } from '@dcloudio/uni-app'
+import { requireLogin } from '@/utils/authGuard'
 // 塔罗两阶段：draw 抽牌 + interpret AI 流式解读
 import { drawTarotCards, interpretTarotWS, closeAllWS } from '@/api/chat'
+import { createTarotRecord } from '@/api'
+import { isLoggedIn } from '@/utils/storage'
 
 interface DrawnCard {
   name: string
@@ -157,6 +160,8 @@ const scrollTop = ref(0)
 
 // 切走 tab / 页面隐藏时关闭 WS，避免 socket 累积超过小程序 5 个上限
 onHide(() => { closeAllWS() })
+
+onShow(() => { requireLogin() })
 
 const spreads = [
   { key: 'daily' as const, name: '每日一牌', desc: '看今日运势指引', icon: '☀' },
@@ -264,6 +269,7 @@ function onInterpret() {
       },
       onDone: () => {
         interpreting.value = false
+        saveRecord()
       },
       onError: (err: string) => {
         interpreting.value = false
@@ -280,6 +286,27 @@ function resetDivine() {
   drawn.value = false
   cards.value = []
   interpretation.value = ''
+}
+
+/** 解读完成后保存记录（登录用户才保存，便于「我的-塔罗记录」回溯） */
+function saveRecord() {
+  if (!isLoggedIn()) return
+  if (!interpretation.value) return
+  const payload = cards.value.map((c) => ({
+    name: c.name,
+    nameEn: c.nameEn,
+    emblem: c.emblem,
+    arcana: c.arcana,
+    suit: c.suit,
+    isReversed: c.isReversed,
+    meaning: c.meaning,
+  }))
+  createTarotRecord({
+    spread: selectedSpread.value,
+    question: question.value,
+    cards: payload,
+    interpretation: interpretation.value,
+  }).catch(() => {})
 }
 </script>
 

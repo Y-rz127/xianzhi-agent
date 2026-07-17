@@ -89,6 +89,21 @@
     </section>
 
     <div v-if="message" class="toast" :class="message.type">{{ message.text }}</div>
+
+    <!-- 确认弹窗 -->
+    <Teleport to="body">
+      <div v-if="showConfirm" class="confirm-overlay" @click.self="showConfirm = false">
+        <div class="confirm-dialog">
+          <p class="confirm-msg">{{ confirmMsg }}</p>
+          <div class="confirm-actions">
+            <button class="btn-confirm-cancel" @click="showConfirm = false">取消</button>
+            <button class="btn-confirm-ok" :disabled="confirmLoading" @click="onConfirmOk">
+              {{ confirmLoading ? '处理中...' : '确定' }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -106,6 +121,29 @@ const fileInput = ref<HTMLInputElement | null>(null)
 const message = ref<{ text: string; type: "success" | "error" } | null>(null)
 const showAllDocs = ref(false)
 const visibleDocs = computed(() => showAllDocs.value ? docs.value : docs.value.slice(0, 5))
+
+// 确认弹窗
+const showConfirm = ref(false)
+const confirmMsg = ref("")
+const confirmLoading = ref(false)
+const pendingAction: ref<(() => Promise<void>) | null> = ref(null)
+
+function askConfirm(msg: string, action: () => Promise<void>) {
+  confirmMsg.value = msg
+  pendingAction.value = action
+  showConfirm.value = true
+}
+async function onConfirmOk() {
+  if (!pendingAction.value) return
+  confirmLoading.value = true
+  try {
+    await pendingAction.value()
+  } finally {
+    confirmLoading.value = false
+    showConfirm.value = false
+    pendingAction.value = null
+  }
+}
 
 function showMessage(text: string, type: "success" | "error" = "success") {
   message.value = { text, type }
@@ -167,31 +205,33 @@ function onDrop(e: DragEvent) {
 }
 
 async function removeDoc(filename: string) {
-  if (!confirm(`确定删除文档「${filename}」？`)) return
-  deleting.value[filename] = true
-  try {
-    await deleteRagDoc(filename)
-    showMessage("删除成功")
-    await refresh()
-  } catch (e: any) {
-    showMessage(e.message || "删除失败", "error")
-  } finally {
-    deleting.value[filename] = false
-  }
+  askConfirm(`确定删除文档「${filename}」？`, async () => {
+    deleting.value[filename] = true
+    try {
+      await deleteRagDoc(filename)
+      showMessage("删除成功")
+      await refresh()
+    } catch (e: any) {
+      showMessage(e.message || "删除失败", "error")
+    } finally {
+      deleting.value[filename] = false
+    }
+  })
 }
 
 async function rebuild() {
-  if (!confirm("重建向量库会重新加载所有知识文档，可能需要一些时间，是否继续？")) return
-  rebuilding.value = true
-  try {
-    const result = await rebuildRagIndex()
-    showMessage(result.ready ? "向量库重建成功" : "向量库重建失败", result.ready ? "success" : "error")
-    await fetchStatus()
-  } catch (e: any) {
-    showMessage(e.message || "重建失败", "error")
-  } finally {
-    rebuilding.value = false
-  }
+  askConfirm("重建向量库会重新加载所有知识文档，可能需要一些时间，是否继续？", async () => {
+    rebuilding.value = true
+    try {
+      const result = await rebuildRagIndex()
+      showMessage(result.ready ? "向量库重建成功" : "向量库重建失败", result.ready ? "success" : "error")
+      await fetchStatus()
+    } catch (e: any) {
+      showMessage(e.message || "重建失败", "error")
+    } finally {
+      rebuilding.value = false
+    }
+  })
 }
 
 function formatSize(bytes: number): string {
@@ -381,4 +421,48 @@ onMounted(() => {
   .page-header { flex-direction: column; align-items: flex-start; gap: var(--spacing-md); }
   .doc-item { align-items: flex-start; flex-direction: column; }
 }
+
+/* 确认弹窗 */
+.confirm-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0,0,0,0.55);
+  backdrop-filter: blur(3px);
+}
+.confirm-dialog {
+  background: #151c2c;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 28px 32px;
+  min-width: 300px;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.5);
+}
+.confirm-msg {
+  font-size: 15px;
+  color: var(--text);
+  margin: 0 0 24px;
+}
+.confirm-actions { display: flex; justify-content: flex-end; gap: 10px; }
+.btn-confirm-cancel,
+.btn-confirm-ok {
+  padding: 7px 20px;
+  border-radius: 9px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s;
+  border: 1px solid var(--border);
+}
+.btn-confirm-cancel { background: transparent; color: var(--text-dim); }
+.btn-confirm-cancel:hover { background: rgba(255,255,255,0.05); }
+.btn-confirm-ok {
+  background: rgba(220,80,80,0.15);
+  color: #dc7878;
+  border-color: rgba(220,80,80,0.25);
+}
+.btn-confirm-ok:hover:not(:disabled) { background: rgba(220,80,80,0.25); }
+.btn-confirm-ok:disabled { opacity: 0.5; cursor: not-allowed; }
 </style>

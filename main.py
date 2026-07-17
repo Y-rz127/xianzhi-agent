@@ -10,9 +10,7 @@ from langchain_openai import ChatOpenAI
 
 from app.api.routes import router
 from app.api.state import set_instances
-from app.agent.xianzhi import Xianzhi
 from app.config import settings
-from app.love_app import LoveApp
 from app.memory import create_chat_memory
 from app.observability import init_observability, record_request
 from app.logger import log
@@ -33,15 +31,16 @@ async def lifespan(app: FastAPI):
         model=settings.dashscope_model,
         base_url=settings.dashscope_url,
         api_key=settings.dashscope_api_key,
-        temperature=0.7,
-        extra_body={"enable_thinking": False},
+        temperature=settings.llm_temperature,
+        timeout=settings.llm_timeout,
+        max_retries=settings.llm_max_retries,
+        extra_body={"enable_thinking": settings.llm_enable_thinking},
     )
 
     # 2. 记忆
     memory = create_chat_memory()
 
-    # 3. RAG 知识库初始化（失败不阻断主流程）
-    log.info("正在初始化 RAG 命理知识库...")
+    # 3. RAG 知识库初始化（失败不阻断主流程；内部根据文档指纹决定是否复用已有索引）
     knowledge_base.init()
     rag_chain = RagChatChain(chat_model=chat_model)
 
@@ -56,33 +55,31 @@ async def lifespan(app: FastAPI):
     log.info("正在启动 MCP 服务...")
     await mcp_manager.start()
 
-    # 6. 先知智能体
-    xianzhi = Xianzhi(chat_model=chat_model, local_tools=local_tools)
-
-    # 7. 恋爱大师分支
-    love_app = LoveApp(chat_model=chat_model, memory=memory)
-
-    # 8. 塔罗占卜
+    # 6. 塔罗占卜
     tarot_app = TarotApp(chat_model=chat_model)
 
-    set_instances(xianzhi, love_app, rag_chain, tarot_app)
+    # 7. 注册共享依赖：Xianzhi 按会话池化，首次请求时按需创建实例
+    set_instances(chat_model, local_tools, memory, rag_chain, tarot_app)
 
-    # 暖启动：预热排盘缓存
-    log.info("正在预热排盘缓存...")
-    from app.tools.bazi import bazi_chart, bazi_analysis, bazi_dayun
-    warm_dates = ["1990-01-01 12:00", "2000-01-01 12:00", "1985-01-01 12:00", "1995-01-01 12:00"]
-    warm_genders = ["男", "女"]
-    warm_count = 0
-    for dt in warm_dates:
-        for g in warm_genders:
-            try:
-                bazi_chart.invoke({"birth_time": dt, "gender": g})
-                bazi_analysis.invoke({"birth_time": dt, "gender": g, "question": "整体命盘"})
-                bazi_dayun.invoke({"birth_time": dt, "gender": g, "count": 8})
-                warm_count += 1
-            except Exception:
-                pass
-    log.info("缓存预热完成: {} 条", warm_count)
+    # 暖启动：预热排盘缓存（后台线程执行，不阻塞服务就绪）
+    def _warm_cache():
+        from app.tools.bazi import bazi_chart, bazi_analysis, bazi_dayun
+        warm_dates = ["1990-01-01 12:00", "2000-01-01 12:00", "1985-01-01 12:00", "1995-01-01 12:00"]
+        warm_genders = ["男", "女"]
+        warm_count = 0
+        for dt in warm_dates:
+            for g in warm_genders:
+                try:
+                    bazi_chart.invoke({"birth_time": dt, "gender": g})
+                    bazi_analysis.invoke({"birth_time": dt, "gender": g, "question": "整体命盘"})
+                    bazi_dayun.invoke({"birth_time": dt, "gender": g, "count": 8})
+                    warm_count += 1
+                except Exception:
+                    pass
+        log.info("缓存预热完成: {} 条", warm_count)
+
+    import threading
+    threading.Thread(target=_warm_cache, daemon=True, name="bazi-cache-warmup").start()
 
     # 8. 初始化命例表
     try:
@@ -97,14 +94,12 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    # 清理资源：关闭 PG 连接
+    # 清理资源：关闭 PG 连接池（chart_cases 已复用 postgres_memory 的连接池）
     try:
-        from app.api.chart_cases import close_conn as close_chart_cases_conn
         from app.memory.postgres_memory import close_global_conn
-        close_chart_cases_conn()
         close_global_conn()
     except Exception as e:
-        log.warning("关闭 PG 连接失败: {}", e)
+        log.warning("关闭 PG 连接池失败: {}", e)
 
     await mcp_manager.stop()
     log.info("先知智能体已关闭")
@@ -126,15 +121,21 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# 安全中间件（后添加的先执行：限流在最外层，鉴权其次）
+from app.security import ApiKeyAuthMiddleware, RateLimitMiddleware
+app.add_middleware(ApiKeyAuthMiddleware)
+app.add_middleware(RateLimitMiddleware)
+
 
 @app.middleware("http")
 async def security_headers_middleware(request, call_next):
     response = await call_next(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
-    # 移除或覆盖可能由其他中间件添加的 CSP
-    if "Content-Security-Policy" in response.headers:
-        del response.headers["Content-Security-Policy"]
+    # API 响应设置严格 CSP（纯 JSON/SSE 无需加载任何资源）；
+    # /docs、/redoc 等 Swagger 页面需加载 CDN 资源，不加 CSP 以免白屏
+    if not request.url.path.startswith(("/docs", "/redoc", "/openapi.json")):
+        response.headers["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none'"
     # 静态资源增加缓存破坏
     if request.url.path.startswith("/assets/"):
         response.headers["Cache-Control"] = "public, max-age=31536000, immutable"

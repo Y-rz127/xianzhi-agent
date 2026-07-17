@@ -1,22 +1,22 @@
 """先知（Xianzhi）相关接口。"""
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconnect
 from sse_starlette.sse import EventSourceResponse
 
 from app.api import state
+from app.api.common import check_message_length, client_error, is_message_too_long, message_too_long_text
+from app.config import settings
 from app.logger import log
 
 router = APIRouter(prefix="/xianzhi", tags=["Xianzhi"])
 
 
-def _mount_chart_context(birth_time: str | None, gender: str | None, sect: int = 2, yun_sect: int = 1):
-    """如果提供了出生信息，直接挂载到当前 Agent 上下文。"""
-    if state._xianzhi is None:
-        return
+def _mount_chart_context(agent, birth_time: str | None, gender: str | None, sect: int = 2, yun_sect: int = 1):
+    """如果提供了出生信息，直接挂载到该会话 Agent 上下文。"""
     if birth_time and gender:
         try:
-            state._xianzhi.set_chart_context(birth_time, gender, sect, yun_sect)
+            agent.set_chart_context(birth_time, gender, sect, yun_sect)
         except Exception as e:
             log.warning("通过 API 挂载命盘上下文失败: {}", e)
 
@@ -31,22 +31,25 @@ async def chat_with_xianzhi(
     yun_sect: int = 1,
     verbose: bool = False,
 ):
-    if state._xianzhi is None:
+    check_message_length(message)
+    try:
+        agent, lock = state.get_xianzhi(conversation_id)
+    except RuntimeError:
         return {"error": "Xianzhi not initialized"}
-    state._xianzhi.set_conversation_id(conversation_id)
-    _mount_chart_context(birth_time, gender, sect, yun_sect)
 
     async def event_stream():
-        # 单例 Agent 并发保护：串行化执行避免状态互相覆盖
-        async with state._xianzhi._lock:
-            state._xianzhi._sect = sect
-            state._xianzhi._yun_sect = yun_sect
+        # 会话实例级锁：同一会话串行，不同会话并行；
+        # sect 设置与命盘挂载均在锁内完成，避免并发污染
+        async with lock:
+            agent._sect = sect
+            agent._yun_sect = yun_sect
+            _mount_chart_context(agent, birth_time, gender, sect, yun_sect)
             try:
-                async for chunk in state._xianzhi.arun_stream(message, verbose=verbose):
+                async for chunk in agent.arun_stream(message, verbose=verbose):
                     yield {"event": "message", "data": chunk}
                 # 流结束后，如果后端从工具调用中提取到出生信息，通知前端（覆盖自然语言输入场景）
-                if state._xianzhi._last_birth_info:
-                    bi = state._xianzhi._last_birth_info
+                if agent._last_birth_info:
+                    bi = agent._last_birth_info
                     import json as _json
                     yield {
                         "event": "chart_context",
@@ -55,7 +58,7 @@ async def chat_with_xianzhi(
                 yield {"event": "message", "data": "[DONE]"}
             except Exception as e:
                 log.exception("SSE stream error")
-                yield {"event": "error", "data": str(e)}
+                yield {"event": "error", "data": client_error(e)}
 
     return EventSourceResponse(event_stream())
 
@@ -82,18 +85,23 @@ async def ws_chat_with_xianzhi(websocket: WebSocket):
             sect = data.get("sect", 2)
             yun_sect = data.get("yun_sect", 1)
             verbose = bool(data.get("verbose", False))
-            if state._xianzhi is None:
+            if is_message_too_long(message):
+                if not await _safe_ws_send(websocket, {"type": "error", "data": message_too_long_text(message)}):
+                    break
+                continue
+            try:
+                agent, lock = state.get_xianzhi(conversation_id)
+            except RuntimeError:
                 if not await _safe_ws_send(websocket, {"type": "error", "data": "Xianzhi not initialized"}):
                     break
                 continue
-            state._xianzhi.set_conversation_id(conversation_id)
-            _mount_chart_context(birth_time, gender, sect, yun_sect)
-            async with state._xianzhi._lock:
-                state._xianzhi._sect = sect
-                state._xianzhi._yun_sect = yun_sect
+            async with lock:
+                agent._sect = sect
+                agent._yun_sect = yun_sect
+                _mount_chart_context(agent, birth_time, gender, sect, yun_sect)
                 client_alive = True
                 try:
-                    async for chunk in state._xianzhi.arun_stream(message, verbose=verbose):
+                    async for chunk in agent.arun_stream(message, verbose=verbose):
                         if not await _safe_ws_send(websocket, {"type": "message", "data": chunk}):
                             client_alive = False
                             log.info("客户端已断开，停止流式发送")
@@ -101,11 +109,11 @@ async def ws_chat_with_xianzhi(websocket: WebSocket):
                 except Exception as e:
                     log.exception("WebSocket stream error")
                     if client_alive:
-                        await _safe_ws_send(websocket, {"type": "error", "data": str(e)})
+                        await _safe_ws_send(websocket, {"type": "error", "data": client_error(e)})
                     client_alive = False
                 # 流结束后，如果后端从工具调用中提取到出生信息，通知前端（覆盖自然语言输入场景）
-                if client_alive and state._xianzhi._last_birth_info:
-                    bi = state._xianzhi._last_birth_info
+                if client_alive and agent._last_birth_info:
+                    bi = agent._last_birth_info
                     await _safe_ws_send(websocket, {
                         "type": "chart_context",
                         "data": {"birth_time": bi.get("time"), "gender": bi.get("gender")},
@@ -116,7 +124,7 @@ async def ws_chat_with_xianzhi(websocket: WebSocket):
         log.info("WebSocket disconnected")
     except Exception as e:
         log.exception("WebSocket error")
-        await _safe_ws_send(websocket, {"type": "error", "data": str(e)})
+        await _safe_ws_send(websocket, {"type": "error", "data": client_error(e)})
 
 
 @router.get("/chat/sync")
@@ -128,18 +136,22 @@ async def chat_with_xianzhi_sync(
     sect: int = 2,
     yun_sect: int = 1,
 ):
-    if state._xianzhi is None:
+    check_message_length(message)
+    try:
+        agent, lock = state.get_xianzhi(conversation_id)
+    except RuntimeError:
         return {"error": "Xianzhi not initialized"}
-    state._xianzhi.set_conversation_id(conversation_id)
-    _mount_chart_context(birth_time, gender, sect, yun_sect)
-    async with state._xianzhi._lock:
-        state._xianzhi._sect = sect
-        state._xianzhi._yun_sect = yun_sect
+    async with lock:
+        agent._sect = sect
+        agent._yun_sect = yun_sect
+        _mount_chart_context(agent, birth_time, gender, sect, yun_sect)
         try:
-            return {"result": state._xianzhi.run(message)}
+            # run 是同步阻塞调用，放到线程池避免卡住事件循环
+            import asyncio
+            return {"result": await asyncio.to_thread(agent.run, message)}
         except Exception as e:
             log.exception("Sync chat error")
-            return {"error": str(e)}
+            return {"error": client_error(e)}
 
 
 @router.get("/sessions")
@@ -149,6 +161,17 @@ async def list_xianzhi_sessions(prefix: str = "web-xianzhi"):
     """
     from app.memory.postgres_memory import get_session_info
     return get_session_info(prefix)
+
+
+@router.get("/sessions/mine")
+async def list_my_sessions(token: str = Query(None)):
+    """我的对话：按登录用户隔离的先知会话列表（小程序「我的」页用）。"""
+    from app.db import users as user_store
+    user = user_store.get_by_token(token) if token else None
+    if not user:
+        raise HTTPException(status_code=401, detail="未登录")
+    from app.memory.postgres_memory import get_session_info
+    return get_session_info(prefix="mp-xianzhi", user_id=user["id"])
 
 
 @router.delete("/sessions/{session_id}")
@@ -243,29 +266,31 @@ async def generate_report(birth_time: str, gender: str):
         return Response(content=pdf_bytes, media_type="application/pdf", headers={"Content-Disposition": 'attachment; filename="xianzhi_bazi_report.pdf"'})
     except Exception as e:
         log.exception("PDF 报告生成失败")
-        raise HTTPException(status_code=500, detail="PDF 生成失败: {}".format(e))
+        raise HTTPException(status_code=500, detail=client_error(e))
 
 
 @router.get("/full_report")
 async def full_report(birth_time: str, gender: str, sections: str = ""):
     """生成 LLM 分节命理报告（Markdown）。"""
-    if state._xianzhi is None:
+    chat_model = state.get_chat_model()
+    if chat_model is None:
         return {"error": "Xianzhi not initialized"}
     from app.tools.report_generator import generate_full_report, DEFAULT_SECTIONS
 
     selected = sections.split(",") if sections else DEFAULT_SECTIONS
     try:
-        content = generate_full_report(state._xianzhi.chat_model, birth_time, gender, selected)
+        content = generate_full_report(chat_model, birth_time, gender, selected)
         return {"content": content}
     except Exception as e:
         log.exception("生成命理报告失败")
-        raise HTTPException(status_code=500, detail="报告生成失败: {}".format(e))
+        raise HTTPException(status_code=500, detail=client_error(e))
 
 
 @router.get("/full_report_pdf")
 async def full_report_pdf(birth_time: str, gender: str, sections: str = ""):
     """生成 LLM 分节命理报告 PDF。"""
-    if state._xianzhi is None:
+    chat_model = state.get_chat_model()
+    if chat_model is None:
         return {"error": "Xianzhi not initialized"}
     from fastapi import Response
     from app.tools.report_generator import generate_full_report, DEFAULT_SECTIONS
@@ -274,7 +299,7 @@ async def full_report_pdf(birth_time: str, gender: str, sections: str = ""):
 
     selected = sections.split(",") if sections else DEFAULT_SECTIONS
     try:
-        ai_commentary = generate_full_report(state._xianzhi.chat_model, birth_time, gender, selected)
+        ai_commentary = generate_full_report(chat_model, birth_time, gender, selected)
         chart_text = bazi_chart.invoke({"birth_time": birth_time, "gender": gender})
         analysis_text = bazi_analysis.invoke({"birth_time": birth_time, "gender": gender, "question": "整体命盘"})
         dayun_text = bazi_dayun.invoke({"birth_time": birth_time, "gender": gender, "count": 8})
@@ -295,4 +320,4 @@ async def full_report_pdf(birth_time: str, gender: str, sections: str = ""):
         )
     except Exception as e:
         log.exception("生成 PDF 报告失败")
-        raise HTTPException(status_code=500, detail="PDF 生成失败: {}".format(e))
+        raise HTTPException(status_code=500, detail=client_error(e))

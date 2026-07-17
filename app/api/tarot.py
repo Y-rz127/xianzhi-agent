@@ -4,6 +4,7 @@ from __future__ import annotations
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from app.api import state
+from app.api.common import client_error, is_message_too_long, message_too_long_text
 from app.logger import log
 from app.tarot_app import SPREADS, SpreadKey
 
@@ -67,7 +68,7 @@ async def ws_tarot_divine(websocket: WebSocket):
                 except Exception as e:
                     log.exception("塔罗抽牌失败")
                     if not await _safe_ws_send(
-                        websocket, {"type": "error", "data": f"抽牌失败: {e}"}
+                        websocket, {"type": "error", "data": client_error(e)}
                     ):
                         break
                     continue
@@ -81,6 +82,10 @@ async def ws_tarot_divine(websocket: WebSocket):
             if action == "interpret":
                 question = (data.get("question") or "").strip()
                 cards = data.get("cards") or []
+                if is_message_too_long(question):
+                    if not await _safe_ws_send(websocket, {"type": "error", "data": message_too_long_text(question)}):
+                        break
+                    continue
                 if not cards:
                     if not await _safe_ws_send(
                         websocket, {"type": "error", "data": "解读需要 cards 字段"}
@@ -98,7 +103,7 @@ async def ws_tarot_divine(websocket: WebSocket):
                 except Exception as e:
                     log.exception("塔罗 LLM 解读异常")
                     if client_alive:
-                        await _safe_ws_send(websocket, {"type": "error", "data": str(e)})
+                        await _safe_ws_send(websocket, {"type": "error", "data": client_error(e)})
                     client_alive = False
 
                 if client_alive:
@@ -114,4 +119,4 @@ async def ws_tarot_divine(websocket: WebSocket):
         log.info("塔罗 WebSocket disconnected")
     except Exception as e:
         log.exception("塔罗 WebSocket error")
-        await _safe_ws_send(websocket, {"type": "error", "data": str(e)})
+        await _safe_ws_send(websocket, {"type": "error", "data": client_error(e)})

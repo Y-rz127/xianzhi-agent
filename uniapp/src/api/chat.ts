@@ -6,7 +6,6 @@
  *
  * 后端 WS 接口:
  *   - /ai/xianzhi/ws      先知智能体
- *   - /ai/love_app/ws      恋爱大师
  *   - /ai/xianzhi/rag/ws   RAG 知识库
  *
  * 协议:
@@ -115,19 +114,6 @@ export function chatWithXianzhiWS(message: string, opts: XianzhiChatOptions) {
       sect: opts.sect ?? 2,
       yun_sect: opts.yunSect ?? 1,
     },
-    opts
-  )
-}
-
-export interface LoveChatOptions extends ChatWSCallbacks {
-  chatId: string
-}
-
-/** 与恋爱大师流式聊天 */
-export function chatWithLoveWS(message: string, opts: LoveChatOptions) {
-  return connectChatWS(
-    '/api/ai/love_app/ws',
-    { message, chat_id: opts.chatId },
     opts
   )
 }

@@ -16,13 +16,6 @@
       }
     },
     {
-      "path": "pages/love/index",
-      "style": {
-        "navigationStyle": "custom",
-        "navigationBarTitleText": "恋爱大师"
-      }
-    },
-    {
       "path": "pages/tarot/index",
       "style": {
         "navigationStyle": "custom",
@@ -39,6 +32,45 @@
         "navigationStyle": "custom",
         "navigationBarTitleText": "命例库"
       }
+    },
+    {
+      "path": "pages/mine/index",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "我的"
+      }
+    },
+    {
+      "path": "pages/login/index",
+      "style": { "navigationBarTitleText": "账号" }
+    },
+    {
+      "path": "pages/mine/profile-edit",
+      "style": { "navigationBarTitleText": "八字档案" }
+    },
+    {
+      "path": "pages/mine/profiles",
+      "style": { "navigationStyle": "custom", "navigationBarTitleText": "我的八字档案" }
+    },
+    {
+      "path": "pages/mine/favorites",
+      "style": { "navigationStyle": "custom", "navigationBarTitleText": "命例收藏" }
+    },
+    {
+      "path": "pages/mine/sessions",
+      "style": { "navigationStyle": "custom", "navigationBarTitleText": "我的对话" }
+    },
+    {
+      "path": "pages/mine/tarots",
+      "style": { "navigationStyle": "custom", "navigationBarTitleText": "塔罗记录" }
+    },
+    {
+      "path": "pages/feedback/index",
+      "style": { "navigationBarTitleText": "问题反馈" }
+    },
+    {
+      "path": "pages/about/index",
+      "style": { "navigationBarTitleText": "关于我们" }
     },
     {
       "path": "pages/legal/disclaimer",
@@ -69,8 +101,8 @@
     "borderStyle": "white",
     "list": [
       { "pagePath": "pages/xianzhi/index", "text": "先知" },
-      { "pagePath": "pages/love/index", "text": "恋爱" },
-      { "pagePath": "pages/tarot/index", "text": "塔罗" }
+      { "pagePath": "pages/tarot/index", "text": "塔罗" },
+      { "pagePath": "pages/mine/index", "text": "我的" }
     ]
   }
 }

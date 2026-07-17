@@ -190,6 +190,8 @@
       :warnings="chartData?.warnings || []"
       :birthTime="lastBirthInfo?.time"
       :gender="lastBirthInfo?.gender"
+      :mingGong="chartData?.mingGong"
+      :shenGong="chartData?.shenGong"
       @close="showModal = false"
     />
 
@@ -649,16 +651,6 @@ onUnmounted(() => {
 <style scoped>
 .chat-view { display: flex; min-height: 100%; position: relative; }
 
-.sidebar-expand-btn {
-  position: fixed; left: 4px; top: 80px; z-index: 50;
-  width: 40px; height: 40px; border-radius: 10px;
-  background: rgba(15,21,32,0.95); border: 1px solid var(--border);
-  color: var(--accent-light); cursor: pointer; display: none; align-items: center; justify-content: center;
-  box-shadow: 0 4px 16px rgba(0,0,0,0.4); transition: all 0.25s;
-}
-.sidebar-expand-btn:hover { background: rgba(212,175,55,0.15); border-color: var(--accent); }
-.sidebar-expand-btn.always-show { display: flex; }
-
 .sidebar-mask {
   position: fixed; top: 0; left: 0; right: 0; bottom: 0;
   background: rgba(0,0,0,0.65); z-index: 45; display: none;
@@ -866,7 +858,6 @@ textarea:disabled { opacity: 0.5; cursor: not-allowed; }
     box-shadow: 4px 0 24px rgba(0,0,0,0.5); transition: transform 0.35s ease; will-change: transform; }
   .chat-sidebar.collapsed { transform: translateX(-100%); width: 260px; }
   .chat-sidebar:not(.collapsed) { transform: translateX(0); }
-  .sidebar-expand-btn { display: none; }
   .sidebar-mask { display: block; }
   .chat-main { padding: 10px; padding-top: 60px; }
   .chat-header { padding: 10px 12px; flex-wrap: wrap; gap: 8px; align-items: center; }

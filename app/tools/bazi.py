@@ -6,7 +6,7 @@
 from __future__ import annotations
 import re
 from langchain_core.tools import tool
-from lunar_python import Solar, Lunar, EightChar
+from lunar_python import Solar, Lunar
 from app.domain.bazi_engine import (
     GZ_WUXING,
     build_bazi_chart,
@@ -74,6 +74,27 @@ def _parse_birth_smart(birth_time: str) -> tuple:
     if not s:
         raise ValueError("出生时间为空")
 
+    # ---- 节日预处理：将"春节/端午/中秋"等替换为农历日期 ----
+    FESTIVAL_MAP = {
+        "春节": ("正", "初一"), "元旦": ("正", "初一"),
+        "端午": ("五", "初五"), "端午日": ("五", "初五"),
+        "中秋": ("八", "十五"), "中秋日": ("八", "十五"),
+        "重阳": ("九", "初九"), "重阳节": ("九", "初九"),
+        "元宵": ("正", "十五"), "元宵节": ("正", "十五"),
+        "七夕": ("七", "初七"), "七夕节": ("七", "初七"),
+        "中元": ("七", "十五"), "中元节": ("七", "十五"),
+        "腊八": ("十二", "初八"), "腊八节": ("十二", "初八"),
+    }
+    ym = re.search(r"(\d{4})年", s)
+    year = int(ym.group(1)) if ym else None
+    for festival, (mo, day) in FESTIVAL_MAP.items():
+        if festival in s and year:
+            # 构造等效农历表达式：如 "2004年端午节 辰时" → "农历2004年五月初五 辰时"
+            cn_month_str = mo + "月"
+            s = re.sub(re.escape(festival), f"农历{year}年{cn_month_str}{day}", s)
+            # 只替换第一个匹配的节日
+            break
+
     # 提取时辰：先尝试 HH:MM，再尝试传统时辰
     hour, minute = 0, 0
     time_label = ""
@@ -93,7 +114,7 @@ def _parse_birth_smart(birth_time: str) -> tuple:
             minute = 0
             time_label = f"传统时辰"
 
-    # 判断农历：含"农历"或"农历"相关字眼，或含中文日（初一/廿三等）
+    # 判断农历：含"农历"或"阴历"相关字眼，或含中文日（初一/廿三等）
     is_lunar = ("农历" in s or "阴历" in s or
                 _parse_cn_day(s) is not None)
 
@@ -157,19 +178,6 @@ def _normalize_birth_time(birth_time: str) -> str:
     return "{}-{:02d}-{:02d} {:02d}:{:02d}".format(
         solar.getYear(), solar.getMonth(), solar.getDay(), h, mi
     )
-
-
-def _get_eight_char(birth_time: str, gender: str, sect: int = 2, yun_sect: int = 1):
-    """排盘并应用流派参数，返回 (solar, lunar, eight_char, yun, gender_int)。
-
-    使用 _parse_birth_smart 智能识别公历/农历/传统时辰。
-    """
-    solar, lunar, ec, h, mi, source = _parse_birth_smart(birth_time)
-    g = _parse_gender(gender)
-    if sect != 2:
-        ec.setSect(sect)
-    yun = ec.getYun(g, yun_sect)
-    return solar, lunar, ec, yun, g
 
 
 @tool
@@ -349,6 +357,11 @@ def bazi_liunian(birth_time: str, gender: str, years: int = 10, yun_sect: int = 
         import datetime
         birth_time = _normalize_birth_time(birth_time)
         current_year = datetime.date.today().year
+        # 缓存 key 含 years 与起始年，避免跨年后命中旧流年
+        cache_tool = "liunian:{}:{}".format(years, current_year)
+        cached = bazi_cache.get(birth_time, gender, 2, yun_sect, cache_tool)
+        if cached:
+            return cached
         chart = build_bazi_chart(
             birth_time,
             gender,
@@ -357,7 +370,9 @@ def bazi_liunian(birth_time: str, gender: str, years: int = 10, yun_sect: int = 
             liunian_years=years,
             liunian_start_year=current_year,
         )
-        return format_liunian_text(chart)
+        result = format_liunian_text(chart)
+        bazi_cache.set(birth_time, gender, result, 2, yun_sect, cache_tool)
+        return result
     except Exception as e:
         return "流年推算失败: {}".format(e)
 
@@ -381,6 +396,11 @@ def bazi_liuyue(birth_time: str, gender: str, year: int = None, sect: int = 2, y
         birth_time = _normalize_birth_time(birth_time)
         y, m, d, h, mi = parse_birth(birth_time)
         target_year = year or datetime.date.today().year
+        # 缓存 key 含目标年份，避免不同年份互相污染
+        cache_tool = "liuyue:{}".format(target_year)
+        cached = bazi_cache.get(birth_time, gender, sect, yun_sect, cache_tool)
+        if cached:
+            return cached
 
         lines = ["【流月推算】{} 年".format(target_year), ""]
 
@@ -394,7 +414,7 @@ def bazi_liuyue(birth_time: str, gender: str, year: int = None, sect: int = 2, y
         lines.append("")
         lines.append("注: 流月按节气分界，非公历月份")
         result = "\n".join(lines)
-        bazi_cache.set(birth_time, gender, result, 2, yun_sect, "liuyue")
+        bazi_cache.set(birth_time, gender, result, sect, yun_sect, cache_tool)
         return result
     except Exception as e:
         return "流月推算失败: {}".format(e)
@@ -420,6 +440,11 @@ def bazi_liuri(birth_time: str, gender: str, year: int = None, month: int = None
         today = datetime.date.today()
         target_year = year or today.year
         target_month = month or today.month
+        # 流日与出生时间无关（纯日历推算），缓存 key 用固定占位
+        cache_tool = "liuri:{}-{:02d}".format(target_year, target_month)
+        cached = bazi_cache.get("calendar", "all", sect, yun_sect, cache_tool)
+        if cached:
+            return cached
 
         lines = ["【流日推算】{}年{}月".format(target_year, target_month), ""]
 
@@ -435,7 +460,9 @@ def bazi_liuri(birth_time: str, gender: str, year: int = None, month: int = None
 
         lines.append("")
         lines.append("注: 显示当月所有日期的干支")
-        return "\n".join(lines)
+        result = "\n".join(lines)
+        bazi_cache.set("calendar", "all", result, sect, yun_sect, cache_tool)
+        return result
     except Exception as e:
         return "流日推算失败: {}".format(e)
 
@@ -455,10 +482,15 @@ def bazi_hehun(birth_time_a: str, gender_a: str, birth_time_b: str, gender_b: st
         双方命盘对比、五行互补分析、合婚建议
     """
     try:
-        from collections import Counter
-
         birth_time_a = _normalize_birth_time(birth_time_a)
         birth_time_b = _normalize_birth_time(birth_time_b)
+        # 合婚结果对双方输入确定，走缓存（双方时间+性别组合为 key）
+        cache_key_a = "{}|{}".format(birth_time_a, gender_a)
+        cache_key_b = "{}|{}".format(birth_time_b, gender_b)
+        cached = bazi_cache.get(cache_key_a, cache_key_b, sect, 1, "hehun")
+        if cached:
+            return cached
+
         y_a, m_a, d_a, h_a, mi_a = parse_birth(birth_time_a)
         g_a = _parse_gender(gender_a)
         solar_a = Solar.fromYmdHms(y_a, m_a, d_a, h_a, mi_a, 0)
@@ -470,6 +502,8 @@ def bazi_hehun(birth_time_a: str, gender_a: str, birth_time_b: str, gender_b: st
         g_b = _parse_gender(gender_b)
         solar_b = Solar.fromYmdHms(y_b, m_b, d_b, h_b, mi_b, 0)
         ec_b = solar_b.getLunar().getEightChar()
+        if sect != 2:
+            ec_b.setSect(sect)
 
         pillars_a = [ec_a.getYear(), ec_a.getMonth(), ec_a.getDay(), ec_a.getTime()]
         pillars_b = [ec_b.getYear(), ec_b.getMonth(), ec_b.getDay(), ec_b.getTime()]
@@ -536,7 +570,9 @@ def bazi_hehun(birth_time_a: str, gender_a: str, birth_time_b: str, gender_b: st
         ] + ["  - " + r for r in complement_reasons]
         lines += ["", "注: 此为基础合婚分析，完整合婚需结合大运流年，由 LLM 综合判断"]
 
-        return "\n".join(lines)
+        result = "\n".join(lines)
+        bazi_cache.set(cache_key_a, cache_key_b, result, sect, 1, "hehun")
+        return result
     except Exception as e:
         return "合婚分析失败: {}".format(e)
 

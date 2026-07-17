@@ -76,6 +76,11 @@
         </div>
       </div>
     </div>
+
+    <!-- Toast -->
+    <Transition name="toast-fade">
+      <div v-if="toastMsg" class="toast-bar error">{{ toastMsg }}</div>
+    </Transition>
   </div>
 </template>
 
@@ -105,6 +110,15 @@ const drawing = ref(false)
 const interpreting = ref(false)
 const cards = ref<DrawnCard[]>([])
 const interpretation = ref("")
+
+// Toast
+const toastMsg = ref("")
+let toastTimer: ReturnType<typeof setTimeout> | null = null
+function showToast(text: string) {
+  if (toastTimer) clearTimeout(toastTimer)
+  toastMsg.value = text
+  toastTimer = setTimeout(() => { toastMsg.value = "" }, 3500)
+}
 
 const currentSpread = computed(() => spreads.find((s) => s.key === selectedSpread.value)!)
 const positions = computed(() => currentSpread.value.positions)
@@ -139,7 +153,7 @@ function drawCards() {
     onError: (err: string) => {
       drawing.value = false
       if (!cards.value.length) {
-        alert(`抽牌失败：${err}`)
+        showToast(`抽牌失败：${err}`)
       }
     },
   })
@@ -340,4 +354,23 @@ function reset() {
 @media (max-width: 480px) {
   .layout-three_card, .layout-relationship { grid-template-columns: 1fr; }
 }
+
+/* Toast */
+.toast-bar {
+  position: fixed;
+  bottom: 28px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 10px 22px;
+  border-radius: 9px;
+  font-size: 13px;
+  color: #fff;
+  z-index: 10000;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.35);
+  background: rgba(239,68,68,0.88);
+}
+.toast-fade-enter-active,
+.toast-fade-leave-active { transition: opacity 0.3s ease, transform 0.3s ease; }
+.toast-fade-enter-from,
+.toast-fade-leave-to { opacity: 0; transform: translateX(-50%) translateY(12px); }
 </style>

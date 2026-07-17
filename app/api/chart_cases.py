@@ -13,37 +13,21 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Response
 
-from app.config import settings
+from app.api.common import client_error
 from app.logger import log
 
 router = APIRouter(prefix="/chart_cases", tags=["Chart Cases"])
 
 
-_pg_conn = None
 _table_ready = False
 _pg_unavailable = False
 _fallback_file = Path("./data/chart_cases.json")
 
 
-def _get_conn():
-    """复用模块级 PG 连接（线程内复用）。"""
-    global _pg_conn
-    import psycopg
-    if _pg_conn is None or _pg_conn.closed:
-        _pg_conn = psycopg.connect(settings.postgres_connection_string, autocommit=True)
-    return _pg_conn
-
-
-def close_conn():
-    """关闭模块级连接。"""
-    global _pg_conn
-    if _pg_conn is not None and not _pg_conn.closed:
-        try:
-            _pg_conn.close()
-        except Exception:
-            pass
-        finally:
-            _pg_conn = None
+def _get_pool():
+    """复用 postgres_memory 模块级连接池（线程安全，懒创建）。"""
+    from app.memory.postgres_memory import _get_pool as _pg_get_pool
+    return _pg_get_pool()
 
 
 def ensure_table():
@@ -58,19 +42,19 @@ def ensure_table():
     if _pg_unavailable:
         return False
     try:
-        conn = _get_conn()
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS chart_cases (
-                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                name TEXT NOT NULL,
-                tags TEXT[] DEFAULT '{}',
-                birth_time TEXT NOT NULL,
-                gender TEXT NOT NULL,
-                chart_data JSONB NOT NULL,
-                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-                updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-            )
-        """)
+        with _get_pool().connection() as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS chart_cases (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    name TEXT NOT NULL,
+                    tags TEXT[] DEFAULT '{}',
+                    birth_time TEXT NOT NULL,
+                    gender TEXT NOT NULL,
+                    chart_data JSONB NOT NULL,
+                    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+                )
+            """)
         _table_ready = True
         log.info("命例表已就绪")
         return True
@@ -140,6 +124,25 @@ def _build_chart_data(birth_time: str, gender: str) -> dict[str, Any]:
     return payload
 
 
+def _extract_bazi_brief(chart_data: Any) -> str | None:
+    """从 chart_data JSON 中提取四柱干支摘要，如 '辛卯 丁酉 庚午 丙子'。"""
+    try:
+        pillars = chart_data.get("pillars")
+        if isinstance(pillars, list) and len(pillars) >= 4:
+            parts = []
+            for p in pillars:
+                gz = p.get("ganzhi") if isinstance(p, dict) else None
+                if isinstance(gz, list) and len(gz) >= 2:
+                    parts.append(f"{gz[0]}{gz[1]}")
+                elif isinstance(gz, str):
+                    parts.append(gz)
+            if len(parts) >= 4:
+                return " ".join(parts[:4])
+    except Exception:
+        pass
+    return None
+
+
 @router.get("")
 async def list_chart_cases():
     """获取所有命例列表。"""
@@ -154,32 +157,35 @@ async def list_chart_cases():
                 "gender": c.get("gender", ""),
                 "createdAt": c.get("createdAt", ""),
                 "updatedAt": c.get("updatedAt", ""),
+                "bazi": _extract_bazi_brief(c.get("chartData") or c.get("chart_data")),
             }
             for c in sorted(cases, key=lambda x: x.get("updatedAt", ""), reverse=True)
         ]
     try:
-        conn = _get_conn()
-        cur = conn.execute(
-            """
-            SELECT id, name, tags, birth_time, gender, created_at, updated_at
-            FROM chart_cases ORDER BY updated_at DESC
-            """
-        )
-        result = []
-        for row in cur:
-            result.append({
-                "id": str(row[0]),
-                "name": row[1],
-                "tags": row[2] or [],
-                "birthTime": row[3],
-                "gender": row[4],
-                "createdAt": str(row[5]) if row[5] else "",
-                "updatedAt": str(row[6]) if row[6] else "",
-            })
+        with _get_pool().connection() as conn:
+            cur = conn.execute(
+                """
+                SELECT id, name, tags, birth_time, gender, created_at, updated_at, chart_data
+                FROM chart_cases ORDER BY updated_at DESC
+                """
+            )
+            result = []
+            for row in cur:
+                cd = row[7] if isinstance(row[7], dict) else json.loads(row[7]) if row[7] else {}
+                result.append({
+                    "id": str(row[0]),
+                    "name": row[1],
+                    "tags": row[2] or [],
+                    "birthTime": row[3],
+                    "gender": row[4],
+                    "createdAt": str(row[5]) if row[5] else "",
+                    "updatedAt": str(row[6]) if row[6] else "",
+                    "bazi": _extract_bazi_brief(cd),
+                })
         return result
     except Exception as e:
         log.exception("获取命例列表失败")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=client_error(e))
 
 
 @router.post("")
@@ -206,20 +212,20 @@ async def create_chart_case(payload: dict):
         return {"id": case["id"], "status": "ok", "storage": "file"}
 
     try:
-        conn = _get_conn()
-        cur = conn.execute(
-            """
-            INSERT INTO chart_cases (id, name, tags, birth_time, gender, chart_data)
-            VALUES (%s, %s, %s, %s, %s, %s)
-            RETURNING id
-            """,
-            (str(uuid.uuid4()), name, tags, birth_time, gender, json.dumps(chart_data)),
-        )
-        row = cur.fetchone()
+        with _get_pool().connection() as conn:
+            cur = conn.execute(
+                """
+                INSERT INTO chart_cases (id, name, tags, birth_time, gender, chart_data)
+                VALUES (%s, %s, %s, %s, %s, %s)
+                RETURNING id
+                """,
+                (str(uuid.uuid4()), name, tags, birth_time, gender, json.dumps(chart_data)),
+            )
+            row = cur.fetchone()
         return {"id": str(row[0]), "status": "ok"}
     except Exception as e:
         log.exception("保存命例失败")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=client_error(e))
 
 
 @router.get("/{case_id}")
@@ -231,12 +237,12 @@ async def get_chart_case(case_id: str):
                 return c
         raise HTTPException(status_code=404, detail="命例不存在")
     try:
-        conn = _get_conn()
-        cur = conn.execute(
-            "SELECT id, name, tags, birth_time, gender, chart_data, created_at, updated_at FROM chart_cases WHERE id = %s",
-            (case_id,),
-        )
-        row = cur.fetchone()
+        with _get_pool().connection() as conn:
+            cur = conn.execute(
+                "SELECT id, name, tags, birth_time, gender, chart_data, created_at, updated_at FROM chart_cases WHERE id = %s",
+                (case_id,),
+            )
+            row = cur.fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="命例不存在")
         return {
@@ -253,7 +259,7 @@ async def get_chart_case(case_id: str):
         raise
     except Exception as e:
         log.exception("获取命例失败")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=client_error(e))
 
 
 @router.put("/{case_id}")
@@ -278,37 +284,37 @@ async def update_chart_case(case_id: str, payload: dict):
             return {"status": "ok", "storage": "file"}
         raise HTTPException(status_code=404, detail="命例不存在")
     try:
-        conn = _get_conn()
-        updates = []
-        params = []
-        if "name" in payload:
-            updates.append("name = %s")
-            params.append(payload["name"])
-        if "tags" in payload:
-            updates.append("tags = %s")
-            params.append(payload["tags"])
-        if "birth_time" in payload and "gender" in payload:
-            birth_time = payload["birth_time"]
-            gender = payload["gender"]
-            updates.extend(["birth_time = %s", "gender = %s"])
-            params.extend([birth_time, gender])
-            if payload.get("regenerate_chart_data", True):
-                updates.append("chart_data = %s")
-                params.append(json.dumps(_build_chart_data(birth_time, gender)))
-        if not updates:
-            raise HTTPException(status_code=400, detail="无更新字段")
-        updates.append("updated_at = NOW()")
-        params.append(case_id)
-        conn.execute(
-            f"UPDATE chart_cases SET {', '.join(updates)} WHERE id = %s",
-            tuple(params),
-        )
+        with _get_pool().connection() as conn:
+            updates = []
+            params = []
+            if "name" in payload:
+                updates.append("name = %s")
+                params.append(payload["name"])
+            if "tags" in payload:
+                updates.append("tags = %s")
+                params.append(payload["tags"])
+            if "birth_time" in payload and "gender" in payload:
+                birth_time = payload["birth_time"]
+                gender = payload["gender"]
+                updates.extend(["birth_time = %s", "gender = %s"])
+                params.extend([birth_time, gender])
+                if payload.get("regenerate_chart_data", True):
+                    updates.append("chart_data = %s")
+                    params.append(json.dumps(_build_chart_data(birth_time, gender)))
+            if not updates:
+                raise HTTPException(status_code=400, detail="无更新字段")
+            updates.append("updated_at = NOW()")
+            params.append(case_id)
+            conn.execute(
+                "UPDATE chart_cases SET {} WHERE id = %s".format(", ".join(updates)),
+                tuple(params),
+            )
         return {"status": "ok"}
     except HTTPException:
         raise
     except Exception as e:
         log.exception("更新命例失败")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=client_error(e))
 
 
 @router.delete("/{case_id}")
@@ -320,12 +326,12 @@ async def delete_chart_case(case_id: str):
         _save_file_cases(kept)
         return {"status": "ok", "storage": "file"}
     try:
-        conn = _get_conn()
-        conn.execute("DELETE FROM chart_cases WHERE id = %s", (case_id,))
+        with _get_pool().connection() as conn:
+            conn.execute("DELETE FROM chart_cases WHERE id = %s", (case_id,))
         return {"status": "ok"}
     except Exception as e:
         log.exception("删除命例失败")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=client_error(e))
 
 
 @router.get("/export/json")
@@ -340,23 +346,23 @@ async def export_chart_cases_json():
             headers={"Content-Disposition": 'attachment; filename="xianzhi_chart_cases.json"'},
         )
     try:
-        conn = _get_conn()
-        cur = conn.execute(
-            "SELECT id, name, tags, birth_time, gender, chart_data, created_at, updated_at FROM chart_cases ORDER BY updated_at DESC"
-        )
-        cases = []
-        for row in cur:
-            chart_data = row[5] if isinstance(row[5], dict) else json.loads(row[5])
-            cases.append({
-                "id": str(row[0]),
-                "name": row[1],
-                "tags": row[2] or [],
-                "birthTime": row[3],
-                "gender": row[4],
-                "chartData": chart_data,
-                "createdAt": str(row[6]) if row[6] else "",
-                "updatedAt": str(row[7]) if row[7] else "",
-            })
+        with _get_pool().connection() as conn:
+            cur = conn.execute(
+                "SELECT id, name, tags, birth_time, gender, chart_data, created_at, updated_at FROM chart_cases ORDER BY updated_at DESC"
+            )
+            cases = []
+            for row in cur:
+                chart_data = row[5] if isinstance(row[5], dict) else json.loads(row[5])
+                cases.append({
+                    "id": str(row[0]),
+                    "name": row[1],
+                    "tags": row[2] or [],
+                    "birthTime": row[3],
+                    "gender": row[4],
+                    "chartData": chart_data,
+                    "createdAt": str(row[6]) if row[6] else "",
+                    "updatedAt": str(row[7]) if row[7] else "",
+                })
         content = json.dumps({"version": 1, "exportedAt": datetime.now().isoformat(), "cases": cases}, ensure_ascii=False, indent=2)
         return Response(
             content=content,
@@ -365,7 +371,7 @@ async def export_chart_cases_json():
         )
     except Exception as e:
         log.exception("导出命例失败")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=client_error(e))
 
 
 @router.post("/import/json")
@@ -402,32 +408,32 @@ async def import_chart_cases_json(payload: dict):
         return {"inserted": inserted, "skipped": skipped, "storage": "file"}
 
     try:
-        conn = _get_conn()
-        for c in cases:
-            cid = c.get("id")
-            if cid:
-                cur = conn.execute("SELECT 1 FROM chart_cases WHERE id = %s", (cid,))
-                if cur.fetchone():
-                    skipped += 1
+        with _get_pool().connection() as conn:
+            for c in cases:
+                cid = c.get("id")
+                if cid:
+                    cur = conn.execute("SELECT 1 FROM chart_cases WHERE id = %s", (cid,))
+                    if cur.fetchone():
+                        skipped += 1
+                        continue
+                name = (c.get("name") or "未命名命例").strip()
+                birth_time = (c.get("birthTime") or c.get("birth_time") or "").strip()
+                gender = (c.get("gender") or "").strip()
+                tags = c.get("tags") or []
+                chart_data = c.get("chartData") or c.get("chart_data")
+                if not birth_time or not gender:
                     continue
-            name = (c.get("name") or "未命名命例").strip()
-            birth_time = (c.get("birthTime") or c.get("birth_time") or "").strip()
-            gender = (c.get("gender") or "").strip()
-            tags = c.get("tags") or []
-            chart_data = c.get("chartData") or c.get("chart_data")
-            if not birth_time or not gender:
-                continue
-            if not chart_data:
-                chart_data = _build_chart_data(birth_time, gender)
-            conn.execute(
-                """
-                INSERT INTO chart_cases (id, name, tags, birth_time, gender, chart_data)
-                VALUES (%s, %s, %s, %s, %s, %s)
-                """,
-                (str(uuid.uuid4()), name, tags, birth_time, gender, json.dumps(chart_data)),
-            )
-            inserted += 1
+                if not chart_data:
+                    chart_data = _build_chart_data(birth_time, gender)
+                conn.execute(
+                    """
+                    INSERT INTO chart_cases (id, name, tags, birth_time, gender, chart_data)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                    """,
+                    (str(uuid.uuid4()), name, tags, birth_time, gender, json.dumps(chart_data)),
+                )
+                inserted += 1
         return {"inserted": inserted, "skipped": skipped}
     except Exception as e:
         log.exception("导入命例失败")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=client_error(e))

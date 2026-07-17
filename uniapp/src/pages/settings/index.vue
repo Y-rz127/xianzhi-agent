@@ -1,7 +1,5 @@
 <template>
   <view class="page">
-    <view class="status-bar" :style="{ height: statusBarHeight + 'px' }"></view>
-
     <!-- 紫蓝渐变头部 -->
     <view class="hero">
       <view class="hero-bg"></view>
@@ -67,12 +65,6 @@ import { ref, onMounted } from 'vue'
 import { setConfig, getConfig } from '@/config'
 import { getHealth } from '@/api'
 
-const statusBarHeight = ref(20)
-try {
-  const sysInfo = uni.getWindowInfo()
-  statusBarHeight.value = sysInfo.statusBarHeight || 20
-} catch {}
-
 const apiBase = ref('')
 const wsBase = ref('')
 const testResult = ref('')
@@ -114,9 +106,6 @@ async function onSave() {
   display: flex;
   flex-direction: column;
 }
-
-/* 状态栏占位 */
-.status-bar { width: 100%; }
 
 /* 水墨渐变头部 */
 .hero {

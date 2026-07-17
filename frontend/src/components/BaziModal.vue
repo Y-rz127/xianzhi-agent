@@ -38,13 +38,30 @@
         </div>
         <div v-else class="modal-body">
           <div v-if="activeTab === 'pillars'" class="tab-panel" role="tabpanel">
-            <div class="section-title">四柱命盘</div>
+            <div class="section-title-row">
+              <span class="section-title">四柱命盘</span>
+              <span v-if="props.mingGong || props.shenGong" class="gong-info">
+                <template v-if="props.mingGong">命宫 {{ props.mingGong }}</template>
+                <template v-if="props.mingGong && props.shenGong"> · </template>
+                <template v-if="props.shenGong">身宫 {{ props.shenGong }}</template>
+              </span>
+            </div>
             <div class="pillars-grid">
               <div v-for="p in pillars" :key="p.name" :class="['pillar-card', p.name === '日柱' ? 'day-master' : '']">
                 <div class="pillar-name">{{ p.name }}</div>
                 <div class="pillar-gan">{{ p.ganzhi[0] }}</div>
                 <div class="pillar-zhi">{{ p.ganzhi[1] }}</div>
                 <div class="pillar-nayin">{{ p.nayin }}</div>
+                <!-- 该柱神煞竖排（点击查看寓意） -->
+                <div v-if="shenshaByPillar[p.name]?.length" class="pillar-shensha">
+                  <span
+                    v-for="(s, i) in shenshaByPillar[p.name]"
+                    :key="i"
+                    class="ps-tag"
+                    :class="['ps-' + s._cat, { 'ps-active': activeShensha === s }]"
+                    @click.stop="toggleShensha(s)"
+                  >{{ s.name }}</span>
+                </div>
               </div>
             </div>
           </div>
@@ -121,29 +138,6 @@
             <div v-else class="tab-empty">暂无流年数据</div>
           </div>
 
-          <div v-if="activeTab === 'shensha'" class="tab-panel" role="tabpanel">
-            <div v-if="shensha.length" class="shensha-section">
-              <div class="section-title">神煞</div>
-              <div class="shensha-categories">
-                <div v-for="cat in shenshaCategories" :key="cat.key" v-show="cat.items.length" class="shensha-category-card" :style="{ '--cat-color': cat.color }">
-                  <div class="category-header">
-                    <div class="category-icon" v-html="cat.icon"></div>
-                    <div class="category-info">
-                      <div class="category-label">{{ cat.label }}</div>
-                      <div class="category-count">{{ cat.items.length }} 项</div>
-                    </div>
-                  </div>
-                  <div class="shensha-tags">
-                    <div v-for="(s, i) in cat.items" :key="i" class="shensha-tag" :title="s.description">
-                      <span class="tag-name">{{ s.name }}</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-            <div v-else class="tab-empty">暂无神煞数据</div>
-          </div>
-
           <div v-if="activeTab === 'report'" class="tab-panel" role="tabpanel">
             <div class="report-section">
               <div class="section-title">完整命理报告</div>
@@ -177,6 +171,14 @@
           </button>
           <button class="btn btn-primary" @click="close" aria-label="关闭">关闭</button>
         </div>
+        <!-- 神煞寓意浮层（点击 ps-tag 触发） -->
+        <div v-if="activeShensha" class="ps-popover" @click="activeShensha = null">
+          <div class="ps-popover-card" @click.stop>
+            <div class="ps-popover-title" :class="'ps-' + activeShensha._cat">{{ activeShensha.name }}</div>
+            <div class="ps-popover-desc">{{ activeShensha.description }}</div>
+            <button class="ps-popover-close" @click="activeShensha = null" aria-label="关闭">关闭</button>
+          </div>
+        </div>
       </div>
     </div>
   </Teleport>
@@ -188,7 +190,7 @@ import type { Pillar, WuxingItem, DayunItem, ShenshaItem, LiuNianItem, ChartAnal
 import { downloadReport, generateFullReport, downloadFullReportPDF } from "../api"
 import MarkdownRender from "./MarkdownRender.vue"
 
-type TabKey = 'pillars' | 'wuxing' | 'dayun' | 'liunian' | 'shensha' | 'report'
+type TabKey = 'pillars' | 'wuxing' | 'dayun' | 'liunian' | 'report'
 
 const props = defineProps<{
   visible: boolean
@@ -203,6 +205,8 @@ const props = defineProps<{
   birthTime?: string
   gender?: string
   chartText?: string
+  mingGong?: string
+  shenGong?: string
 }>()
 
 const emit = defineEmits<{ close: [] }>()
@@ -212,11 +216,17 @@ const tabs = [
   { key: 'wuxing' as TabKey, label: '五行' },
   { key: 'dayun' as TabKey, label: '大运' },
   { key: 'liunian' as TabKey, label: '流年' },
-  { key: 'shensha' as TabKey, label: '神煞' },
   { key: 'report' as TabKey, label: '报告' },
 ]
 const activeTab = ref<TabKey>('pillars')
 const wuxingAnimated = ref(false)
+
+// 神煞寓意浮层状态：点击 ps-tag 触发显示/隐藏
+type TaggedShensha = ShenshaItem & { _cat: string }
+const activeShensha = ref<TaggedShensha | null>(null)
+const toggleShensha = (s: TaggedShensha) => {
+  activeShensha.value = activeShensha.value === s ? null : s
+}
 
 const maxWuxing = computed(() => Math.max(...props.wuxing.map(w => w.count), 1))
 const liunian = computed(() => props.liunian || [])
@@ -248,6 +258,8 @@ function triggerWuxingAnimation() {
 watch(() => props.visible, (v) => {
   if (v) {
     activeTab.value = 'pillars'
+  } else {
+    activeShensha.value = null
   }
 })
 
@@ -264,43 +276,31 @@ function classifyShensha(item: ShenshaItem): string {
   return 'other'
 }
 
-const categoryDefs = [
-  {
-    key: 'good',
-    label: '吉神',
-    color: '#4ade80',
-    icon: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>'
-  },
-  {
-    key: 'bad',
-    label: '凶煞',
-    color: '#f87171',
-    icon: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>'
-  },
-  {
-    key: 'love',
-    label: '桃花/感情',
-    color: '#f472b6',
-    icon: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>'
-  },
-  {
-    key: 'career',
-    label: '事业/财运',
-    color: '#60a5fa',
-    icon: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>'
-  },
-  {
-    key: 'other',
-    label: '其他',
-    color: '#94a3b8',
-    icon: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>'
-  },
-]
-
-const shenshaCategories = computed(() => {
-  const groups: Record<string, ShenshaItem[]> = { good: [], bad: [], love: [], career: [], other: [] }
-  props.shensha.forEach(s => { groups[classifyShensha(s)].push(s) })
-  return categoryDefs.map(def => ({ ...def, items: groups[def.key] }))
+const shenshaByPillar = computed(() => {
+  const pillarNames = ['年柱', '月柱', '日柱', '时柱']
+  const groups: Record<string, (ShenshaItem & { _cat: string })[]> = {}
+  // 每柱独立去重：同一柱内同名神煞只保留一条
+  const seenByPillar: Record<string, Set<string>> = {}
+  for (const s of props.shensha) {
+    // 从 description 中提取柱名（后端格式："{pillar_name}：{desc}"）
+    let pillarName = ''
+    for (const pn of pillarNames) {
+      if (s.description.includes(pn)) {
+        pillarName = pn
+        break
+      }
+    }
+    if (!pillarName) {
+      // 兜底：理论上所有神煞都应有柱名
+      pillarName = '日柱'
+    }
+    const seen = seenByPillar[pillarName] ??= new Set<string>()
+    if (seen.has(s.name)) continue
+    seen.add(s.name)
+    const tagged = { ...s, _cat: classifyShensha(s) }
+    ;(groups[pillarName] ||= []).push(tagged)
+  }
+  return groups
 })
 
 const formattedChartText = computed(() => {
@@ -444,6 +444,9 @@ const downloadFullPDF = () => {
 .tab-empty { color: var(--text-dim); font-size: 13px; text-align: center; padding: 30px 20px; }
 .section-title { font-size: 13px; color: var(--accent); letter-spacing: 3px; margin-bottom: 14px;
   padding-bottom: 6px; border-bottom: 1px solid var(--border); }
+.section-title-row { display: flex; align-items: baseline; justify-content: space-between;
+  margin-bottom: 14px; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
+.gong-info { font-size: 11px; color: var(--text-dim); letter-spacing: normal; }
 .pillars-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 10px; }
 .pillar-card { background: rgba(255,255,255,0.03); border-radius: 12px; padding: 14px 8px; text-align: center;
   border: 1px solid var(--border); transition: all 0.25s; }
@@ -484,16 +487,31 @@ const downloadFullPDF = () => {
 .liunian-pill em { font-style: normal; color: var(--accent); text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .warning-list { margin-top: 10px; display: grid; gap: 6px; }
 .warning-item { font-size: 11px; color: #d8bf7a; line-height: 1.5; padding: 8px 10px; border-radius: 9px; background: rgba(212,175,55,0.06); border: 1px solid rgba(212,175,55,0.12); }
-.shensha-categories { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
-.shensha-category-card { background: rgba(255,255,255,0.03); border: 1px solid var(--border); border-radius: 12px; padding: 12px;
-  border-left: 3px solid var(--cat-color); }
-.category-header { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
-.category-icon { color: var(--cat-color); display: flex; align-items: center; }
-.category-label { font-size: 13px; font-weight: 600; color: var(--text); }
-.category-count { font-size: 10px; color: var(--text-muted); }
-.shensha-tags { display: flex; flex-wrap: wrap; gap: 6px; }
-.shensha-tag { padding: 4px 8px; border-radius: 6px; background: rgba(255,255,255,0.04); border: 1px solid var(--border); font-size: 11px; color: var(--text-dim); cursor: default; transition: all 0.2s; }
-.shensha-tag:hover { border-color: var(--cat-color); color: var(--text); background: rgba(255,255,255,0.07); }
+/* ===== 每柱神煞竖排 ===== */
+.pillar-shensha { display: flex; flex-wrap: wrap; gap: 4px; justify-content: center;
+  margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.05); }
+.ps-tag { font-size: 10px; padding: 2px 7px; border-radius: 5px; line-height: 1.6; cursor: pointer;
+  transition: all 0.2s; white-space: nowrap; user-select: none; }
+.ps-tag:hover { filter: brightness(1.2); }
+.ps-active { outline: 1px solid currentColor; }
+.ps-good { color: #4ade80; background: rgba(74,222,128,0.1); }
+.ps-bad { color: #f87171; background: rgba(248,113,113,0.1); }
+.ps-love { color: #f472b6; background: rgba(244,114,182,0.1); }
+.ps-career { color: #60a5fa; background: rgba(96,165,250,0.1); }
+.ps-other { color: #94a3b8; background: rgba(148,163,184,0.1); }
+/* 神煞寓意浮层 */
+.ps-popover { position: fixed; inset: 0; background: rgba(0,0,0,0.55); display: flex; align-items: center;
+  justify-content: center; z-index: 1100; padding: 20px; box-sizing: border-box; cursor: pointer;
+  animation: fadeIn 0.15s ease; }
+.ps-popover-card { background: linear-gradient(135deg, rgba(28,36,56,0.98), rgba(18,24,40,0.98));
+  border: 1px solid var(--border-bright); border-radius: 12px; padding: 16px 20px; max-width: 340px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.5); cursor: default; animation: slideUp 0.2s ease-out; }
+.ps-popover-title { font-size: 15px; font-weight: 600; margin-bottom: 10px; letter-spacing: 1px; }
+.ps-popover-desc { font-size: 13px; color: var(--text-dim); line-height: 1.7; margin-bottom: 12px; }
+.ps-popover-close { display: inline-block; padding: 6px 14px; background: rgba(255,255,255,0.05);
+  border: 1px solid var(--border); border-radius: 6px; color: var(--text-dim); font-size: 12px;
+  cursor: pointer; transition: all 0.2s; }
+.ps-popover-close:hover { border-color: var(--accent); color: var(--accent); }
 .report-section { }
 .report-loading { display: flex; align-items: center; gap: 10px; color: var(--accent); font-size: 13px; padding: 20px; }
 .report-placeholder { color: var(--text-dim); font-size: 13px; text-align: center; padding: 20px; }
@@ -514,7 +532,6 @@ const downloadFullPDF = () => {
   .consult-grid { grid-template-columns: repeat(2, 1fr); }
   .consult-card.wide { grid-column: span 2; }
   .liunian-strip { grid-template-columns: repeat(2, 1fr); }
-  .shensha-categories { grid-template-columns: 1fr; }
   .modal-body { max-height: 50vh; }
 }
 </style>

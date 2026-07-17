@@ -15,7 +15,17 @@ from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 
 from app.domain.bazi_engine import BaziChart, build_bazi_chart, format_fact_context
 from app.logger import log
+# 检索策略（领域关键词/领域检索词/理论术语检索词/术语识别）统一由 app.rag.retrieval 提供，
+# 与 ReAct 工具路径（app/tools/rag_search.py）共用一套体系
+from app.rag.retrieval import (
+    DOMAIN_KEYWORDS,
+    DOMAIN_RULE_QUERIES,
+    THEORY_TOPIC_QUERIES,
+    detect_domain,
+    detect_theory_topic,
+)
 from app.rag.vector_store import knowledge_base
+from app.utils.text_clean import clean_think_tags, dedupe_content as _dedupe_content_impl
 
 
 def _parse_json(text: str) -> Any:
@@ -36,46 +46,16 @@ def _parse_json(text: str) -> Any:
 
 
 def _dedupe_content(content: str) -> str:
-    """检测并移除完全重复的内容（推理模型 think 块泄漏的兜底）。"""
-    content = content.strip()
-    if len(content) < 100:
-        return content
-    mid = len(content) // 2
-    first_half = content[:mid].strip()
-    second_half = content[mid:].strip()
-    if first_half == second_half and len(first_half) > 50:
-        log.warning("检测到 LLM 输出内容重复，已去重（长度 {}）", len(first_half))
-        return first_half
-    return content
+    """检测并移除完全重复的内容（推理模型 think 块泄漏的兜底）。
+    
+    委托给 app.utils.text_clean.dedupe_content 统一实现。
+    """
+    return _dedupe_content_impl(content)
 
 
 GANZHI_RE = re.compile(r"[甲乙丙丁戊己庚辛壬癸][子丑寅卯辰巳午未申酉戌亥]")
 YEAR_GANZHI_RE = re.compile(r"(?P<year>\d{4})年[^。；;，,、\n]{0,12}(?P<ganzhi>[甲乙丙丁戊己庚辛壬癸][子丑寅卯辰巳午未申酉戌亥])")
 
-
-DOMAIN_KEYWORDS = {
-    "career": ("事业", "工作", "职业", "跳槽", "换工作", "升职", "创业", "老板", "岗位", "offer"),
-    "wealth": ("财运", "赚钱", "收入", "投资", "生意", "偏财", "正财", "破财", "资产"),
-    "love": ("感情", "恋爱", "桃花", "对象", "复合", "分手", "脱单"),
-    "marriage": ("婚姻", "结婚", "离婚", "配偶", "另一半", "合婚"),
-    "health": ("健康", "身体", "疾病", "失眠", "焦虑", "病"),
-    "liunian": ("今年", "明年", "流年", "大运", "运势", "哪年", "年份", "最近"),
-    "study": ("学习", "考试", "考研", "升学", "证书"),
-    "theory": ("是什么", "什么意思", "寓意", "解释", "含义", "什么是", "讲讲", "说说",
-               "空亡", "桃花", "羊刃", "华盖", "七杀", "食神", "伤官", "正官", "偏印",
-               "用神", "格局", "纳音", "神煞", "刑冲合害", "伏吟", "反吟", "禄神",
-               "调候", "通根", "透干", "墓库", "长生", "帝旺", "死绝",
-               # 复合术语 / 格局断法（用户常问）
-               "枭神", "夺食", "枭神夺食", "食神制杀", "制杀", "伤官见官",
-               "官杀混杂", "杀印相生", "财星破印", "财破印", "贪合忘生", "贪合",
-               "化气", "合化", "从格", "从强", "从弱", "从财", "从杀",
-               "身旺", "身弱", "任财官", "建禄", "月刃", "泄秀", "食伤泄秀",
-               "比劫夺财", "劫财", "印星", "食伤", "官星", "财星",
-               "是不是", "算不算", "算是", "有没有"),
-    "chitchat": ("你好", "在吗", "谢谢", "辛苦", "早上好", "晚上好", "晚安",
-                 "最近怎么样", "吃饭了吗", "在干嘛", "无聊", "心情", "压力大",
-                 "烦", "累", "开心", "难过", "生日快乐", "新年好"),
-}
 
 DOMAIN_LABELS = {
     "career": "事业工作",
@@ -85,120 +65,12 @@ DOMAIN_LABELS = {
     "health": "健康状态",
     "liunian": "大运流年",
     "study": "学习考试",
+    "social": "社交人际",
+    "family": "六亲关系",
     "theory": "术语理论",
     "chitchat": "闲聊问候",
     "general": "综合咨询",
 }
-
-DOMAIN_RULE_QUERIES = {
-    "career": ("八字事业 官杀 印星 食伤 大运流年", "工作变动 跳槽 流年 大运 命理"),
-    "wealth": ("八字财运 正财 偏财 食伤 生财 大运", "破财 投资 流年 财星 命理"),
-    "love": ("八字感情 桃花 配偶星 合冲 流年", "恋爱复合 八字 大运 流年"),
-    "marriage": ("八字婚姻 配偶宫 夫妻星 合冲刑害", "结婚年份 大运流年 婚姻 命理"),
-    "health": ("八字健康 五行寒暖燥湿 失衡", "健康 流年 冲克 命理"),
-    "liunian": ("大运流年 作用关系 流年与原局", "流年 干支 立春 大运"),
-    "study": ("八字学习考试 印星 食伤 官星", "考试 升学 大运流年 命理"),
-    # theory 走精准概念路径，default 仅作兜底（未识别到具体术语时使用）
-    "theory": ("命理 术语 概念 解释",),
-    "chitchat": (),
-    "general": ("八字 用神 喜忌 大运流年 综合分析",),
-}
-
-
-# 理论术语 → 精准检索 query 映射。
-# 设计原则：单一概念 + 必要的同义/近义扩展，避免一次拉一堆无关主题。
-THEORY_TOPIC_QUERIES: dict[str, str] = {
-    # 取用体系
-    "用神": "用神 取用 喜忌 调候 扶抑 病药",
-    "喜神": "喜神 用神 喜忌",
-    "忌神": "忌神 用神 喜忌 仇神",
-    "仇神": "仇神 忌神 用神",
-    "格局": "格局 取格 月令 用神 成格 破格",
-    "调候": "调候 用神 寒暖燥湿",
-    # 十神
-    "十神": "十神 正官 七杀 正印 偏印 食神 伤官 正财 偏财 比肩 劫财",
-    "正官": "正官 官星 含义 作用",
-    "七杀": "七杀 偏官 含义 制化",
-    "正印": "正印 印星 含义 作用",
-    "偏印": "偏印 枭神 含义 夺食",
-    "食神": "食神 含义 作用 制杀",
-    "伤官": "伤官 含义 作用 伤官见官",
-    "正财": "正财 财星 含义",
-    "偏财": "偏财 财星 含义",
-    "比肩": "比肩 含义",
-    "劫财": "劫财 含义",
-    # 复合术语 / 格局断法
-    "枭神夺食": "枭神夺食 偏印 食神 条件 判断",
-    "枭神": "枭神 偏印 含义 夺食",
-    "夺食": "枭神夺食 偏印 食神",
-    "食神制杀": "食神制杀 七杀 食神 条件",
-    "制杀": "食神制杀 七杀 食神",
-    "伤官见官": "伤官见官 伤官 正官 为祸百端",
-    "官杀混杂": "官杀混杂 七杀 正官 条件 影响",
-    "杀印相生": "杀印相生 七杀 印星 化杀",
-    "财星破印": "财星破印 财 印星 破印",
-    "财破印": "财星破印 财 印星",
-    "贪合忘生": "贪合忘生 合化 忘生",
-    "贪合": "贪合忘生 合化",
-    "化气": "化气 化合 五行化气",
-    "合化": "合化 化气 条件",
-    "从格": "从格 从强 从弱 专旺",
-    "从强": "从强 从格 专旺",
-    "从弱": "从弱 从格",
-    "从财": "从财格 从格 财星",
-    "从杀": "从杀格 从格 七杀",
-    "身旺": "身旺 日主强 根气 旺衰",
-    "身弱": "身弱 日主弱 根气 旺衰",
-    "任财官": "任财官 身旺 财官",
-    "建禄": "建禄格 月令 比肩",
-    "月刃": "月刃格 羊刃 月令",
-    "泄秀": "食伤泄秀 日主 泄秀",
-    "食伤泄秀": "食伤泄秀 日主 泄秀",
-    "比劫夺财": "比劫夺财 比肩 劫财 财星",
-    "印星": "印星 正印 偏印 含义",
-    "食伤": "食伤 食神 伤官 含义",
-    "官星": "官星 正官 七杀 含义",
-    "财星": "财星 正财 偏财 含义",
-    # 神煞
-    "空亡": "空亡 旬空 含义",
-    "桃花": "桃花 咸池 子午卯酉 含义",
-    "神煞": "神煞 吉神 凶煞 含义",
-    "禄神": "禄神 禄 含义",
-    "羊刃": "羊刃 刃 含义",
-    "华盖": "华盖 含义 孤寡",
-    "天乙贵人": "天乙 贵人 含义",
-    "天乙": "天乙 贵人",
-    "驿马": "驿马 含义",
-    "将星": "将星 含义",
-    # 地支关系
-    "刑冲合害": "刑 冲 合 害 地支关系",
-    "六合": "六合 地支合 含义",
-    "三合": "三合 地支合 局",
-    "六冲": "六冲 地支冲 含义",
-    "相刑": "相刑 地支刑 含义",
-    "相害": "相害 地支害 六害",
-    # 长生体系
-    "长生": "长生 十二长生 帝旺 墓库",
-    "十二长生": "长生 沐浴 冠带 临官 帝旺 衰 病 死 墓 绝 胎 养",
-    "长生十二宫": "长生 帝旺 衰 死 墓",
-    "通根": "通根 根气 强弱",
-    "透干": "透干 含义",
-    "墓库": "墓库 库 含义 刑冲",
-    "纳音": "纳音 含义 甲子",
-    "伏吟": "伏吟 反吟 含义",
-    "反吟": "反吟 伏吟 含义",
-    # 基础
-    "天干": "天干 甲乙丙丁戊己庚辛壬癸 含义",
-    "地支": "地支 子丑寅卯辰巳午未申酉戌亥 含义",
-    "五行": "五行 金木水火土 相生相克",
-    "大运": "大运 起运 顺排 逆排 排法",
-    "流年": "流年 太岁 作用 关系",
-    "小运": "小运 含义 排法",
-    "四柱": "四柱 年柱 月柱 日柱 时柱 含义",
-    "日柱": "日柱 日主 命主 含义",
-    "月令": "月令 令 提纲 含义",
-}
-
 
 @dataclass(frozen=True)
 class QuestionIntent:
@@ -345,6 +217,37 @@ WORKERS: dict[str, DomainWorker] = {
         ),
         extra_queries=("印星 食伤 官星 文昌 学习考试 断法",),
     ),
+    "social": DomainWorker(
+        domain="social",
+        label="社交人际",
+        expertise_prompt=(
+            "【社交人际专项断法】\n"
+            "- 比肩劫财主朋友同辈：比肩为同性相助、劫财为异性相助；比劫为用则朋友得力，为忌则受朋友连累\n"
+            "- 贵人星（天乙贵人、天德贵人、月德贵人）入命，主社交有贵人提携\n"
+            "- 七杀无制主小人：七杀攻身无食伤制化，易招小人嫉妒、背后使坏\n"
+            "- 日支合他柱：日支被合走，主身边人缘变化（合入为得助，合走为疏远）\n"
+            "- 比劫夺财兼社交：比劫旺而夺财，不仅破财，也主朋友争利、合伙生隙\n"
+            "- 大运流年走比劫旺地，主社交活跃、人脉变动；走官杀旺地，主遇贵人或受压制\n"
+            "- 社交层次看格局清浊：清格主贵人层次高、交往圈子优质；浊格主交际复杂、是非多"
+        ),
+        extra_queries=("比肩 劫财 朋友 贵人 小人 人际 断法", "天乙贵人 社交 合伙 八字 命理"),
+    ),
+    "family": DomainWorker(
+        domain="family",
+        label="六亲关系",
+        expertise_prompt=(
+            "【六亲关系专项断法】\n"
+            "- 六亲对应十神：年柱为祖上/父母宫，月柱为父母/兄弟宫，日柱为自身/配偶宫，时柱为子女宫\n"
+            "- 印星为母：正印为母，偏印为继母/养母；印星为用神且有力，主与母亲缘深得力\n"
+            "- 财星为父：正财为父（也有以偏财为父的流派）；财星为用神且有力，主与父亲缘深得力\n"
+            "- 比肩劫财为兄弟姐妹：比肩为同性手足，劫财为异性手足；为用则手足得力，为忌则受手足连累\n"
+            "- 食神伤官为子女（女命）：食神为女，伤官为子；食伤为用神且有力，主子女出息\n"
+            "- 正官七杀为子女（男命）：正官为女，七杀为子；官杀为用神且有力，主子女有成\n"
+            "- 宫位受冲刑害：对应宫位逢冲刑害，主该六亲关系动荡、缘分浅薄\n"
+            "- 大运流年引动六亲宫位或星位，多主该六亲当年有重大变化（婚丧嫁娶、升迁变动）"
+        ),
+        extra_queries=("六亲 十神 宫位 父母 子女 断法", "印星 财星 比劫 食伤 官杀 六亲 八字"),
+    ),
     "liunian": DomainWorker(
         domain="liunian",
         label="大运流年",
@@ -424,32 +327,6 @@ def classify_question(text: str, today: _dt.date | None = None) -> QuestionInten
         wants_report=wants_report,
         confidence=round(confidence, 2),
     )
-
-
-# 理论术语识别：key 越长越具体，优先匹配
-_THEORY_TOPIC_SORTED: tuple[tuple[str, str], ...] = tuple(
-    sorted(THEORY_TOPIC_QUERIES.items(), key=lambda x: -len(x[0]))
-)
-
-
-def detect_theory_topic(text: str) -> tuple[str, str] | None:
-    """从用户问题中识别具体理论术语。
-
-    Returns:
-        (topic, query) 元组，未识别到返回 None。
-
-    Examples:
-        >>> detect_theory_topic("请问用神是什么意思")
-        ('用神', '用神 取用 喜忌 调候 扶抑 病药')
-        >>> detect_theory_topic("今天天气真好")
-        None
-    """
-    if not text:
-        return None
-    for topic, query in _THEORY_TOPIC_SORTED:
-        if topic in text:
-            return topic, query
-    return None
 
 
 def build_chart_context(birth_time: str, gender: str, sect: int = 2, yun_sect: int = 1) -> WorkflowChartContext:
@@ -540,12 +417,25 @@ class XianzhiWorkflow:
         self.chat_model = chat_model
         self._reviewer = ReviewerWorker()
         self._graph = None
+        self._graph_error: str | None = None
         try:
             from app.agent.xianzhi_langgraph import create_xianzhi_graph
 
             self._graph = create_xianzhi_graph(self)
+            log.info("[workflow] LangGraph 编排已启用（backend=langgraph）")
         except Exception as e:
-            log.debug("LangGraph workflow unavailable: {}", e)
+            self._graph_error = str(e)
+            log.warning("[workflow] LangGraph 编排不可用，降级为内置 Supervisor 流水线（backend=builtin）: {}", e)
+
+    @property
+    def graph_enabled(self) -> bool:
+        """LangGraph 编排是否真正启用。"""
+        return self._graph is not None
+
+    @property
+    def backend(self) -> str:
+        """当前生效的编排后端：langgraph / builtin。"""
+        return "langgraph" if self._graph is not None else "builtin"
 
     # ===== LLM 意图拆解 =====
     _DECOMPOSE_SYSTEM = (
@@ -553,6 +443,7 @@ class XianzhiWorkflow:
         '{"domain":"...","queries":["...","..."],"needs_chart":true/false}\n\n'
         "domain 取值：theory=术语/概念/格局解释与判断, career=事业工作, wealth=财运, "
         "love=恋爱, marriage=婚姻, health=健康, liunian=大运流年, study=学习考试, "
+        "social=社交人际/朋友/贵人/小人, family=六亲关系/父母/子女/兄弟姐妹, "
         "chitchat=闲聊问候, general=综合咨询\n"
         "queries：1-3条精准检索词，用于知识库语义检索，每条≤30字，紧密围绕用户核心问题。"
         "不要泛化，不要堆砌无关概念。例如用户问'枭神夺食'就只给枭神夺食相关的词。\n"
@@ -620,8 +511,13 @@ class XianzhiWorkflow:
         chart_context: WorkflowChartContext,
         history: list[BaseMessage] | None = None,
     ) -> str:
-        # LLM 拆解优先，失败 fallback 到关键词分类
-        intent = self._decompose_query(user_prompt) or classify_question(user_prompt)
+        # 闲聊短路：关键词命中 chitchat 时直接走分类，不调用 LLM 拆解（节省 API 调用+时间）
+        _chitchat_kw = detect_domain(user_prompt)
+        if _chitchat_kw == "chitchat":
+            intent = classify_question(user_prompt)
+            log.info("[LLM拆解] 闲聊识别，跳过 LLM 拆解 → domain={}", intent.domain)
+        else:
+            intent = self._decompose_query(user_prompt) or classify_question(user_prompt)
         if self._graph is not None:
             result = self._graph.invoke({
                 "user_prompt": user_prompt,
@@ -632,6 +528,7 @@ class XianzhiWorkflow:
             final = (result.get("final_answer") or "").strip()
             if final:
                 return final
+            log.warning("[workflow] LangGraph 未产出最终答案，回退内置 Supervisor 流水线")
 
         # ===== Supervisor 分派阶段 =====
         worker = WORKERS.get(intent.domain, WORKERS["general"])
@@ -644,14 +541,17 @@ class XianzhiWorkflow:
         knowledge = self._retrieve_rules(intent, chart_context, worker, user_prompt)
         messages = self._build_messages(user_prompt, intent, chart_context, knowledge, history or [], worker)
         raw_answer = self._invoke(messages)
+        log.info("[Worker] {} 生成回答 {}字", worker.label, len(raw_answer))
 
         # ===== Reviewer 审核阶段（三重校验：事实+古籍真实性+合规） =====
+        log.info("[Reviewer] 开始审核 {} Worker 产出 ({}字)...", worker.label, len(raw_answer))
         review = self._reviewer.review(raw_answer, chart_context.chart, knowledge, self.check_facts)
         if review.ok:
-            log.info("[Reviewer] {} Worker 产出通过三重校验", worker.label)
+            log.info("[Reviewer] {} Worker 产出通过三重校验 ✓", worker.label)
             return raw_answer
-        log.warning("[Reviewer] {} Worker 产出未通过校验，触发 Reflextion 修复: {}",
-                    worker.label, review.issues)
+        log.warning("[Reviewer] {} Worker 产出未通过校验 ✗，触发 Reflextion 修复", worker.label)
+        for i, issue in enumerate(review.issues, 1):
+            log.warning("[Reviewer]   issue[{}]: {}", i, issue)
 
         # ===== Reflextion 回退修复 =====
         repair_messages = self._build_repair_messages(
@@ -660,9 +560,11 @@ class XianzhiWorkflow:
         repaired = self._invoke(repair_messages)
         repaired_review = self._reviewer.review(repaired, chart_context.chart, knowledge, self.check_facts)
         if repaired_review.ok:
-            log.info("[Reflextion] {} Worker 修复后通过校验", worker.label)
+            log.info("[Reflextion] {} Worker 修复后通过校验 ✓", worker.label)
             return repaired
-        log.warning("[Reflextion] {} Worker 修复后仍未通过，附加口径说明", worker.label)
+        log.warning("[Reflextion] {} Worker 修复后仍未通过 ✗", worker.label)
+        for i, issue in enumerate(repaired_review.issues, 1):
+            log.warning("[Reflextion]   残留issue[{}]: {}", i, issue)
         return repaired.rstrip() + "\n\n口径校验：本次回答以系统排盘为准；" + "；".join(repaired_review.issues)
 
     def _extend_chart_if_needed(self, ctx: WorkflowChartContext, intent: QuestionIntent) -> WorkflowChartContext:
@@ -685,9 +587,9 @@ class XianzhiWorkflow:
         return WorkflowChartContext(ctx.birth_time, ctx.gender, ctx.sect, ctx.yun_sect, chart)
 
     # 单 query 检索结果最大字符数（避免单次拉爆 token；≈ 2-3 个 chunk）
-    _MAX_TEXT_PER_QUERY = 1500
+    _MAX_TEXT_PER_QUERY = 1000
     # 累计送入 prompt 的总检索字符上限（截断兜底）
-    _MAX_KNOWLEDGE_TOTAL = 5000
+    _MAX_KNOWLEDGE_TOTAL = 3500
 
     def _retrieve_rules(
         self,
@@ -707,8 +609,10 @@ class XianzhiWorkflow:
 
         # ===== LLM 拆解的 queries 优先（精准、自适应） =====
         if intent.queries:
-            queries = list(intent.queries)
-            log.info("[workflow检索] LLM拆解路径 queries={}", queries)
+            # 限制最多 2 条 query，避免过多检索导致 token 浪费
+            queries = list(intent.queries[:2])
+            log.info("[workflow检索] LLM拆解路径 queries={} (原{}条,取前2条)",
+                     queries, len(intent.queries))
         elif intent.domain == "theory":
             queries, log_meta = self._build_theory_queries(user_text)
             log.info("[workflow检索] 理论路径 meta={} 构造query数={}", log_meta, len(queries))
@@ -721,13 +625,27 @@ class XianzhiWorkflow:
 
         parts: list[str] = []
         total_chars = 0
+        seen_prefixes: set[str] = set()  # 跨 query 去重：相同片段不重复送入 prompt
+        dedup_count = 0
         for idx, query in enumerate(queries, 1):
             text = knowledge_base.search_as_text(query)
             # 单 query 结果截断，防止长片段（古籍原文）吃光预算
             if text and len(text) > self._MAX_TEXT_PER_QUERY:
                 text = text[:self._MAX_TEXT_PER_QUERY] + "…"
-            preview = (text[:200] + "…") if text and len(text) > 200 else (text or "（无匹配）")
-            log.info("[workflow检索] [{}/{}] query={}\n  返回={}", idx, len(queries), query, preview)
+            # 跨 query 去重：取前 120 字符作为指纹，避免语义相近的 query 返回相同片段
+            if text:
+                prefix = text[:120]
+                if prefix in seen_prefixes:
+                    dedup_count += 1
+                    log.debug("[workflow检索] [{}/{}] query={} 结果与前面重复，跳过", idx, len(queries), query)
+                    continue
+                seen_prefixes.add(prefix)
+            log.info("[workflow检索] [{}/{}] query={} 命中={}字",
+                     idx, len(queries), query, len(text) if text else 0)
+            # 打印检索内容前 200 字符，方便排查
+            if text:
+                preview = text.replace("\n", " ")[:200]
+                log.info("[workflow检索] [{}/{}] 内容预览: {}", idx, len(queries), preview)
             if not text:
                 continue
             block = f"【检索问题】{query}\n{text}"
@@ -744,6 +662,9 @@ class XianzhiWorkflow:
             total_chars += len(block)
         if not parts:
             log.info("[workflow检索] 全部query无匹配结果")
+        else:
+            log.info("[workflow检索] 汇总: {}条query → {}条有效结果, 去重跳过{}条, 总{}字",
+                     len(queries), len(parts), dedup_count, total_chars)
         return "\n\n".join(parts) if parts else "（未检索到相关知识）"
 
     def _build_theory_queries(self, user_text: str) -> tuple[list[str], str]:
@@ -802,8 +723,8 @@ class XianzhiWorkflow:
         duanfa_q = duanfa_query_map.get(intent.domain)
         if duanfa_q:
             queries.append(duanfa_q)
-        # 上限 5 条
-        return queries[:5], "duxing"
+        # 上限 3 条（领域规则 + 个性化 + 古籍/断法择一）
+        return queries[:3], "duxing"
 
     def _build_messages(
         self,
@@ -839,7 +760,7 @@ class XianzhiWorkflow:
             "合规红线：不推断生死、不指导赌博投机、不宣扬符咒改运、不提供堕胎择时；涉及重病、牢狱等凶险信息，优先劝导寻求医院、律师等现实专业帮助，不放大恐慌。\n"
             "说话风格：真人聊天感，不用表格、多层标题、emoji。不同问题回答重点不同，不重复论述，详略得当，一针见血。\n"
             "闲聊场景：用户不问命理问题时，回复不围绕命盘，根据心境适当回应，可参杂人生哲理、处世良言，引发情感共鸣。\n"
-            "篇幅规范：闲聊1-3句≤150字；简单问题≤200字；常规分析2-3段≤350字；用户主动要求完整详批可放宽。\n"
+            "篇幅规范：闲聊1-3句≤120字；简单问题≤250字；常规分析2-3段≤400字；用户主动要求完整详批可放宽。\n"
             "该幽默幽默（调侃桃花旺、财来财去等），该严肃严肃（健康、刑冲等）。用'你'不用'您'，口语化，可适当用语气词。不确定直说'这个要看具体情况'，不绝对化。\n"
             "避免AI腔：不要'总结一下''需要注意的是''好消息/需要注意'这种模板。不要输出ReAct过程，不要机械倾倒完整报告，不要恐吓。"
         )
@@ -893,10 +814,7 @@ class XianzhiWorkflow:
         response = self.chat_model.invoke(messages)
         content = (getattr(response, "content", "") or "").strip()
         # 过滤 reasoning model 的 <think>...</think> 推理过程，避免重复显示
-        content = re.sub(r"<think>[\s\S]*?</think>\s*", "", content, flags=re.IGNORECASE)
-        # 处理未闭合的 <think> 标签（流式中断等场景）
-        content = re.sub(r"<think>[\s\S]*$", "", content, flags=re.IGNORECASE)
-        content = content.strip()
+        content = clean_think_tags(content)
         if not content:
             return "我先看盘面，当前信息足够排盘，但模型没有生成有效解读。你可以换一个更具体的问题继续问。"
         return _dedupe_content(content)

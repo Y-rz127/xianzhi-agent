@@ -100,10 +100,10 @@ TIAN_YI = {
 # 太极贵人（以日干查）
 TAI_JI = {
     "甲": ("子", "午"), "乙": ("子", "午"),
-    "丙": ("卯", "酉"), "丁": ("卯", "酉"),
-    "戊": ("辰", "戌"), "己": ("辰", "戌"), "辛": ("辰", "戌"),
-    "壬": ("巳", "亥"), "癸": ("巳", "亥"),
-    "庚": ("寅", "申"),
+    "丙": ("酉", "卯"), "丁": ("酉", "卯"),
+    "戊": ("辰", "戌", "丑", "未"), "己": ("辰", "戌", "丑", "未"),
+    "庚": ("寅", "亥"), "辛": ("寅", "亥"),
+    "壬": ("巳", "申"), "癸": ("巳", "申"),
 }
 # 文昌（以日干查）
 WEN_CHANG = {
@@ -126,7 +126,7 @@ HUA_GAI = {
     "申": "辰", "子": "辰", "辰": "辰",
     "亥": "未", "卯": "未", "未": "未",
 }
-# 桃花（以年支/日支查，四正地支）
+# 桃花（以年支/日支查，四正地支，又名咸池）
 TAO_HUA = {
     "寅": "卯", "午": "卯", "戌": "卯",
     "巳": "午", "酉": "午", "丑": "午",
@@ -152,6 +152,185 @@ LU_SHEN = {
     "甲": "寅", "乙": "卯", "丙": "巳", "丁": "午",
     "戊": "巳", "己": "午", "庚": "申", "辛": "酉",
     "壬": "亥", "癸": "子",
+}
+
+# ===== 补充神煞查表 =====
+# 天德贵人（以月支查，歌诀：正丁二申三壬，四辛五亥六甲，
+#         七癸八寅九丙，十乙十一己十二庚）
+# 注意：天德可能是天干也可能是地支，需分别检测
+TIAN_DE_MONTH = {
+    1: ("丁",),     # 正月(寅月)：见丁
+    2: ("申",),     # 二月(卯月)：见申（地支！）
+    3: ("壬",),     # 三月(辰月)：见壬
+    4: ("辛",),     # 四月(巳月)：见辛
+    5: ("亥",),     # 五月(午月)：见亥（地支！）
+    6: ("甲",),     # 六月(未月)：见甲
+    7: ("癸",),     # 七月(申月)：见癸
+    8: ("寅",),     # 八月(酉月)：见寅（地支！）
+    9: ("丙",),     # 九月(戌月)：见丙
+    10: ("乙",),    # 十月(亥月)：见乙
+    11: ("己",),    # 十一月(子月)：见己
+    12: ("庚",),    # 十二月(丑月)：见庚
+}
+TIAN_DE_IS_BRANCH = {2, 5, 8}  # 这几个月的天德是地支而非天干
+# 月德贵人（以月支查，歌诀：寅午戌月丙上辉，亥卯未月甲干栖，
+#         申子辰月壬干是，巳酉丑月庚干奇）
+YUE_DE_MONTH = {
+    1: ("丙",),   2: ("甲",),   3: ("壬",),   4: ("庚",),
+    5: ("丙",),   6: ("甲",),   7: ("壬",),   8: ("庚",),
+    9: ("丙",),   10: ("甲",), 11: ("壬",), 12: ("庚",),
+}
+# 十恶大败（日柱干支组合，共10组）
+# 来源：华易网《四柱神煞查法对照表》
+SHI_E_DA_BAI = (
+    "甲辰",
+    "乙巳",   # ← 原：乙亥（错）
+    "丙申",
+    "丁亥",
+    "戊戌",   # ← 原：戊午（错）
+    "己丑",   # ← 原：己巳（错）
+    "庚辰",   # ← 原：庚午（错）
+    "辛巳",
+    "壬申",
+    "癸亥",
+)
+# 学堂（以日干查，十二长生之长生位）
+XUE_TANG = {
+    "甲": "亥", "乙": "午", "丙": "寅", "丁": "酉",
+    "戊": "寅", "己": "酉", "庚": "巳", "辛": "子",
+    "壬": "申", "癸": "卯",
+}
+# 词馆（以日干查，学堂之临官位）
+CI_GUAN = {
+    "甲": "寅", "乙": "申", "丙": "寅", "丁": "亥",
+    "戊": "寅", "己": "申", "庚": "巳", "辛": "亥",
+    "壬": "卯", "癸": "巳",
+}
+# 金舆（以日干查，禄神顺推一位）
+JIN_YU = {
+    "甲": "辰", "乙": "巳", "丙": "未", "丁": "申",
+    "戊": "未", "己": "申", "庚": "戌", "辛": "亥",
+    "壬": "丑", "癸": "寅",
+}
+# 福星贵人（以年/日干查地支，古诀：凡甲、丙两干见寅或子，
+# 乙、癸两干见卯或丑，戊干见申，己干见未，丁干见亥，庚干见午，
+# 辛干见巳，壬干见辰）
+FU_XING = {
+    "甲": ("寅", "子"), "丙": ("寅", "子"),
+    "乙": ("卯", "丑"), "癸": ("卯", "丑"),
+    "戊": ("申",),
+    "己": ("未",),
+    "丁": ("亥",),
+    "庚": ("午",),
+    "辛": ("巳",),
+    "壬": ("辰",),
+}
+# 童子煞（以日柱干支组合判断，共60组）
+TONG_ZI_GAN_ZHI = {
+    "甲子", "甲寅", "甲辰", "甲午", "甲申", "甲戌",
+    "乙丑", "乙卯", "乙巳", "乙未", "乙酉", "乙亥",
+    "丙子", "丙寅", "丙辰", "丙午", "丙申", "丙戌",
+    "丁丑", "丁卯", "丁巳", "丁未", "丁酉", "丁亥",
+    "戊子", "戊寅", "戊辰", "戊午", "戊申", "戊戌",
+    "己丑", "己卯", "己巳", "己未", "己酉", "己亥",
+    "庚午", "庚申", "庚戌", "庚子", "庚寅", "庚辰",
+    "辛未", "辛酉", "辛亥", "辛丑", "辛卯", "辛巳",
+    "壬午", "壬申", "壬戌", "壬子", "壬寅", "壬辰",
+    "癸未", "癸酉", "癸亥", "癸丑", "癸卯", "癸巳",
+}
+# 劫煞（三合局绝位，以年支/日支查）
+# 歌诀：申子辰见巳，寅午戌见亥，亥卯未见申，巳酉丑见寅
+# 来源：算卦吧《八字入门之四柱神煞》
+JIE_SHA = {
+    # 水局(申子辰)：木绝于巳
+    "申": "巳", "子": "巳", "辰": "巳",
+    # 火局(寅午戌)：火绝于亥
+    "寅": "亥", "午": "亥", "戌": "亥",
+    # 木局(亥卯未)：水绝于申
+    "亥": "申", "卯": "申", "未": "申",
+    # 金局(巳酉丑)：土绝于寅
+    "巳": "寅", "酉": "寅", "丑": "寅",
+}
+# 灾煞（将星受冲位，以年支/日支查）
+# 将星=三合局中支(四正)，灾煞=将星之冲
+ZAI_SHA = {
+    # 水(申子辰)→将星子→冲午
+    "申": "午", "子": "午", "辰": "午",
+    # 火(寅午戌)→将星午→冲子
+    "寅": "子", "午": "子", "戌": "子",
+    # 木(亥卯未)→将星卯→冲酉
+    "亥": "酉", "卯": "酉", "未": "酉",
+    # 金(巳酉丑)→将星酉→冲卯
+    "巳": "卯", "酉": "卯", "丑": "卯",
+}
+# 亡神（三合局临官位，以年支/日支查）
+# 歌诀：寅午戌见巳，亥卯未见寅，巳酉丑见申，申子辰见亥
+WANG_SHEN = {
+    # 火局(寅午戌)：火临官在巳
+    "寅": "巳", "午": "巳", "戌": "巳",
+    # 木局(亥卯未)：木临官在寅
+    "亥": "寅", "卯": "寅", "未": "寅",
+    # 金局(巳酉丑)：金临官在申
+    "巳": "申", "酉": "申", "丑": "申",
+    # 水局(申子辰)：水临官在亥
+    "申": "亥", "子": "亥", "辰": "亥",
+}
+# 吊客（以年支查，岁后二辰 / 丧门对宫）
+DIAO_KE = {
+    "寅": "子", "午": "子", "戌": "子",       # 寅午戌年
+    "申": "午", "辰": "午", "丑": "午",        # 申子辰年
+    "巳": "卯", "酉": "卯",                     # 巳酉丑年（丑重复但值相同）
+    "亥": "酉", "卯": "酉", "未": "酉",         # 亥卯未年
+}
+# 丧门（吊客的对宫，以年支查）
+SANG_MEN = {
+    "寅": "午", "午": "午", "戌": "午",         # 寅午戌年
+    "申": "卯", "辰": "卯", "丑": "卯",          # 申子辰年
+    "巳": "酉", "酉": "酉",                      # 巳酉丑年
+    "亥": "子", "卯": "子", "未": "子",          # 亥卯未年
+}
+# 病符（岁后一辰，以年支查）
+BING_FU = {
+    "寅": "丑", "午": "未", "戌": "酉",         # 寅午戌
+    "申": "未", "辰": "巳", "丑": "亥",          # 申子辰
+    "巳": "辰", "酉": "申",                       # 巳酉丑
+    "亥": "戌", "卯": "寅", "未": "午",           # 亥卯未
+}
+# 天医（以年支查，岁前五辰 / 三合局前一顺位墓库）
+TIAN_YI_SS = {
+    "寅": "丑", "午": "丑", "戌": "丑",         # 寅午戌→丑库
+    "申": "未", "辰": "未", "丑": "未",          # 申子辰→未库
+    "巳": "申", "酉": "申",                       # 巳酉丑→申（长生）
+    "亥": "戌", "卯": "戌", "未": "戌",           # 亥卯未→戌库
+}
+# 红鸾（以年支查，桃花位）
+HONG_LUAN = {
+    "寅": "卯", "午": "卯", "戌": "卯",          # 寅午戌→卯
+    "巳": "午", "酉": "午", "丑": "午",           # 巳酉丑→午
+    "申": "酉", "子": "酉", "辰": "酉",           # 申子辰→酉
+    "亥": "子", "卯": "子", "未": "子",           # 亥卯未→子
+}
+# 天喜（红鸾对宫，以年支查）
+TIAN_XI = {
+    "寅": "酉", "午": "酉", "戌": "酉",          # 寅午戌
+    "巳": "子", "酉": "子", "丑": "子",            # 巳酉丑
+    "申": "卯", "子": "卯", "辰": "卯",             # 申子辰
+    "亥": "午", "卯": "午", "未": "午",             # 亥卯未
+}
+# 孤辰寡宿（以年支查）
+# 歌诀：亥子丑人见寅为孤，见未为寡；寅卯辰人见巳为孤，见丑为寡；
+#       已午未人见申为孤，见寅为寡；申酉戌人见亥为孤，见卯为寡。
+GU_CHEN = {
+    "寅": "巳", "卯": "巳", "辰": "巳",           # 寅卯辰年 → 巳
+    "巳": "申", "午": "申", "未": "申",            # 巳午未年 → 申
+    "申": "亥", "酉": "亥", "戌": "亥",            # 申酉戌年 → 亥
+    "亥": "寅", "子": "寅", "丑": "寅",            # 亥子丑年 → 寅
+}
+GUA_SU = {
+    "寅": "丑", "卯": "丑", "辰": "丑",           # 寅卯辰年 → 丑
+    "巳": "寅", "午": "寅", "未": "寅",            # 巳午未年 → 寅
+    "申": "卯", "酉": "卯", "戌": "卯",            # 申酉戌年 → 卯
+    "亥": "未", "子": "未", "丑": "未",            # 亥子丑年 → 未
 }
 SEASON_NOTES = {
     "寅": "春初木旺，重在疏土培木，兼看火来通明。",
@@ -319,7 +498,7 @@ def _round_counts(counts: dict[str, float]) -> dict[str, float]:
 def _compute_shensha(pillars: list[Pillar]) -> list[dict[str, str]]:
     """根据四柱干支计算传统神煞。
 
-    以日干、年支、日支为查表主键，遍历四柱地支判断是否带神煞。
+    以日干、年支、日支、月支为查表主键，遍历四柱地支判断是否带神煞。
     返回 [{"name": "天乙贵人", "description": "日干甲见丑，逢凶化吉"}, ...]
     """
     if not pillars:
@@ -327,8 +506,8 @@ def _compute_shensha(pillars: list[Pillar]) -> list[dict[str, str]]:
 
     day_gan = pillars[2].gan  # 日柱天干
     year_zhi = pillars[0].zhi  # 年支
+    month_zhi = pillars[1].zhi  # 月支
     day_zhi = pillars[2].zhi  # 日支
-    all_zhi = [p.zhi for p in pillars]  # 四柱地支集合
     all_gan = [p.gan for p in pillars]  # 四柱天干集合
 
     result: list[dict[str, str]] = []
@@ -342,39 +521,111 @@ def _compute_shensha(pillars: list[Pillar]) -> list[dict[str, str]]:
         full_desc = f"{pillar_name}：{desc}" if pillar_name else desc
         result.append({"name": name, "description": full_desc})
 
-    # —— 以日干查 ——
+    # ================================================================
+    # 一、以日干查的神煞
+    # ================================================================
+
+    # 天乙贵人
     tianyi = TIAN_YI.get(day_gan)
     if tianyi:
         for p in pillars:
             if p.zhi in tianyi:
                 add("天乙贵人", "逢凶化吉，贵人相助", p.name)
 
-    taiji = TAI_JI.get(day_gan)
-    if taiji:
+    # 太极贵人（以日干或年干查四地支）
+    taiji_gans = [day_gan, pillars[0].gan] if pillars else [day_gan]
+    taiji_set: set[str] = set()
+    for g in taiji_gans:
+        taiji_set.update(TAI_JI.get(g, ()))
+    if taiji_set:
         for p in pillars:
-            if p.zhi in taiji:
+            if p.zhi in taiji_set:
                 add("太极贵人", "聪明好学，近玄妙之学", p.name)
 
+    # 文昌
     wenchang = WEN_CHANG.get(day_gan)
     if wenchang:
         for p in pillars:
             if p.zhi == wenchang:
                 add("文昌", "学业聪明，文采出众", p.name)
 
+    # 禄神
     lu = LU_SHEN.get(day_gan)
     if lu:
         for p in pillars:
             if p.zhi == lu:
                 add("禄神", "衣食丰足，财禄有源", p.name)
 
+    # 羊刃
     yangren = YANG_REN.get(day_gan)
     if yangren:
         for p in pillars:
             if p.zhi == yangren:
                 add("羊刃", "刚烈易伤，主血光破财", p.name)
 
-    # —— 以年支/日支查 ——
+    # 学堂（以日干查，落在日支对应柱——日柱本身，不遍历）
+    xuetang = XUE_TANG.get(day_gan)
+    if xuetang and pillars[2].zhi == xuetang:
+        add("学堂", "聪明好学，利于科举学业", "日柱")
+
+    # 词馆（以日干查，仅在日柱；查表值可能是单字或双字）
+    ciguan = CI_GUAN.get(day_gan)
+    if ciguan and pillars[2].zhi in ciguan:
+        add("词馆", "文章华盖，才学出众", "日柱")
+
+    # 金舆（以日干或年干查四地支）
+    jinyu_gans = [day_gan, pillars[0].gan] if pillars else [day_gan]
+    jinyu_set: set[str] = set()
+    for g in jinyu_gans:
+        val = JIN_YU.get(g)
+        if val:
+            jinyu_set.add(val)
+    if jinyu_set:
+        for p in pillars:
+            if p.zhi in jinyu_set:
+                add("金舆", "得长辈/异性荫护，生活富足", p.name)
+
+    # 福星贵人（以日干或年干查四地支）
+    fuxing_gans = [day_gan, pillars[0].gan] if pillars else [day_gan]
+    fuxing_set: set[str] = set()
+    for g in fuxing_gans:
+        fuxing_set.update(FU_XING.get(g, ()))
+    if fuxing_set:
+        for p in pillars:
+            if p.zhi in fuxing_set:
+                add("福星贵人", "福气深厚，遇事多助", p.name)
+
+    # ================================================================
+    # 二、以月支查的神煞（天德、月德 — 需四柱天干见对应字）
+    # ================================================================
+    month_idx = _zhi_to_month_index(month_zhi)  # 寅=1, 卯=2, ..., 丑=12
+
+    tiande_chars = TIAN_DE_MONTH.get(month_idx)
+    if tiande_chars:
+        for c in tiande_chars:
+            is_branch_target = month_idx in TIAN_DE_IS_BRANCH
+            for p in pillars:
+                if is_branch_target:
+                    # 天德是地支（2月申、5月亥、8月寅），查地支
+                    if p.zhi == c:
+                        add("天德贵人", f"月支{month_zhi}月，地支见{c}，逢凶化吉", p.name)
+                else:
+                    # 天德是天干，查天干和藏干
+                    if p.gan == c or any(hs == c for hs in p.hidden_stems):
+                        add("天德贵人", f"月支{month_zhi}月，见{c}，逢凶化吉", p.name)
+
+    yuede_chars = YUE_DE_MONTH.get(month_idx)
+    if yuede_chars:
+        for c in yuede_chars:
+            for p in pillars:
+                if p.gan == c or any(hs == c for hs in p.hidden_stems):
+                    add("月德贵人", f"月支{month_zhi}月，见{c}，化煞解厄", p.name)
+
+    # ================================================================
+    # 三、以年支/日支查的神煞
+    # ================================================================
     for key_zhi, label in ((year_zhi, "年"), (day_zhi, "日")):
+
         huagai = HUA_GAI.get(key_zhi)
         if huagai:
             for p in pillars:
@@ -399,12 +650,138 @@ def _compute_shensha(pillars: list[Pillar]) -> list[dict[str, str]]:
                 if p.zhi == jiang:
                     add("将星", f"掌权威望，领导力强（{label}支起）", p.name)
 
-    # —— 魁罡（日柱为庚辰/壬辰/庚戌/戊戌）——
+        # 劫煞
+        jiesha = JIE_SHA.get(key_zhi)
+        if jiesha:
+            for p in pillars:
+                if p.zhi == jiesha:
+                    add("劫煞", f"破财伤身之兆（{label}支起）", p.name)
+
+        # 灾煞
+        zaisha = ZAI_SHA.get(key_zhi)
+        if zaisha:
+            for p in pillars:
+                if p.zhi == zaisha:
+                    add("灾煞", f"灾厄不顺，需防意外（{label}支起）", p.name)
+
+        # 亡神
+        wangshen = WANG_SHEN.get(key_zhi)
+        if wangshen:
+            for p in pillars:
+                if p.zhi == wangshen:
+                    add("亡神", f"心思深沉，暗耗多端（{label}支起）", p.name)
+
+        # 吊客
+        diaoke = DIAO_KE.get(key_zhi)
+        if diaoke:
+            for p in pillars:
+                if p.zhi == diaoke:
+                    add("吊客", f"孝服丧事之兆（{label}支起）", p.name)
+
+        # 病符
+        bingfu = BING_FU.get(key_zhi)
+        if bingfu:
+            for p in pillars:
+                if p.zhi == bingfu:
+                    add("病符", f"身体小恙，注意健康（{label}支起）", p.name)
+
+        # 天医
+        tianyi_ss = TIAN_YI_SS.get(key_zhi)
+        if tianyi_ss:
+            for p in pillars:
+                if p.zhi == tianyi_ss:
+                    add("天医", f"医药有缘，善疗病痛（{label}支起）", p.name)
+
+    # ================================================================
+    # 四、以年支查的专属神煞（红鸾、天喜、孤辰寡宿）
+    # ================================================================
+    hongluan = HONG_LUAN.get(year_zhi)
+    if hongluan:
+        for p in pillars:
+            if p.zhi == hongluan:
+                add("红鸾", "喜庆婚恋之事", p.name)
+
+    tianxi = TIAN_XI.get(year_zhi)
+    if tianxi:
+        for p in pillars:
+            if p.zhi == tianxi:
+                add("天喜", "喜事临门，感情顺遂", p.name)
+
+    guchen = GU_CHEN.get(year_zhi)
+    if guchen:
+        for p in pillars:
+            if p.zhi == guchen:
+                add("孤辰", "性格孤独，亲情淡薄", p.name)
+
+    guasu = GUA_SU.get(year_zhi)
+    if guasu:
+        for p in pillars:
+            if p.zhi == guasu:
+                add("寡宿", "内心寂寞，晚景清冷", p.name)
+
+    # 丧门
+    sangmen = SANG_MEN.get(year_zhi)
+    if sangmen:
+        for p in pillars:
+            if p.zhi == sangmen:
+                add("丧门", "孝服丧事之应", p.name)
+
+    # ================================================================
+    # 五、特殊组合类神煞（日柱特定组合 / 日柱纳音等）
+    # ================================================================
+
+    # 魁罡（日柱为庚辰/壬辰/庚戌/戊戌）
     day_gz = pillars[2].ganzhi
     if day_gz in ("庚辰", "壬辰", "庚戌", "戊戌"):
         add("魁罡", "刚强果断，主掌权立威", "日柱")
 
+    # 十恶大败（日柱干支在十恶大败表中）
+    if day_gz in SHI_E_DA_BAI:
+        add("十恶大败", "祖业难承，不善理财", "日柱")
+
+    # 童子煞（民间主流：时柱为主，参考《渊海子平》《三命通会》）
+    if len(pillars) > 3 and pillars[3].ganzhi in TONG_ZI_GAN_ZHI:
+        add("童子煞", "聪慧灵性，宜修道艺", "时柱")
+
+    # 飞刃（阳刃的对冲位出现在四柱，更凶）
+    # 传统主流查法：阳刃对冲 = 飞刃。例：壬日子为阳刃，子对冲午 → 月柱午为飞刃。
+    if yangren:
+        chong_map = {
+            "子": "午", "午": "子",
+            "丑": "未", "未": "丑",
+            "寅": "申", "申": "寅",
+            "卯": "酉", "酉": "卯",
+            "辰": "戌", "戌": "辰",
+            "巳": "亥", "亥": "巳",
+        }
+        feiren_zhi = chong_map.get(yangren, "")
+        if feiren_zhi:
+            for p in pillars:
+                if p.zhi == feiren_zhi:
+                    add("飞刃", f"阳刃{yangren}对冲{feiren_zhi}，刚烈更甚", p.name)
+                    break
+
+    # ================================================================
+    # 六、空亡（lunar-python 已算出，只标注实际落住四柱的旬空位）
+    # ================================================================
+    xunkong_set: set[str] = set()
+    for p in pillars:
+        if p.xunkong:
+            for xk_char in p.xunkong:
+                xunkong_set.add(xk_char)
+    if xunkong_set:
+        for p in pillars:
+            if p.zhi in xunkong_set:
+                add("空亡", f"旬空{p.zhi}，力减半", p.name)
+
     return result
+
+
+def _zhi_to_month_index(zhi: str) -> int:
+    """地支 → 农历月份索引。寅=1, 卯=2, ..., 子=11, 丑=12"""
+    m = {"寅": 1, "卯": 2, "辰": 3, "巳": 4, "午": 5, "未": 6,
+         "申": 7, "酉": 8, "戌": 9, "亥": 10, "子": 11, "丑": 12}
+    return m.get(zhi, 0)
 
 
 def _build_wuxing_analysis(ec) -> WuxingAnalysis:
@@ -787,10 +1164,9 @@ def chart_to_api_dict(chart: BaziChart) -> dict[str, Any]:
             }
             for item in chart.liunian
         ],
-        "shensha": [
-            {"name": "命宫", "description": f"{chart.ming_gong}（{chart.ming_gong_nayin}）"},
-            {"name": "身宫", "description": f"{chart.shen_gong}（{chart.shen_gong_nayin}）"},
-        ] + _compute_shensha(chart.pillars),
+        "shensha": _compute_shensha(chart.pillars),
+        "mingGong": f"{chart.ming_gong}（{chart.ming_gong_nayin}）",
+        "shenGong": f"{chart.shen_gong}（{chart.shen_gong_nayin}）",
         "startYun": chart.start_yun,
         "warnings": chart.warnings,
     }

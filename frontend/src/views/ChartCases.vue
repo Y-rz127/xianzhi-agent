@@ -74,9 +74,12 @@
           <div class="case-gender">{{ c.gender }}</div>
         </div>
         <div class="case-meta">
-          <div class="meta-item">
-            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-            <span>{{ c.birthTime }}</span>
+          <div class="meta-row">
+            <div class="meta-item">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+              <span>{{ c.birthTime }}</span>
+            </div>
+            <span v-if="c.bazi" class="bazi-text">{{ c.bazi }}</span>
           </div>
           <div class="meta-item">
             <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
@@ -153,8 +156,30 @@
       :warnings="activeChart?.warnings || []"
       :birthTime="activeCase?.birthTime"
       :gender="activeCase?.gender"
+      :mingGong="activeChart?.mingGong"
+      :shenGong="activeChart?.shenGong"
       @close="closeBaziModal"
     />
+
+    <!-- 确认弹窗 -->
+    <Teleport to="body">
+      <div v-if="showConfirm" class="confirm-overlay" @click.self="showConfirm = false">
+        <div class="confirm-dialog">
+          <p class="confirm-msg">{{ confirmMsg }}</p>
+          <div class="confirm-actions">
+            <button class="btn-confirm-cancel" @click="showConfirm = false">取消</button>
+            <button class="btn-confirm-ok" :disabled="deleting" @click="onConfirmOk">
+              {{ deleting ? '处理中...' : '确定' }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- Toast 提示 -->
+    <Transition name="toast-fade">
+      <div v-if="toastMsg" class="toast-bar" :class="toastType">{{ toastMsg }}</div>
+    </Transition>
   </div>
 </template>
 
@@ -178,6 +203,39 @@ const activeCase = ref<ChartCase | null>(null)
 const activeChart = ref<ChartData | null>(null)
 
 const importInput = ref<HTMLInputElement | null>(null)
+
+// 确认弹窗
+const showConfirm = ref(false)
+const confirmMsg = ref("")
+const pendingAction: ref<(() => void) | null> = ref(null)
+const deleting = ref(false)
+
+// Toast
+const toastMsg = ref("")
+const toastType = ref<"success" | "error">("success")
+let toastTimer: ReturnType<typeof setTimeout> | null = null
+function showToast(text: string, type: "success" | "error" = "error") {
+  if (toastTimer) clearTimeout(toastTimer)
+  toastMsg.value = text
+  toastType.value = type
+  toastTimer = setTimeout(() => { toastMsg.value = "" }, 3000)
+}
+
+function askConfirm(msg: string, action: () => void) {
+  confirmMsg.value = msg
+  pendingAction.value = action
+  showConfirm.value = true
+}
+async function onConfirmOk() {
+  deleting.value = true
+  try {
+    await pendingAction.value?.()
+  } finally {
+    deleting.value = false
+    showConfirm.value = false
+    pendingAction.value = null
+  }
+}
 
 const allTags = computed(() => {
   const set = new Set<string>()
@@ -267,18 +325,19 @@ const saveCase = async () => {
     closeModal()
     await loadCases()
   } catch (e: any) {
-    alert(e?.message || "保存失败")
+    showToast(e?.message || "保存失败", "error")
   }
 }
 
-const confirmDelete = async (c: ChartCase) => {
-  if (!confirm(`确定删除命例「${c.name}」吗？`)) return
-  try {
-    await deleteChartCase(c.id)
-    await loadCases()
-  } catch (e: any) {
-    alert(e?.message || "删除失败")
-  }
+const confirmDelete = (c: ChartCase) => {
+  askConfirm(`确定删除命例「${c.name}」吗？`, async () => {
+    try {
+      await deleteChartCase(c.id)
+      await loadCases()
+    } catch (e: any) {
+      showToast(e?.message || "删除失败", "error")
+    }
+  })
 }
 
 const viewCase = async (c: ChartCase) => {
@@ -314,10 +373,10 @@ const onImportFile = async (e: Event) => {
   if (!file) return
   try {
     const res = await importChartCasesJSON(file)
-    alert(`导入成功：新增 ${res.inserted} 条，跳过 ${res.skipped} 条`)
+    showToast(`导入成功：新增 ${res.inserted} 条，跳过 ${res.skipped} 条`, "success")
     await loadCases()
   } catch (err: any) {
-    alert(err?.message || "导入失败")
+    showToast(err?.message || "导入失败", "error")
   } finally {
     target.value = ""
   }
@@ -508,12 +567,29 @@ onMounted(loadCases)
   margin-bottom: 12px;
 }
 
+.meta-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
 .meta-item {
   display: flex;
   align-items: center;
   gap: 8px;
   font-size: 12px;
   color: var(--text-dim);
+}
+
+.bazi-text {
+  font-size: 11px;
+  letter-spacing: 2px;
+  color: var(--accent-light);
+  background: rgba(212,175,55,0.08);
+  padding: 1px 8px;
+  border-radius: 4px;
+  white-space: nowrap;
 }
 
 .meta-item svg {
@@ -738,4 +814,72 @@ onMounted(loadCases)
     grid-template-columns: 1fr;
   }
 }
+
+/* 确认弹窗 */
+.confirm-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0,0,0,0.55);
+  backdrop-filter: blur(3px);
+}
+.confirm-dialog {
+  background: #151c2c;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 28px 32px;
+  min-width: 300px;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.5);
+}
+.confirm-msg {
+  font-size: 15px;
+  color: var(--text);
+  margin: 0 0 24px;
+}
+.confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+.btn-confirm-cancel,
+.btn-confirm-ok {
+  padding: 7px 20px;
+  border-radius: 9px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s;
+  border: 1px solid var(--border);
+}
+.btn-confirm-cancel { background: transparent; color: var(--text-dim); }
+.btn-confirm-cancel:hover { background: rgba(255,255,255,0.05); }
+.btn-confirm-ok {
+  background: rgba(220,80,80,0.15);
+  color: #dc7878;
+  border-color: rgba(220,80,80,0.25);
+}
+.btn-confirm-ok:hover:not(:disabled) { background: rgba(220,80,80,0.25); }
+.btn-confirm-ok:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Toast */
+.toast-bar {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 10px 22px;
+  border-radius: 9px;
+  font-size: 13px;
+  color: #fff;
+  z-index: 10000;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.35);
+}
+.toast-bar.error { background: rgba(239,68,68,0.88); }
+.toast-bar.success { background: rgba(34,197,94,0.88); }
+.toast-fade-enter-active,
+.toast-fade-leave-active { transition: opacity 0.3s ease, transform 0.3s ease; }
+.toast-fade-enter-from,
+.toast-fade-leave-to { opacity: 0; transform: translateX(-50%) translateY(12px); }
 </style>

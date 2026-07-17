@@ -8,6 +8,7 @@ from fastapi import APIRouter, File, HTTPException, UploadFile, WebSocket, WebSo
 from sse_starlette.sse import EventSourceResponse
 
 from app.api import state
+from app.api.common import check_message_length, client_error, is_message_too_long, message_too_long_text
 from app.logger import log
 from app.rag.vector_store import KNOWLEDGE_DIR, knowledge_base
 
@@ -49,6 +50,7 @@ def _list_markdown_files() -> list[dict]:
 
 @chat_router.get("/rag")
 async def chat_with_rag(message: str, session_id: str = "default"):
+    check_message_length(message)
     if state._rag_chain is None:
         return {"error": "RAG chain not initialized"}
 
@@ -59,7 +61,7 @@ async def chat_with_rag(message: str, session_id: str = "default"):
             yield {"event": "message", "data": "[DONE]"}
         except Exception as e:
             log.exception("RAG SSE stream error")
-            yield {"event": "error", "data": str(e)}
+            yield {"event": "error", "data": client_error(e)}
 
     return EventSourceResponse(event_stream())
 
@@ -82,6 +84,10 @@ async def ws_chat_with_rag(websocket: WebSocket):
             data = await websocket.receive_json()
             message = data.get("message", "")
             session_id = data.get("session_id", data.get("conversation_id", "default"))
+            if is_message_too_long(message):
+                if not await _safe_ws_send(websocket, {"type": "error", "data": message_too_long_text(message)}):
+                    break
+                continue
             if state._rag_chain is None:
                 if not await _safe_ws_send(websocket, {"type": "error", "data": "RAG chain not initialized"}):
                     break
@@ -96,7 +102,7 @@ async def ws_chat_with_rag(websocket: WebSocket):
             except Exception as e:
                 log.exception("RAG WebSocket stream error")
                 if client_alive:
-                    await _safe_ws_send(websocket, {"type": "error", "data": str(e)})
+                    await _safe_ws_send(websocket, {"type": "error", "data": client_error(e)})
                 client_alive = False
             if client_alive:
                 await _safe_ws_send(websocket, {"type": "done"})
@@ -104,7 +110,7 @@ async def ws_chat_with_rag(websocket: WebSocket):
         log.info("RAG WebSocket disconnected")
     except Exception as e:
         log.exception("RAG WebSocket error")
-        await _safe_ws_send(websocket, {"type": "error", "data": str(e)})
+        await _safe_ws_send(websocket, {"type": "error", "data": client_error(e)})
 
 
 @chat_router.get("/rag/sync")
@@ -140,7 +146,7 @@ async def upload_rag_doc(file: UploadFile = File(...)):
         raise
     except Exception as e:
         log.exception("上传知识库文档失败")
-        raise HTTPException(status_code=500, detail=f"上传失败: {e}")
+        raise HTTPException(status_code=500, detail=client_error(e))
 
 
 @mgmt_router.delete("/docs/{filename}")
@@ -155,18 +161,22 @@ async def delete_rag_doc(filename: str):
         return {"status": "ok", "filename": path.name}
     except Exception as e:
         log.exception("删除知识库文档失败")
-        raise HTTPException(status_code=500, detail=f"删除失败: {e}")
+        raise HTTPException(status_code=500, detail=client_error(e))
 
 
 @mgmt_router.post("/docs/rebuild")
-async def rebuild_rag_index():
-    """重新初始化 RAG 向量知识库。"""
+async def rebuild_rag_index(force: bool = False):
+    """重新初始化 RAG 向量知识库。
+
+    默认按文档指纹判断：文档未变更时直接复用已有索引（零 embedding 调用）；
+    force=true 时无视指纹强制全量重建。
+    """
     try:
-        ready = knowledge_base.init()
-        return {"ready": ready}
+        ready = knowledge_base.init(force=force)
+        return {"ready": ready, "embedding": knowledge_base.embedding_id}
     except Exception as e:
         log.exception("重建 RAG 向量库失败")
-        raise HTTPException(status_code=500, detail=f"重建失败: {e}")
+        raise HTTPException(status_code=500, detail="重建失败，请查看服务日志")
 
 
 @mgmt_router.get("/status")
