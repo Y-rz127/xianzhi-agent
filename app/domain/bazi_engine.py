@@ -9,6 +9,13 @@ from typing import Any
 
 from lunar_python import Solar
 
+"""八字命盘结构化引擎（基于 lunar-python 纯算法）。
+
+对外暴露 build_bazi_chart / parse_birth / parse_gender / chart_to_api_dict /
+format_* 等函数，产出 BaziChart 这一「命盘事实来源」，供 API、图表案例与
+Agent 上下文共用。公共工具函数仍返回可读文本，但结构化数据以本模块为准。
+"""
+
 
 GAN_WUXING = {
     "甲": "木", "乙": "木", "丙": "火", "丁": "火", "戊": "土",
@@ -350,6 +357,7 @@ SEASON_NOTES = {
 
 @dataclass(frozen=True)
 class BirthInfo:
+    """排盘基础信息（公历/农历/生肖/性别/流派）。"""
     solar: str
     lunar: str
     gender: str
@@ -360,6 +368,7 @@ class BirthInfo:
 
 @dataclass(frozen=True)
 class Pillar:
+    """单柱（年/月/日/时）的结构化数据：干支、五行、纳音、空亡、藏干、十神。"""
     name: str
     ganzhi: str
     gan: str
@@ -375,6 +384,7 @@ class Pillar:
 
 @dataclass(frozen=True)
 class DayunItem:
+    """大运单项：干支、起止年份/年龄、空亡。"""
     index: int
     ganzhi: str
     start_year: int
@@ -386,6 +396,7 @@ class DayunItem:
 
 @dataclass(frozen=True)
 class LiunianItem:
+    """流年单项：年份、干支、虚岁、所在大运区间。"""
     year: int
     ganzhi: str
     age: int
@@ -397,6 +408,7 @@ class LiunianItem:
 
 @dataclass(frozen=True)
 class WuxingAnalysis:
+    """五行分析结果：含权重统计、日主强弱、用神提示与口径说明。"""
     counts: dict[str, float]
     visible_counts: dict[str, int]
     strongest: str
@@ -411,6 +423,7 @@ class WuxingAnalysis:
 
 @dataclass(frozen=True)
 class DomainAnalysis:
+    """十神/合冲刑害/调候/格局等命局结构分析。"""
     ten_gods: dict[str, int]
     exposed_stems: list[str]
     rooted_stems: list[str]
@@ -426,6 +439,7 @@ class DomainAnalysis:
 
 @dataclass(frozen=True)
 class BaziChart:
+    """八字命盘完整结构化数据（事实来源），供 API/图表/代理上下文共用。"""
     birth: BirthInfo
     pillars: list[Pillar]
     wuxing: WuxingAnalysis
@@ -444,6 +458,10 @@ class BaziChart:
 
 
 def parse_birth(birth_time: str) -> tuple[int, int, int, int, int]:
+    """将多种格式的出生时间字符串解析为 (年, 月, 日, 时, 分)。
+
+    兼容中文年月日时、点/号、T、多种分隔符；不足 3 段或时辰非法则抛 ValueError。
+    """
     import re as _re
     s = birth_time.strip()
     # 兼容多种分隔符：中文冒号、中文年月日时分、点号、T、汉字等
@@ -465,6 +483,7 @@ def parse_birth(birth_time: str) -> tuple[int, int, int, int, int]:
 
 
 def parse_gender(gender: str) -> int:
+    """解析性别为内部编码：男=1，女=0；支持 男/女/male/female/m/f/1/0/公/母。"""
     g = (gender or "").strip().lower()
     if g in ("男", "male", "m", "1", "公"):
         return 1
@@ -1042,6 +1061,19 @@ def build_bazi_chart(
     liunian_years: int = 5,
     liunian_start_year: int | None = None,
 ) -> BaziChart:
+    """构建完整八字命盘（BaziChart）。
+
+    Args:
+        birth_time: 出生时间（公历/农历/时辰/节日格式）
+        gender: 性别（男/女）
+        sect: 日柱计算流派（默认 2）
+        yun_sect: 大运计算流派（默认 1）
+        dayun_count: 推算多少柱大运（默认 8）
+        liunian_years: 推算多少年流年（默认 5）
+        liunian_start_year: 流年起始年（默认当前年）
+    Returns:
+        结构化 BaziChart（四柱/五行/十神/大运/流年/命宫/身宫/起运）
+    """
     y, m, d, h, mi = parse_birth(birth_time)
     gender_int = parse_gender(gender)
     solar = Solar.fromYmdHms(y, m, d, h, mi, 0)
@@ -1103,6 +1135,7 @@ def build_bazi_chart(
 
 
 def chart_to_api_dict(chart: BaziChart) -> dict[str, Any]:
+    """将 BaziChart 转为前端友好的 dict（含五行配色、柱/五行/大运/流年结构）。"""
     colors = {"金": "#d4af37", "木": "#4a7c3a", "水": "#3a6ea5", "火": "#c0392b", "土": "#8b6f47"}
     return {
         "birth": asdict(chart.birth),
@@ -1173,6 +1206,7 @@ def chart_to_api_dict(chart: BaziChart) -> dict[str, Any]:
 
 
 def format_chart_text(chart: BaziChart) -> str:
+    """格式化四柱排盘文本（基本信息/四柱/空亡/命宫身宫/神煞/校验提示）。"""
     lines = [
         "【基本信息】",
         f"出生(公历): {chart.birth.solar}",
@@ -1208,6 +1242,7 @@ def format_chart_text(chart: BaziChart) -> str:
 
 
 def format_analysis_text(chart: BaziChart, question: str = "整体运势") -> str:
+    """格式化五行十神分析文本（四柱/日主强弱/用神/十神/藏干/结构判断）。"""
     wx = chart.wuxing
     lines = [
         f"【四柱】 {' '.join(p.ganzhi for p in chart.pillars)}",
@@ -1247,6 +1282,7 @@ def format_analysis_text(chart: BaziChart, question: str = "整体运势") -> st
 
 
 def format_dayun_text(chart: BaziChart) -> str:
+    """格式化大运文本（起运信息 + 每柱大运的干支/年份区间/年龄）。"""
     lines = [
         "【起运信息】",
         f"起运年龄: {chart.start_yun['startYear']}年 {chart.start_yun['startMonth']}月 {chart.start_yun['startDay']}日 {chart.start_yun['startHour']}时",
@@ -1263,6 +1299,7 @@ def format_dayun_text(chart: BaziChart) -> str:
 
 
 def format_liunian_text(chart: BaziChart) -> str:
+    """格式化流年文本（逐年干支/虚岁，并绑定所在大运）。"""
     if chart.liunian:
         start_year = chart.liunian[0].year
     else:
@@ -1276,6 +1313,7 @@ def format_liunian_text(chart: BaziChart) -> str:
 
 
 def format_fact_context(chart: BaziChart) -> str:
+    """汇总格式化命盘事实（排盘+分析+大运+流年），用于事实校验锚点。"""
     return "\n\n".join([
         format_chart_text(chart),
         format_analysis_text(chart),

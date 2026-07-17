@@ -3,11 +3,11 @@ from __future__ import annotations
 
 import asyncio
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 
 from app.api.common import client_error
 from app.logger import log
-from app.utils.text_clean import clean_think_tags
+from app.tools.text_clean import clean_think_tags
 
 router = APIRouter(prefix="/xianzhi", tags=["Tools"])
 

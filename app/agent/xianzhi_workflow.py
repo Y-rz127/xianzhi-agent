@@ -20,12 +20,11 @@ from app.logger import log
 from app.rag.retrieval import (
     DOMAIN_KEYWORDS,
     DOMAIN_RULE_QUERIES,
-    THEORY_TOPIC_QUERIES,
     detect_domain,
     detect_theory_topic,
 )
 from app.rag.vector_store import knowledge_base
-from app.utils.text_clean import clean_think_tags, dedupe_content as _dedupe_content_impl
+from app.tools.text_clean import clean_think_tags, dedupe_content as _dedupe_content_impl
 
 
 def _parse_json(text: str) -> Any:
@@ -91,6 +90,11 @@ DOMAIN_LABELS = {
 
 @dataclass(frozen=True)
 class QuestionIntent:
+    """用户问题意图分类结果。
+
+    Supervisor 用它决定分派哪个专业 Worker，以及检索哪些知识。
+    合婚(match)场景下额外携带对方出生信息/命盘/规则基础数据。
+    """
     domain: str
     label: str
     target_years: list[int] = field(default_factory=list)
@@ -106,6 +110,11 @@ class QuestionIntent:
 
 @dataclass
 class WorkflowChartContext:
+    """工作流用的命盘上下文容器。
+
+    保存原始输入（birth_time/gender/sect/yun_sect）与已排好的 BaziChart，
+    供 Supervisor/Worker/Reviewer 共享同一排盘事实，避免重复计算。
+    """
     birth_time: str
     gender: str
     sect: int
@@ -115,6 +124,7 @@ class WorkflowChartContext:
 
 @dataclass(frozen=True)
 class FactCheckResult:
+    """事实校验结果：ok 表示通过全部校验，issues 为发现的问题列表。"""
     ok: bool
     issues: list[str] = field(default_factory=list)
 
@@ -398,6 +408,14 @@ WORKERS: dict[str, DomainWorker] = {
 
 
 def classify_question(text: str, today: _dt.date | None = None) -> QuestionIntent:
+    """基于关键词/年份/闲聊信号的轻量意图分类（LLM 拆解的兜底）。
+
+    Args:
+        text: 用户问题
+        today: 基准日期（默认今天，用于"今年/明年"年份推算）
+    Returns:
+        含 domain/label/target_years 等的 QuestionIntent
+    """
     today = today or _dt.date.today()
     years = sorted({int(y) for y in re.findall(r"(?:19|20)\d{2}", text)})
     if "今年" in text:
@@ -435,6 +453,16 @@ def classify_question(text: str, today: _dt.date | None = None) -> QuestionInten
 
 
 def build_chart_context(birth_time: str, gender: str, sect: int = 2, yun_sect: int = 1) -> WorkflowChartContext:
+    """根据出生时间/性别/流派构造 WorkflowChartContext（大运 10 柱、流年 8 年）。
+
+    Args:
+        birth_time: 出生时间（公历/农历/时辰/节日格式均可）
+        gender: 性别（男/女）
+        sect: 日柱计算流派（默认 2）
+        yun_sect: 大运计算流派（默认 1）
+    Returns:
+        已排盘完成的 WorkflowChartContext
+    """
     chart = build_bazi_chart(birth_time, gender, sect=sect, yun_sect=yun_sect, dayun_count=10, liunian_years=8)
     return WorkflowChartContext(
         birth_time=birth_time,

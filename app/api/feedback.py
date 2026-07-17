@@ -12,6 +12,7 @@ router = APIRouter(prefix="/feedback", tags=["Feedback"])
 
 @router.post("")
 async def submit_feedback(body: dict, token: str = Query(None)):
+    """提交问题反馈（登录用户带 user_id，未登录可匿名）。"""
     content = (body.get("content") or "").strip()
     if len(content) < 5:
         raise HTTPException(status_code=400, detail="反馈内容至少 5 个字")
@@ -30,6 +31,7 @@ async def submit_feedback(body: dict, token: str = Query(None)):
 
 @router.delete("/{fid}")
 async def delete_feedback(fid: str):
+    """删除一条反馈；不存在返回 404。"""
     try:
         ok = user_data.delete_feedback(fid)
         if not ok:

@@ -9,8 +9,6 @@ import re
 from typing import Optional
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
-from langchain_core.tools import BaseTool
-from langchain_core.language_models import BaseChatModel
 
 from app.agent.base_agent import AgentState, BaseAgent
 from app.agent.tool_call_agent import ToolCallAgent
@@ -23,7 +21,7 @@ import asyncio
 
 from app.agent.xianzhi_workflow import XianzhiWorkflow, WorkflowChartContext, build_chart_context, render_full_fact_context, classify_question, _dedupe_content
 from app.tools.bazi import _normalize_birth_time
-from app.utils.text_clean import clean_think_tags
+from app.tools.text_clean import clean_think_tags
 
 
 # 用于从用户输入中尝试提取出生时间与性别
@@ -492,7 +490,6 @@ class Xianzhi(ToolCallAgent):
         同时过滤掉 next_step_prompt 占位消息（tool_call_agent.think 注入的 HumanMessage），
         防止历史会话恢复时把"工具指引"内容当作用户消息显示在左边。
         """
-        from app.agent.tool_call_agent import ToolCallAgent
         new_messages = self.message_list[self._history_len:]
         if new_messages:
             # 过滤 next_step_prompt 注入的 HumanMessage（其内容以工具调度模板开头）

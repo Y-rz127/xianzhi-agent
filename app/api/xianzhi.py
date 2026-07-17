@@ -31,6 +31,7 @@ async def chat_with_xianzhi(
     yun_sect: int = 1,
     verbose: bool = False,
 ):
+    """先知 SSE 流式对话接口（支持挂载出生信息，流式返回 + 可选 chart_context 事件）。"""
     check_message_length(message)
     try:
         agent, lock = state.get_xianzhi(conversation_id)
@@ -74,6 +75,7 @@ async def _safe_ws_send(websocket: WebSocket, data: dict) -> bool:
 
 @router.websocket("/ws")
 async def ws_chat_with_xianzhi(websocket: WebSocket):
+    """先知 WebSocket 流式对话接口（小程序无 SSE，用 WS 替代）。"""
     await websocket.accept()
     try:
         while True:
@@ -136,6 +138,7 @@ async def chat_with_xianzhi_sync(
     sect: int = 2,
     yun_sect: int = 1,
 ):
+    """先知同步对话接口（run 在线程池执行，避免阻塞事件循环）。"""
     check_message_length(message)
     try:
         agent, lock = state.get_xianzhi(conversation_id)
@@ -176,6 +179,7 @@ async def list_my_sessions(token: str = Query(None)):
 
 @router.delete("/sessions/{session_id}")
 async def delete_xianzhi_session(session_id: str):
+    """删除先知会话（含消息记录）。"""
     from app.memory.postgres_memory import delete_session
     delete_session(session_id)
     return {"status": "ok"}
@@ -191,6 +195,7 @@ async def clear_xianzhi_session(session_id: str):
 
 @router.get("/sessions/{session_id}/messages")
 async def get_xianzhi_session_messages(session_id: str):
+    """获取会话的完整消息记录。"""
     from app.memory.postgres_memory import get_messages
     return get_messages(session_id)
 

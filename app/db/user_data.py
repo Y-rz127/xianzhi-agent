@@ -16,6 +16,7 @@ _READY = False
 
 
 def _ensure_tables():
+    """惰性建表：首次调用时创建八字档案/命例收藏/塔罗记录/反馈四张表及索引，之后直接返回。"""
     global _READY
     if _READY:
         return
@@ -88,6 +89,7 @@ def _ensure_tables():
 # ---------------- 八字档案 ----------------
 
 def create_profile(user_id: str, data: dict) -> str:
+    """创建一条八字档案，返回新记录 id。"""
     _ensure_tables()
     pid = str(uuid.uuid4())
     with _get_pool().connection() as conn:
@@ -113,6 +115,7 @@ def create_profile(user_id: str, data: dict) -> str:
 
 
 def list_profiles(user_id: str) -> list:
+    """列出某用户全部八字档案（按创建时间倒序）。"""
     _ensure_tables()
     with _get_pool().connection() as conn:
         rows = conn.execute(
@@ -126,6 +129,7 @@ def list_profiles(user_id: str) -> list:
 
 
 def get_profile(user_id: str, pid: str) -> Optional[dict]:
+    """查询单条八字档案；不属于该用户或不存在时返回 None。"""
     _ensure_tables()
     with _get_pool().connection() as conn:
         row = conn.execute(
@@ -139,6 +143,7 @@ def get_profile(user_id: str, pid: str) -> Optional[dict]:
 
 
 def update_profile(user_id: str, pid: str, data: dict) -> bool:
+    """更新八字档案字段；返回是否命中并修改了记录。"""
     _ensure_tables()
     with _get_pool().connection() as conn:
         cur = conn.execute(
@@ -164,6 +169,7 @@ def update_profile(user_id: str, pid: str, data: dict) -> bool:
 
 
 def delete_profile(user_id: str, pid: str) -> bool:
+    """删除八字档案；返回是否成功删除。"""
     _ensure_tables()
     with _get_pool().connection() as conn:
         cur = conn.execute(
@@ -173,6 +179,7 @@ def delete_profile(user_id: str, pid: str) -> bool:
 
 
 def _row_to_profile(r) -> dict:
+    """将数据库行元组转换为前端使用的档案字典（兼容 chart_data 为字符串的情况）。"""
     chart = r[7]
     if isinstance(chart, str):
         try:
@@ -195,6 +202,7 @@ def _row_to_profile(r) -> dict:
 # ---------------- 命例收藏 ----------------
 
 def add_favorite(user_id: str, case_id: str) -> str:
+    """添加命例收藏（user_id+case_id 唯一，重复收藏不报错），返回收藏记录 id。"""
     _ensure_tables()
     fid = str(uuid.uuid4())
     with _get_pool().connection() as conn:
@@ -210,6 +218,7 @@ def add_favorite(user_id: str, case_id: str) -> str:
 
 
 def list_favorites(user_id: str) -> list:
+    """列出某用户收藏的命例（联表获取命例名称/标签/排盘等），按收藏时间倒序。"""
     _ensure_tables()
     with _get_pool().connection() as conn:
         rows = conn.execute(
@@ -236,6 +245,7 @@ def list_favorites(user_id: str) -> list:
 
 
 def remove_favorite(user_id: str, case_id: str) -> bool:
+    """取消收藏；返回是否成功删除。"""
     _ensure_tables()
     with _get_pool().connection() as conn:
         cur = conn.execute(
@@ -246,6 +256,7 @@ def remove_favorite(user_id: str, case_id: str) -> bool:
 
 
 def is_favorite(user_id: str, case_id: str) -> bool:
+    """判断某命例是否已被该用户收藏。"""
     _ensure_tables()
     with _get_pool().connection() as conn:
         row = conn.execute(
@@ -258,6 +269,7 @@ def is_favorite(user_id: str, case_id: str) -> bool:
 # ---------------- 塔罗记录 ----------------
 
 def add_tarot_record(user_id: str, spread: str, question: str, cards: list, interpretation: str) -> str:
+    """保存一次塔罗占卜记录，返回记录 id。"""
     _ensure_tables()
     rid = str(uuid.uuid4())
     with _get_pool().connection() as conn:
@@ -279,6 +291,7 @@ def add_tarot_record(user_id: str, spread: str, question: str, cards: list, inte
 
 
 def list_tarot_records(user_id: str, limit: int = 50) -> list:
+    """列出某用户的塔罗记录（默认最近 50 条，倒序）。"""
     _ensure_tables()
     with _get_pool().connection() as conn:
         rows = conn.execute(
@@ -302,6 +315,7 @@ def list_tarot_records(user_id: str, limit: int = 50) -> list:
 
 
 def delete_tarot_record(user_id: str, rid: str) -> bool:
+    """删除一条塔罗记录；返回是否成功删除。"""
     _ensure_tables()
     with _get_pool().connection() as conn:
         cur = conn.execute(
@@ -313,6 +327,7 @@ def delete_tarot_record(user_id: str, rid: str) -> bool:
 # ---------------- 问题反馈 ----------------
 
 def add_feedback(user_id: str | None, content: str, contact: str = "") -> str:
+    """保存用户问题反馈（user_id 可空，表示匿名），返回反馈 id。"""
     _ensure_tables()
     fid = str(uuid.uuid4())
     with _get_pool().connection() as conn:
@@ -324,6 +339,7 @@ def add_feedback(user_id: str | None, content: str, contact: str = "") -> str:
 
 
 def list_feedback(limit: int = 200) -> list:
+    """列出反馈（联表获取昵称），默认最近 200 条倒序。"""
     _ensure_tables()
     with _get_pool().connection() as conn:
         rows = conn.execute(
@@ -350,6 +366,7 @@ def list_feedback(limit: int = 200) -> list:
 
 
 def delete_feedback(fid: str) -> bool:
+    """删除一条反馈；返回是否成功删除。"""
     _ensure_tables()
     with _get_pool().connection() as conn:
         result = conn.execute(
@@ -370,6 +387,7 @@ def delete_feedback(fid: str) -> bool:
 
 
 def _safe_json(s: str):
+    """安全解析 JSON 字符串，解析失败时返回空字典。"""
     try:
         return json.loads(s)
     except Exception:

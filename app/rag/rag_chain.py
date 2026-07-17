@@ -36,6 +36,14 @@ class RagChatChain:
     """带历史记忆的 RAG 对话链。"""
 
     def __init__(self, chat_model: BaseChatModel):
+        """初始化 RAG 对话链。
+
+        Args:
+            chat_model: LangChain 聊天模型，用于生成答案。
+
+        根据 MEMORY_STORE_TYPE 选择记忆后端：postgres 走 PG 持久化
+        （失败自动回退内存），否则使用进程内内存记忆。
+        """
         self.chat_model = chat_model
         # 内存缓存（file 模式或 PG 不可用时回退）
         self._histories: dict[str, InMemoryChatMessageHistory] = {}

@@ -50,6 +50,7 @@ def _list_markdown_files() -> list[dict]:
 
 @chat_router.get("/rag")
 async def chat_with_rag(message: str, session_id: str = "default"):
+    """RAG 知识库 SSE 流式问答接口。"""
     check_message_length(message)
     if state._rag_chain is None:
         return {"error": "RAG chain not initialized"}
@@ -115,6 +116,7 @@ async def ws_chat_with_rag(websocket: WebSocket):
 
 @chat_router.get("/rag/sync")
 async def chat_with_rag_sync(message: str, session_id: str = "default"):
+    """RAG 知识库同步问答接口（一次性返回完整结果）。"""
     if state._rag_chain is None:
         return {"error": "RAG chain not initialized"}
     return {"result": state._rag_chain.chat(message, session_id)}

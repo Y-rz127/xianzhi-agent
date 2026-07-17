@@ -11,6 +11,7 @@ router = APIRouter(tags=["Observability"])
 
 @router.get("/health")
 async def health():
+    """健康检查：返回 RAG 就绪状态、工作流后端与 Agent 池统计。"""
     return {
         "status": "ok",
         "rag_ready": state._rag_chain is not None,
@@ -21,6 +22,7 @@ async def health():
 
 @router.get("/observability/status")
 async def observability_status():
+    """返回系统可观测性状态。"""
     return get_status()
 
 

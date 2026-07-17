@@ -9,6 +9,7 @@ from app.logger import log
 
 
 class AgentState(str, Enum):
+    """Agent 生命周期状态枚举：IDLE / RUNNING / FINISHED / ERROR。"""
     IDLE = "IDLE"
     RUNNING = "RUNNING"
     FINISHED = "FINISHED"
@@ -16,7 +17,13 @@ class AgentState(str, Enum):
 
 
 class BaseAgent(ABC):
+    """抽象基础代理（对应 Java BaseAgent）。
+
+    定义统一的执行循环（run / run_stream / arun_stream），子类需实现 step()；
+    提供状态校验（_validate）与运行态清理（cleanup）。
+    """
     def __init__(self, name, chat_model, system_prompt="", next_step_prompt="", max_steps=5):
+        """初始化代理基础属性（名称、模型、提示词、最大步数、运行状态）。"""
         self.name = name
         self.chat_model = chat_model
         self.system_prompt = system_prompt
@@ -28,6 +35,7 @@ class BaseAgent(ABC):
         self._last_error = None
 
     def run(self, user_prompt):
+        """同步执行 Agent：在 max_steps 内循环 step() 收集结果，异常转 ERROR，finally 清理。"""
         self._validate(user_prompt)
         self.state = AgentState.RUNNING
         self.message_list.append(HumanMessage(content=user_prompt))
@@ -52,6 +60,7 @@ class BaseAgent(ABC):
             self.cleanup()
 
     def run_stream(self, user_prompt):
+        """同步流式执行：后台线程跑执行循环，通过队列逐条产出步骤结果（不推内部状态标记）。"""
         import queue, threading
         q = queue.Queue()
         _SENTINEL = object()
@@ -146,14 +155,17 @@ class BaseAgent(ABC):
 
     @abstractmethod
     def step(self):
+        """执行一轮 Agent 逻辑（思考 / 工具调用 / 产出），由子类实现。"""
         raise NotImplementedError
 
     def cleanup(self):
+        """清理运行态：重置步数、清空消息列表、回到 IDLE。"""
         self.current_step = 0
         self.message_list = []
         self.state = AgentState.IDLE
 
     def _validate(self, user_prompt):
+        """运行前校验：必须处于 IDLE 且 user_prompt 非空，否则抛 RuntimeError。"""
         if self.state != AgentState.IDLE:
             raise RuntimeError("Cannot run agent from state: {}".format(self.state))
         if not user_prompt or not user_prompt.strip():

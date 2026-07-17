@@ -13,6 +13,7 @@ router = APIRouter(prefix="/tarot_records", tags=["TarotRecords"])
 
 @router.get("")
 async def list_tarot_records(current_user: dict = Depends(get_current_user)):
+    """列出当前用户的塔罗记录。"""
     try:
         return user_data.list_tarot_records(current_user["id"])
     except Exception as e:
@@ -22,6 +23,7 @@ async def list_tarot_records(current_user: dict = Depends(get_current_user)):
 
 @router.post("")
 async def create_tarot_record(body: dict, current_user: dict = Depends(get_current_user)):
+    """保存一次塔罗占卜记录（spread/question/cards/interpretation）。"""
     try:
         rid = user_data.add_tarot_record(
             current_user["id"],
@@ -38,5 +40,6 @@ async def create_tarot_record(body: dict, current_user: dict = Depends(get_curre
 
 @router.delete("/{rid}")
 async def delete_tarot_record(rid: str, current_user: dict = Depends(get_current_user)):
+    """删除一条塔罗记录。"""
     user_data.delete_tarot_record(current_user["id"], rid)
     return {"status": "ok"}

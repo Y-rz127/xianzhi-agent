@@ -14,6 +14,7 @@ router = APIRouter(prefix="/me", tags=["Me"])
 
 @router.get("")
 async def my_overview(current_user: dict = Depends(get_current_user)):
+    """聚合返回当前用户的资料与各模块数据量统计（档案/收藏/塔罗/会话）。"""
     uid = current_user["id"]
     try:
         sessions = get_session_info(prefix="mp-xianzhi", user_id=uid)

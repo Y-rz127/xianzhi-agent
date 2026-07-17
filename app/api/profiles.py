@@ -13,6 +13,7 @@ router = APIRouter(prefix="/profiles", tags=["Profiles"])
 
 @router.get("")
 async def list_profiles(current_user: dict = Depends(get_current_user)):
+    """列出当前用户的八字档案。"""
     try:
         return user_data.list_profiles(current_user["id"])
     except Exception as e:
@@ -22,6 +23,7 @@ async def list_profiles(current_user: dict = Depends(get_current_user)):
 
 @router.post("")
 async def create_profile(body: dict, current_user: dict = Depends(get_current_user)):
+    """创建八字档案（需 birth_time / gender / name）。"""
     if not body.get("birth_time") or not body.get("gender"):
         raise HTTPException(status_code=400, detail="缺少 birth_time / gender")
     if not body.get("name"):
@@ -36,6 +38,7 @@ async def create_profile(body: dict, current_user: dict = Depends(get_current_us
 
 @router.get("/{pid}")
 async def get_profile(pid: str, current_user: dict = Depends(get_current_user)):
+    """获取单条八字档案；不存在返回 404。"""
     prof = user_data.get_profile(current_user["id"], pid)
     if not prof:
         raise HTTPException(status_code=404, detail="档案不存在")
@@ -44,6 +47,7 @@ async def get_profile(pid: str, current_user: dict = Depends(get_current_user)):
 
 @router.put("/{pid}")
 async def update_profile(pid: str, body: dict, current_user: dict = Depends(get_current_user)):
+    """更新八字档案；不存在返回 404。"""
     try:
         ok = user_data.update_profile(current_user["id"], pid, body)
         if not ok:
@@ -56,5 +60,6 @@ async def update_profile(pid: str, body: dict, current_user: dict = Depends(get_
 
 @router.delete("/{pid}")
 async def delete_profile(pid: str, current_user: dict = Depends(get_current_user)):
+    """删除八字档案。"""
     user_data.delete_profile(current_user["id"], pid)
     return {"status": "ok"}

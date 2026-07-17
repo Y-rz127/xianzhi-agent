@@ -126,6 +126,7 @@ class PostgresChatMemory:
         return f"{prefix}-{conversation_id}"
 
     def _history(self, conversation_id: str, conn):
+        """基于给定连接构造 PostgresChatMessageHistory 实例（session_uuid 隔离）。"""
         from langchain_postgres import PostgresChatMessageHistory
         session_uuid = self._to_uuid(conversation_id)
         return PostgresChatMessageHistory(
@@ -135,6 +136,7 @@ class PostgresChatMemory:
         )
 
     def get(self, conversation_id: str) -> List[BaseMessage]:
+        """从 PostgreSQL 读取会话全部历史消息（失败返回空列表）。"""
         try:
             with _get_pool().connection() as conn:
                 return self._history(conversation_id, conn).messages
@@ -143,6 +145,7 @@ class PostgresChatMemory:
             return []
 
     def add(self, conversation_id: str, messages: List[BaseMessage]):
+        """写入消息并持久化会话元数据（UUID 映射、模块、user_id）。"""
         try:
             session_uuid = self._to_uuid(conversation_id)
             global _session_uuid_map
@@ -167,6 +170,7 @@ class PostgresChatMemory:
             log.warning("写入PG记忆失败 {} : {}", conversation_id, e)
 
     def clear(self, conversation_id: str):
+        """清空该会话在 PG 中的全部消息。"""
         try:
             with _get_pool().connection() as conn:
                 self._history(conversation_id, conn).clear()

@@ -12,6 +12,7 @@ from app.logger import log
 
 
 class XianzhiGraphState(TypedDict, total=False):
+    """LangGraph 工作流状态字典：各节点在 state 上读写，贯穿分类→扩盘→检索→生成→校验→修复。"""
     user_prompt: str
     chart_context: WorkflowChartContext
     history: list[Any]
@@ -31,6 +32,7 @@ def create_xianzhi_graph(workflow):
         return None
 
     def classify_node(state: XianzhiGraphState) -> XianzhiGraphState:
+        """分类节点：优先复用 answer() 已拆解的 intent，否则关键词兜底；匹配对应 Worker。"""
         # 优先使用 answer() 入口已通过 LLM 拆解得到的 intent（含 queries/needs_chart），
         # 没有时才 fallback 到关键词分类
         intent = state.get("intent")
@@ -40,10 +42,12 @@ def create_xianzhi_graph(workflow):
         return {"intent": intent, "worker": worker}
 
     def chart_node(state: XianzhiGraphState) -> XianzhiGraphState:
+        """扩盘节点：按需扩展命盘流年覆盖范围以覆盖目标年份。"""
         ctx = workflow._extend_chart_if_needed(state["chart_context"], state["intent"])
         return {"chart_context": ctx}
 
     def retrieve_node(state: XianzhiGraphState) -> XianzhiGraphState:
+        """检索节点：闲聊意图短路跳过；否则检索命理知识库片段。"""
         # 闲聊场景短路：无需检索知识库
         intent = state.get("intent")
         if intent and getattr(intent, "domain", "") == "chitchat":
@@ -54,6 +58,7 @@ def create_xianzhi_graph(workflow):
         return {"knowledge": knowledge}
 
     def generate_node(state: XianzhiGraphState) -> XianzhiGraphState:
+        """生成节点：组装 Worker 消息并调用 LLM 产出原始回答。"""
         worker = state.get("worker")
         messages = workflow._build_messages(
             state["user_prompt"],
@@ -68,6 +73,7 @@ def create_xianzhi_graph(workflow):
         return {"raw_answer": raw}
 
     def check_node(state: XianzhiGraphState) -> XianzhiGraphState:
+        """校验节点：用 Reviewer 做事实+古籍+合规三重校验，通过则定稿，否则记录 issues。"""
         # 新架构：用 ReviewerWorker 做三重校验（事实+古籍真实性+合规），替代旧的 check_facts
         raw = state.get("raw_answer", "")
         worker = state.get("worker")
@@ -90,6 +96,7 @@ def create_xianzhi_graph(workflow):
         return {"issues": review.issues, "final_answer": raw if review.ok else ""}
 
     def repair_node(state: XianzhiGraphState) -> XianzhiGraphState:
+        """修复节点：基于 issues 重构消息让 LLM 反思修复，并二次校验；仍不过则附口径说明。"""
         from app.agent.xianzhi_workflow import FactCheckResult
 
         worker = state.get("worker")
@@ -124,6 +131,7 @@ def create_xianzhi_graph(workflow):
         return {"final_answer": repaired.rstrip() + "\n\n口径校验：" + "；".join(repaired_review.issues), "issues": repaired_review.issues}
 
     def route_after_check(state: XianzhiGraphState) -> str:
+        """条件路由：有 issues 走 repair，否则结束。"""
         return "repair" if state.get("issues") else "end"
 
     graph = StateGraph(XianzhiGraphState)

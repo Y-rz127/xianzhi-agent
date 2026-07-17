@@ -20,12 +20,14 @@ _TABLE_READY = False
 
 
 def _hash_password(password: str, salt: str) -> str:
+    """使用 pbkdf2_hmac(sha256) + 盐值对密码进行哈希，返回十六进制字符串。"""
     return hashlib.pbkdf2_hmac(
         "sha256", password.encode("utf-8"), bytes.fromhex(salt), 100_000
     ).hex()
 
 
 def _ensure_table():
+    """惰性建表：首次调用时创建 users 表与索引（含兼容旧库的 wx_openid 列），之后直接返回。"""
     global _TABLE_READY
     if _TABLE_READY:
         return
@@ -119,6 +121,7 @@ def authenticate(nickname: str, password: str) -> Optional[dict]:
 
 
 def get_by_token(token: str) -> Optional[dict]:
+    """按登录 token 查询用户；token 为空或查询失败时返回 None。"""
     if not token:
         return None
     _ensure_table()
@@ -141,6 +144,7 @@ def get_by_token(token: str) -> Optional[dict]:
 
 
 def get_by_id(uid: str) -> Optional[dict]:
+    """按用户 id 查询公开用户字典；失败返回 None。"""
     _ensure_table()
     try:
         with _get_pool().connection() as conn:
@@ -220,6 +224,7 @@ def list_users(limit: int = 200, offset: int = 0) -> list:
 
 
 def count_users() -> int:
+    """返回用户总数。"""
     _ensure_table()
     with _get_pool().connection() as conn:
         row = conn.execute("SELECT COUNT(*) FROM users").fetchone()

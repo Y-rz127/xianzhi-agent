@@ -5,6 +5,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
+    """应用配置模型（基于 pydantic-settings 从 .env / 环境变量加载，对应 Java 的 application.yml）。
+
+    所有字段均通过 alias 支持环境变量覆盖，便于容器化部署。
+    """
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     # 大模型

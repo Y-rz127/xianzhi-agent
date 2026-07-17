@@ -1,16 +1,16 @@
 """工具调用代理基类（对应 Java ToolCallAgent）。"""
 from __future__ import annotations
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
-from langchain_core.tools import BaseTool
-from langchain_core.language_models import BaseChatModel
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from app.agent.base_agent import AgentState
 from app.agent.react_agent import ReActAgent
 from app.logger import log
-from app.utils.text_clean import clean_think_tags
+from app.tools.text_clean import clean_think_tags
 
 
 class ToolCallAgent(ReActAgent):
+    """工具调用代理（对应 Java ToolCallAgent）：绑定 LLM 工具，实现 think/act/observe。"""
     def __init__(self, name, chat_model, tools, system_prompt="", next_step_prompt="", max_steps=5):
+        """初始化并绑定工具集（chat_model.bind_tools），记录工具列表与执行计数。"""
         super().__init__(name, chat_model, system_prompt, next_step_prompt, max_steps)
         self.available_tools = tools
         self._llm_with_tools = chat_model.bind_tools(tools) if tools else chat_model
@@ -18,6 +18,7 @@ class ToolCallAgent(ReActAgent):
         self._current_step = 0
 
     def think(self):
+        """调用 LLM（含工具绑定）决策下一步；过滤 <think> 推理块，返回是否需要调用工具。"""
         self._current_step += 1
         if self.next_step_prompt and len(self.message_list) <= 2:
             self.message_list.append(HumanMessage(content=self.next_step_prompt))
@@ -45,6 +46,7 @@ class ToolCallAgent(ReActAgent):
             return False
 
     def act(self):
+        """执行 LLM 决策出的工具调用列表：查工具、invoke、写入 ToolMessage；do_terminate 则标记完成。"""
         last_msg = self.message_list[-1]
         tool_calls = getattr(last_msg, "tool_calls", None) or []
         if not tool_calls:
@@ -74,6 +76,7 @@ class ToolCallAgent(ReActAgent):
         return "\n".join(results)
 
     def observe(self, act_result):
+        """根据工具执行结果类型记录结构化观察日志（排盘/搜索/抓取等）。"""
         if not act_result:
             return
         if "do_terminate" in act_result:
@@ -90,12 +93,14 @@ class ToolCallAgent(ReActAgent):
             log.info("[观察] 工具执行完成")
 
     def _find_tool(self, name):
+        """按工具名在可用工具集中线性查找对应 BaseTool，找不到返回 None。"""
         for t in self.available_tools:
             if t.name == name:
                 return t
         return None
 
     def _build_messages(self):
+        """组装发给 LLM 的消息：system prompt（如有）+ 完整对话历史。"""
         msgs = []
         if self.system_prompt:
             msgs.append(SystemMessage(content=self.system_prompt))
