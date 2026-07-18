@@ -204,6 +204,26 @@ async for _ in super().arun_stream(user_prompt):
 - **ReAct 路径**：第一次对话没命盘、用户主动提供生辰让 LLM 排盘、纯术语问答
 - **闲聊短路**：两条路径都有，避免"你好"也触发工具调用
 
+## 知识检索的分层（RAG）
+
+两条路径的知识检索都遵循「Layer 1 单 query MMR + Layer 2 多 query 编排」的两层结构，但上层的编排逻辑在两条路径里是**两套独立实现**，预算口径也不同。
+
+### Layer 1 — 单 query 向量检索（`app/rag/vector_store.py`）
+
+- `knowledge_base.search(q)` 走 MMR：`k=2`、`fetch_k=6`、`lambda_mult=0.5`，即由 6 个候选选出 2 条「相关且多样」的片段。
+- 只解决「给定一条成型 query，返回最相关且多样的 2 条」；不负责查询改写、多意图合并、跨 query 去重与预算。同时也是 Layer 2 的内层原语。
+
+### Layer 2 — 多 query 编排（扩展 + 跨 query 去重 + 预算）
+
+解决 Layer 1 管不了的事：用户口语化问题 embedding 后检索差 → 扩展为多个角度提升召回；不同 query 命中同一片段需去重；并控制送进 LLM 的上下文预算。两套实现如下：
+
+| 路径 | 上层实现 | query 来源 | 去重键 | 预算上限 |
+|------|---------|-----------|--------|---------|
+| ReAct 工具（`tools/rag_search.py`） | `search_deduped(expand_knowledge_queries(query), max_docs=6)` | 原文 + 理论术语精准 query + 领域规则 query（最多 4 条） | `(来源, 内容前120字)` | **最多 6 条文档** |
+| 工作流（`xianzhi_workflow._retrieve_rules`） | 自研循环（不调用 `search_deduped`） | LLM 拆解 `intent.queries`（限 2 条）/ theory 路径 / 断事路径（`DOMAIN_RULE_QUERIES[domain]` + `worker.extra_queries`） | 内容前 120 字 | **`_MAX_KNOWLEDGE_TOTAL=3500` 字符**（单 query 还受 `_MAX_TEXT_PER_QUERY` 截断） |
+
+> 注意：ReAct 工具路径的 Layer 2 即文档常说的 `search_deduped`（6 条文档上限）；但真正产出答案的**工作流路径并未调用 `search_deduped`**，而是用 3500 字符预算的自研循环。两者都会把每条 query 交给 Layer 1 的 `search_as_text` 执行 MMR，再跨 query 去重。
+
 ## LangGraph 集成
 
 [xianzhi_langgraph.py](app/agent/xianzhi_langgraph.py) 是可选的 LangGraph 封装，已接入新架构：

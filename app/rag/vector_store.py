@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import threading
 import time
 from collections import OrderedDict
@@ -35,6 +36,10 @@ from app.logger import log
 KNOWLEDGE_DIR = Path(__file__).parent / "knowledge_docs"
 _FINGERPRINT_FILE = "knowledge_fingerprint.json"
 _SEARCH_CACHE_MAX = 200
+
+# 切分参数（纳入文档指纹，变更后自动重建索引，避免新旧 chunk 混用）
+CHUNK_SIZE = 350
+CHUNK_OVERLAP = 70
 
 
 def get_embeddings() -> Embeddings:
@@ -57,9 +62,7 @@ def _get_local_embeddings() -> Embeddings:
         from langchain_community.embeddings import HuggingFaceEmbeddings
     except ImportError as e:
         raise RuntimeError(
-            "本地 embedding 回退需要安装 sentence-transformers："
-            "pip install sentence-transformers"
-        ) from e
+            "本地 embedding 回退 sentence-transformers") from e
     return HuggingFaceEmbeddings(model_name=settings.embedding_local_model)
 
 
@@ -103,17 +106,31 @@ def _split_chunks(docs: list[Document]) -> list[Document]:
     """切分文档为片段。
 
     用 RecursiveCharacterTextSplitter 多级递归切分，针对中文命理文档优化：
-    - separators 优先按段落、句号、分号切分，保证语义完整
-    - chunk_size 适当放宽到 800，避免长段落（古籍原文、调候表）被强行截断
+    - separators 依次按 段落(\\n\\n) → 换行(\\n) → 句号(。) → 分号(；) → 逗号(，) → 空格 → 兜底硬切 降级切分，保证语义完整
+    - chunk_size=350、chunk_overlap=70（由 CHUNK_SIZE/CHUNK_OVERLAP 常量控制）：超长段落（古籍原文、调候表）仍会被切到 350 字以内，无法整体保留
     """
     splitter = RecursiveCharacterTextSplitter(
-        chunk_size=500,
-        chunk_overlap=80,
+        chunk_size=CHUNK_SIZE,
+        chunk_overlap=CHUNK_OVERLAP,
         separators=["\n\n", "\n", "。", "；", "，", " ", ""],
     )
     chunks = splitter.split_documents(docs)
     log.info("切分为 {} 个知识片段", len(chunks))
     return chunks
+
+
+def _bigrams(s: str) -> set[str]:
+    """提取字符级 2-gram（去空白），用于轻量相关性打分。"""
+    s = re.sub(r"\s+", "", s or "")
+    return {s[i:i + 2] for i in range(len(s) - 1)}
+
+
+def _keyword_overlap(query: str, text: str) -> float:
+    """query 与文档的字符 2-gram 重叠度（Jaccard），作为 rerank 相关性分。"""
+    bq, bt = _bigrams(query), _bigrams(text)
+    if not bq or not bt:
+        return 0.0
+    return len(bq & bt) / len(bq | bt)
 
 
 # ============================================================
@@ -145,18 +162,22 @@ def _load_fingerprint() -> dict | None:
         return None
 
 
-def _save_fingerprint(docs_hash: str, embedding_id: str, store_type: str) -> None:
+def _save_fingerprint(docs_hash: str, embedding_id: str, store_type: str,
+                      chunk_size: int, chunk_overlap: int) -> None:
     p = _fingerprint_path()
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(json.dumps({
         "docs_hash": docs_hash,
         "embedding_id": embedding_id,
         "store_type": store_type,
+        "chunk_size": chunk_size,
+        "chunk_overlap": chunk_overlap,
         "updated_at": time.time(),
     }, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def _is_up_to_date(docs_hash: str, embedding_id: str, store_type: str) -> bool:
+def _is_up_to_date(docs_hash: str, embedding_id: str, store_type: str,
+                   chunk_size: int, chunk_overlap: int) -> bool:
     fp = _load_fingerprint()
     if not fp:
         return False
@@ -164,6 +185,8 @@ def _is_up_to_date(docs_hash: str, embedding_id: str, store_type: str) -> bool:
         fp.get("docs_hash") == docs_hash
         and fp.get("embedding_id") == embedding_id
         and fp.get("store_type") == store_type
+        and fp.get("chunk_size") == chunk_size
+        and fp.get("chunk_overlap") == chunk_overlap
     )
 
 
@@ -285,34 +308,45 @@ def _rebuild_store(chunks: list[Document], embeddings: Embeddings, store_type: s
 
 
 def _build_vector_store(embeddings: Embeddings, embedding_id: str, force: bool = False):
-    """构建或加载向量库。
+    """构建或加载向量库，返回 (store, 实际生效的 store_type)。
 
     指纹（文档内容 + embedding 模型 + 向量库类型）一致时直接加载已有索引，
     否则全量重建并更新指纹。
+
+    实际生效类型可能低于配置优先级（如配置了 postgres 但不可用会回退 chroma）。
+    指纹记录的是实际生效类型，下次启动优先按指纹记录的类型直接复用索引，
+    避免高优先级后端不可用时限重试、每次全量重建（含重复 embedding 调用）。
     """
     docs = _load_knowledge_docs()
     if not docs:
-        return None
+        return None, ""
     docs_hash = _docs_hash()
-    store_type = settings.vector_store_type.lower()
+    configured_type = settings.vector_store_type.lower()
+
+    # 指纹中记录的实际生效类型：上次回退后落盘的类型。
+    # 优先用它判断"索引是否可复用"，从而跳过对已不可用后端的重试。
+    # 注意：改回高优先级后端（如 postgres 恢复）需手动 force 重建索引。
+    fp = _load_fingerprint()
+    effective_type = fp.get("store_type", configured_type) if fp else configured_type
 
     # 指纹未变 → 直接加载已有索引，零 embedding API 调用
-    if not force and _is_up_to_date(docs_hash, embedding_id, store_type):
-        log.info("RAG 文档指纹未变，复用已有向量索引（零 embedding 调用）")
+    if not force and _is_up_to_date(docs_hash, embedding_id, effective_type,
+                                    CHUNK_SIZE, CHUNK_OVERLAP):
+        log.info("RAG 文档指纹未变，复用已有向量索引 (store_type={})", effective_type)
         try:
-            if store_type == "postgres":
-                return _load_postgres(embeddings)
-            if store_type == "milvus" and settings.milvus_uri:
-                return _load_milvus(embeddings)
-            return _load_chroma(embeddings)
+            if effective_type == "postgres":
+                return _load_postgres(embeddings), "postgres"
+            if effective_type == "milvus" and settings.milvus_uri:
+                return _load_milvus(embeddings), "milvus"
+            return _load_chroma(embeddings), "chroma"
         except Exception as e:
             log.warning("已有索引加载失败，将全量重建: {}", e)
 
-    log.info("RAG 文档指纹变更或首次构建，开始全量重建向量库 (store_type={})", store_type)
+    log.info("RAG 文档指纹变更或首次构建，开始全量重建向量库 (configured_type={})", configured_type)
     chunks = _split_chunks(docs)
-    store, actual_type = _rebuild_store(chunks, embeddings, store_type)
-    _save_fingerprint(docs_hash, embedding_id, actual_type)
-    return store
+    store, actual_type = _rebuild_store(chunks, embeddings, configured_type)
+    _save_fingerprint(docs_hash, embedding_id, actual_type, CHUNK_SIZE, CHUNK_OVERLAP)
+    return store, actual_type
 
 
 class KnowledgeBase:
@@ -323,6 +357,7 @@ class KnowledgeBase:
         self._retriever = None
         self._ready = False
         self._embedding_id = ""
+        self._store_type = ""
         self._search_cache: OrderedDict[str, tuple[float, list[Document]]] = OrderedDict()
         self._cache_lock = threading.Lock()
 
@@ -338,7 +373,8 @@ class KnowledgeBase:
         try:
             embeddings, embedding_id = _select_embeddings()
             self._embedding_id = embedding_id
-            self._store = _build_vector_store(embeddings, embedding_id, force=force)
+            self._store, actual_type = _build_vector_store(embeddings, embedding_id, force=force)
+            self._store_type = actual_type
             if self._store is None:
                 return False
             self._retriever = self._store.as_retriever(
@@ -354,7 +390,7 @@ class KnowledgeBase:
             with self._cache_lock:
                 self._search_cache.clear()
             log.info("RAG 知识库初始化完成 (store_type={}, embedding={})",
-                     settings.vector_store_type, embedding_id)
+                     self._store_type, embedding_id)
             return True
         except Exception as e:
             log.warning("RAG 知识库初始化失败: {}", e)
@@ -369,7 +405,7 @@ class KnowledgeBase:
         return self._embedding_id
 
     def search(self, query: str) -> list[Document]:
-        """相似性检索（MMR，兼顾相关性与多样性）。
+        """相似性检索（相似度排序 + 关键词重叠 rerank，兼顾相关性与精确率）。
 
         同一 query 在 RAG_SEARCH_CACHE_TTL 秒内直接命中缓存，
         避免多轮对话重复调用 embedding。
@@ -386,12 +422,10 @@ class KnowledgeBase:
                     log.debug("检索缓存命中: {}", query[:30])
                     return hit[1]
         try:
-            docs = self._retriever.invoke(query)
+            docs = self._search_reranked(query)
         except Exception as e:
             log.warning("RAG 检索失败: {}", e)
             return []
-        # 打印每条结果的相似度（Chroma MMR 返回的文档暂无 score 字段，
-        # 但可通过 with_distance 模式获取；此处仅记录命中数量和长度）
         if docs:
             total = sum(len(d.page_content) for d in docs)
             log.debug("[RAG] query={} 命中{}条 总{}字", query[:40], len(docs), total)
@@ -401,6 +435,30 @@ class KnowledgeBase:
                 while len(self._search_cache) > _SEARCH_CACHE_MAX:
                     self._search_cache.popitem(last=False)
         return docs
+
+    def _search_reranked(self, query: str) -> list[Document]:
+        """相似度候选 + （chroma）距离阈值过滤 + 关键词重叠 rerank。
+
+        替代原 MMR：向量召回负责筛选 fetch_k 候选，关键词重叠 rerank 负责精排。
+        精排与后端 score 语义无关，避免不同向量库（Chroma L2 距离 vs
+        pgvector/milvus 余弦相似度）的 score 方向不一致导致排序反向。
+        """
+        fetch_k = max(settings.rag_k * 3, settings.rag_k)
+        k = settings.rag_k
+        try:
+            scored = self._store.similarity_search_with_score(query, k=fetch_k)
+        except Exception as e:
+            log.debug("后端不支持 score 检索，回退 MMR: {}", e)
+            return self._retriever.invoke(query)
+        # 距离阈值过滤（仅 Chroma L2 距离语义；pgvector/milvus 的 score 语义不同，暂不应用）
+        if settings.rag_distance_threshold and self._store_type == "chroma":
+            scored = [(d, s) for d, s in scored if s <= settings.rag_distance_threshold]
+        if not scored:
+            return []
+        # rerank：关键词重叠度降序（后端无关）；预计算重叠分避免排序时重复计算
+        scored = [(d, s, _keyword_overlap(query, d.page_content)) for d, s in scored]
+        scored.sort(key=lambda x: -x[2])
+        return [d for d, _, _ in scored[:k]]
 
     def search_as_text(self, query: str) -> str:
         """检索并拼接为上下文文本，供 LLM 引用。"""

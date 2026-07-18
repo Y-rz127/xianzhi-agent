@@ -48,24 +48,28 @@ def test_detect_theory_topic_returns_none_for_unrelated():
     assert detect_theory_topic("今天适合跳槽吗") is None
 
 
-def test_build_theory_queries_uses_focused_single_query():
-    """理论问题：识别到术语时只构造 1 条 query，不叠加个性化/命例/古籍/断法"""
+def test_build_theory_queries_uses_focused_queries():
+    """理论问题：识别到术语时以用户原句为首条、术语精准 query 其次，
+    不叠加个性化/命例/古籍/断法"""
     workflow = XianzhiWorkflow(chat_model=None)
     queries, meta = workflow._build_theory_queries("用神是什么")
-    assert len(queries) == 1
+    assert len(queries) == 2
     assert meta.startswith("topic=")
-    assert "用神" in queries[0]
+    assert queries[0] == "用神是什么"           # 用户原句置首
+    assert "用神" in queries[1]                  # 术语精准 query
     # 验证不含无关的"空亡 桃花 神煞 禄神"等内容
-    assert "空亡" not in queries[0]
-    assert "桃花" not in queries[0]
+    assert "空亡" not in queries[0] and "空亡" not in queries[1]
+    assert "桃花" not in queries[0] and "桃花" not in queries[1]
 
 
 def test_build_theory_queries_fallback_when_no_topic():
-    """未识别到具体术语时走 fallback"""
+    """未识别到具体术语时走 fallback（仍注入用户原句为首条）"""
     workflow = XianzhiWorkflow(chat_model=None)
     queries, meta = workflow._build_theory_queries("命理学有哪些流派")
     assert meta == "fallback"
-    assert len(queries) == 1
+    assert len(queries) == 2
+    assert queries[0] == "命理学有哪些流派"
+    assert queries[1] == "命理 术语 概念 解释"
 
 
 def test_decompose_query_parses_llm_json():

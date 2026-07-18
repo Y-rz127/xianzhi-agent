@@ -1,5 +1,7 @@
 """应用配置加载（对应 Java 项目的 application.yml）。"""
 from pathlib import Path
+from typing import Optional
+
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -65,8 +67,13 @@ class Settings(BaseSettings):
     milvus_uri: str = Field(default="", alias="MILVUS_URI")
     vector_db_dir: Path = Field(default=Path("./data/vector_db"), alias="VECTOR_DB_DIR")
     rag_k: int = Field(default=2, alias="RAG_K")
-    # MMR 检索的 lambda_mult 参数（0~1）：越高越重视相关性、越低越重视多样性；0.5 为均衡值
-    rag_mmr_lambda: float = Field(default=0.5, alias="RAG_MMR_LAMBDA")
+    # 检索排序相关度权重（0~1）：越高越重视相关性、越低越重视多样性。
+    # 主路径（KnowledgeBase._search_reranked）按关键词重叠重排，不依赖本值；
+    # 本值仅在后端不支持 score 检索、回退 MMR retriever 时生效。
+    rag_mmr_lambda: float = Field(default=0.7, alias="RAG_MMR_LAMBDA")
+    # 检索距离阈值（仅对支持 score 的后端有效，如 Chroma L2 距离）。
+    # None 表示不过滤；需按 embedding 模型距离分布实验标定，避免误伤召回。
+    rag_distance_threshold: Optional[float] = Field(default=None, alias="RAG_DISTANCE_THRESHOLD")
     # PostgreSQL + pgvector 连接串（VECTOR_STORE_TYPE=postgres 时使用）
     postgres_connection_string: str = Field(
         default="postgresql://postgres:postgres@localhost:5433/xianzhi",

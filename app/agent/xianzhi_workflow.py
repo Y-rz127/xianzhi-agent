@@ -795,7 +795,7 @@ class XianzhiWorkflow:
     # 单 query 检索结果最大字符数（避免单次拉爆 token；≈ 2-3 个 chunk）
     _MAX_TEXT_PER_QUERY = 1000
     # 累计送入 prompt 的总检索字符上限（截断兜底）
-    _MAX_KNOWLEDGE_TOTAL = 3500
+    _MAX_KNOWLEDGE_TOTAL = 2500
 
     def _retrieve_rules(
         self,
@@ -823,7 +823,7 @@ class XianzhiWorkflow:
             queries, log_meta = self._build_theory_queries(user_text)
             log.info("[workflow检索] 理论路径 meta={} 构造query数={}", log_meta, len(queries))
         else:
-            queries, log_meta = self._build_duxing_queries(intent, ctx, worker)
+            queries, log_meta = self._build_duxing_queries(intent, ctx, worker, user_text)
             log.info("[workflow检索] 断事路径 meta={} 构造query数={}", log_meta, len(queries))
 
         log.info("[workflow检索] 领域={} 命主={}{} 构造query数={}",
@@ -854,7 +854,7 @@ class XianzhiWorkflow:
                 log.info("[workflow检索] [{}/{}] 内容预览: {}", idx, len(queries), preview)
             if not text:
                 continue
-            block = f"【检索问题】{query}\n{text}"
+            block = text
             # 总字符截断兜底
             if total_chars + len(block) > self._MAX_KNOWLEDGE_TOTAL:
                 remain = self._MAX_KNOWLEDGE_TOTAL - total_chars
@@ -883,7 +883,12 @@ class XianzhiWorkflow:
         match = detect_theory_topic(user_text)
         if match:
             topic, query = match
-            return [query], f"topic={topic}"
+            # 用户原句放首条：语义最自然，对 embedding 检索最友好
+            queries = [user_text, query] if user_text and user_text.strip() else [query]
+            return queries, f"topic={topic}"
+        # fallback 也注入用户原句，保持与匹配路径/断事路径一致
+        if user_text and user_text.strip():
+            return [user_text, "命理 术语 概念 解释"], "fallback"
         return ["命理 术语 概念 解释"], "fallback"
 
     def _build_duxing_queries(
@@ -891,23 +896,29 @@ class XianzhiWorkflow:
         intent: QuestionIntent,
         ctx: WorkflowChartContext,
         worker: DomainWorker | None,
+        user_text: str = "",
     ) -> tuple[list[str], str]:
         """断事问题 query 构造：领域规则 + 个性化 + 命例 + 古籍 + 断法。"""
-        queries: list[str] = list(DOMAIN_RULE_QUERIES.get(intent.domain, DOMAIN_RULE_QUERIES["general"]))
+        # 用户原句放首条：语义最自然，对 embedding 检索最友好
+        queries: list[str] = []
+        if user_text and user_text.strip():
+            queries.append(user_text.strip())
+        day_master = ctx.chart.wuxing.day_master or ""
+        strength = ctx.chart.wuxing.strength or ""
+        # 个性化 query 紧随：绑定命盘日主+强弱，对检索精度最关键，优先于通用堆砌词
+        queries.append(f"{intent.label} {day_master}日主 {strength} 大运流年")
+        # 领域通用规则 query
+        queries.extend(DOMAIN_RULE_QUERIES.get(intent.domain, DOMAIN_RULE_QUERIES["general"]))
         # 1) Worker 专属额外检索 query
         if worker and worker.extra_queries:
             queries.extend(worker.extra_queries)
-        day_master = ctx.chart.wuxing.day_master or ""
-        strength = ctx.chart.wuxing.strength or ""
-        # 2) 日主 + 强弱个性化 query
-        queries.append(f"{intent.label} {day_master}日主 {strength} 大运流年")
-        # 3) 命例查相似结构
+        # 2) 命例查相似结构
         if day_master and strength:
             if "旺" in strength or "强" in strength:
                 queries.append(f"{day_master}日主身旺 命例 典型命局 古籍")
             elif "弱" in strength or "衰" in strength:
                 queries.append(f"{day_master}日主身弱 命例 典型命局 古籍")
-        # 4) 按领域补古籍检索
+        # 3) 按领域补古籍检索
         ancient_query_map = {
             "career": "渊海子平 论官杀 事业 官星",
             "wealth": "渊海子平 论财 财星 食伤生财",
@@ -924,7 +935,7 @@ class XianzhiWorkflow:
         ancient_q = ancient_query_map.get(intent.domain)
         if ancient_q:
             queries.append(ancient_q)
-        # 5) 断法体系 query
+        # 4) 断法体系 query
         duanfa_query_map = {
             "health": "健康伤病 断法 五行失衡 疾病",
             "wealth": "贫富层次 财星 断法 命理",
@@ -941,8 +952,8 @@ class XianzhiWorkflow:
         duanfa_q = duanfa_query_map.get(intent.domain)
         if duanfa_q:
             queries.append(duanfa_q)
-        # 上限 3 条（领域规则 + 个性化 + 古籍/断法择一）
-        return queries[:3], "duxing"
+        # 上限 4 条（用户原句 + 个性化 + 领域通用/worker专属 择前二）
+        return queries[:4], "duxing"
 
     def _build_messages(
         self,

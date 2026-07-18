@@ -16,6 +16,9 @@ from app.config import settings
 from app.rag.vector_store import knowledge_base
 from app.logger import log
 
+# RAG 端点历史窗口：仅保留最近 N 轮（human+ai），防止上下文无限膨胀
+RAG_MAX_HISTORY_TURNS = 10
+
 
 RAG_SYSTEM_PROMPT = """你是先知，一位精通八字命理的预测师。
 请结合下方【命理知识库】的内容回答用户问题，确保专业准确。
@@ -125,7 +128,7 @@ class RagChatChain:
 
     def chat(self, question: str, session_id: str = "default") -> str:
         """同步问答（带记忆）。"""
-        history_msgs = self._load_history(session_id)
+        history_msgs = self._load_history(session_id)[-RAG_MAX_HISTORY_TURNS * 2:]
         try:
             response = self._chain.invoke(
                 {"question": question, "history": history_msgs},
@@ -138,7 +141,7 @@ class RagChatChain:
 
     async def chat_stream(self, question: str, session_id: str = "default"):
         """流式问答（带记忆）。"""
-        history_msgs = self._load_history(session_id)
+        history_msgs = self._load_history(session_id)[-RAG_MAX_HISTORY_TURNS * 2:]
         ctx = knowledge_base.search_as_text(question)
         full = ""
         try:
