@@ -61,10 +61,10 @@ class RagChatChain:
                 self._pg_factory = PostgresChatMessageHistory
                 # 首次连接时建表（create_tables 是静态方法）
                 try:
-                    self._pg_factory.create_tables(self._pg_conn, settings.memory_table_name)
+                    self._pg_factory.create_tables(self._pg_conn, "rag_message_store")
                 except Exception as ce:
                     log.warning("RAG 记忆表创建失败（可能已存在）: {}", ce)
-                log.info("RAG 历史记忆: PostgreSQL (table={})", settings.memory_table_name)
+                log.info("RAG 历史记忆: PostgreSQL (table={})", "rag_message_store")
             except Exception as e:
                 log.warning("PostgresChatMessageHistory 不可用，RAG 回退内存: {}", e)
                 self._use_pg = False
@@ -95,7 +95,7 @@ class RagChatChain:
         if self._use_pg and self._pg_factory is not None:
             try:
                 h = self._pg_factory(
-                    settings.memory_table_name,
+                    "rag_message_store",
                     str(uuid.uuid5(uuid.NAMESPACE_DNS, session_id)),
                     sync_connection=self._pg_conn,
                 )
@@ -112,7 +112,7 @@ class RagChatChain:
         if self._use_pg and self._pg_factory is not None:
             try:
                 h = self._pg_factory(
-                    settings.memory_table_name,
+                    "rag_message_store",
                     str(uuid.uuid5(uuid.NAMESPACE_DNS, session_id)),
                     sync_connection=self._pg_conn,
                 )

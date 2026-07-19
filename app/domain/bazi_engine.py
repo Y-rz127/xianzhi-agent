@@ -220,7 +220,7 @@ JIN_YU = {
 }
 # 福星贵人（以年/日干查地支，古诀：凡甲、丙两干见寅或子，
 # 乙、癸两干见卯或丑，戊干见申，己干见未，丁干见亥，庚干见午，
-# 辛干见巳，壬干见辰）
+# 辛干见巳，壬干见辰是也）
 FU_XING = {
     "甲": ("寅", "子"), "丙": ("寅", "子"),
     "乙": ("卯", "丑"), "癸": ("卯", "丑"),
@@ -703,8 +703,8 @@ def _compute_shensha(pillars: list[Pillar], gender_int: int | None = None) -> li
                 if p.zhi == y:
                     add("金舆", "贵气显赫、得权贵相助，具领导气质", p.name)
 
-    # 福星贵人（年干或月干）
-    for g in (year_gan, month_gan):
+    # 福星贵人（年干或日干）
+    for g in (year_gan, day_gan):
         for z in FU_XING.get(g, ()):
             for p in pillars:
                 if p.zhi == z:

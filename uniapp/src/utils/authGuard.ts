@@ -9,7 +9,7 @@ const LOGIN_PATH = '/pages/login/index'
 /** 检查登录状态，未登录则跳转。返回 true 表示已通过检查。 */
 export function requireLogin(): boolean {
   if (isLoggedIn()) return true
-  // tabBar 页不能用 navigateTo 跳转非 tabBar 页，需用 reLaunch / redirectTo
-  uni.reLaunch({ url: LOGIN_PATH })
+  // TODO: 真机调试期间暂时关闭强制登录跳转，调试完成后恢复
+  // uni.reLaunch({ url: LOGIN_PATH })
   return false
 }

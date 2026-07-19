@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <view class="page">
     <!-- 水墨山水背景 -->
     <view class="landscape" aria-hidden="true">
@@ -169,7 +169,7 @@
 
     <!-- 历史会话抽屉 -->
     <view v-if="showHistoryDrawer" class="drawer-mask" @tap="closeHistoryDrawer">
-      <view class="drawer-panel" @tap.stop>
+      <view class="drawer-panel" @tap.stop :style="{ paddingTop: (statusBarHeight + 10) + 'px' }">
         <view class="drawer-header">
           <text class="drawer-title">历史会话</text>
           <text class="drawer-close" @tap="closeHistoryDrawer">✕</text>
@@ -210,7 +210,7 @@ import { chatWithXianzhiWS, chatWithRagWS, closeAllWS } from '@/api/chat'
 import {
   parsePillars, parseWuxing, parseDayun, parseShensha,
   downloadReport, getChart,
-  fetchSessions, fetchMySessions, deleteSession as deleteSessionApi, clearSessionMessages, getSessionMessages,
+  fetchSessions, fetchMySessions, deleteSession as deleteSessionApi, clearSessionMessages, clearRagSessionMessages, getSessionMessages,
   getSessionBirthInfo,
   type ChartData, type ChatSession,
 } from '@/api'
@@ -262,6 +262,8 @@ function genConversationId(): string {
 }
 const conversationId = ref(genConversationId())
 
+const ragSessionId = ref(uni.getStorageSync('rag-session-id') || ('rag-' + Date.now()))
+uni.setStorageSync('rag-session-id', ragSessionId.value)
 // 历史会话抽屉
 const showHistoryDrawer = ref(false)
 const historySessions = ref<ChatSession[]>([])
@@ -441,14 +443,17 @@ function goHehun() {
 /** 清空当前会话的消息记录，保留会话ID与命盘上下文 */
 async function clearChat() {
   try {
-    await clearSessionMessages('xianzhi', conversationId.value)
+    if (mode.value === "rag" && ragSessionId.value) {
+      await clearRagSessionMessages(ragSessionId.value)
+    } else {
+      await clearSessionMessages("xianzhi", conversationId.value)
+    }
   } catch {}
   // 按当前 mode 清空对应的会话数组
-  const target = mode.value === 'rag' ? ragMessages.value : agentMessages.value
+  const target = mode.value === "rag" ? ragMessages.value : agentMessages.value
   target.splice(0, target.length)
   inputText.value = ''
 }
-
 /** 清空前确认 */
 function confirmClear() {
   uni.showModal({
@@ -461,6 +466,8 @@ function confirmClear() {
 /** 新建会话：生成新会话ID并清空命盘上下文 */
 function newSession() {
   conversationId.value = genConversationId()
+  ragSessionId.value = 'rag-' + Date.now()
+  uni.setStorageSync('rag-session-id', ragSessionId.value)
   agentMessages.value.splice(0, agentMessages.value.length)
   ragMessages.value.splice(0, ragMessages.value.length)
   inputText.value = ''
@@ -607,7 +614,7 @@ function onSend() {
     })
   } else {
     chatWithRagWS(text, {
-      sessionId: 'rag-' + Date.now(),
+      sessionId: ragSessionId.value,
       onMessage, onDone, onError,
     })
   }

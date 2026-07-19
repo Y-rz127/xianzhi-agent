@@ -1,4 +1,4 @@
-const API_BASE = import.meta.env.DEV ? "http://localhost:8123/api" : "/api"
+﻿const API_BASE = import.meta.env.DEV ? "http://localhost:8123/api" : "/api"
 
 export interface SSECallbacks {
   onMessage?: (data: string) => void
@@ -275,6 +275,13 @@ export async function clearSessionMessages(type: "xianzhi", id: string): Promise
   if (!id) return
   try {
     await fetch(`${API_BASE}/ai/xianzhi/sessions/${id}/clear`, { method: "POST" })
+  } catch {}
+}
+
+export async function clearRagSessionMessages(sessionId: string): Promise<void> {
+  if (!sessionId) return
+  try {
+    await fetch(`${API_BASE}/ai/xianzhi/rag/sessions/${encodeURIComponent(sessionId)}/clear`, { method: "POST" })
   } catch {}
 }
 

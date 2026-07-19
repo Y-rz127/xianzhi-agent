@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="chat-view">
     <div class="sidebar-mask" v-if="!sidebarCollapsed && isMobile" @click="sidebarCollapsed = true"></div>
     <div class="chat-sidebar" :class="{ collapsed: sidebarCollapsed }">
@@ -238,7 +238,7 @@
 <script setup lang="ts">
 defineOptions({ name: 'Xianzhi' })
 import { ref, nextTick, computed, onMounted, onActivated, onUnmounted } from "vue"
-import { chatWithXianzhi, chatWithRag, downloadReport, parsePillars, parseWuxing, parseDayun, parseShensha, fetchSessions, deleteSession as deleteSessionApi, clearSessionMessages, getSessionMessages, getSessionBirthInfo, fetchChartCases, createChartCase, deleteChartCase, getChart, type ChatSession, type SessionMessage, type ChartCase, type ChartData, type SSECallbacks } from "../api"
+import { chatWithXianzhi, chatWithRag, downloadReport, parsePillars, parseWuxing, parseDayun, parseShensha, fetchSessions, deleteSession as deleteSessionApi, clearSessionMessages, clearRagSessionMessages, getSessionMessages, getSessionBirthInfo, fetchChartCases, createChartCase, deleteChartCase, getChart, type ChatSession, type SessionMessage, type ChartCase, type ChartData, type SSECallbacks } from "../api"
 import BaziCard from "../components/BaziCard.vue"
 import WuxingChart from "../components/WuxingChart.vue"
 import DayunTimeline from "../components/DayunTimeline.vue"
@@ -255,7 +255,8 @@ const mode = ref<"agent" | "rag">("agent")
 const lastBirthInfo = ref<BirthInfo | null>(null)
 const chartData = ref<ChartData | null>(null)
 const conversationId = ref("web-xianzhi-" + Date.now())
-const ragSessionId = ref("rag-" + Date.now())
+const ragSessionId = ref(localStorage.getItem("rag-session-id") || ("rag-" + Date.now()))
+localStorage.setItem("rag-session-id", ragSessionId.value)
 const sidebarCollapsed = ref(true)
 const isMobile = ref(false)
 const appSidebarOpen = ref(false)
@@ -411,7 +412,10 @@ const switchMode = (m: "agent" | "rag") => {
 
 const clearChat = async () => {
   // 清空当前会话：删除数据库消息记录，保留会话ID与命盘上下文
-  if (conversationId.value) {
+  if (mode.value === "rag" && ragSessionId.value) {
+    await clearRagSessionMessages(ragSessionId.value)
+  }
+  if (mode.value === "agent" && conversationId.value) {
     await clearSessionMessages("xianzhi", conversationId.value)
   }
   messages.value = []
@@ -422,6 +426,7 @@ const clearChat = async () => {
 const newSession = () => {
   conversationId.value = "web-xianzhi-" + Date.now()
   ragSessionId.value = "rag-" + Date.now()
+  localStorage.setItem("rag-session-id", ragSessionId.value)
   messages.value = []
   lastBirthInfo.value = null
   chartData.value = null

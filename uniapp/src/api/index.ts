@@ -1,4 +1,4 @@
-/**
+﻿/**
  * API 请求层 - 基于 uni.request，对齐后端 FastAPI 接口
  * 后端路由前缀: /api/ai
  * 基址来自 config.ts，运行时可调用 setConfig({ apiBase }) 覆盖（小程序切局域网 IP 用）
@@ -253,6 +253,9 @@ export const clearSessionMessages = (type: 'xianzhi', id: string) => {
   return post(`/ai/xianzhi/sessions/${id}/clear`, {})
 }
 
+export const clearRagSessionMessages = (sessionId: string) => {
+  return post(`/ai/xianzhi/rag/sessions/${encodeURIComponent(sessionId)}/clear`, {})
+}
 export interface SessionMessage {
   role: 'user' | 'assistant'
   content: string

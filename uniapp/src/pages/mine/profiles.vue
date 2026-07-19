@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <view class="page">
     <view class="nav-placeholder" :style="{ height: (statusBarHeight + navBarHeight) + 'px' }"></view>
     <view class="nav-bar">
@@ -79,8 +79,8 @@ const navBarHeight = ref(44)
 try {
   const s = uni.getWindowInfo()
   const btn = uni.getMenuButtonBoundingClientRect()
-  statusBarHeight.value = s.statusBarHeight || 20
-  navBarHeight.value = (btn.bottom - s.statusBarHeight) + (s.statusBarHeight - btn.top)
+  statusBarHeight.value = Math.max(s.statusBarHeight || 0, 44)
+  navBarHeight.value = Math.max((btn.bottom - s.statusBarHeight) + (s.statusBarHeight - btn.top), 44)
 } catch {}
 
 const profiles = ref<BaziProfile[]>([])

@@ -29,7 +29,7 @@
       </view>
 
       <view v-else class="list">
-        <view v-for="c in cases" :key="c.id" class="case-card" @tap="loadChartCase(c)">
+        <view v-for="c in cases" :key="c.id" class="case-card">
           <view class="case-top">
             <view class="case-head">
               <text class="case-name">{{ c.name }}</text>

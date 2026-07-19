@@ -1,4 +1,4 @@
-"""RAG 知识库问答与管理接口。"""
+﻿"""RAG 知识库问答与管理接口。"""
 from __future__ import annotations
 
 from datetime import datetime
@@ -121,6 +121,22 @@ async def chat_with_rag_sync(message: str, session_id: str = "default"):
         return {"error": "RAG chain not initialized"}
     return {"result": state._rag_chain.chat(message, session_id)}
 
+
+
+@chat_router.post("/rag/sessions/{session_id}/clear")
+async def clear_rag_session(session_id: str):
+    """清空 RAG 问答会话的消息记录，保留会话 ID。"""
+    import uuid
+    from app.config import settings
+    from app.memory.postgres_memory import _get_pool
+    try:
+        session_uuid = str(uuid.uuid5(uuid.NAMESPACE_DNS, session_id))
+        with _get_pool().connection() as conn:
+            conn.execute("DELETE FROM rag_message_store WHERE session_id = %s", (session_uuid,))
+        return {"status": "ok"}
+    except Exception as e:
+        log.exception("清空 RAG 会话消息失败: {}", session_id)
+        return {"status": "error", "detail": str(e)}
 
 # ---------- 知识库管理接口 ----------
 

@@ -836,45 +836,50 @@ class XianzhiWorkflow:
 
         parts: list[str] = []
         total_chars = 0
-        seen_prefixes: set[str] = set()  # 跨 query 去重：相同片段不重复送入 prompt
+        seen_chunks: set[tuple[str, str]] = set()
         dedup_count = 0
         for idx, query in enumerate(queries, 1):
-            text = knowledge_base.search_as_text(query)
-            # 单 query 结果截断，防止长片段（古籍原文）吃光预算
-            if text and len(text) > self._MAX_TEXT_PER_QUERY:
-                text = text[:self._MAX_TEXT_PER_QUERY] + "…"
-            # 跨 query 去重：取前 120 字符作为指纹，避免语义相近的 query 返回相同片段
-            if text:
-                prefix = text[:120]
-                if prefix in seen_prefixes:
-                    dedup_count += 1
-                    log.debug("[workflow检索] [{}/{}] query={} 结果与前面重复，跳过", idx, len(queries), query)
-                    continue
-                seen_prefixes.add(prefix)
-            log.info("[workflow检索] [{}/{}] query={} 命中={}字",
-                     idx, len(queries), query, len(text) if text else 0)
-            # 打印检索内容前 200 字符，方便排查
-            if text:
-                preview = text.replace("\n", " ")[:200]
-                log.info("[workflow检索] [{}/{}] 内容预览: {}", idx, len(queries), preview)
-            if not text:
+            docs = knowledge_base.search(query)
+            if not docs:
+                log.info("[workflow检索] [{}/{}] query={} 无匹配", idx, len(queries), query)
                 continue
-            block = text
-            # 总字符截断兜底
-            if total_chars + len(block) > self._MAX_KNOWLEDGE_TOTAL:
+            query_parts: list[str] = []
+            query_chars = 0
+            for di, doc in enumerate(docs, 1):
+                chunk_key = (doc.metadata.get("source", ""), doc.page_content[:120])
+                if chunk_key in seen_chunks:
+                    dedup_count += 1
+                    continue
+                seen_chunks.add(chunk_key)
+                chunk_text = "[片段{}] (来源:{}):\n{}".format(
+                    di, doc.metadata.get("source", "未知"), doc.page_content)
+                if query_chars + len(chunk_text) > self._MAX_TEXT_PER_QUERY:
+                    chunk_text = chunk_text[:self._MAX_TEXT_PER_QUERY - query_chars] + "…"
+                    query_parts.append(chunk_text)
+                    query_chars += len(chunk_text)
+                    break
+                query_parts.append(chunk_text)
+                query_chars += len(chunk_text)
+            if not query_parts:
+                log.info("[workflow检索] [{}/{}] query={} 全部chunk重复，跳过", idx, len(queries), query)
+                continue
+            text = "\n\n".join(query_parts)
+            preview = text.replace("\n", " ")[:200]
+            log.info("[workflow检索] [{}/{}] query={} 命中={}字", idx, len(queries), query, len(text))
+            log.info("[workflow检索] [{}/{}] 内容预览: {}", idx, len(queries), preview)
+            if total_chars + len(text) > self._MAX_KNOWLEDGE_TOTAL:
                 remain = self._MAX_KNOWLEDGE_TOTAL - total_chars
                 if remain > 200:
-                    block = block[:remain] + "…"
-                    parts.append(block)
-                    total_chars += len(block)
+                    parts.append(text[:remain] + "…")
+                    total_chars += remain
                 log.info("[workflow检索] 累计字符已达上限，截断后续结果")
                 break
-            parts.append(block)
-            total_chars += len(block)
+            parts.append(text)
+            total_chars += len(text)
         if not parts:
             log.info("[workflow检索] 全部query无匹配结果")
         else:
-            log.info("[workflow检索] 汇总: {}条query → {}条有效结果, 去重跳过{}条, 总{}字",
+            log.info("[workflow检索] 汇总: {}条query → {}条有效结果, 去重跳过{}条chunk, 总{}字",
                      len(queries), len(parts), dedup_count, total_chars)
         return "\n\n".join(parts) if parts else "（未检索到相关知识）"
 
