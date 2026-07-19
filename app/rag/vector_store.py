@@ -2,8 +2,8 @@
 
 加载命理知识 markdown，切分、向量化、入库，提供检索能力。
 向量库支持：
-- chroma  : 本地嵌入式（默认，开箱即用）
-- postgres: PostgreSQL + pgvector（生产级，可扩展）
+- chroma  : 本地嵌入式（兜底使用，开箱即用）
+- postgres: PostgreSQL + pgvector（本项目默认使用）
 - milvus  : Milvus（参考笔记 07_RAG）
 
 Embedding 默认用阿里云 DashScope text-embedding-v2；
@@ -458,7 +458,11 @@ class KnowledgeBase:
         # rerank：关键词重叠度降序（后端无关）；预计算重叠分避免排序时重复计算
         scored = [(d, s, _keyword_overlap(query, d.page_content)) for d, s in scored]
         scored.sort(key=lambda x: -x[2])
-        return [d for d, _, _ in scored[:k]]
+        top = scored[:k]
+        log.info("[rerank] query={} 候选数={} 选取前{}条={}",
+                  query[:30], len(scored), k,
+                  [(round(o, 3), d.page_content[:18]) for d, s, o in top])
+        return [d for d, _, _ in top]
 
     def search_as_text(self, query: str) -> str:
         """检索并拼接为上下文文本，供 LLM 引用。"""
