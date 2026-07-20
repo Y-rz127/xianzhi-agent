@@ -803,44 +803,58 @@ def _compute_shensha(pillars: list[Pillar], gender_int: int | None = None) -> li
 
     # ================================================================
     # 三、以年支/日支查的神煞
+    # 注：文档明确「查余支/余三支」，即排除自身柱位
+    #   以年支查时排除年柱(index=0)，以日支查时排除日柱(index=2)
     # ================================================================
-    for key_zhi, label in ((year_zhi, "年"), (day_zhi, "日")):
+    for key_zhi, label, skip_idx in ((year_zhi, "年", 0), (day_zhi, "日", 2)):
 
         huagai = HUA_GAI.get(key_zhi)
         if huagai:
-            for p in pillars:
+            for i, p in enumerate(pillars):
+                if i == skip_idx:
+                    continue
                 if p.zhi == huagai:
                     add("华盖", f"聪明孤僻，近艺术宗教（{label}支起）", p.name)
 
         taohua = TAO_HUA.get(key_zhi)
         if taohua:
-            for p in pillars:
+            for i, p in enumerate(pillars):
+                if i == skip_idx:
+                    continue
                 if p.zhi == taohua:
                     add("桃花", f"人缘感情，异性缘佳（{label}支起）", p.name)
 
         yima = YI_MA.get(key_zhi)
         if yima:
-            for p in pillars:
+            for i, p in enumerate(pillars):
+                if i == skip_idx:
+                    continue
                 if p.zhi == yima:
                     add("驿马", f"迁动出行，奔波变化（{label}支起）", p.name)
 
         jiang = JIANG_XING.get(key_zhi)
         if jiang:
-            for p in pillars:
+            for i, p in enumerate(pillars):
+                if i == skip_idx:
+                    continue
                 if p.zhi == jiang:
                     add("将星", f"掌权威望，领导力强（{label}支起）", p.name)
 
         # 劫煞
         jiesha = JIE_SHA.get(key_zhi)
         if jiesha:
-            for p in pillars:
+            for i, p in enumerate(pillars):
+                if i == skip_idx:
+                    continue
                 if p.zhi == jiesha:
                     add("劫煞", f"破财伤身之兆（{label}支起）", p.name)
 
         # 亡神
         wangshen = WANG_SHEN.get(key_zhi)
         if wangshen:
-            for p in pillars:
+            for i, p in enumerate(pillars):
+                if i == skip_idx:
+                    continue
                 if p.zhi == wangshen:
                     add("亡神", f"心思深沉，暗耗多端（{label}支起）", p.name)
 
@@ -848,72 +862,92 @@ def _compute_shensha(pillars: list[Pillar], gender_int: int | None = None) -> li
     # 四、以年支查的专属神煞（灾煞、红鸾、天喜、孤辰寡宿、吊客、病符、天医）
     # 注：吊客/病符/天医传统只以年支查，故不放入上面的年/日双查循环
     # ================================================================
-    # 灾煞（将星冲位，以年支查）
+    # 灾煞（将星冲位，以年支查余三支）
     zaisha = ZAI_SHA.get(year_zhi)
     if zaisha:
-        for p in pillars:
+        for i, p in enumerate(pillars):
+            if i == 0:
+                continue
             if p.zhi == zaisha:
                 add("灾煞", f"灾厄不顺，需防意外（年支{year_zhi}→{zaisha}）", p.name)
 
-    # 吊客（岁后二辰）
+    # 吊客（岁后二辰，以年支查余三支）
     diaoke = DIAO_KE.get(year_zhi)
     if diaoke:
-        for p in pillars:
+        for i, p in enumerate(pillars):
+            if i == 0:
+                continue
             if p.zhi == diaoke:
                 add("吊客", "孝服丧事之兆（年支起）", p.name)
 
-    # 病符（岁后一辰）
+    # 病符（岁后一辰，以年支查余三支）
     bingfu = BING_FU.get(year_zhi)
     if bingfu:
-        for p in pillars:
+        for i, p in enumerate(pillars):
+            if i == 0:
+                continue
             if p.zhi == bingfu:
                 add("病符", "身体小恙，注意健康（年支起）", p.name)
 
     hongluan = HONG_LUAN.get(year_zhi)
     if hongluan:
-        for p in pillars:
+        for i, p in enumerate(pillars):
+            if i == 0:
+                continue
             if p.zhi == hongluan:
                 add("红鸾", "喜庆婚恋之事", p.name)
 
     tianxi = TIAN_XI.get(year_zhi)
     if tianxi:
-        for p in pillars:
+        for i, p in enumerate(pillars):
+            if i == 0:
+                continue
             if p.zhi == tianxi:
                 add("天喜", "喜事临门，感情顺遂", p.name)
 
     guchen = GU_CHEN.get(year_zhi)
     if guchen:
-        for p in pillars:
+        for i, p in enumerate(pillars):
+            if i == 0:
+                continue
             if p.zhi == guchen:
                 add("孤辰", "性格孤独，亲情淡薄", p.name)
 
     guasu = GUA_SU.get(year_zhi)
     if guasu:
-        for p in pillars:
+        for i, p in enumerate(pillars):
+            if i == 0:
+                continue
             if p.zhi == guasu:
                 add("寡宿", "内心寂寞，晚景清冷", p.name)
 
-    # 丧门
+    # 丧门（以年支查余三支）
     sangmen = SANG_MEN.get(year_zhi)
     if sangmen:
-        for p in pillars:
+        for i, p in enumerate(pillars):
+            if i == 0:
+                continue
             if p.zhi == sangmen:
                 add("丧门", "孝服丧事之应，主忧郁悲伤", p.name)
 
-    # 披麻（年支查）
+    # 披麻（年支查余三支）
     for z in PI_MA.get(year_zhi, ()):
-        for p in pillars:
+        for i, p in enumerate(pillars):
+            if i == 0:
+                continue
             if p.zhi == z:
                 add("披麻", "孝服六亲有损，大运流年遇之主意外伤病", p.name)
 
-    # 血刃（月支查）
+    # 血刃（月支查余三支，排除月柱自身）
     xr = XUE_REN.get(month_zhi)
     if xr:
-        for p in pillars:
+        for i, p in enumerate(pillars):
+            if i == 1:
+                continue
             if p.zhi == xr:
                 add("血刃", "血光之灾、外伤手术，岁运冲激尤忌", p.name)
 
-    # 勾绞煞（年支查，依年干阴阳+性别：阳男阴女勾前绞后，阴男阳女勾后绞前）
+    # 勾绞煞（年支查余三支，依年干阴阳+性别：阳男阴女勾前绞后，阴男阳女勾后绞前）
     yang_gan = {"甲", "丙", "戊", "庚", "壬"}
     is_yang = year_gan in yang_gan
     is_male = gender_int == 1
@@ -921,10 +955,14 @@ def _compute_shensha(pillars: list[Pillar], gender_int: int | None = None) -> li
         gou = _adv(year_zhi, 3); jiao = _adv(year_zhi, -3); gtype = "阳男/阴女"
     else:
         gou = _adv(year_zhi, -3); jiao = _adv(year_zhi, 3); gtype = "阴男/阳女"
-    for p in pillars:
+    for i, p in enumerate(pillars):
+        if i == 0:
+            continue
         if p.zhi == gou:
             add("勾绞煞", f"牵连羁绊、易有官非纠纷（勾煞 {gtype} {year_zhi}→{gou}）", p.name)
-    for p in pillars:
+    for i, p in enumerate(pillars):
+        if i == 0:
+            continue
         if p.zhi == jiao:
             add("勾绞煞", f"牵连羁绊、易有官非纠纷（绞煞 {gtype} {year_zhi}→{jiao}）", p.name)
 
@@ -935,7 +973,9 @@ def _compute_shensha(pillars: list[Pillar], gender_int: int | None = None) -> li
             yuan = _adv(chong, 1); ylabel = "冲前一位（阳男/阴女）"
         else:
             yuan = _adv(chong, -1); ylabel = "冲后一位（阴男/阳女）"
-        for p in pillars:
+        for i, p in enumerate(pillars):
+            if i == 0:
+                continue
             if p.zhi == yuan:
                 add("元辰", f"别而不合、诸事不顺（{ylabel} {year_zhi}冲{chong}→{yuan}）", p.name)
 
@@ -1352,21 +1392,15 @@ def build_bazi_chart(
     if sect != 2:
         ec.setSect(sect)
 
-    # 大运顺逆以日干阴阳+性别判定（不依赖年干）
-    # 规则：男命日干阳→顺排、阴→逆排；女命日干阳→逆排、阴→顺排
-    # lunar-python 内部用年干，故年干/日干阴阳不同时翻转性别参数
+    # 大运顺逆以年干阴阳+性别判定（传统《渊海子平》古法）
+    # 规则：阳年(甲丙戊庚壬)男/阴年女 → 顺排；阴年男/阳年女 → 逆排
+    # lunar-python 内部用年干阴阳+性别判定，与古法一致，直接传真实性别
     yang_gan = {"甲", "丙", "戊", "庚", "壬"}
-    day_gan = ec.getDayGan()
     year_gan = ec.getYearGan()
-    day_is_yang = day_gan in yang_gan
     year_is_yang = year_gan in yang_gan
-    if year_is_yang != day_is_yang:
-        virtual_gender = 1 - gender_int
-    else:
-        virtual_gender = gender_int
-    yun = ec.getYun(virtual_gender, yun_sect)
+    yun = ec.getYun(gender_int, yun_sect)
     start_solar = yun.getStartSolar()
-    dayun_direction = "顺排" if (day_is_yang == (gender_int == 1)) else "逆排"
+    dayun_direction = "顺排" if (year_is_yang == (gender_int == 1)) else "逆排"
 
     pillars = [
         _pillar("年柱", ec.getYear(), ec.getYearNaYin(), ec.getYearXunKong(), ec.getYearHideGan(), ec.getYearShiShenGan(), ec.getYearShiShenZhi()),
@@ -1411,7 +1445,7 @@ def build_bazi_chart(
             "startDay": yun.getStartDay(),
             "startHour": yun.getStartHour(),
             "startDate": f"{start_solar.getYear():04d}-{start_solar.getMonth():02d}-{start_solar.getDay():02d}",
-            "forward": day_is_yang == (gender_int == 1),
+            "forward": year_is_yang == (gender_int == 1),
             "direction": dayun_direction,
         },
         warnings=warnings,
