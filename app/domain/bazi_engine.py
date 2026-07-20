@@ -180,10 +180,10 @@ TIAN_DE_MONTH = {
     8: ("寅",),     # 八月(酉月)：见寅（地支！）
     9: ("丙",),     # 九月(戌月)：见丙
     10: ("乙",),    # 十月(亥月)：见乙
-    11: ("己",),    # 十一月(子月)：见己
+    11: ("巳",),    # 十一月(子月)：见巳（地支！）
     12: ("庚",),    # 十二月(丑月)：见庚
 }
-TIAN_DE_IS_BRANCH = {2, 5, 8}  # 这几个月的天德是地支而非天干
+TIAN_DE_IS_BRANCH = {2, 5, 8, 11}  # 这几个月的天德是地支而非天干
 # 月德贵人（以月支查，歌诀：寅午戌月丙上辉，亥卯未月甲干栖，
 #         申子辰月壬干是，巳酉丑月庚干奇）
 YUE_DE_MONTH = {
@@ -244,7 +244,7 @@ JIE_SHA = {
     # 金局(巳酉丑)：土绝于寅
     "巳": "寅", "酉": "寅", "丑": "寅",
 }
-# 灾煞（将星受冲位，以年支/日支查）
+# 灾煞（将星受冲位，以年支查）
 # 将星=三合局中支(四正)，灾煞=将星之冲
 ZAI_SHA = {
     # 水(申子辰)→将星子→冲午
@@ -837,13 +837,6 @@ def _compute_shensha(pillars: list[Pillar], gender_int: int | None = None) -> li
                 if p.zhi == jiesha:
                     add("劫煞", f"破财伤身之兆（{label}支起）", p.name)
 
-        # 灾煞
-        zaisha = ZAI_SHA.get(key_zhi)
-        if zaisha:
-            for p in pillars:
-                if p.zhi == zaisha:
-                    add("灾煞", f"灾厄不顺，需防意外（{label}支起）", p.name)
-
         # 亡神
         wangshen = WANG_SHEN.get(key_zhi)
         if wangshen:
@@ -852,9 +845,16 @@ def _compute_shensha(pillars: list[Pillar], gender_int: int | None = None) -> li
                     add("亡神", f"心思深沉，暗耗多端（{label}支起）", p.name)
 
     # ================================================================
-    # 四、以年支查的专属神煞（红鸾、天喜、孤辰寡宿、吊客、病符、天医）
+    # 四、以年支查的专属神煞（灾煞、红鸾、天喜、孤辰寡宿、吊客、病符、天医）
     # 注：吊客/病符/天医传统只以年支查，故不放入上面的年/日双查循环
     # ================================================================
+    # 灾煞（将星冲位，以年支查）
+    zaisha = ZAI_SHA.get(year_zhi)
+    if zaisha:
+        for p in pillars:
+            if p.zhi == zaisha:
+                add("灾煞", f"灾厄不顺，需防意外（年支{year_zhi}→{zaisha}）", p.name)
+
     # 吊客（岁后二辰）
     diaoke = DIAO_KE.get(year_zhi)
     if diaoke:
@@ -913,33 +913,38 @@ def _compute_shensha(pillars: list[Pillar], gender_int: int | None = None) -> li
             if p.zhi == xr:
                 add("血刃", "血光之灾、外伤手术，岁运冲激尤忌", p.name)
 
-    # 勾绞煞（年支查：命前三辰为勾、命后三辰为绞）
-    gou = _adv(year_zhi, 3)
-    jiao = _adv(year_zhi, -3)
+    # 勾绞煞（年支查，依年干阴阳+性别：阳男阴女勾前绞后，阴男阳女勾后绞前）
+    yang_gan = {"甲", "丙", "戊", "庚", "壬"}
+    is_yang = year_gan in yang_gan
+    is_male = gender_int == 1
+    if (is_yang and is_male) or (not is_yang and not is_male):
+        gou = _adv(year_zhi, 3); jiao = _adv(year_zhi, -3); gtype = "阳男/阴女"
+    else:
+        gou = _adv(year_zhi, -3); jiao = _adv(year_zhi, 3); gtype = "阴男/阳女"
     for p in pillars:
         if p.zhi == gou:
-            add("勾绞煞", f"牵连羁绊、易有官非纠纷（勾煞 {year_zhi}→{gou}）", p.name)
+            add("勾绞煞", f"牵连羁绊、易有官非纠纷（勾煞 {gtype} {year_zhi}→{gou}）", p.name)
     for p in pillars:
         if p.zhi == jiao:
-            add("勾绞煞", f"牵连羁绊、易有官非纠纷（绞煞 {year_zhi}→{jiao}）", p.name)
+            add("勾绞煞", f"牵连羁绊、易有官非纠纷（绞煞 {gtype} {year_zhi}→{jiao}）", p.name)
 
-    # 元辰（年支查对冲前/后一位，依性别：男取冲前一位、女取冲后一位）
+    # 元辰（年支查对冲前/后一位，依年干阴阳+性别）
     chong = CHONG_ZHI.get(year_zhi)
     if chong:
-        if gender_int == 0:
-            yuan = _adv(chong, -1); ylabel = "冲后一位"
+        if (is_yang and is_male) or (not is_yang and not is_male):
+            yuan = _adv(chong, 1); ylabel = "冲前一位（阳男/阴女）"
         else:
-            yuan = _adv(chong, 1); ylabel = "冲前一位"
+            yuan = _adv(chong, -1); ylabel = "冲后一位（阴男/阳女）"
         for p in pillars:
             if p.zhi == yuan:
                 add("元辰", f"别而不合、诸事不顺（{ylabel} {year_zhi}冲{chong}→{yuan}）", p.name)
 
-    # 天罗地网（戌亥为天罗、辰巳为地网；年/日支见之）
-    for z in (year_zhi, day_zhi):
-        if z in TIAN_LUO:
-            add("天罗", f"困顿羁绊、难挣脱（年/日支见{z}）", "")
-        if z in DI_WANG:
-            add("地网", f"困顿羁绊、事业受阻（年/日支见{z}）", "")
+    # 天罗地网（戌亥为天罗、辰巳为地网；需戌亥互见 / 辰巳互见）
+    all_zhi = [p.zhi for p in pillars]
+    if "戌" in all_zhi and "亥" in all_zhi:
+        add("天罗", "困顿羁绊、难挣脱（戌亥互见）", "")
+    if "辰" in all_zhi and "巳" in all_zhi:
+        add("地网", "困顿羁绊、事业受阻（辰巳互见）", "")
 
     # ================================================================
     # 五、特殊组合类神煞（日柱特定组合 / 日柱纳音等）
@@ -1015,21 +1020,25 @@ def _compute_shensha(pillars: list[Pillar], gender_int: int | None = None) -> li
                 add("三奇贵人", f"天干相连见{' '.join(triple)}，襟怀卓越、博学多能", "")
                 break
 
-    # 童子煞（月令 + 年柱纳音 + 日时支综合判断，对齐 07_神煞初探.md）
-    dt_zhi = {day_zhi} | ({pillars[3].zhi} if len(pillars) > 3 else set())
-    tongzi = False
-    if season_now in ("春", "秋") and (dt_zhi & {"寅", "子"}):
-        tongzi = True
-    elif season_now in ("夏", "冬") and (dt_zhi & {"卯", "未", "辰"}):
-        tongzi = True
-    if year_nayin_wx in ("金", "木") and (dt_zhi & {"午", "卯"}):
-        tongzi = True
-    elif year_nayin_wx in ("水", "火") and (dt_zhi & {"酉", "戌"}):
-        tongzi = True
-    elif year_nayin_wx == "土" and (dt_zhi & {"辰", "巳"}):
-        tongzi = True
-    if tongzi:
-        add("童子煞", "运气多阻、易遇小人，婚姻迟缓，宜修道艺", "日时支")
+    # 童子煞（月令 + 年柱纳音 + 日/时支分别判断，对齐 07_神煞初探.md）
+    # 「春秋寅子贵，冬夏卯未辰；金木马卯合，水火鸡犬多；土命逢辰巳」
+    def _check_tongzi(zhi: str, pillar_label: str) -> bool:
+        if season_now in ("春", "秋") and zhi in ("寅", "子"):
+            return True
+        if season_now in ("夏", "冬") and zhi in ("卯", "未", "辰"):
+            return True
+        if year_nayin_wx in ("金", "木") and zhi in ("午", "卯"):
+            return True
+        if year_nayin_wx in ("水", "火") and zhi in ("酉", "戌"):
+            return True
+        if year_nayin_wx == "土" and zhi in ("辰", "巳"):
+            return True
+        return False
+
+    if _check_tongzi(day_zhi, "日柱"):
+        add("童子煞", "运气多阻、易遇小人，婚姻迟缓，宜修道艺", "日柱")
+    if len(pillars) > 3 and _check_tongzi(pillars[3].zhi, "时柱"):
+        add("童子煞", "运气多阻、易遇小人，婚姻迟缓，宜修道艺", "时柱")
 
     # 飞刃（羊刃对冲位）
     if yangren:
@@ -1255,7 +1264,7 @@ def _pillar(name: str, ganzhi: str, nayin: str, xunkong: str, hidden: str, shish
 
 def _build_dayun(yun, count: int) -> list[DayunItem]:
     items: list[DayunItem] = []
-    for d_yun in yun.getDaYun(count):
+    for d_yun in yun.getDaYun(count + 1):
         gz = d_yun.getGanZhi()
         if not gz:
             continue
@@ -1268,6 +1277,8 @@ def _build_dayun(yun, count: int) -> list[DayunItem]:
             end_age=d_yun.getEndAge(),
             xunkong=d_yun.getXunKong(),
         ))
+        if len(items) >= count:
+            break
     return items
 
 
@@ -1340,8 +1351,22 @@ def build_bazi_chart(
     ec = lunar.getEightChar()
     if sect != 2:
         ec.setSect(sect)
-    yun = ec.getYun(gender_int, yun_sect)
+
+    # 大运顺逆以日干阴阳+性别判定（不依赖年干）
+    # 规则：男命日干阳→顺排、阴→逆排；女命日干阳→逆排、阴→顺排
+    # lunar-python 内部用年干，故年干/日干阴阳不同时翻转性别参数
+    yang_gan = {"甲", "丙", "戊", "庚", "壬"}
+    day_gan = ec.getDayGan()
+    year_gan = ec.getYearGan()
+    day_is_yang = day_gan in yang_gan
+    year_is_yang = year_gan in yang_gan
+    if year_is_yang != day_is_yang:
+        virtual_gender = 1 - gender_int
+    else:
+        virtual_gender = gender_int
+    yun = ec.getYun(virtual_gender, yun_sect)
     start_solar = yun.getStartSolar()
+    dayun_direction = "顺排" if (day_is_yang == (gender_int == 1)) else "逆排"
 
     pillars = [
         _pillar("年柱", ec.getYear(), ec.getYearNaYin(), ec.getYearXunKong(), ec.getYearHideGan(), ec.getYearShiShenGan(), ec.getYearShiShenZhi()),
@@ -1386,8 +1411,8 @@ def build_bazi_chart(
             "startDay": yun.getStartDay(),
             "startHour": yun.getStartHour(),
             "startDate": f"{start_solar.getYear():04d}-{start_solar.getMonth():02d}-{start_solar.getDay():02d}",
-            "forward": yun.isForward(),
-            "direction": "顺排" if yun.isForward() else "逆排",
+            "forward": day_is_yang == (gender_int == 1),
+            "direction": dayun_direction,
         },
         warnings=warnings,
     )

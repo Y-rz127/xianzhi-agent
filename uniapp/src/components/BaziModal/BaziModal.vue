@@ -461,7 +461,7 @@ async function generateReport() {
   width: calc(25% - 9rpx);
   background: $color-bg-card;
   border-radius: 12rpx;
-  padding: 16rpx 8rpx;
+  padding: 12rpx 6rpx;
   text-align: center;
   border: 1rpx solid $color-border;
   box-sizing: border-box;
@@ -469,22 +469,22 @@ async function generateReport() {
 }
 .dayun-year {
   display: block;
-  font-size: 30rpx;
+  font-size: 28rpx;
   font-weight: bold;
   color: $color-ink;
   font-family: $font-family-display;
-  margin-bottom: 6rpx;
+  margin-bottom: 4rpx;
   letter-spacing: 2rpx;
 }
 .dayun-range {
   display: block;
-  font-size: 20rpx;
+  font-size: 18rpx;
   color: $color-ink-light;
   margin-bottom: 2rpx;
 }
 .dayun-age {
   display: block;
-  font-size: 20rpx;
+  font-size: 18rpx;
   color: $color-ink-lighter;
 }
 
