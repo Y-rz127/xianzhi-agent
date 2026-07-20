@@ -88,7 +88,7 @@
 import { ref, watch } from "vue"
 import MarkdownRender from "../components/MarkdownRender.vue"
 import BaziCard from "../components/BaziCard.vue"
-import { getChart, type ChartData } from "../api"
+import { getChart, apiFetch, type ChartData } from "../api"
 
 const API_BASE = import.meta.env.DEV ? "http://localhost:8123/api" : "/api"
 const male = ref({ birth: "", gender: "男" })
@@ -147,7 +147,7 @@ const analyze = async () => {
       birth_time_b: normalizeBirth(female.value.birth),
       gender_b: female.value.gender,
     })
-    const res = await fetch(`${API_BASE}/ai/xianzhi/hehun?${params}`)
+    const res = await apiFetch(`${API_BASE}/ai/xianzhi/hehun?${params}`)
     const data = await res.json()
     if (data.error) result.value = "分析失败：" + data.error
     else result.value = data.result || data.content || JSON.stringify(data)

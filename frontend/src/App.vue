@@ -63,6 +63,12 @@
           </span>
           <span v-if="!sidebarCollapsed">用户管理</span>
         </router-link>
+      <router-link to="/admin-accounts" class="nav-item" active-class="active" @click="onNavClick">
+        <span class="nav-icon account-icon">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        </span>
+        <span v-if="!sidebarCollapsed">账号管理</span>
+      </router-link>
         <router-link to="/feedback" class="nav-item feedback-nav" active-class="active" @click="onNavClick">
           <span class="nav-icon feedback-icon">
             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>

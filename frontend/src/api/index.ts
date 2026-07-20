@@ -1,4 +1,18 @@
 ﻿const API_BASE = import.meta.env.DEV ? "http://localhost:8123/api" : "/api"
+const API_KEY = "xianzhi-yrz-admin"
+
+function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  const headers = new Headers(init?.headers)
+  headers.set("X-API-Key", API_KEY)
+  return fetch(input, { ...init, headers })
+}
+
+export { apiFetch }
+
+function withApiKey(url: string): string {
+  const sep = url.includes("?") ? "&" : "?"
+  return `${url}${sep}api_key=${encodeURIComponent(API_KEY)}`
+}
 
 export interface SSECallbacks {
   onMessage?: (data: string) => void
@@ -19,7 +33,7 @@ export function connectSSE(path: string, params: Record<string, string | undefin
     .filter((k) => params[k] !== undefined && params[k] !== "")
     .map((k) => `${encodeURIComponent(k)}=${encodeURIComponent(params[k] as string)}`)
     .join("&")
-  const url = `${API_BASE}${path}?${qs}`
+  const url = withApiKey(`${API_BASE}${path}?${qs}`)
   const es = new EventSource(url)
   es.onmessage = (e) => {
     if (e.data === "[DONE]") { cb.onDone?.(); es.close() }
@@ -64,7 +78,7 @@ export function downloadReport(birthTime: string, gender: string): void {
 export async function generateFullReport(birthTime: string, gender: string, sections?: string[]): Promise<string> {
   const params = new URLSearchParams({ birth_time: birthTime, gender })
   if (sections && sections.length) params.set("sections", sections.join(","))
-  const res = await fetch(`${API_BASE}/ai/xianzhi/full_report?${params.toString()}`)
+  const res = await apiFetch(`${API_BASE}/ai/xianzhi/full_report?${params.toString()}`)
   const data = await res.json()
   if (data.error) throw new Error(data.error)
   return data.content || ""
@@ -116,14 +130,14 @@ export async function getChart(birthTime: string, gender: string, sect = 2, yunS
     sect: String(sect),
     yun_sect: String(yunSect),
   })
-  const res = await fetch(`${API_BASE}/ai/xianzhi/chart?${params.toString()}`)
+  const res = await apiFetch(`${API_BASE}/ai/xianzhi/chart?${params.toString()}`)
   if (!res.ok) throw new Error(`排盘失败 ${res.status}`)
   return await res.json()
 }
 
 export async function fetchChartCases(): Promise<ChartCase[]> {
   try {
-    const res = await fetch(`${API_BASE}/ai/xianzhi/chart_cases`)
+    const res = await apiFetch(`${API_BASE}/ai/xianzhi/chart_cases`)
     if (!res.ok) throw new Error("fail")
     return await res.json()
   } catch { return [] }
@@ -137,7 +151,7 @@ export async function createChartCase(payload: Partial<ChartCase>): Promise<{ id
     tags: payload.tags,
     chart_data: payload.chartData,
   }
-  const res = await fetch(`${API_BASE}/ai/xianzhi/chart_cases`, {
+  const res = await apiFetch(`${API_BASE}/ai/xianzhi/chart_cases`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -150,7 +164,7 @@ export async function createChartCase(payload: Partial<ChartCase>): Promise<{ id
 }
 
 export async function updateChartCase(id: string, payload: Partial<ChartCase>): Promise<void> {
-  const res = await fetch(`${API_BASE}/ai/xianzhi/chart_cases/${id}`, {
+  const res = await apiFetch(`${API_BASE}/ai/xianzhi/chart_cases/${id}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -167,7 +181,7 @@ export async function updateChartCase(id: string, payload: Partial<ChartCase>): 
 }
 
 export async function deleteChartCase(id: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/ai/xianzhi/chart_cases/${id}`, { method: "DELETE" })
+  const res = await apiFetch(`${API_BASE}/ai/xianzhi/chart_cases/${id}`, { method: "DELETE" })
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: `删除失败 ${res.status}` }))
     throw new Error(err.detail || `删除失败 ${res.status}`)
@@ -182,7 +196,7 @@ export function exportChartCasesJSON(): void {
 export async function importChartCasesJSON(file: File): Promise<{ inserted: number; skipped: number }> {
   const text = await file.text()
   const data = JSON.parse(text)
-  const res = await fetch(`${API_BASE}/ai/xianzhi/chart_cases/import/json`, {
+  const res = await apiFetch(`${API_BASE}/ai/xianzhi/chart_cases/import/json`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ cases: data.cases || [] }),
@@ -258,7 +272,7 @@ export function parseShensha(text: string): ShenshaItem[] {
 export interface ChatSession { id: string; title: string; lastMessage: string; lastTime: string; messageCount: number }
 export async function fetchSessions(type: "xianzhi"): Promise<ChatSession[]> {
   try {
-    const res = await fetch(`${API_BASE}/ai/xianzhi/sessions`)
+    const res = await apiFetch(`${API_BASE}/ai/xianzhi/sessions`)
     if (!res.ok) throw new Error("Not found")
     return res.json()
   } catch { return [] }
@@ -267,21 +281,21 @@ export async function fetchSessions(type: "xianzhi"): Promise<ChatSession[]> {
 export async function deleteSession(type: "xianzhi", id: string): Promise<void> {
   if (!id) return
   try {
-    await fetch(`${API_BASE}/ai/xianzhi/sessions/${id}`, { method: "DELETE" })
+    await apiFetch(`${API_BASE}/ai/xianzhi/sessions/${id}`, { method: "DELETE" })
   } catch {}
 }
 
 export async function clearSessionMessages(type: "xianzhi", id: string): Promise<void> {
   if (!id) return
   try {
-    await fetch(`${API_BASE}/ai/xianzhi/sessions/${id}/clear`, { method: "POST" })
+    await apiFetch(`${API_BASE}/ai/xianzhi/sessions/${id}/clear`, { method: "POST" })
   } catch {}
 }
 
 export async function clearRagSessionMessages(sessionId: string): Promise<void> {
   if (!sessionId) return
   try {
-    await fetch(`${API_BASE}/ai/xianzhi/rag/sessions/${encodeURIComponent(sessionId)}/clear`, { method: "POST" })
+    await apiFetch(`${API_BASE}/ai/xianzhi/rag/sessions/${encodeURIComponent(sessionId)}/clear`, { method: "POST" })
   } catch {}
 }
 
@@ -318,19 +332,19 @@ export interface MetricsData {
 }
 
 export async function fetchMetrics(): Promise<MetricsData> {
-  const res = await fetch(`${API_BASE}/ai/metrics`)
+  const res = await apiFetch(`${API_BASE}/ai/metrics`)
   if (!res.ok) throw new Error("获取指标失败")
   return await res.json()
 }
 
 export async function getRagStatus(): Promise<RagStatus> {
-  const res = await fetch(`${API_BASE}/ai/rag/status`)
+  const res = await apiFetch(`${API_BASE}/ai/rag/status`)
   if (!res.ok) throw new Error("获取 RAG 状态失败")
   return await res.json()
 }
 
 export async function listRagDocs(): Promise<RagDoc[]> {
-  const res = await fetch(`${API_BASE}/ai/rag/docs`)
+  const res = await apiFetch(`${API_BASE}/ai/rag/docs`)
   if (!res.ok) throw new Error("获取文档列表失败")
   const data = await res.json()
   return data.files || []
@@ -339,7 +353,7 @@ export async function listRagDocs(): Promise<RagDoc[]> {
 export async function uploadRagDoc(file: File): Promise<{ filename: string; size: number }> {
   const form = new FormData()
   form.append("file", file)
-  const res = await fetch(`${API_BASE}/ai/rag/docs/upload`, { method: "POST", body: form })
+  const res = await apiFetch(`${API_BASE}/ai/rag/docs/upload`, { method: "POST", body: form })
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: `上传失败 ${res.status}` }))
     throw new Error(err.detail || `上传失败 ${res.status}`)
@@ -348,7 +362,7 @@ export async function uploadRagDoc(file: File): Promise<{ filename: string; size
 }
 
 export async function deleteRagDoc(filename: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/ai/rag/docs/${encodeURIComponent(filename)}`, { method: "DELETE" })
+  const res = await apiFetch(`${API_BASE}/ai/rag/docs/${encodeURIComponent(filename)}`, { method: "DELETE" })
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: `删除失败 ${res.status}` }))
     throw new Error(err.detail || `删除失败 ${res.status}`)
@@ -356,7 +370,7 @@ export async function deleteRagDoc(filename: string): Promise<void> {
 }
 
 export async function rebuildRagIndex(): Promise<{ ready: boolean }> {
-  const res = await fetch(`${API_BASE}/ai/rag/docs/rebuild`, { method: "POST" })
+  const res = await apiFetch(`${API_BASE}/ai/rag/docs/rebuild`, { method: "POST" })
   if (!res.ok) throw new Error("重建向量库失败")
   return await res.json()
 }
@@ -364,7 +378,7 @@ export async function rebuildRagIndex(): Promise<{ ready: boolean }> {
 export async function getSessionMessages(type: "xianzhi", id: string): Promise<SessionMessage[]> {
   if (!id) return []
   try {
-    const res = await fetch(`${API_BASE}/ai/xianzhi/sessions/${id}/messages`)
+    const res = await apiFetch(`${API_BASE}/ai/xianzhi/sessions/${id}/messages`)
     if (!res.ok) return []
     const data = await res.json()
     return data.map((m: any) => ({
@@ -381,7 +395,7 @@ export interface SessionBirthInfo { time: string | null; gender: string | null }
 export async function getSessionBirthInfo(id: string): Promise<SessionBirthInfo> {
   if (!id) return { time: null, gender: null }
   try {
-    const res = await fetch(`${API_BASE}/ai/xianzhi/sessions/${id}/birth-info`)
+    const res = await apiFetch(`${API_BASE}/ai/xianzhi/sessions/${id}/birth-info`)
     if (!res.ok) return { time: null, gender: null }
     return await res.json()
   } catch { return { time: null, gender: null } }
@@ -413,7 +427,7 @@ export function drawTarotCardsWS(
   cb: { onCards?: (cards: TarotDrawnCard[]) => void; onError?: (err: string) => void }
 ): WebSocket {
   const wsBase = API_BASE.replace(/^http/, "ws")
-  const url = `${wsBase}/ai/tarot/ws`
+  const url = withApiKey(`${wsBase}/ai/tarot/ws`)
   const ws = new WebSocket(url)
 
   ws.onopen = () => {
@@ -438,7 +452,7 @@ export function interpretTarotWS(
   cb: TarotInterpretCallbacks
 ): WebSocket {
   const wsBase = API_BASE.replace(/^http/, "ws")
-  const url = `${wsBase}/ai/tarot/ws`
+  const url = withApiKey(`${wsBase}/ai/tarot/ws`)
   const ws = new WebSocket(url)
 
   ws.onopen = () => {
@@ -484,13 +498,13 @@ export interface AdminUserDetail {
 
 export async function listAdminUsers(limit = 200, offset = 0): Promise<{ total: number; users: AdminUser[] }> {
   const params = new URLSearchParams({ limit: String(limit), offset: String(offset) })
-  const res = await fetch(`${API_BASE}/ai/admin/users?${params.toString()}`)
+  const res = await apiFetch(`${API_BASE}/ai/admin/users?${params.toString()}`)
   if (!res.ok) throw new Error("获取用户列表失败")
   return await res.json()
 }
 
 export async function getAdminUser(user_id: string): Promise<AdminUserDetail> {
-  const res = await fetch(`${API_BASE}/ai/admin/users/${encodeURIComponent(user_id)}`)
+  const res = await apiFetch(`${API_BASE}/ai/admin/users/${encodeURIComponent(user_id)}`)
   if (!res.ok) throw new Error("获取用户详情失败")
   return await res.json()
 }
@@ -512,7 +526,7 @@ export async function submitFeedback(content: string, contact?: string): Promise
   const token = localStorage.getItem("XZ_TOKEN")
   const headers: Record<string, string> = { "Content-Type": "application/x-www-form-urlencoded" }
   if (token) headers["Authorization"] = `Bearer ${token}`
-  const res = await fetch(`${API_BASE}/ai/feedback?${params.toString()}`, {
+  const res = await apiFetch(`${API_BASE}/ai/feedback?${params.toString()}`, {
     method: "POST",
     headers,
   })
@@ -525,7 +539,7 @@ export async function submitFeedback(content: string, contact?: string): Promise
 
 /** 管理员获取反馈列表 */
 export async function fetchFeedbacks(limit = 200): Promise<FeedbackItem[]> {
-  const res = await fetch(`${API_BASE}/ai/feedback?limit=${limit}`)
+  const res = await apiFetch(`${API_BASE}/ai/feedback?limit=${limit}`)
   if (!res.ok) throw new Error("获取反馈列表失败")
   const data = await res.json()
   return data.items || []
@@ -533,9 +547,80 @@ export async function fetchFeedbacks(limit = 200): Promise<FeedbackItem[]> {
 
 /** 管理员删除反馈 */
 export async function deleteFeedback(fid: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/ai/feedback/${fid}`, { method: "DELETE" })
+  const res = await apiFetch(`${API_BASE}/ai/feedback/${fid}`, { method: "DELETE" })
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: `删除失败 ${res.status}` }))
     throw new Error(err.detail || `删除失败 ${res.status}`)
   }
+}
+// ========== 管理后台：管理员账号 ==========
+
+export interface AdminAccount {
+  id: string
+  username: string
+  nickname: string | null
+  enabled: boolean
+  is_super: boolean
+  created_at: string
+}
+
+/** 获取管理员账号列表 */
+export async function listAdminAccounts(): Promise<AdminAccount[]> {
+  const res = await apiFetch(`${API_BASE}/ai/admin/accounts`)
+  if (!res.ok) throw new Error("获取管理员账号列表失败")
+  const data = await res.json()
+  return data.accounts || []
+}
+
+/** 创建管理员账号 */
+export async function createAdminAccount(data: { username: string; password: string; nickname?: string }): Promise<AdminAccount> {
+  const res = await apiFetch(`${API_BASE}/ai/admin/accounts`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.detail || "创建账号失败")
+  }
+  return await res.json()
+}
+
+/** 更新管理员账号 */
+export async function updateAdminAccount(account_id: string, data: { nickname?: string; password?: string; enabled?: boolean }): Promise<AdminAccount> {
+  const res = await apiFetch(`${API_BASE}/ai/admin/accounts/${encodeURIComponent(account_id)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.detail || "更新账号失败")
+  }
+  return await res.json()
+}
+
+/** 删除管理员账号 */
+export async function deleteAdminAccount(account_id: string): Promise<void> {
+  const res = await apiFetch(`${API_BASE}/ai/admin/accounts/${encodeURIComponent(account_id)}`, {
+    method: "DELETE",
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.detail || "删除账号失败")
+  }
+}
+
+/** 管理员登录 */
+export async function adminLogin(username: string, password: string): Promise<{ id: string; username: string; nickname: string }> {
+  const res = await fetch(`${API_BASE}/ai/admin/accounts/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username, password }),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.detail || "登录失败")
+  }
+  return await res.json()
 }

@@ -1,5 +1,5 @@
-import { createRouter, createWebHistory } from "vue-router"
-import type { RouteRecordRaw } from "vue-router"
+﻿import { createRouter, createWebHistory } from "vue-router"
+import type { RouteLocationNormalized, RouteRecordRaw } from "vue-router"
 import Xianzhi from "../views/Xianzhi.vue"
 import Disclaimer from "../views/Disclaimer.vue"
 import Privacy from "../views/Privacy.vue"
@@ -11,6 +11,8 @@ import ChartCases from "../views/ChartCases.vue"
 import Observability from "../views/Observability.vue"
 import UserAdmin from "../views/UserAdmin.vue"
 import Feedback from "../views/Feedback.vue"
+import AdminLogin from "../views/AdminLogin.vue"
+import { isAdminLoggedIn } from "../utils/adminAuth"
 
 const routes: RouteRecordRaw[] = [
   { path: "/", redirect: "/xianzhi" },
@@ -25,8 +27,17 @@ const routes: RouteRecordRaw[] = [
   { path: "/observability", name: "observability", component: Observability, meta: { title: "可观测性" } },
   { path: "/user-admin", name: "user-admin", component: UserAdmin, meta: { title: "用户管理" } },
   { path: "/feedback", name: "feedback", component: Feedback, meta: { title: "问题反馈" } },
+  { path: "/admin-login", name: "admin-login", component: AdminLogin, meta: { title: "管理员登录" } },
+  { path: "/admin-accounts", name: "admin-accounts", component: () => import("../views/AdminAccountManager.vue"), meta: { title: "账号管理" } },
 ]
 
 const router = createRouter({ history: createWebHistory(), routes })
-router.afterEach((to) => { document.title = (to.meta.title as string) || "先知" })
+
+router.beforeEach((to: RouteLocationNormalized) => {
+  if (to.path === "/admin-login") return
+  if (!isAdminLoggedIn()) {
+    return { path: "/admin-login", query: { redirect: to.fullPath } }
+  }
+})
+
 export default router

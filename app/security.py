@@ -1,6 +1,6 @@
 """安全中间件：API Key 鉴权 + 单 IP 滑动窗口限流。
 
-- 鉴权：API_KEYS 为空时关闭（本地开发默认）；非空时 HTTP 与 WebSocket 均校验。
+- 鉴权：API_KEYS 为空时关闭（本地开发默认）；非空时仅对管理后台路径校验。
   HTTP 支持 X-API-Key 请求头或 ?api_key= 查询参数；WebSocket 同规则（小程序无法自定义头时用 query）。
 - 限流：内存滑动窗口，单 IP 每分钟 RATE_LIMIT_PER_MINUTE 次（0=不限流）。
   多 worker 部署时应换 Redis 等共享存储，本实现覆盖单进程场景。
@@ -23,14 +23,27 @@ _EXEMPT_PREFIXES = (
     "/docs",
     "/redoc",
     "/openapi.json",
+    "/api/ai/admin/accounts/login",
     "/assets/",
     "/static/",
     "/favicon",
 )
 
+# 管理后台路径（需 API Key 鉴权；普通用户接口不受影响）
+_ADMIN_PREFIXES = (
+    "/api/ai/admin/",
+    "/api/ai/metrics",
+    "/api/ai/rag/",
+    "/api/ai/observability/",
+)
+
 
 def _is_exempt(path: str) -> bool:
     return any(path.startswith(p) for p in _EXEMPT_PREFIXES)
+
+
+def _is_admin_path(path: str) -> bool:
+    return any(path.startswith(p) for p in _ADMIN_PREFIXES)
 
 
 def _extract_api_key(scope: Scope) -> str:
@@ -52,8 +65,17 @@ class ApiKeyAuthMiddleware:
         if scope["type"] not in ("http", "websocket"):
             await self.app(scope, receive, send)
             return
+        # CORS 预检请求（OPTIONS）不带自定义头，直接放行
+        if scope.get("method") == "OPTIONS":
+            await self.app(scope, receive, send)
+            return
         keys = {k.strip() for k in settings.api_keys.split(",") if k.strip()}
-        if not keys or _is_exempt(scope.get("path", "")):
+        path = scope.get("path", "")
+        if not keys or _is_exempt(path):
+            await self.app(scope, receive, send)
+            return
+        # 只对管理后台路径要求 API Key，普通用户接口不受影响
+        if not _is_admin_path(path):
             await self.app(scope, receive, send)
             return
         if _extract_api_key(scope) in keys:
