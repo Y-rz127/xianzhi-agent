@@ -11,8 +11,8 @@
         :class="['pillar', p.name === '日柱' && 'day-master']"
       >
         <text class="pillar-name">{{ p.name }}</text>
-        <text class="pillar-gan">{{ p.ganzhi[0] }}</text>
-        <text class="pillar-zhi">{{ p.ganzhi[1] }}</text>
+        <text class="pillar-gan" :style="{ color: ganColor(p.ganzhi[0]) }">{{ p.ganzhi[0] }}</text>
+        <text class="pillar-zhi" :style="{ color: zhiColor(p.ganzhi[1]) }">{{ p.ganzhi[1] }}</text>
         <text class="pillar-nayin">{{ p.nayin }}</text>
         <text v-if="p.name === '日柱'" class="day-badge">日主</text>
       </view>
@@ -23,6 +23,23 @@
 <script setup lang="ts">
 import type { Pillar } from '@/api'
 defineProps<{ pillars: Pillar[] }>()
+
+const ganWx: Record<string, string> = {
+  '甲': '#4ade80', '乙': '#4ade80',
+  '丙': '#f87171', '丁': '#f87171',
+  '戊': '#d4a574', '己': '#d4a574',
+  '庚': '#fbbf24', '辛': '#fbbf24',
+  '壬': '#60a5fa', '癸': '#60a5fa',
+}
+const zhiWx: Record<string, string> = {
+  '寅': '#4ade80', '卯': '#4ade80',
+  '巳': '#f87171', '午': '#f87171',
+  '辰': '#d4a574', '戌': '#d4a574', '丑': '#d4a574', '未': '#d4a574',
+  '申': '#fbbf24', '酉': '#fbbf24',
+  '亥': '#60a5fa', '子': '#60a5fa',
+}
+const ganColor = (c: string) => ganWx[c] || '#e5e7eb'
+const zhiColor = (c: string) => zhiWx[c] || '#e5e7eb'
 </script>
 
 <style lang="scss" scoped>

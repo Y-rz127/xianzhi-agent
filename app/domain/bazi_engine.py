@@ -624,8 +624,7 @@ def _compute_shensha(pillars: list[Pillar], gender_int: int | None = None) -> li
         if key in seen:
             return
         seen.add(key)
-        full_desc = f"{pillar_name}：{desc}" if pillar_name else desc
-        result.append({"name": name, "description": full_desc})
+        result.append({"name": name, "description": desc, "pillar": pillar_name})
 
     # ================================================================
     # 一、以日干 / 年干查的神煞（口径对齐 07_神煞初探.md / FateMaster）
@@ -1089,13 +1088,14 @@ def _compute_shensha(pillars: list[Pillar], gender_int: int | None = None) -> li
                     add("飞刃", f"羊刃{yangren}对冲{feiren_zhi}，刚烈更甚、主突发伤害", p.name)
 
     # ================================================================
-    # 六、空亡（lunar-python 已算出，只标注实际落住四柱的旬空位）
+    # 六、空亡（以年柱+日柱旬空双查，标注实际落住四柱的旬空位）
     # ================================================================
-    # 空亡以日柱旬空为主（传统命理核心空亡），避免年/月/时柱空亡交叉放大标记
+    # 传统子平法以日柱旬空为主，年柱旬空为辅；本实现双查，任一落空即标记
     xunkong_set: set[str] = set()
-    if pillars[2].xunkong:
-        for xk_char in pillars[2].xunkong:
-            xunkong_set.add(xk_char)
+    for idx in (0, 2):  # 年柱=0, 日柱=2
+        if pillars[idx].xunkong:
+            for xk_char in pillars[idx].xunkong:
+                xunkong_set.add(xk_char)
     if xunkong_set:
         for p in pillars:
             if p.zhi in xunkong_set:
@@ -1552,8 +1552,11 @@ def format_chart_text(chart: BaziChart) -> str:
     shensha = _compute_shensha(chart.pillars, parse_gender(chart.birth.gender))
     if shensha:
         lines += ["", "【神煞】"]
+        seen = set()
         for s in shensha:
-            lines.append(f"  {s['name']}: {s['description']}")
+            if s["name"] not in seen:
+                seen.add(s["name"])
+                lines.append(f"  {s['name']}: {s['description']}")
     if chart.warnings:
         lines += ["", "【校验提示】"] + [f"  - {w}" for w in chart.warnings]
     return "\n".join(lines)

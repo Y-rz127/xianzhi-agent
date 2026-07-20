@@ -240,7 +240,7 @@ export function parseDayun(text: string): DayunItem[] {
   return result
 }
 
-export interface ShenshaItem { name: string; description: string }
+export interface ShenshaItem { name: string; description: string; pillar?: string }
 export function parseShensha(text: string): ShenshaItem[] {
   if (!text) return []
   const result: ShenshaItem[] = []

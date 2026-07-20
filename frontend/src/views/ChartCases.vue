@@ -184,7 +184,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from "vue"
+import { ref, computed, onMounted, type Ref } from "vue"
 import { fetchChartCases, createChartCase, updateChartCase, deleteChartCase, getChart, exportChartCasesJSON, importChartCasesJSON, type ChartCase, type ChartData } from "../api"
 import BaziModal from "../components/BaziModal.vue"
 
@@ -207,7 +207,7 @@ const importInput = ref<HTMLInputElement | null>(null)
 // 确认弹窗
 const showConfirm = ref(false)
 const confirmMsg = ref("")
-const pendingAction: ref<(() => void) | null> = ref(null)
+const pendingAction: Ref<(() => void) | null> = ref(null)
 const deleting = ref(false)
 
 // Toast

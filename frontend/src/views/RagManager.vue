@@ -108,7 +108,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from "vue"
+import { ref, computed, onMounted, type Ref } from "vue"
 import { getRagStatus, listRagDocs, uploadRagDoc, deleteRagDoc, rebuildRagIndex, type RagDoc, type RagStatus } from "../api"
 
 const status = ref<RagStatus | null>(null)
@@ -126,7 +126,7 @@ const visibleDocs = computed(() => showAllDocs.value ? docs.value : docs.value.s
 const showConfirm = ref(false)
 const confirmMsg = ref("")
 const confirmLoading = ref(false)
-const pendingAction: ref<(() => Promise<void>) | null> = ref(null)
+const pendingAction: Ref<(() => Promise<void>) | null> = ref(null)
 
 function askConfirm(msg: string, action: () => Promise<void>) {
   confirmMsg.value = msg

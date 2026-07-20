@@ -48,9 +48,8 @@
             </div>
             <div class="pillars-grid">
               <div v-for="p in pillars" :key="p.name" :class="['pillar-card', p.name === '日柱' ? 'day-master' : '']">
-                <div class="pillar-name">{{ p.name }}</div>
-                <div class="pillar-gan">{{ p.ganzhi[0] }}</div>
-                <div class="pillar-zhi">{{ p.ganzhi[1] }}</div>
+                <div class="pillar-name">{{ p.name }}</div><div class="pillar-gan" :style="{ color: ganColor(p.ganzhi[0]) }">{{ p.ganzhi[0] }}</div>
+                <div class="pillar-zhi" :style="{ color: zhiColor(p.ganzhi[1]) }">{{ p.ganzhi[1] }}</div>
                 <div class="pillar-nayin">{{ p.nayin }}</div>
                 <!-- 该柱神煞竖排（点击查看寓意） -->
                 <div v-if="shenshaByPillar[p.name]?.length" class="pillar-shensha">
@@ -211,6 +210,23 @@ const props = defineProps<{
 
 const emit = defineEmits<{ close: [] }>()
 
+const ganWx: Record<string, string> = {
+  '甲': '#4ade80', '乙': '#4ade80',
+  '丙': '#f87171', '丁': '#f87171',
+  '戊': '#d4a574', '己': '#d4a574',
+  '庚': '#fbbf24', '辛': '#fbbf24',
+  '壬': '#60a5fa', '癸': '#60a5fa',
+}
+const zhiWx: Record<string, string> = {
+  '寅': '#4ade80', '卯': '#4ade80',
+  '巳': '#f87171', '午': '#f87171',
+  '辰': '#d4a574', '戌': '#d4a574', '丑': '#d4a574', '未': '#d4a574',
+  '申': '#fbbf24', '酉': '#fbbf24',
+  '亥': '#60a5fa', '子': '#60a5fa',
+}
+const ganColor = (c: string) => ganWx[c] || '#e5e7eb'
+const zhiColor = (c: string) => zhiWx[c] || '#e5e7eb'
+
 const tabs = [
   { key: 'pillars' as TabKey, label: '四柱' },
   { key: 'wuxing' as TabKey, label: '五行' },
@@ -279,21 +295,9 @@ function classifyShensha(item: ShenshaItem): string {
 const shenshaByPillar = computed(() => {
   const pillarNames = ['年柱', '月柱', '日柱', '时柱']
   const groups: Record<string, (ShenshaItem & { _cat: string })[]> = {}
-  // 每柱独立去重：同一柱内同名神煞只保留一条
   const seenByPillar: Record<string, Set<string>> = {}
   for (const s of props.shensha) {
-    // 从 description 中提取柱名（后端格式："{pillar_name}：{desc}"）
-    let pillarName = ''
-    for (const pn of pillarNames) {
-      if (s.description.includes(pn)) {
-        pillarName = pn
-        break
-      }
-    }
-    if (!pillarName) {
-      // 兜底：理论上所有神煞都应有柱名
-      pillarName = '日柱'
-    }
+    const pillarName = pillarNames.includes(s.pillar || '') ? s.pillar! : '日柱'
     const seen = seenByPillar[pillarName] ??= new Set<string>()
     if (seen.has(s.name)) continue
     seen.add(s.name)
