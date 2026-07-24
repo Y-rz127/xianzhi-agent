@@ -121,7 +121,7 @@ class RateLimitMiddleware:
             window.popleft()
         if len(window) >= limit:
             if scope["type"] == "websocket":
-                await send({"type": "websocket.close", "code": 4429, "reason": "Too Many Requests"})
+                await send({"type": "websocket.close", "code": 429, "reason": "Too Many Requests"})
                 return
             response = JSONResponse({"detail": "请求过于频繁，请稍后再试"}, status_code=429)
             await response(scope, receive, send)

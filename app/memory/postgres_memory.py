@@ -26,27 +26,23 @@ from app.logger import log
 # ---------------------------------------------------------------
 # 模块级连接池（懒创建，线程安全）
 # ---------------------------------------------------------------
-
-_pg_pool = None
-_pool_lock = threading.Lock()
+_pg_pool = None           # 全局单例，None 表示还没创建
+_pool_lock = threading.Lock()  # 互斥锁，防止并发创建多个池
 _schema_ready = False
 
-
 def _get_pool():
-    """获取模块级 psycopg 连接池（懒创建）。ConnectionPool 本身线程安全。"""
     global _pg_pool
-    with _pool_lock:
-        if _pg_pool is None:
+    with _pool_lock:             # ① 加锁，同一时刻只有一个线程进入
+        if _pg_pool is None:     # ② 双重检查：锁内再判一次，避免重复创建
             from psycopg_pool import ConnectionPool
             _pg_pool = ConnectionPool(
                 settings.postgres_connection_string,
-                min_size=1,
-                max_size=5,
-                kwargs={"autocommit": True},
-                open=True,
+                min_size=1,      # 最少保持 1 个连接（空闲也不释放）
+                max_size=5,      # 最多 5 个连接（并发上限）
+                kwargs={"autocommit": True},  # 每条 SQL 自动提交
+                open=True,       # 创建时立即建立初始连接
             )
-            log.info("PG 连接池已创建 (min=1, max=5)")
-        return _pg_pool
+        return _pg_pool          # ③ 返回池（已存在则直接返回）
 
 
 def _ensure_schema():

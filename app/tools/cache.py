@@ -48,7 +48,7 @@ class BaziCache:
         with self._lock:
             self._cache[key] = (time.time(), result)
             while len(self._cache) > self._max_size:
-                self._cache.popitem(last=False)
+                self._cache.popitem(last=False)  # LRU 策略，移除最久未使用的，也就是队首
             log.debug("缓存写入: {} (size={})", tool, len(self._cache))
 
     def stats(self) -> dict:

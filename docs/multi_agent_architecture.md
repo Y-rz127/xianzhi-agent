@@ -39,9 +39,9 @@
   domain=career   (前文已详述)    四柱/大运/流年/十神
       │             │             │
       ▼             ▼             │
-  查WORKERS表    每条query →      │
-  取career Worker  embedding检索  │
-      │            → 2-gram重排   │
+  查WORKERS表    每条query →       │
+  取career Worker  embedding检索   │
+      │            → 2-gram重排    │
       │            → 跨query去重   │
       │            → 截断2500字    │
       │             │             │
@@ -52,6 +52,7 @@
       └─────────────┼─────────────┘
                     ▼
            拼接完整 Prompt → 发给 LLM
+
 拼接完整Prompt发给LLM：
 System:
   你是先知，拥有数十年实战经验的八字命理师傅...
@@ -92,7 +93,7 @@ Human:
   常规分析2-3段≤400字，口语化，一针见血。
   如果提到具体年份，必须同时核对该年流年干支和所在大运。
 
-两条路径对比
+两条路径对比：
 ReAct 路径（rag_search.py + retrieval.py）
 LLM 主动调用 search_knowledge 工具时触发：
 search_knowledge(query="什么是伤官见官")
@@ -114,7 +115,7 @@ search_deduped(queries, max_docs=6)  ← retrieval.py:295
   └─ 跨 query 去重（来源+前120字），最多6条文档
   │
   ▼
-返回格式化文本给 LLM（无单query/总字符限制）
+返回格式化文本给 LLM（单query850，总字符限制2500）
 
 Workflow 路径（xianzhi_workflow.py）
 确定性流程，不走 LLM 工具调用：
@@ -138,6 +139,43 @@ knowledge_base.search() × 4（每条query）
   │
   ▼
 拼入 _build_messages() 的【命理规则检索】字段 → 发给 LLM
+
+六节点流水线：
+用户问题
+    │
+    ▼
+┌──────────┐
+│ 1. 分类   │  确定领域 → 匹配 Worker
+└────┬─────┘
+     │
+     ▼
+┌──────────┐
+│ 2. 扩盘   │  按需扩展命盘流年范围
+└────┬─────┘
+     │
+     ▼
+┌──────────┐
+│ 3. 检索   │  从知识库检索命理知识
+└────┬─────┘
+     │
+     ▼
+┌──────────┐
+│ 4. 生成   │  LLM 生成回答
+└────┬─────┘
+     │
+     ▼
+┌──────────┐
+│ 5. 校验   │  Reviewer 三重校验
+└────┬─────┘
+     │
+  ┌──┴──┐
+  │ 通过 │──→ 返回
+  └──┬──┘
+     │ 不通过
+     ▼
+┌──────────┐
+│ 6. 修复   │  反思修复 → 二次校验
+└──────────┘
 ### 三种角色
 
 | 角色 | 实现 | 职责 |
@@ -228,9 +266,9 @@ class WorkerResult:
 ```
 [Supervisor] 意图=事业工作 置信度=0.65 → 分派给 事业工作 Worker
 [workflow检索] 领域=career 命主=甲木身旺 构造query数=5
-[workflow检索] [1/5] query=八字事业 官杀 印星 食伤 大运流年
+[workflow检索] [1/3] query=八字事业 官杀 印星 食伤 大运流年
   返回=《渊海子平》论官杀：正官主稳定公职…
-[workflow检索] [2/5] query=工作变动 跳槽 流年 大运 命理
+[workflow检索] [2/3] query=工作变动 跳槽 流年 大运 命理
   返回=（无匹配）
 [Reviewer] 事业工作 Worker 产出通过三重校验
 ```
@@ -324,12 +362,12 @@ async for _ in super().arun_stream(user_prompt):
 
 解决 Layer 1 管不了的事：用户口语化问题 embedding 后检索差 → 扩展为多个角度提升召回；不同 query 命中同一片段需去重；并控制送进 LLM 的上下文预算。两套实现如下：
 
-| 路径 | 上层实现 | query 来源 | 去重键 | 预算上限 |
-|------|---------|-----------|--------|---------|
-| ReAct 工具（`tools/rag_search.py`） | `search_deduped(expand_knowledge_queries(query), max_docs=6)` | 原文 + 理论术语精准 query + 领域规则 query（最多 4 条） | `(来源, 内容前120字)` | **最多 6 条文档** |
-| 工作流（`xianzhi_workflow._retrieve_rules`） | 自研循环（不调用 `search_deduped`） | LLM 拆解 `intent.queries`（限 2 条）/ theory 路径 / 断事路径（`DOMAIN_RULE_QUERIES[domain]` + `worker.extra_queries`） | 内容前 120 字 | **`_MAX_KNOWLEDGE_TOTAL=3500` 字符**（单 query 还受 `_MAX_TEXT_PER_QUERY` 截断） |
+| 路径 | 上层实现 | query 来源                                                                                                 | 去重键 | 预算上限                                                                    |
+|------|---------|----------------------------------------------------------------------------------------------------------|--------|-------------------------------------------------------------------------|
+| ReAct 工具（`tools/rag_search.py`） | `search_deduped(expand_knowledge_queries(query), max_docs=6)` | 原文 + 理论术语精准 query + 领域规则 query（最多 4 条）                                                                   | `(来源, 内容前120字)` | **最多 6 条文档**                                                            |
+| 工作流（`xianzhi_workflow._retrieve_rules`） | 自研循环（不调用 `search_deduped`） | LLM 拆解 `intent.queries`（限 3 条）/ theory 路径 / 断事路径（`DOMAIN_RULE_QUERIES[domain]` + `worker.extra_queries`） | 内容前 120 字 | **`_MAX_KNOWLEDGE_TOTAL=2800` 字符**（单 query 还受 `_MAX_TEXT_PER_QUERY` 截断） |
 
-> 注意：ReAct 工具路径的 Layer 2 即文档常说的 `search_deduped`（6 条文档上限）；但真正产出答案的**工作流路径并未调用 `search_deduped`**，而是用 3500 字符预算的自研循环。两者都会把每条 query 交给 Layer 1 的 `search_as_text` 执行 MMR，再跨 query 去重。
+> 注意：ReAct 工具路径的 Layer 2 即文档常说的 `search_deduped`（6 条文档上限）；但真正产出答案的**工作流路径并未调用 `search_deduped`**，而是用 2800 字符预算的自研循环。两者都会把每条 query 交给 Layer 1 的 `search_as_text` 执行 MMR，再跨 query 去重。
 
 ## LangGraph 集成
 

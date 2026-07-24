@@ -1,6 +1,7 @@
 """基于先知图的咨询流程是确定性的。
 对先知答案质量进行离线检查。
 这些检查是故意设计为确定性的：它们验证事实性锚点、禁止的幻觉内容以及对话结构，而无需调用模型。
+用法大概是准备一批测试用例（JSON），跑一轮得到 EvalResult 列表，看哪些用例没过。
 """
 from __future__ import annotations
 
@@ -22,7 +23,13 @@ class EvalResult:
 
 
 def evaluate_answer_case(case: dict[str, Any], answer: str) -> EvalResult:
-    """对单条答案做确定性离线评估：必含/禁含词、长度区间、报告体检测 + 事实校验。"""
+    """对单条答案做确定性离线评估：必含/禁含词、长度区间、报告体检测 + 事实校验。
+    1. 必含词检查    → 答案里有没有该出现的术语
+    2. 禁含词检查    → 答案里有没有不该出现的东西
+    3. 长度检查      → 40~900 字
+    4. 报告体检测    → 有没有把完整报告原文 dump 出来
+    5. 事实校验      → 调用 workflow.check_facts() 检查命盘事实是否说错
+    """
     issues: list[str] = []
     required_terms = case.get("required_terms", [])
     forbidden_terms = case.get("forbidden_terms", [])
