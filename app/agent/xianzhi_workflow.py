@@ -55,6 +55,31 @@ def _dedupe_content(content: str) -> str:
 GANZHI_RE = re.compile(r"[甲乙丙丁戊己庚辛壬癸][子丑寅卯辰巳午未申酉戌亥]")
 YEAR_GANZHI_RE = re.compile(r"(?P<year>\d{4})年[^。；;，,、\n]{0,12}(?P<ganzhi>[甲乙丙丁戊己庚辛壬癸][子丑寅卯辰巳午未申酉戌亥])")
 
+# 命理相关信号：用于前置判断用户输入是否与命理无关（避免长文本/诗歌调 LLM 浪费 token）
+# 收集所有非闲聊领域的核心关键词
+_ALL_BAZI_SIGNALS = (
+    "八字", "命理", "算命", "排盘", "命盘", "运势", "大运", "流年",
+    "甲", "乙", "丙", "丁", "戊", "己", "庚", "辛", "壬", "癸",
+    "子", "丑", "寅", "卯", "辰", "巳", "午", "未", "申", "酉", "戌", "亥",
+    "五行", "十神", "用神", "忌神", "格局", "神煞", "财星", "官星", "印星", "食伤",
+    "事业", "财运", "感情", "婚姻", "健康", "考试", "六亲", "子女", "性格",
+    "合婚", "起名", "择日", "方位",
+)
+
+
+def _looks_off_topic(text: str) -> bool:
+    """前置判断：用户输入是否大概率与命理无关。
+
+    条件（同时满足）：
+    1. 文本长度 > 100 字（长文本）
+    2. 不含任何命理信号词（_ALL_BAZI_SIGNALS）
+
+    命中则跳过 LLM 拆解，直接走闲聊兜底，节省 token。
+    """
+    if len(text) <= 100:
+        return False
+    return not any(sig in text for sig in _ALL_BAZI_SIGNALS)
+
 # 从用户问题里抽取「对方」出生信息（合婚场景）：支持 男/女 在数字前后两种顺序，时分可缺省
 # 注意：不允许在「性别→日期」之间跨过另一个 男/女，否则会把用户自己的性别误配给对方日期
 _OTHER_BIRTH_RE1 = re.compile(
@@ -579,15 +604,25 @@ class XianzhiWorkflow:
     _DECOMPOSE_SYSTEM = (
         "你是命理问答系统的意图分析模块。分析用户问题，输出JSON：\n"
         '{"domain":"...","queries":["...","..."],"needs_chart":true/false}\n\n'
-        "domain 取值：theory=术语/概念/格局解释与判断, career=事业工作, wealth=财运, "
+        "domain 取值：theory=术语/概念/格局解释与判断, career=事业工作, wealth=财运收入, "
         "love=恋爱, marriage=婚姻, health=健康, liunian=大运流年, study=学习考试, "
         "social=社交人际/朋友/贵人/小人, family=六亲关系/父母/子女/兄弟姐妹, "
         "personality=性格心性/天赋为人/适合什么人, migration=方位迁移/去哪发展/本地外地, "
         "naming=起名改名/用神取名, auspicious=择吉择日/开业搬家结婚选日, "
         "match=合婚配对/两人八字合不合, children=子女生育时机/何年生子, "
         "chitchat=闲聊问候, general=综合咨询\n"
-        "queries：1-3条精准检索词，用于知识库语义检索，每条≤30字，紧密围绕用户核心问题。"
-        "不要泛化，不要堆砌无关概念。例如用户问'枭神夺食'就只给枭神夺食相关的词。\n"
+        "domain 判断规则：\n"
+        "1. 与八字命理、运势、人生问题完全无关的内容（如诗歌、故事、闲聊、日常流水账），"
+        "一律归为 chitchat，queries 留空数组 []\n"
+        "2. 与命理沾边但无法归入具体领域的，归为 general\n"
+        "3. 其余按上述 domain 取值匹配\n"
+        "queries：1-3条精准检索词，用于知识库语义检索，每条≤30字。\n"
+        "知识库内容结构：古籍原文（渊海子平/子平真诠/穷通宝鉴/滴天髓/三命通会/神峰通考/盲派口诀）、"
+        "断法体系（上面列举的各领域专项断法规则）、基础理论（天干地支/五行/十神/用神/神煞/纳音等）、"
+        "规则卡（婚恋/合冲刑害/大运流年咨询口径）、术语对照表、问答模板、命例案例库。\n"
+        "知识库是通用命理文档，不按年份/人名/具体事件索引，检索词应聚焦命理概念和断法方向。\n"
+        "正确示例：用户问'2017年有人追我，感情怎么样？'→ queries: ['流年桃花 异性缘 感情运势', '恋爱机会 感情断法', '丁酉年 桃花 婚姻']\n"
+        "错误示例：'2017年丁酉流年感情运势'（年份太具体，知识库无此维度，检索结果偏离）\n"
         "needs_chart：用户是否在问自己命盘的具体判断（如'我是不是XX''我命盘XX'）。\n"
         "若 domain=match 且用户问题中给出了对方出生时间，请额外返回 other_birth_time"
         "（格式 YYYY-MM-DD HH:MM 或含时辰，如'1990-05-20 14:30'/'男1990年五月初五辰时'）和 "
@@ -622,7 +657,7 @@ class XianzhiWorkflow:
             if not isinstance(queries_raw, list):
                 return None
             queries = tuple(str(q).strip() for q in queries_raw if str(q).strip())[:3]
-            if not queries:
+            if not queries and domain != "chitchat":
                 return None
             needs_chart = bool(data.get("needs_chart", False))
             other_birth_time = str(data.get("other_birth_time", "") or "").strip()
@@ -664,6 +699,11 @@ class XianzhiWorkflow:
         if _chitchat_kw == "chitchat":
             intent = classify_question(user_prompt)
             log.info("[LLM拆解] 闲聊识别，跳过 LLM 拆解 → domain={}", intent.domain)
+        elif _looks_off_topic(user_prompt):
+            # 长文本 + 零命理信号 → 几乎确定是题外话，直接标记为 chitchat
+            intent = classify_question(user_prompt)
+            intent = replace(intent, domain="chitchat", label="闲聊问候")
+            log.info("[LLM拆解] 长文本无命理信号，跳过 LLM 拆解 → domain=chitchat")
         else:
             intent = self._decompose_query(user_prompt) or classify_question(user_prompt)
         # ===== 合婚双盘：解析对方命盘（用户已挂载自己的盘，问题中给出对方盘）=====
@@ -745,9 +785,11 @@ class XianzhiWorkflow:
             return ctx
         known_years = {item.year for item in ctx.chart.liunian}
         if all(year in known_years for year in intent.target_years):
+            log.debug("[扩盘] 目标年份 {} 已在流年范围内，无需扩盘", intent.target_years)
             return ctx
         start = min(min(intent.target_years), _dt.date.today().year)
         end = max(max(intent.target_years), _dt.date.today().year)
+        log.info("[扩盘] 流年范围不足，扩展至 {}~{} (目标年份={})", start, end, intent.target_years)
         chart = build_bazi_chart(
             ctx.birth_time,
             ctx.gender,
