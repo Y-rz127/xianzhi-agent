@@ -1,4 +1,4 @@
-﻿<template>
+﻿﻿﻿﻿<template>
   <div class="chat-view">
     <div class="sidebar-mask" v-if="!sidebarCollapsed && isMobile" @click="sidebarCollapsed = true"></div>
     <div class="chat-sidebar" :class="{ collapsed: sidebarCollapsed }">
@@ -738,6 +738,11 @@ onUnmounted(() => {
 .tab.active { background: rgba(212,175,55,0.15); color: var(--accent-light); }
 
 .messages { flex: 1; overflow-y: auto; padding: 8px; min-height: 0; }
+.messages::-webkit-scrollbar { width: 10px; }
+.messages::-webkit-scrollbar-track { background: rgba(255,255,255,0.03); border-radius: 5px; margin: 4px 0; }
+.messages::-webkit-scrollbar-thumb { background: rgba(212,175,55,0.25); border-radius: 5px; border: 2px solid transparent; background-clip: padding-box; min-height: 60px; }
+.messages::-webkit-scrollbar-thumb:hover { background: rgba(212,175,55,0.5); border: 2px solid transparent; background-clip: padding-box; }
+.messages { scrollbar-width: auto; scrollbar-color: rgba(212,175,55,0.3) rgba(255,255,255,0.03); }
 
 .load-more-bar { display: flex; justify-content: center; padding: 12px 0 6px; }
 .load-more-btn { padding: 8px 18px; font-size: 12px; color: var(--text-dim);

@@ -135,9 +135,34 @@ def init_observability() -> bool:
     os.environ["LANGCHAIN_API_KEY"] = settings.langsmith_api_key
     os.environ["LANGCHAIN_PROJECT"] = settings.langsmith_project
 
+    if not _validate_api_key(settings.langsmith_api_key):
+        os.environ["LANGCHAIN_TRACING_V2"] = "false"
+        log.warning("LangSmith API Key 无效（403），已自动关闭追踪，不影响功能")
+        return False
+
     log.info("LangSmith 追踪已启用 | 项目: {} | 查看: https://smith.langchain.com/",
              settings.langsmith_project)
     return True
+
+
+def _validate_api_key(api_key: str) -> bool:
+    """快速校验 LangSmith API Key 是否有效，避免启动后持续刷 403 报错。"""
+    try:
+        import urllib.request
+        import urllib.error
+        req = urllib.request.Request(
+            "https://api.smith.langchain.com/info",
+            headers={"x-api-key": api_key},
+            method="GET",
+        )
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            return resp.status == 200
+    except urllib.error.HTTPError as e:
+        if e.code in (401, 403):
+            return False
+        return True
+    except Exception:
+        return True
 
 
 def get_status() -> dict:

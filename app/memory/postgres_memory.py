@@ -421,6 +421,11 @@ def get_birth_info_from_session(session_id: str) -> dict | None:
                     bt = args.get("birth_time")
                     gd = args.get("gender")
                     if bt and gd:
+                        try:
+                            from app.tools.bazi import _normalize_birth_time
+                            bt = _normalize_birth_time(bt)
+                        except Exception:
+                            pass
                         return {"time": bt, "gender": gd}
         return None
     except Exception as e:

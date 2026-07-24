@@ -1,4 +1,4 @@
-﻿<template>
+﻿﻿﻿<template>
   <view class="page">
     <!-- 水墨山水背景 -->
     <view class="landscape" aria-hidden="true">
@@ -968,6 +968,10 @@ messages.value.push({
   position: relative;
   z-index: 1;
 }
+.messages::-webkit-scrollbar { width: 10px; }
+.messages::-webkit-scrollbar-track { background: rgba(255,255,255,0.03); border-radius: 5px; }
+.messages::-webkit-scrollbar-thumb { background: rgba(212,175,55,0.25); border-radius: 5px; border: 2px solid transparent; background-clip: padding-box; min-height: 60px; }
+.messages::-webkit-scrollbar-thumb:hover { background: rgba(212,175,55,0.5); border: 2px solid transparent; background-clip: padding-box; }
 .empty-state {
   display: flex;
   flex-direction: column;
