@@ -815,9 +815,8 @@ class XianzhiWorkflow:
 
         # ===== LLM 拆解的 queries 优先（精准、自适应） =====
         if intent.queries:
-            # 限制最多 2 条 query，避免过多检索导致 token 浪费
-            queries = list(intent.queries[:2])
-            log.info("[workflow检索] LLM拆解路径 queries={} (原{}条,取前2条)",
+            queries = list(intent.queries)
+            log.info("[workflow检索] LLM拆解路径 queries={} (共{}条)",
                      queries, len(intent.queries))
         elif intent.domain == "theory":
             queries, log_meta = self._build_theory_queries(user_text)

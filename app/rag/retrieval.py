@@ -284,7 +284,8 @@ def expand_knowledge_queries(query: str, limit: int = 4) -> list[str]:
     if match:
         queries.append(match[1])
     domain = detect_domain(text)
-    if domain:
+    # 理论术语已命中时，跳过 theory 领域规则 query（避免追加"命理 术语 概念 解释"这类泛化词）
+    if domain and not (match and domain == "theory"):
         queries.extend(DOMAIN_RULE_QUERIES.get(domain, ()))
     if not queries:
         queries.append("八字 命理 基础 大运 流年 用神")
