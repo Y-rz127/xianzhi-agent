@@ -27,6 +27,7 @@ async def lifespan(app: FastAPI):
 
     # 1. LLM - 使用 OpenAI 兼容模式调用千问（langchain-dashscope 不支持 bind_tools）
     # extra_body: 禁用 Qwen3 推理模型的 thinking 模式，避免 <think> 标签导致内容重复
+    import httpx
     chat_model = ChatOpenAI(
         model=settings.dashscope_model,
         base_url=settings.dashscope_url,
@@ -35,6 +36,7 @@ async def lifespan(app: FastAPI):
         timeout=settings.llm_timeout,
         max_retries=settings.llm_max_retries,
         extra_body={"enable_thinking": settings.llm_enable_thinking},
+        http_client=httpx.Client(trust_env=False),
     )
 
     # 2. 记忆
