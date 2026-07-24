@@ -73,21 +73,22 @@ def detect_domain(text: str) -> str:
 # ============================================================
 
 DOMAIN_RULE_QUERIES = {
-    "career": ("八字事业 官杀 印星 食伤 大运流年", "工作变动 跳槽 流年 大运 命理"),
-    "wealth": ("八字财运 正财 偏财 食伤 生财 大运", "破财 投资 流年 财星 命理"),
-    "love": ("八字感情 桃花 配偶星 合冲 流年", "恋爱复合 八字 大运 流年"),
-    "marriage": ("八字婚姻 配偶宫 夫妻星 合冲刑害", "结婚年份 大运流年 婚姻 命理"),
-    "health": ("八字健康 五行寒暖燥湿 失衡", "健康 流年 冲克 命理"),
-    "liunian": ("大运流年 作用关系 流年与原局", "流年 干支 立春 大运"),
-    "study": ("八字学习考试 印星 食伤 官星", "考试 升学 大运流年 命理"),
-    "social": ("八字人际 朋友 贵人 小人 比劫 社交", "合伙 同事 人脉 八字 大运 流年"),
-    "family": ("八字六亲 父母 子女 兄弟姐妹 十神", "六亲关系 印星 食伤 官杀 大运 命理"),
-    "personality": ("八字性格 日主 十神组合 心性天赋", "为人处世 性格 十神 命理"),
-    "migration": ("八字方位 用神方位 驿马 迁移发展", "去外地 本地 大运 流年 命理"),
-    "naming": ("八字起名 喜用神 取名 改名 五行补缺", "命名 用神 喜忌 命理"),
-    "auspicious": ("八字择日 择吉 黄道吉日 用事", "开业 搬家 结婚 择日 命理"),
-    "match": ("八字合婚 配偶宫 夫妻星 双盘 合婚", "婚配 八字合 刑冲 命理"),
-    "children": ("八字子女 食伤 官杀 子女宫 生育时机", "何年生子 大运流年 子女 命理"),
+    # 领域规则 query：每条 6-8 个抽象命理术语，偏向星神/格局/五行等概念层
+    "career": ("八字事业 官杀 印星 食伤 大运流年 命理",),
+    "wealth": ("八字财运 正财 偏财 食伤生财 财星 大运流年 命理",),
+    "love": ("八字感情 桃花 配偶星 合冲 流年 命理",),
+    "marriage": ("八字婚姻 配偶宫 夫妻星 合冲刑害 大运流年 命理",),
+    "health": ("八字健康 五行 寒暖燥湿 失衡 冲克 命理",),
+    "liunian": ("大运流年 作用关系 流年与原局 干支 立春 命理",),
+    "study": ("八字学业 印星 食伤 官星 大运流年 命理",),
+    "social": ("八字人际 比劫 贵人 小人 大运流年 命理",),
+    "family": ("八字六亲 父母 子女 印星 食伤 官杀 大运流年 命理",),
+    "personality": ("八字性格 日主 十神 心性天赋 命理",),
+    "migration": ("八字方位 用神 驿马 迁移 大运流年 命理",),
+    "naming": ("八字起名 喜用神 五行 命名 命理",),
+    "auspicious": ("八字择日 择吉 黄道吉日 用事 命理",),
+    "match": ("八字合婚 配偶宫 夫妻星 刑冲 命理",),
+    "children": ("八字子女 食伤 官杀 子女宫 大运流年 命理",),
     # theory 走精准概念路径，default 仅作兜底（未识别到具体术语时使用）
     "theory": ("命理 术语 概念 解释",),
     "chitchat": (),
@@ -294,20 +295,35 @@ def expand_knowledge_queries(query: str, limit: int = 4) -> list[str]:
     return deduped[:limit]
 
 
-def search_deduped(queries: list[str], max_docs: int = 6):
+def search_deduped(
+    queries: list[str],
+    max_docs: int = 6,
+    max_chars_per_query: int = 850,
+    max_chars_total: int = 2500,
+):
     """对多条 query 逐一检索并跨 query 去重，返回 [(query, doc), ...]。
 
     去重键：(来源文件, 内容前120字)，与 ReAct 工具原有行为一致。
+    控量：单 query 检索结果累计 ≤ max_chars_per_query，总 ≤ max_chars_total。
     """
     docs = []
     seen = set()
+    total_chars = 0
     for q in queries:
+        query_chars = 0
         for doc in knowledge_base.search(q):
             key = (doc.metadata.get("source", ""), doc.page_content[:120])
             if key in seen:
                 continue
+            text_len = len(doc.page_content)
+            if query_chars + text_len > max_chars_per_query:
+                continue
+            if total_chars + text_len > max_chars_total:
+                return docs
             seen.add(key)
             docs.append((q, doc))
+            query_chars += text_len
+            total_chars += text_len
             if len(docs) >= max_docs:
                 return docs
     return docs

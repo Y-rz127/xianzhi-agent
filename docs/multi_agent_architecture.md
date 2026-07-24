@@ -30,7 +30,114 @@
                   ▼
               最终回答
 ```
+完整数据流总结：
+用户："我最近事业不太顺，想换工作，什么时候有机会？"
+                    │
+      ┌─────────────┼─────────────┐
+      ▼             ▼             ▼
+  意图分类        构造4条query    命盘事实注入
+  domain=career   (前文已详述)    四柱/大运/流年/十神
+      │             │             │
+      ▼             ▼             │
+  查WORKERS表    每条query →      │
+  取career Worker  embedding检索  │
+      │            → 2-gram重排   │
+      │            → 跨query去重   │
+      │            → 截断2500字    │
+      │             │             │
+      ▼             ▼             ▼
+  expertise_prompt  knowledge片段  facts事实
+  (拼入System)     (拼入Human)    (拼入Human)
+      │             │             │
+      └─────────────┼─────────────┘
+                    ▼
+           拼接完整 Prompt → 发给 LLM
+拼接完整Prompt发给LLM：
+System:
+  你是先知，拥有数十年实战经验的八字命理师傅...
+  硬性规则（事实红线）：...
+  知识库规则：...
+  合规红线：...
+  说话风格：...
+  篇幅规范：...
+  【事业专项断法】                          ← Worker.expertise_prompt
+  - 官杀为事业主星：正官主稳定公职、体制内...
+  - 印星为权力依托：印星生扶则职位稳...
+  ...
 
+Human:
+  【用户问题】
+  我最近事业不太顺，想换工作，什么时候有机会？
+
+  【识别意图】
+  领域=事业工作; 目标年份=未指定; 置信度=0.68
+
+  【最近对话摘要】
+  （无）
+
+  【系统排盘事实】
+  八字：甲子 丙寅 甲午 庚午
+  大运：丁卯(1-10岁) 戊辰(11-20岁) ...
+  当前大运：庚午(31-40岁)
+  日主：甲木，身旺
+  十神：...
+  神煞：...
+
+  【命理规则检索】
+  [片段1] (来源:事业断法规则卡): ...
+  [片段2] (来源:流年断法): ...
+  ...（共9个片段，2500字符）
+
+  【输出要求】
+  常规分析2-3段≤400字，口语化，一针见血。
+  如果提到具体年份，必须同时核对该年流年干支和所在大运。
+
+两条路径对比
+ReAct 路径（rag_search.py + retrieval.py）
+LLM 主动调用 search_knowledge 工具时触发：
+search_knowledge(query="什么是伤官见官")
+  │
+  ▼
+expand_knowledge_queries(query)     ← retrieval.py:276
+  │
+  ├─ query 1: "什么是伤官见官"          ← 用户原句
+  ├─ query 2: (理论术语精准query，如果命中)
+  └─ query 3: "八字事业 官杀 印星 食伤 大运流年 命理"  ← DOMAIN_RULE_QUERIES（我们的改动生效）
+  │
+  ▼
+search_deduped(queries, max_docs=6)  ← retrieval.py:295
+  │
+  └─ 逐条调用 knowledge_base.search(query)
+       │
+       └─ _search_reranked() → fetch_k=6 粗排 → 2-gram 取 top 2
+       │
+  └─ 跨 query 去重（来源+前120字），最多6条文档
+  │
+  ▼
+返回格式化文本给 LLM（无单query/总字符限制）
+
+Workflow 路径（xianzhi_workflow.py）
+确定性流程，不走 LLM 工具调用：
+_retrieve_rules()
+  │
+  ▼
+_build_duxing_queries()             ← workflow:899
+  │
+  ├─ query 1: 用户原句
+  ├─ query 2: "事业工作 甲日主 身旺 大运流年"     ← 个性化（日主+强弱）
+  ├─ query 3: "八字事业 官杀 印星 食伤 大运流年 命理"  ← DOMAIN_RULE_QUERIES
+  └─ query 4: "事业 升职 换工作 跳槽 伤官见官 官杀混杂 断法"  ← Worker.extra_queries
+  │
+  ▼
+knowledge_base.search() × 4（每条query）
+  │
+  └─ _search_reranked() → fetch_k=6 粗排 → 2-gram 取 top 2
+  │
+  ▼
+手动去重 + 控量：单query≤750字，总≤2800字
+  │
+  ▼
+拼入 _build_messages() 的【命理规则检索】字段 → 发给 LLM
 ### 三种角色
 
 | 角色 | 实现 | 职责 |

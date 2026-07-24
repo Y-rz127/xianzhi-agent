@@ -176,7 +176,7 @@ WORKERS: dict[str, DomainWorker] = {
             "- 官杀混杂、伤官见官、劫财夺财，多主事业动荡、口舌是非\n"
             "- 判断事业层次看格局清浊：清格主贵，浊格主劳碌"
         ),
-        extra_queries=("官星 印星 食伤 事业 升职 断法", "伤官见官 官杀混杂 事业动荡 命理"),
+        extra_queries=("事业 升职 换工作 跳槽 伤官见官 官杀混杂 断法",),
     ),
     "wealth": DomainWorker(
         domain="wealth",
@@ -190,7 +190,7 @@ WORKERS: dict[str, DomainWorker] = {
             "- 身旺财旺为富格，身弱财旺则富屋贫人，反主求财辛苦\n"
             "- 大运流年走财旺之乡、食伤生扶之地，主进财；走比劫、印星夺食之地主破财"
         ),
-        extra_queries=("正财 偏财 食伤生财 财库 断法", "比劫夺财 破财 身弱财旺 命理"),
+        extra_queries=("财运 正财 偏财 食伤生财 财库 比劫夺财 破财 断法",),
     ),
     "love": DomainWorker(
         domain="love",
@@ -204,7 +204,7 @@ WORKERS: dict[str, DomainWorker] = {
             "- 大运流年遇配偶星、桃花、合入日支，多为动婚恋之期\n"
             "- 配偶星被冲合化、坐比劫，多主感情波折、第三者"
         ),
-        extra_queries=("桃花 配偶星 日支 感情 断法", "咸池 红艳 孤辰寡宿 感情 命理"),
+        extra_queries=("感情 桃花 配偶星 红艳 孤辰寡宿 恋爱 断法",),
     ),
     "marriage": DomainWorker(
         domain="marriage",
@@ -218,7 +218,7 @@ WORKERS: dict[str, DomainWorker] = {
             "- 比劫成群夺财（男）、伤官见官（女）多主克配偶、离婚\n"
             "- 古籍依据：《滴天髓》论婚姻、《三命通会》论夫妻宫"
         ),
-        extra_queries=("配偶宫 夫妻星 合冲刑害 婚姻 断法", "克配偶 离婚 晚婚 命理 古籍"),
+        extra_queries=("婚姻 配偶宫 夫妻星 离婚 晚婚 合冲刑害 断法",),
     ),
     "health": DomainWorker(
         domain="health",
@@ -232,7 +232,7 @@ WORKERS: dict[str, DomainWorker] = {
             "- 刑冲入本命盘的宫位，对应脏腑易病\n"
             "合规提示：命理健康参考仅供参考，涉及重病必须劝导就医，不替代医疗诊断。"
         ),
-        extra_queries=("五行失衡 寒暖燥湿 疾病 健康 断法", "七杀攻身 羊刃 外伤 手术 命理"),
+        extra_queries=("健康 五行失衡 疾病 七杀攻身 羊刃 外伤 手术 断法",),
     ),
     "study": DomainWorker(
         domain="study",
@@ -246,7 +246,7 @@ WORKERS: dict[str, DomainWorker] = {
             "- 大运流年走印星、官星、食伤生扶之地，主考试升学之机\n"
             "- 印星受克、官杀混杂，多主学业分心、考试不利"
         ),
-        extra_queries=("印星 食伤 官星 文昌 学习考试 断法",),
+        extra_queries=("学习 考试 印星 食伤 官星 文昌 升学 断法",),
     ),
     "social": DomainWorker(
         domain="social",
@@ -261,7 +261,7 @@ WORKERS: dict[str, DomainWorker] = {
             "- 大运流年走比劫旺地，主社交活跃、人脉变动；走官杀旺地，主遇贵人或受压制\n"
             "- 社交层次看格局清浊：清格主贵人层次高、交往圈子优质；浊格主交际复杂、是非多"
         ),
-        extra_queries=("比肩 劫财 朋友 贵人 小人 人际 断法", "天乙贵人 社交 合伙 八字 命理"),
+        extra_queries=("人际 朋友 贵人 小人 比肩 劫财 社交 合伙 断法",),
     ),
     "family": DomainWorker(
         domain="family",
@@ -277,7 +277,7 @@ WORKERS: dict[str, DomainWorker] = {
             "- 宫位受冲刑害：对应宫位逢冲刑害，主该六亲关系动荡、缘分浅薄\n"
             "- 大运流年引动六亲宫位或星位，多主该六亲当年有重大变化（婚丧嫁娶、升迁变动）"
         ),
-        extra_queries=("六亲 十神 宫位 父母 子女 断法", "印星 财星 比劫 食伤 官杀 六亲 八字"),
+        extra_queries=("六亲 父母 子女 印星 财星 比劫 宫位 断法",),
     ),
     "liunian": DomainWorker(
         domain="liunian",
@@ -292,7 +292,7 @@ WORKERS: dict[str, DomainWorker] = {
             "- 流年走比劫、伤官、七杀攻身，主破财、口舌、疾病\n"
             "- 立春换年口径：流年以立春为界，不以正月初一"
         ),
-        extra_queries=("大运流年 作用关系 流年断法 应期", "太岁 岁运并临 立春换年 命理"),
+        extra_queries=("流年 大运 太岁 岁运并临 应期 流年断法",),
     ),
     "theory": DomainWorker(
         domain="theory",
@@ -328,7 +328,7 @@ WORKERS: dict[str, DomainWorker] = {
             "- 适合什么人：看夫妻星/配偶宫十神与日主生克，以及桃花星、贵人星，给出互补型人格建议\n"
             "- 避免贴标签式下定论，结合用神喜忌说明性格的可成长方向"
         ),
-        extra_queries=("日主 十神 性格 心性 断法", "用神 性格 天赋 为人 命理"),
+        extra_queries=("性格 心性 日主 十神 天赋 为人 断法",),
     ),
     "migration": DomainWorker(
         domain="migration",
@@ -341,7 +341,7 @@ WORKERS: dict[str, DomainWorker] = {
             "- 本地 vs 外地：日主强、驿马旺、用神在他方者宜外出；日主弱、用神在本地者宜守\n"
             "- 合规提示：迁移仅为命理趋势参考，实际决策结合现实条件（工作、家庭、政策）"
         ),
-        extra_queries=("用神方位 驿马 迁移 出行 断法", "外地发展 本地 大运 流年 命理"),
+        extra_queries=("迁移 出行 驿马 用神方位 外地发展 断法",),
     ),
     "naming": DomainWorker(
         domain="naming",
@@ -354,12 +354,7 @@ WORKERS: dict[str, DomainWorker] = {
             "- 调候优先：寒命（冬生水旺）喜火调候、燥命（夏生火旺）喜水润局\n"
             "- 合规提示：起名改名仅为文化民俗参考，不保证改运；最终以家长与户籍规定为准"
         ),
-        extra_queries=(
-            "喜用神 起名 改名 五行补缺 命理",
-            "八字命名 用神 古籍",
-            "汉字五行属性表 喜用神 取名",
-            "姓名学 音律 字形 五行",
-        ),
+        extra_queries=("起名 改名 喜用神 五行补缺 汉字五行 命名 断法",),
     ),
     "auspicious": DomainWorker(
         domain="auspicious",
@@ -372,7 +367,7 @@ WORKERS: dict[str, DomainWorker] = {
             "- 选吉神当值：天德、月德、天赦、三合、六合等吉神值日优先\n"
             "- 合规提示：择日为传统民俗参考，重大事宜（医疗、法律）务必以专业意见为准"
         ),
-        extra_queries=("择日 择吉 黄道吉日 用事 命理", "开业 嫁娶 搬迁 择日 古籍"),
+        extra_queries=("择日 择吉 黄道吉日 开业 嫁娶 搬迁 用事 断法",),
     ),
     "match": DomainWorker(
         domain="match",
@@ -389,7 +384,7 @@ WORKERS: dict[str, DomainWorker] = {
             "- 若【对方命盘事实】缺失（用户未提供对方出生时间），说明需要对方出生年月日时+性别才能合婚，"
             "并先用单盘讲清本方配偶宫/夫妻星维度"
         ),
-        extra_queries=("八字合婚 配偶宫 夫妻星 双盘 命理", "生肖 纳音 刑冲 合婚 古籍"),
+        extra_queries=("合婚 配偶宫 夫妻星 生肖 纳音 刑冲 双盘 断法",),
     ),
     "children": DomainWorker(
         domain="children",
@@ -402,7 +397,7 @@ WORKERS: dict[str, DomainWorker] = {
             "- 子女星受克（被冲合、入墓、空亡）多主缘分较浅或迟得，需结合大运看应期\n"
             "- 合规提示：生育规划仅为命理参考，健康与医学建议以医院为准"
         ),
-        extra_queries=("子女星 子女宫 食伤 官杀 生育 断法", "何年生子 大运流年 子女 命理"),
+        extra_queries=("子女 生育 食伤 官杀 子女宫 大运流年 断法",),
     ),
     "general": DomainWorker(
         domain="general",
@@ -798,9 +793,9 @@ class XianzhiWorkflow:
         return ""
 
     # 单 query 检索结果最大字符数（避免单次拉爆 token；≈ 2-3 个 chunk）
-    _MAX_TEXT_PER_QUERY = 1000
+    _MAX_TEXT_PER_QUERY = 750
     # 累计送入 prompt 的总检索字符上限（截断兜底）
-    _MAX_KNOWLEDGE_TOTAL = 2500
+    _MAX_KNOWLEDGE_TOTAL = 2800
 
     def _retrieve_rules(
         self,
@@ -917,18 +912,14 @@ class XianzhiWorkflow:
         strength = ctx.chart.wuxing.strength or ""
         # 个性化 query 紧随：绑定命盘日主+强弱，对检索精度最关键，优先于通用堆砌词
         queries.append(f"{intent.label} {day_master}日主 {strength} 大运流年")
-        # 领域通用规则 query
-        queries.extend(DOMAIN_RULE_QUERIES.get(intent.domain, DOMAIN_RULE_QUERIES["general"]))
-        # 1) Worker 专属额外检索 query
+        # 领域通用规则 query（合并为1条，抽象术语）
+        domain_rules = DOMAIN_RULE_QUERIES.get(intent.domain, DOMAIN_RULE_QUERIES["general"])
+        if domain_rules:
+            queries.append(domain_rules[0])
+        # 1) Worker 专属检索 query（合并为1条，具体场景词）
         if worker and worker.extra_queries:
-            queries.extend(worker.extra_queries)
-        # 2) 命例查相似结构
-        if day_master and strength:
-            if "旺" in strength or "强" in strength:
-                queries.append(f"{day_master}日主身旺 命例 典型命局 古籍")
-            elif "弱" in strength or "衰" in strength:
-                queries.append(f"{day_master}日主身弱 命例 典型命局 古籍")
-        # 3) 按领域补古籍检索
+            queries.append(worker.extra_queries[0])
+        # 2) 按领域补古籍检索
         ancient_query_map = {
             "career": "渊海子平 论官杀 事业 官星",
             "wealth": "渊海子平 论财 财星 食伤生财",
@@ -962,7 +953,7 @@ class XianzhiWorkflow:
         duanfa_q = duanfa_query_map.get(intent.domain)
         if duanfa_q:
             queries.append(duanfa_q)
-        # 上限 4 条（用户原句 + 个性化 + 领域通用/worker专属 择前二）
+        # 上限 4 条（用户原句 + 个性化 + 领域规则 + worker专属）
         return queries[:4], "duxing"
 
     def _build_messages(
