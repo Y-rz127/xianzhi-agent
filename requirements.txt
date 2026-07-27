@@ -1,4 +1,6 @@
-﻿# AI 框架
+﻿langchain-classic
+langchain
+# AI 框架
 # 注意：langchain-dashscope 0.1.8 不支持 bind_tools(Function Calling)，
 # 故改用 langchain-openai 通过 OpenAI 兼容模式调用千问
 langchain-core>=1.0.0,<2.0.0

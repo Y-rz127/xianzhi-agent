@@ -48,7 +48,7 @@ def get_embeddings() -> Embeddings:
     return DashScopeEmbeddings(
         model=settings.embedding_model,
         max_retries=3,
-        dashscope_api_key=settings.dashscope_api_key,
+        dashscope_api_key=settings.embedding_api_key,
     )
 
 
