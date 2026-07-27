@@ -16,6 +16,16 @@ class AgentState(str, Enum):
     ERROR = "ERROR"
 
 
+# 指令隔离：用户输入用分隔符包裹，配合 System Prompt 中的隔离规则防止注入
+_USER_INPUT_PREFIX = "\n--- USER INPUT BEGIN ---\n"
+_USER_INPUT_SUFFIX = "\n--- USER INPUT END ---\n"
+
+
+def _wrap_user_input(user_prompt: str) -> str:
+    """用分隔符包裹用户输入，将用户内容与系统指令隔离。"""
+    return f"{_USER_INPUT_PREFIX}{user_prompt}{_USER_INPUT_SUFFIX}"
+
+
 class BaseAgent(ABC):
     """抽象基础代理（对应 Java BaseAgent）。
 
@@ -38,7 +48,7 @@ class BaseAgent(ABC):
         """同步执行 Agent：在 max_steps 内循环 step() 收集结果，异常转 ERROR，finally 清理。"""
         self._validate(user_prompt)
         self.state = AgentState.RUNNING
-        self.message_list.append(HumanMessage(content=user_prompt))
+        self.message_list.append(HumanMessage(content=_wrap_user_input(user_prompt)))
         results = []
         try:
             for i in range(self.max_steps):
@@ -71,7 +81,7 @@ class BaseAgent(ABC):
             except Exception as e:
                 q.put("错误: {}".format(e)); q.put(_SENTINEL); return
             self.state = AgentState.RUNNING
-            self.message_list.append(HumanMessage(content=user_prompt))
+            self.message_list.append(HumanMessage(content=_wrap_user_input(user_prompt)))
             try:
                 for i in range(self.max_steps):
                     if self.state == AgentState.FINISHED:
@@ -119,7 +129,7 @@ class BaseAgent(ABC):
                 loop.call_soon_threadsafe(q.put_nowait, _SENTINEL)
                 return
             self.state = AgentState.RUNNING
-            self.message_list.append(HumanMessage(content=user_prompt))
+            self.message_list.append(HumanMessage(content=_wrap_user_input(user_prompt)))
             try:
                 for i in range(self.max_steps):
                     if self.state == AgentState.FINISHED:
