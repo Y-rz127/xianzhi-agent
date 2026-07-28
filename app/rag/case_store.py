@@ -6,9 +6,7 @@ few-shot references without treating them as authoritative rules.
 """
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass, field
-from typing import Any
 
 from app.domain.bazi_engine import BaziChart
 from app.logger import log

@@ -23,7 +23,6 @@ import threading
 import time
 from collections import OrderedDict
 from pathlib import Path
-from typing import Any
 
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings

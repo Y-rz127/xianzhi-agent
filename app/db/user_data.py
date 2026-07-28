@@ -13,7 +13,6 @@ import hashlib
 import json
 import re
 import uuid
-from pathlib import Path
 from typing import Optional
 
 from app.logger import log
@@ -1358,100 +1357,3 @@ def search_cases_for_rag(limit: int = 200) -> list[dict]:
         return []
 
 
-def migrate_json_cases_to_db() -> int:
-    """将 data/cases/*.json 文件迁移到 chart_cases 表（结构化案例库）。"""
-    import json as _json
-    from pathlib import Path as _Path
-    cases_dir = _Path("data/cases")
-    if not cases_dir.exists():
-        log.info("[cases迁移] data/cases 目录不存在，跳过")
-        return 0
-    count = 0
-    for path in sorted(cases_dir.glob("*.json")):
-        try:
-            payload = _json.loads(path.read_text(encoding="utf-8"))
-        except Exception as e:
-            log.warning("[cases迁移] 读取失败 {}: {}", path, e)
-            continue
-        items = payload.get("cases", payload) if isinstance(payload, dict) else payload
-        if not isinstance(items, list):
-            items = [items]
-        for item in items:
-            if not isinstance(item, dict):
-                continue
-            analysis = (item.get("answer") or item.get("analysis") or item.get("content") or "").strip()
-            if not analysis:
-                continue
-            try:
-                add_chart_case({
-                    "title": item.get("title") or item.get("name") or f"{path.stem}",
-                    "source": item.get("source") or path.name,
-                    "question": item.get("question") or "",
-                    "analysis": analysis,
-                    "domains": item.get("domains") or [item.get("domain") or "general"],
-                    "features": item.get("features") or {},
-                    "rating": item.get("rating") or 4,
-                    "verified": item.get("verified", True),
-                    "keywords": item.get("keywords") or [],
-                    "promoted_by": item.get("promoted_by") or "",
-                })
-                count += 1
-            except Exception as e:
-                log.warning("[cases迁移] 写入失败 {}: {}", path, e)
-    log.info("[cases迁移] 完成，共迁移 {} 条案例", count)
-    return count
-
-
-def backfill_chart_facts_from_feedback() -> int:
-    """从 answer_feedback 表回填 chart_profiles 和 chart_facts。"""
-    _ensure_tables()
-    count = 0
-    with _get_pool().connection() as conn:
-        rows = conn.execute(
-            """
-            SELECT id, user_id, conversation_id, question, answer, rating, reason, chart_snapshot
-            FROM answer_feedback
-            WHERE chart_snapshot IS NOT NULL
-            ORDER BY created_at ASC
-            """
-        ).fetchall()
-    for r in rows:
-        fid = str(r[0])
-        user_id = (r[1] or "").strip() or r[2] or "anonymous"
-        chart = r[7] or {}
-        if isinstance(chart, str):
-            chart = json.loads(chart)
-        # 兼容多种数据结构：
-        # 1. 直接字段: chart_snapshot.birth_time / chart_snapshot.gender
-        # 2. 嵌套 birthInfo: chart_snapshot.birthInfo.time / chart_snapshot.birthInfo.gender
-        # 3. 嵌套 chartData.birth: chart_snapshot.chartData.birth.solar / chart_snapshot.chartData.birth.gender
-        birth_time = ""
-        gender = ""
-        if "birth_time" in chart:
-            birth_time = (chart.get("birth_time") or "").strip()
-            gender = (chart.get("gender") or "").strip()
-        elif "birthInfo" in chart:
-            birth_info = chart.get("birthInfo") or {}
-            birth_time = (birth_info.get("time") or "").strip()
-            gender = (birth_info.get("gender") or "").strip()
-        elif "chartData" in chart:
-            chart_data = chart.get("chartData") or {}
-            birth_data = chart_data.get("birth") or {}
-            birth_time = (birth_data.get("solar") or birth_data.get("time") or "").strip()
-            gender = (birth_data.get("gender") or "").strip()
-        if not birth_time or not gender:
-            continue
-        pid = upsert_chart_profile(user_id, birth_time, gender, chart, interaction_count=1)
-        confidence = "verified" if r[5] == "up" else "disputed"
-        add_chart_fact(
-            user_id=user_id,
-            chart_profile_id=pid,
-            conversation_id=r[2] or "",
-            question=r[3] or "",
-            answer_snippet=(r[4] or "")[:500],
-            confidence=confidence,
-            reason=r[6] or "",
-        )
-        count += 1
-    log.info("[回填] 从 answer_feedback 补了 {} 条断事知识", count)
-    return count

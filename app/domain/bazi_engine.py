@@ -1,6 +1,9 @@
-# 结构化Bazi图表引擎。
-#
-# 公共工具仍然返回可读的文本，但该模块是API、图表案例和代理上下文所使用的图表数据的事实来源。
+"""八字命盘结构化引擎（基于 lunar-python 纯算法）。
+
+对外暴露 build_bazi_chart / parse_birth / parse_gender / chart_to_api_dict /
+format_* 等函数，产出 BaziChart 这一「命盘事实来源」，供 API、图表案例与
+Agent 上下文共用。公共工具函数仍返回可读文本，但结构化数据以本模块为准。
+"""
 from __future__ import annotations
 
 import datetime as _dt
@@ -8,13 +11,6 @@ from dataclasses import asdict, dataclass
 from typing import Any
 
 from lunar_python import Solar
-
-"""八字命盘结构化引擎（基于 lunar-python 纯算法）。
-
-对外暴露 build_bazi_chart / parse_birth / parse_gender / chart_to_api_dict /
-format_* 等函数，产出 BaziChart 这一「命盘事实来源」，供 API、图表案例与
-Agent 上下文共用。公共工具函数仍返回可读文本，但结构化数据以本模块为准。
-"""
 
 
 GAN_WUXING = {

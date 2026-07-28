@@ -6,7 +6,6 @@ from sse_starlette.sse import EventSourceResponse
 
 from app.api import state
 from app.api.common import check_message_length, client_error, is_message_too_long, message_too_long_text
-from app.config import settings
 from app.db import users as user_store
 from app.logger import log
 

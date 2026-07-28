@@ -1,7 +1,7 @@
 """我的命例收藏（按用户隔离）。"""
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException
 
 from app.api.common import client_error
 from app.api.deps import get_current_user

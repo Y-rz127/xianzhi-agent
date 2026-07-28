@@ -6,7 +6,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from app.api import state
 from app.api.common import client_error, is_message_too_long, message_too_long_text
 from app.logger import log
-from app.tarot_app import SPREADS, SpreadKey
+from app.tarot_app import SPREADS
 
 router = APIRouter(prefix="/tarot", tags=["Tarot"])
 

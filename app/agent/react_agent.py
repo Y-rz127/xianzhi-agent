@@ -1,4 +1,4 @@
-﻿"""ReAct 模式代理基类（对应 Java ReActAgent）。"""
+"""ReAct 模式代理基类（对应 Java ReActAgent）。"""
 from __future__ import annotations
 from abc import abstractmethod
 from app.agent.base_agent import BaseAgent, AgentState

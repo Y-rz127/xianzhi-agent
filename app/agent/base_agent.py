@@ -2,9 +2,7 @@
 from __future__ import annotations
 from abc import ABC, abstractmethod
 from enum import Enum
-from typing import Callable
-from langchain_core.messages import BaseMessage, HumanMessage
-from langchain_core.language_models import BaseChatModel
+from langchain_core.messages import HumanMessage
 from app.logger import log
 
 

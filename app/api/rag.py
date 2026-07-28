@@ -1,4 +1,4 @@
-﻿"""RAG 知识库问答与管理接口。"""
+"""RAG 知识库问答与管理接口。"""
 from __future__ import annotations
 
 from datetime import datetime
@@ -127,7 +127,6 @@ async def chat_with_rag_sync(message: str, session_id: str = "default"):
 async def clear_rag_session(session_id: str):
     """清空 RAG 问答会话的消息记录，保留会话 ID。"""
     import uuid
-    from app.config import settings
     from app.memory.postgres_memory import _get_pool
     try:
         session_uuid = str(uuid.uuid5(uuid.NAMESPACE_DNS, session_id))

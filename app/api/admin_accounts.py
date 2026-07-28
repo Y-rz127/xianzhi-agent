@@ -5,7 +5,7 @@ import hashlib
 import json
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, HTTPException, Request
 
 router = APIRouter(prefix="/admin/accounts", tags=["Admin Accounts"])
 

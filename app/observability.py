@@ -107,15 +107,6 @@ def get_metrics() -> dict[str, Any]:
         }
 
 
-def reset_metrics() -> None:
-    """重置所有 API 指标。"""
-    with _metrics_lock:
-        _metrics["endpoints"] = defaultdict(lambda: {"count": 0, "total_latency_ms": 0.0})
-        _metrics["status_codes"] = {"2xx": 0, "4xx": 0, "5xx": 0}
-        _metrics["recent_errors"] = []
-        _metrics["started_at"] = time.time()
-
-
 def init_observability() -> bool:
     """初始化 LangSmith 可观测性。返回是否启用。
 

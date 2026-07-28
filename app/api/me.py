@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from app.api.common import client_error
 from app.api.deps import get_current_user
-from app.db import user_data, users as user_store
+from app.db import user_data
 from app.logger import log
 from app.memory.postgres_memory import get_session_info
 

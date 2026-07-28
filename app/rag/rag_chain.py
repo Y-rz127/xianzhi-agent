@@ -1,4 +1,4 @@
-﻿"""RAG 问答链（带对话记忆）。
+"""RAG 问答链（带对话记忆）。
 
 LCEL 链：检索知识 + 历史记忆 + 提示词 + LLM。
 历史记忆根据 MEMORY_STORE_TYPE 自动切换 file / postgres。

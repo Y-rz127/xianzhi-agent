@@ -12,7 +12,6 @@ import secrets
 import uuid
 from typing import Optional
 
-from app.config import settings
 from app.logger import log
 from app.memory.postgres_memory import _get_pool
 

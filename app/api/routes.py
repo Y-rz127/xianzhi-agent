@@ -13,7 +13,6 @@ from app.api.me import router as me_router
 from app.api.observability import router as observability_router
 from app.api.profiles import router as profiles_router
 from app.api.rag import chat_router as rag_chat_router, mgmt_router as rag_mgmt_router
-from app.api.state import set_instances
 from app.api.tarot import router as tarot_router
 from app.api.tarot_records import router as tarot_records_router
 from app.api.tools import router as tools_router
