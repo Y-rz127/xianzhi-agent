@@ -1,7 +1,11 @@
 # ReAct 路径 · 闲聊短路（_chitchat_reply）
 
 - **所属路径**：ReAct（`app/agent/xianzhi.py` 的 `Xianzhi` 类）
-- **触发条件**：`run_stream` / `arun_stream` 判定 `_is_chitchat()` 为真（**无命盘上下文** + 意图分类为 `chitchat`）→ 调用 `_chitchat_reply()`（xianzhi.py:368）
+- **触发条件**：`run_stream` / `arun_stream` 到达 `_chitchat_reply()`（xianzhi.py:368）前需经过**三层判断**（此前文档漏写了 verbose 层）：
+  1. **verbose 开关层** — `run_stream:423` / `arun_stream:449` 的 `not verbose`。`verbose=True`（调试透传 ReAct 步骤）时，即使是闲聊也强制走完整工具循环，**不做短路**。
+  2. **命盘上下文层** — `_is_chitchat:363` 的 `if self._workflow_context: return False`。存在 workflow 命盘上下文（即 `_workflow_context is not None`）时不判为闲聊（此判定在 `run_stream:420` 已被 `if self._workflow_context and not verbose: return workflow` 先挡掉，这里是函数自包含的防御）。
+  3. **意图分类层** — `_is_chitchat:365-366` 调 `classify_question(user_prompt).domain == "chitchat"`。只有意图分类器归到 `chitchat` 域才真正短路。
+  - 三层全过（`not verbose` **且** `_workflow_context is None` **且** 意图为 chitchat）→ 调用 `_chitchat_reply()`。
 - **LLM 调用点**：`xianzhi.py:393` → `self.chat_model.invoke(messages)`
 - **调用次数**：固定 **1 次**，不走 ReAct 循环、不挂命盘、不调任何工具
 - **特点**：token 最轻的对话方式；无 `SYSTEM_PROMPT`、无 `FACT_GUARDRAILS`、无工具 schema
