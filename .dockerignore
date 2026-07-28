@@ -1,0 +1,42 @@
+# 前端 / 移动端源码（后端镜像不需要，且体积大）
+frontend/
+uniapp/
+学习资料/
+
+# 敏感配置（禁止打进镜像）
+.env
+.env.local
+*.secret
+
+# 运行时数据
+data/
+logs/
+*.log
+
+# Python 缓存与构建产物
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# 测试
+tests/
+.pytest_cache/
+
+# 工具与元数据
+.workbuddy/
+.github/
+.git/
+.gitignore
+
+# 文档（运行时不需要；部署文档保留在仓库即可）
+docs/
+*.md

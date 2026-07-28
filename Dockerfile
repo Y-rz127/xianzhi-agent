@@ -8,6 +8,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-EXPOSE 8123
+# CloudBase 云托管默认注入 PORT（通常为 80），main.py 已优先读取；本地/compose 回退 8123
+EXPOSE 80
 
 CMD ["python", "main.py"]

@@ -162,5 +162,8 @@ app.include_router(router, prefix="/api")
 
 
 if __name__ == "__main__":
+    import os
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=settings.app_port, reload=False)
+    # CloudBase 云托管/容器平台会注入 PORT 环境变量；本地与 docker-compose 回退到 APP_PORT 或 8123
+    port = int(os.environ.get("PORT", settings.app_port))
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False)
