@@ -1102,7 +1102,7 @@ class XianzhiWorkflow:
             )
             if not profile:
                 return ""
-            verified, disputed = user_data.get_chart_facts_for_llm(profile["id"], limit=5)
+            verified, disputed = user_data.get_chart_facts_for_llm(profile["id"], limit=6)
             lines = []
             if verified:
                 lines.append("【已验证断事】以下均为用户确认过的历史事实，可直接引用：")

@@ -17,6 +17,7 @@ from app.logger import log
 from app.memory import create_chat_memory
 from app.tools.mcp_client import mcp_manager
 import asyncio
+import threading
 
 
 from app.agent.xianzhi_workflow import XianzhiWorkflow, WorkflowChartContext, build_chart_context, render_full_fact_context, classify_question, _dedupe_content
@@ -519,9 +520,11 @@ class Xianzhi(ToolCallAgent):
             return ""
 
     def _maybe_summarize(self):
-        """每 6 轮对话触发 LLM 增量摘要，压缩后存入 session_metadata。
+        """每 6 条消息触发一次增量摘要（后台线程异步执行，不阻塞当次请求）。
 
-        摘要上限 600 字，增量累积：旧摘要 + 最近 6 轮 → 新摘要。
+        阈值判断与数据快照在主线程完成（线程安全）；
+        LLM 调用与落库放进 daemon 线程，避免拖慢用户响应。
+        摘要上限 600 字，增量累积：旧摘要 + 最近 6 条 → 新摘要。
         """
         try:
             msg_count = self._memory.get_message_count(self._conversation_id)
@@ -530,36 +533,44 @@ class Xianzhi(ToolCallAgent):
             if new_since_last < 6:
                 return
 
+            # ---- 主线程：先取线程安全所需的快照（避免线程内读共享状态）----
             old_summary = self._get_session_summary()
             recent = self.message_list[-6:]
             recent_text = "\n".join(
-                f"{m.__class__.__name__.replace('Message','')}: {str(getattr(m,'content',''))[:300]}"
+                f"{m.__class__.__name__.replace('Message', '')}: {str(getattr(m, 'content', ''))[:300]}"
                 for m in recent if str(getattr(m, "content", "")).strip()
             )
 
-            summary_prompt = (
-                "你是一个会话摘要助手。请根据【旧摘要】和【最近对话】，生成不超过 600 字的增量摘要。\n"
-                "只保留与用户身份、命理、人生事件相关的事实（如：年龄、职业、婚姻、健康、已确认的断事结果）。\n"
-                 "忽略闲聊、问候、天气、心情吐槽等非命理内容，这些不纳入摘要。\n"
-                "合并同类项，丢弃过时或冗余信息，保持简洁。\n\n"
-                f"【旧摘要】\n{old_summary or '（无）'}\n\n"
-                f"【最近对话】\n{recent_text}\n\n"
-                "请输出新摘要（不超过 600 字）："
-            )
-            response = self.chat_model.invoke([
-                SystemMessage(content="你是会话摘要助手，只输出摘要文本，不输出任何解释。"),
-                HumanMessage(content=summary_prompt),
-            ])
-            new_summary = (getattr(response, "content", "") or "").strip()
-            if new_summary and len(new_summary) > 10:
-                # 确保不超过 600 字
-                if len(new_summary) > 600:
-                    new_summary = new_summary[:600]
-                self._memory.save_summary(self._conversation_id, new_summary, msg_count)
-                log.info("[摘要] 会话 {} 已生成摘要 ({}字, 消息数={})",
-                         self._conversation_id, len(new_summary), msg_count)
+            # ---- 后台线程：执行 LLM 摘要与落库 ----
+            def _run():
+                try:
+                    prompt = (
+                        "你是一个会话摘要助手。请根据【旧摘要】和【最近对话】，生成不超过 600 字的增量摘要。\n"
+                        "只保留与用户身份、命理、人生事件相关的事实（如：年龄、职业、婚姻、健康、已确认的断事结果）。\n"
+                        "忽略闲聊、问候、天气、心情吐槽等非命理内容，这些不纳入摘要。\n"
+                        "合并同类项，丢弃过时或冗余信息，保持简洁。\n\n"
+                        f"【旧摘要】\n{old_summary or '（无）'}\n\n"
+                        f"【最近对话】\n{recent_text}\n\n"
+                        "请输出新摘要（不超过 600 字）："
+                    )
+                    resp = self.chat_model.invoke([
+                        SystemMessage(content="你是会话摘要助手，只输出摘要文本，不输出任何解释。"),
+                        HumanMessage(content=prompt),
+                    ])
+                    new_summary = (getattr(resp, "content", "") or "").strip()
+                    if new_summary and len(new_summary) > 10:
+                        # 确保不超过 600 字
+                        if len(new_summary) > 600:
+                            new_summary = new_summary[:600]
+                        self._memory.save_summary(self._conversation_id, new_summary, msg_count)
+                        log.info("[摘要] 会话 {} 已生成摘要 ({}字, 消息数={})",
+                                 self._conversation_id, len(new_summary), msg_count)
+                except Exception as e:
+                    log.warning("会话摘要生成失败（后台线程）: {}", e)
+
+            threading.Thread(target=_run, daemon=True).start()
         except Exception as e:
-            log.warning("会话摘要生成失败: {}", e)
+            log.warning("会话摘要触发失败: {}", e)
 
     def cleanup(self):
         self._persist_history()

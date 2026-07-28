@@ -1153,7 +1153,7 @@ def get_chart_facts_for_llm(
 ) -> tuple[list[str], list[str]]:
     """获取命盘已验证/已否定的断事摘要，供 LLM 上下文注入。
 
-    每条断事截断到 250 字，正负反馈总计不超过 2500 字。
+    每条断事截断到 250 字；返回条数由 limit 控制（调用方默认 6 条，SQL LIMIT 兜底）。
 
     Returns:
         (verified_lines, disputed_lines): 两个字符串列表，
@@ -1162,7 +1162,6 @@ def get_chart_facts_for_llm(
     _ensure_tables()
     verified: list[str] = []
     disputed: list[str] = []
-    total_chars = 0
     with _get_pool().connection() as conn:
         rows = conn.execute(
             """
@@ -1175,8 +1174,6 @@ def get_chart_facts_for_llm(
             (chart_profile_id, limit),
         ).fetchall()
         for r in rows:
-            if total_chars >= 2500:
-                break
             question = (r[0] or "").strip()
             answer = (r[1] or "").strip()
             summary = (r[2] or "").strip()
@@ -1198,7 +1195,6 @@ def get_chart_facts_for_llm(
                 verified.append(line)
             elif confidence == "disputed":
                 disputed.append(line)
-            total_chars += len(line)
     return verified, disputed
 
 
