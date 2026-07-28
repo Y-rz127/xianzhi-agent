@@ -71,6 +71,9 @@ def _ensure_schema():
                 """)
                 # 兼容旧部署：补充 user_id 列
                 conn.execute("ALTER TABLE session_metadata ADD COLUMN IF NOT EXISTS user_id TEXT")
+                # 会话摘要（渐进式压缩，600 字上限）
+                conn.execute("ALTER TABLE session_metadata ADD COLUMN IF NOT EXISTS summary TEXT DEFAULT ''")
+                conn.execute("ALTER TABLE session_metadata ADD COLUMN IF NOT EXISTS last_summary_msg_count INT DEFAULT 0")
                 # 会话列表/消息查询的高频过滤列，避免每次全表扫描
                 conn.execute("""
                     CREATE INDEX IF NOT EXISTS idx_message_store_session_created
@@ -175,6 +178,62 @@ class PostgresChatMemory:
 
     def close(self):
         """连接由模块级连接池统一管理，实例无需单独关闭（保留接口兼容）。"""
+
+    def get_summary(self, conversation_id: str) -> str:
+        """获取会话摘要。"""
+        try:
+            session_uuid = self._to_uuid(conversation_id)
+            with _get_pool().connection() as conn:
+                row = conn.execute(
+                    "SELECT summary FROM session_metadata WHERE session_id = %s",
+                    (session_uuid,),
+                ).fetchone()
+                return (row[0] or "").strip() if row else ""
+        except Exception as e:
+            log.warning("获取会话摘要失败 {} : {}", conversation_id, e)
+            return ""
+
+    def save_summary(self, conversation_id: str, summary: str, msg_count: int):
+        """保存会话摘要及当前消息计数。"""
+        try:
+            session_uuid = self._to_uuid(conversation_id)
+            with _get_pool().connection() as conn:
+                conn.execute(
+                    """UPDATE session_metadata
+                       SET summary = %s, last_summary_msg_count = %s, updated_at = CURRENT_TIMESTAMP
+                       WHERE session_id = %s""",
+                    (summary, msg_count, session_uuid),
+                )
+        except Exception as e:
+            log.warning("保存会话摘要失败 {} : {}", conversation_id, e)
+
+    def get_message_count(self, conversation_id: str) -> int:
+        """获取会话消息总数。"""
+        try:
+            session_uuid = self._to_uuid(conversation_id)
+            with _get_pool().connection() as conn:
+                row = conn.execute(
+                    f"SELECT COUNT(*) FROM {self.table_name} WHERE session_id = %s",
+                    (session_uuid,),
+                ).fetchone()
+                return row[0] if row else 0
+        except Exception as e:
+            log.warning("获取消息计数失败 {} : {}", conversation_id, e)
+            return 0
+
+    def get_last_summary_count(self, conversation_id: str) -> int:
+        """获取上次摘要时的消息计数。"""
+        try:
+            session_uuid = self._to_uuid(conversation_id)
+            with _get_pool().connection() as conn:
+                row = conn.execute(
+                    "SELECT last_summary_msg_count FROM session_metadata WHERE session_id = %s",
+                    (session_uuid,),
+                ).fetchone()
+                return (row[0] or 0) if row else 0
+        except Exception as e:
+            log.warning("获取上次摘要计数失败 {} : {}", conversation_id, e)
+            return 0
 
 
 # 反向查找表：UUID -> 原始 conversation_id（由 PostgresChatMemory 实例维护）

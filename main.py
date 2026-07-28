@@ -85,7 +85,7 @@ async def lifespan(app: FastAPI):
 
     # 8. 初始化命例表
     try:
-        from app.api.chart_cases import ensure_table
+        from app.api.cases import ensure_table
         ensure_table()
     except Exception as e:
         log.warning("命例表初始化失败（可能已存在）: {}", e)
@@ -96,7 +96,7 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    # 清理资源：关闭 PG 连接池（chart_cases 已复用 postgres_memory 的连接池）
+    # 清理资源：关闭 PG 连接池（cases 已复用 postgres_memory 的连接池）
     try:
         from app.memory.postgres_memory import close_global_conn
         close_global_conn()

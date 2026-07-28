@@ -24,6 +24,7 @@ from app.rag.retrieval import (
     detect_domain,
     detect_theory_topic,
 )
+from app.rag.case_store import case_library
 from app.rag.vector_store import knowledge_base
 from app.tools.text_clean import clean_think_tags, dedupe_content as _dedupe_content_impl
 
@@ -138,14 +139,16 @@ class QuestionIntent:
 class WorkflowChartContext:
     """工作流用的命盘上下文容器。
 
-    保存原始输入（birth_time/gender/sect/yun_sect）与已排好的 BaziChart，
+    保存原始输入（birth_time/gender/sect/yun_sect/user_id）与已排好的 BaziChart，
     供 Supervisor/Worker/Reviewer 共享同一排盘事实，避免重复计算。
+    user_id 用于从命盘画像中加载历史断事知识。
     """
     birth_time: str
     gender: str
     sect: int
     yun_sect: int
     chart: BaziChart
+    user_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -478,7 +481,7 @@ def classify_question(text: str, today: _dt.date | None = None) -> QuestionInten
     )
 
 
-def build_chart_context(birth_time: str, gender: str, sect: int = 2, yun_sect: int = 1) -> WorkflowChartContext:
+def build_chart_context(birth_time: str, gender: str, sect: int = 2, yun_sect: int = 1, user_id: str = "") -> WorkflowChartContext:
     """根据出生时间/性别/流派构造 WorkflowChartContext（大运 10 柱、流年 8 年）。
 
     Args:
@@ -486,6 +489,7 @@ def build_chart_context(birth_time: str, gender: str, sect: int = 2, yun_sect: i
         gender: 性别（男/女）
         sect: 日柱计算流派（默认 2）
         yun_sect: 大运计算流派（默认 1）
+        user_id: 用户 ID，用于从命盘画像加载历史断事知识
     Returns:
         已排盘完成的 WorkflowChartContext
     """
@@ -496,6 +500,7 @@ def build_chart_context(birth_time: str, gender: str, sect: int = 2, yun_sect: i
         sect=sect,
         yun_sect=yun_sect,
         chart=chart,
+        user_id=user_id,
     )
 
 
@@ -694,6 +699,7 @@ class XianzhiWorkflow:
         user_prompt: str,
         chart_context: WorkflowChartContext,
         history: list[BaseMessage] | None = None,
+        summary: str = "",
     ) -> str:
         # 闲聊短路：关键词命中 chitchat 时直接走分类，不调用 LLM 拆解（节省 API 调用+时间）
         _chitchat_kw = detect_domain(user_prompt)
@@ -751,7 +757,7 @@ class XianzhiWorkflow:
 
         # ===== Worker 执行阶段 =====
         knowledge = self._retrieve_rules(intent, chart_context, worker, user_prompt)
-        messages = self._build_messages(user_prompt, intent, chart_context, knowledge, history or [], worker)
+        messages = self._build_messages(user_prompt, intent, chart_context, knowledge, history or [], worker, summary)
         raw_answer = self._invoke(messages)
         log.info("[Worker] {} 生成回答 {}字", worker.label, len(raw_answer))
 
@@ -836,9 +842,9 @@ class XianzhiWorkflow:
         return ""
 
     # 单 query 检索结果最大字符数（避免单次拉爆 token；≈ 2-3 个 chunk）
-    _MAX_TEXT_PER_QUERY = 750
+    _MAX_TEXT_PER_QUERY = 850
     # 累计送入 prompt 的总检索字符上限（截断兜底）
-    _MAX_KNOWLEDGE_TOTAL = 2800
+    _MAX_KNOWLEDGE_TOTAL = 2500
 
     def _retrieve_rules(
         self,
@@ -1006,6 +1012,7 @@ class XianzhiWorkflow:
         knowledge: str,
         history: list[BaseMessage],
         worker: DomainWorker | None = None,
+        summary: str = "",
     ) -> list[BaseMessage]:
         # Worker 配置优先（专业 Worker 提供 length_rule 和 skip_facts）
         if worker is None:
@@ -1013,7 +1020,7 @@ class XianzhiWorkflow:
         # needs_chart 覆盖 skip_facts：用户问"我命盘是不是XX"时需要注入命盘事实
         skip = worker.skip_facts and not intent.needs_chart
         facts = "" if skip else self._compact_facts(ctx.chart, intent)
-        recent_history = self._compact_history(history)
+        recent_history = self._compact_history(history, summary)
         # 篇幅规则：详批优先 → Worker 专属规则
         if intent.wants_report:
             length_rule = "可以分段深入，但仍要围绕用户问题，不要堆砌全盘。"
@@ -1051,12 +1058,64 @@ class XianzhiWorkflow:
         match_basis = getattr(intent, "match_basis", "")
         if match_basis:
             human += f"【合婚基础数据（系统规则）】\n{match_basis}\n\n"
+        # 注入该命盘的历史断事知识（已验证/已否定）
+        chart_facts_text = self._get_chart_facts_text(ctx)
+        if chart_facts_text:
+            human += f"【历史断事参考】\n{chart_facts_text}\n\n"
+        similar_cases = self._retrieve_similar_cases(intent, ctx, user_prompt)
+        if similar_cases:
+            human += (
+                "【相似命例参考】\n"
+                "下面案例只用于参考断法路径和表达范式，不得照搬结论；当前命盘事实仍以【系统排盘事实】为准。\n"
+                f"{similar_cases}\n\n"
+            )
         human += (
             f"【命理规则检索】\n{knowledge}\n\n"
             f"【输出要求】\n{length_rule}\n"
             "如果提到具体年份，必须同时核对该年流年干支和所在大运。"
         )
         return [SystemMessage(content=system), HumanMessage(content=human)]
+
+    def _retrieve_similar_cases(self, intent: QuestionIntent, ctx: WorkflowChartContext, user_text: str) -> str:
+        """检索与当前命盘/问题相近的经验案例，作为 few-shot 参考。"""
+        if intent.domain in {"chitchat", "theory"}:
+            return ""
+        try:
+            records = case_library.search(ctx.chart, user_text, intent.domain, top_k=1)
+            if records:
+                log.info("[case检索] domain={} 命中命例 {}", intent.domain, [r.id for r in records])
+            return case_library.format_for_prompt(records)
+        except Exception as e:
+            log.warning("[case检索] 相似命例检索失败: {}", e)
+            return ""
+
+    def _get_chart_facts_text(self, ctx: WorkflowChartContext) -> str:
+        """从命盘画像中获取历史断事知识，供 LLM 上下文注入。"""
+        if not ctx.birth_time or not ctx.gender:
+            return ""
+        try:
+            from app.db import user_data
+            profile = user_data.get_chart_profile(
+                getattr(ctx, "user_id", "") or "",
+                ctx.birth_time,
+                ctx.gender,
+            )
+            if not profile:
+                return ""
+            verified, disputed = user_data.get_chart_facts_for_llm(profile["id"], limit=5)
+            lines = []
+            if verified:
+                lines.append("【已验证断事】以下均为用户确认过的历史事实，可直接引用：")
+                for v in verified:
+                    lines.append(f"  • {v}")
+            if disputed:
+                lines.append("【已否定断事】以下判断用户已明确否认，务必避免重复：")
+                for d in disputed:
+                    lines.append(f"  ✗ {d}")
+            return "\n".join(lines)
+        except Exception as e:
+            log.warning("[断事知识] 加载失败: {}", e)
+            return ""
 
     def _build_repair_messages(
         self,
@@ -1098,16 +1157,24 @@ class XianzhiWorkflow:
             return "我先看盘面，当前信息足够排盘，但模型没有生成有效解读。你可以换一个更具体的问题继续问。"
         return _dedupe_content(content)
 
-    def _compact_history(self, history: list[BaseMessage]) -> str:
-        if not history:
+    def _compact_history(self, history: list[BaseMessage], summary: str = "") -> str:
+        if not history and not summary:
             return "（无）"
-        chunks = []
-        for msg in history[-6:]:
-            role = msg.__class__.__name__.replace("Message", "")
-            content = str(getattr(msg, "content", "")).strip()
-            if content:
-                chunks.append(f"{role}: {content[:180]}")
-        return "\n".join(chunks) if chunks else "（无）"
+        parts = []
+        if summary:
+            parts.append(f"【历史摘要】{summary}")
+        recent = history[-6:] if history else []
+        recent_3 = recent[-3:]
+        if recent_3:
+            chunks = []
+            for msg in recent_3:
+                role = msg.__class__.__name__.replace("Message", "")
+                content = str(getattr(msg, "content", "")).strip()
+                if content:
+                    chunks.append(f"{role}: {content[:250]}")
+            if chunks:
+                parts.append("【最近对话】\n" + "\n".join(chunks))
+        return "\n\n".join(parts) if parts else "（无）"
 
     def _fact_block(self, chart: BaziChart, intent: QuestionIntent) -> str:
         """单张命盘的紧凑事实块（不含对方盘逻辑，供 _compact_facts 复用）。"""

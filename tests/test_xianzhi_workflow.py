@@ -113,6 +113,31 @@ def test_needs_chart_overrides_skip_facts():
     assert "系统排盘事实" in human_content
 
 
+def test_build_messages_injects_similar_cases_for_duanshi():
+    """断事类问题会注入相似命例参考，作为 few-shot 分析范式。"""
+    workflow = XianzhiWorkflow(chat_model=None)
+    ctx = build_chart_context("1990-05-20 14:30", MALE)
+    intent = classify_question("我的婚姻感情怎么样？", today=dt.date(2026, 7, 5))
+
+    messages = workflow._build_messages("我的婚姻感情怎么样？", intent, ctx, "知识", [], None)
+    human_content = [m for m in messages if hasattr(m, "content") and "用户问题" in m.content][-1].content
+
+    assert "相似命例参考" in human_content
+    assert "不得照搬结论" in human_content
+
+
+def test_build_messages_skips_similar_cases_for_theory():
+    """理论解释不注入案例，避免概念问答被命例带偏。"""
+    workflow = XianzhiWorkflow(chat_model=None)
+    ctx = build_chart_context("1990-05-20 14:30", MALE)
+    intent = classify_question("用神是什么意思", today=dt.date(2026, 7, 5))
+
+    messages = workflow._build_messages("用神是什么意思", intent, ctx, "知识", [], None)
+    human_content = [m for m in messages if hasattr(m, "content") and "用户问题" in m.content][-1].content
+
+    assert "相似命例参考" not in human_content
+
+
 def test_fact_checker_catches_wrong_liunian_and_pillar():
     workflow = XianzhiWorkflow(chat_model=None)
     ctx = build_chart_context("1990-05-20 14:30", MALE)

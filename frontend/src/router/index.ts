@@ -11,6 +11,7 @@ import ChartCases from "../views/ChartCases.vue"
 import Observability from "../views/Observability.vue"
 import UserAdmin from "../views/UserAdmin.vue"
 import Feedback from "../views/Feedback.vue"
+import AnswerFeedback from "../views/AnswerFeedback.vue"
 import AdminLogin from "../views/AdminLogin.vue"
 import { isAdminLoggedIn } from "../utils/adminAuth"
 
@@ -27,6 +28,7 @@ const routes: RouteRecordRaw[] = [
   { path: "/observability", name: "observability", component: Observability, meta: { title: "可观测性" } },
   { path: "/user-admin", name: "user-admin", component: UserAdmin, meta: { title: "用户管理" } },
   { path: "/feedback", name: "feedback", component: Feedback, meta: { title: "问题反馈" } },
+  { path: "/answer-feedback", name: "answer-feedback", component: AnswerFeedback, meta: { title: "回答反馈" } },
   { path: "/admin-login", name: "admin-login", component: AdminLogin, meta: { title: "管理员登录" } },
   { path: "/admin-accounts", name: "admin-accounts", component: () => import("../views/AdminAccountManager.vue"), meta: { title: "账号管理" } },
 ]

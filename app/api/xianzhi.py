@@ -7,16 +7,17 @@ from sse_starlette.sse import EventSourceResponse
 from app.api import state
 from app.api.common import check_message_length, client_error, is_message_too_long, message_too_long_text
 from app.config import settings
+from app.db import users as user_store
 from app.logger import log
 
 router = APIRouter(prefix="/xianzhi", tags=["Xianzhi"])
 
 
-def _mount_chart_context(agent, birth_time: str | None, gender: str | None, sect: int = 2, yun_sect: int = 1):
+def _mount_chart_context(agent, birth_time: str | None, gender: str | None, sect: int = 2, yun_sect: int = 1, user_id: str = ""):
     """如果提供了出生信息，直接挂载到该会话 Agent 上下文。"""
     if birth_time and gender:
         try:
-            agent.set_chart_context(birth_time, gender, sect, yun_sect)
+            agent.set_chart_context(birth_time, gender, sect, yun_sect, user_id)
         except Exception as e:
             log.warning("通过 API 挂载命盘上下文失败: {}", e)
 
@@ -30,9 +31,15 @@ async def chat_with_xianzhi(
     sect: int = 2,
     yun_sect: int = 1,
     verbose: bool = False,
+    token: str = Query(None),
 ):
     """先知 SSE 流式对话接口（支持挂载出生信息，流式返回 + 可选 chart_context 事件）。"""
     check_message_length(message)
+    uid = ""
+    if token:
+        u = user_store.get_by_token(token)
+        if u:
+            uid = u["id"]
     try:
         agent, lock = state.get_xianzhi(conversation_id)
     except RuntimeError:
@@ -44,7 +51,7 @@ async def chat_with_xianzhi(
         async with lock:
             agent._sect = sect
             agent._yun_sect = yun_sect
-            _mount_chart_context(agent, birth_time, gender, sect, yun_sect)
+            _mount_chart_context(agent, birth_time, gender, sect, yun_sect, uid)
             try:
                 async for chunk in agent.arun_stream(message, verbose=verbose):
                     yield {"event": "message", "data": chunk}
@@ -87,6 +94,12 @@ async def ws_chat_with_xianzhi(websocket: WebSocket):
             sect = data.get("sect", 2)
             yun_sect = data.get("yun_sect", 1)
             verbose = bool(data.get("verbose", False))
+            token = data.get("token") or ""
+            uid = ""
+            if token:
+                u = user_store.get_by_token(token)
+                if u:
+                    uid = u["id"]
             if is_message_too_long(message):
                 if not await _safe_ws_send(websocket, {"type": "error", "data": message_too_long_text(message)}):
                     break
@@ -100,7 +113,7 @@ async def ws_chat_with_xianzhi(websocket: WebSocket):
             async with lock:
                 agent._sect = sect
                 agent._yun_sect = yun_sect
-                _mount_chart_context(agent, birth_time, gender, sect, yun_sect)
+                _mount_chart_context(agent, birth_time, gender, sect, yun_sect, uid)
                 client_alive = True
                 try:
                     async for chunk in agent.arun_stream(message, verbose=verbose):
@@ -137,9 +150,15 @@ async def chat_with_xianzhi_sync(
     gender: str | None = None,
     sect: int = 2,
     yun_sect: int = 1,
+    token: str = Query(None),
 ):
     """先知同步对话接口（run 在线程池执行，避免阻塞事件循环）。"""
     check_message_length(message)
+    uid = ""
+    if token:
+        u = user_store.get_by_token(token)
+        if u:
+            uid = u["id"]
     try:
         agent, lock = state.get_xianzhi(conversation_id)
     except RuntimeError:
@@ -147,7 +166,7 @@ async def chat_with_xianzhi_sync(
     async with lock:
         agent._sect = sect
         agent._yun_sect = yun_sect
-        _mount_chart_context(agent, birth_time, gender, sect, yun_sect)
+        _mount_chart_context(agent, birth_time, gender, sect, yun_sect, uid)
         try:
             # run 是同步阻塞调用，放到线程池避免卡住事件循环
             import asyncio

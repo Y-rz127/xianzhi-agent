@@ -28,6 +28,7 @@
     "@dcloudio/uni-mp-weixin": "3.0.0-5010420260703001",
     "@dcloudio/uni-mp-xhs": "3.0.0-5010420260703001",
     "@dcloudio/uni-quickapp-webview": "3.0.0-5010420260703001",
+    "tslib": "^2.8.1",
     "vue": "3.4.21",
     "vue-i18n": "9.14.4"
   },

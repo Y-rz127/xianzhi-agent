@@ -224,7 +224,7 @@ xianzhi-agent/
 │   │   ├── xianzhi.py            # 先知聊天 WS / SSE / REST
 │   │   ├── tarot.py              # 塔罗 WS
 │   │   ├── rag.py                # 问答 WS
-│   │   ├── chart_cases.py        # 命例库 REST
+│   │   ├── cases.py              # 命例库 REST（Web 端新建八字命例，cases 表）
 │   │   ├── auth.py               # 用户登录认证（JWT）
 │   │   ├── me.py                 # 当前用户信息
 │   │   ├── profiles.py           # 命主档案 REST
@@ -360,7 +360,7 @@ docker-compose up -d
 |------|------|
 | `GET /api/ai/xianzhi/chart` | 结构化命盘数据 |
 | `POST /api/ai/xianzhi/hehun` | 合婚分析 |
-| `GET /api/ai/xianzhi/chart_cases` | 命例库列表 |
+| `GET /api/ai/xianzhi/cases` | 命例库列表（Web 端新建八字命例） |
 | `GET /api/ai/tarot/spreads` | 塔罗牌阵列表 |
 | `POST /api/auth/login` | 用户登录 |
 | `GET /api/me` | 当前用户信息 |

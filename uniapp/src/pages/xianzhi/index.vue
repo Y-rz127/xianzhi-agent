@@ -1,4 +1,4 @@
-﻿﻿﻿<template>
+﻿﻿﻿﻿<template>
   <view class="page">
     <!-- 水墨山水背景 -->
     <view class="landscape" aria-hidden="true">
@@ -38,6 +38,7 @@
           @tap="switchMode('rag')"
         >问答</text>
         <text class="tab" @tap="goHehun">合婚</text>
+        <text v-if="chartData" class="tab chart-tab" @tap="openBaziModal">命盘</text>
       </view>
     </view>
 
@@ -105,10 +106,17 @@
             <text v-else-if="!msg.content" class="typing">推演中…</text>
             <text v-else>{{ formatContent(msg.content) }}</text>
           </view>
-          <!-- 最后一条助手消息的操作栏 -->
-          <view v-if="mode === 'agent' && msg.role === 'assistant' && msg.content && i === messages.length - 1 && !thinking && lastBirthInfo" class="report-bar">
-            <text class="report-btn" @tap="openBaziModal">查看命盘详情</text>
-            <text class="report-btn" @tap="downloadPdfReport">下载 PDF 报告</text>
+          <!-- 回答反馈栏（点赞/点踩） -->
+          <view v-if="mode === 'agent' && msg.role === 'assistant' && msg.content && !isThinking(msg.content)" class="feedback-bar">
+            <text
+              :class="['feedback-chip', feedbackState[msgFeedbackKey(msg, i)] === 'up' && 'active-up']"
+              @tap="openFeedbackModal(msg, i, 'up')"
+            >✓</text>
+            <text
+              :class="['feedback-chip', feedbackState[msgFeedbackKey(msg, i)] === 'down' && 'active-down']"
+              @tap="openFeedbackModal(msg, i, 'down')"
+            >✗</text>
+            <text v-if="feedbackState[msgFeedbackKey(msg, i)] === 'saved'" class="feedback-saved">已记录</text>
           </view>
         </view>
       </view>
@@ -199,6 +207,24 @@
         </view>
       </view>
     </view>
+
+    <!-- 反馈弹窗 -->
+    <view v-if="showFeedbackModal" class="feedback-modal-mask" @tap="closeFeedbackModal">
+      <view class="feedback-modal" @tap.stop>
+        <text class="feedback-modal-title">{{ feedbackModalRating === 'up' ? '👍 感谢反馈' : '👎 请告诉我们原因' }}</text>
+        <textarea
+          class="feedback-modal-input"
+          v-model="feedbackModalReason"
+          :placeholder="feedbackModalRating === 'up' ? '可选：补充说明...' : '请描述问题，帮助我们改进...'"
+          :auto-height="true"
+          :maxlength="500"
+        />
+        <view class="feedback-modal-btns">
+          <text class="feedback-modal-cancel" @tap="closeFeedbackModal">取消</text>
+          <text class="feedback-modal-submit" @tap="submitFeedback">提交</text>
+        </view>
+      </view>
+    </view>
   </view>
 </template>
 
@@ -212,10 +238,11 @@ import {
   downloadReport, getChart,
   fetchSessions, fetchMySessions, deleteSession as deleteSessionApi, clearSessionMessages, clearRagSessionMessages, getSessionMessages,
   getSessionBirthInfo,
+  submitAnswerFeedback,
   type ChartData, type ChatSession,
 } from '@/api'
 import { getLocalDateString } from '@/utils/datetimePicker'
-import { currentUserId, isLoggedIn } from '@/utils/storage'
+import { currentUserId, isLoggedIn, getToken } from '@/utils/storage'
 
 interface Message { role: 'user' | 'assistant'; content: string }
 interface BirthInfo { time: string; gender: string }
@@ -244,6 +271,15 @@ const gender = ref<'男' | '女'>('男')
 const sect = ref<number>(2)
 const inputText = ref('')
 const thinking = ref(false)
+const feedbackState = ref<Record<string, 'up' | 'down' | 'saved'>>({})
+const feedbackReasons = ref<Record<string, string>>({})
+const feedbackReasonOptions = ['分析具体', '结论符合', '事实有误', '太笼统', '风格不喜欢']
+// 反馈弹窗状态
+const showFeedbackModal = ref(false)
+const feedbackModalMsg = ref<Message | null>(null)
+const feedbackModalIndex = ref(-1)
+const feedbackModalRating = ref<'up' | 'down'>('up')
+const feedbackModalReason = ref('')
 // 排盘与问答使用独立的会话历史，互不干扰
 const agentMessages = ref<Message[]>([])
 const ragMessages = ref<Message[]>([])
@@ -323,6 +359,8 @@ async function switchToSession(session: ChatSession) {
   } catch (e) {
     uni.showToast({ title: '加载消息失败', icon: 'none' })
   }
+  feedbackState.value = {}
+  feedbackReasons.value = {}
   closeHistoryDrawer()
 }
 
@@ -475,6 +513,8 @@ function newSession() {
   chartData.value = null
   birthDate.value = ''
   birthTime.value = ''
+  feedbackState.value = {}
+  feedbackReasons.value = {}
 }
 
 /** 新建会话前确认 */
@@ -496,6 +536,74 @@ function extractAnswer(text: string): string {
 /** 判断是否还在思考（含 ReAct 标记） */
 function isThinking(content: string) {
   return typeof content === 'string' && (content.includes('[思考]') || content.includes('[行动]') || content.includes('[观察]'))
+}
+
+/** 生成消息反馈的唯一 key */
+const msgFeedbackKey = (msg: Message, index: number) =>
+  `${conversationId.value}:${index}:${msg.content.slice(0, 64)}`
+
+/** 获取指定消息之前的最后一条用户消息 */
+function questionBefore(index: number): string {
+  if (mode.value === 'agent') {
+    for (let i = index - 1; i >= 0; i--) {
+      if (agentMessages.value[i]?.role === 'user') return agentMessages.value[i].content
+    }
+  }
+  return ''
+}
+
+/** 打开反馈弹窗 */
+function openFeedbackModal(msg: Message, index: number, rating: 'up' | 'down') {
+  feedbackModalMsg.value = msg
+  feedbackModalIndex.value = index
+  feedbackModalRating.value = rating
+  feedbackModalReason.value = feedbackReasons.value[msgFeedbackKey(msg, index)] || ''
+  showFeedbackModal.value = true
+}
+
+/** 关闭反馈弹窗 */
+function closeFeedbackModal() {
+  showFeedbackModal.value = false
+  feedbackModalMsg.value = null
+  feedbackModalIndex.value = -1
+  feedbackModalReason.value = ''
+}
+
+/** 提交反馈（弹窗确认后） */
+async function submitFeedback() {
+  const msg = feedbackModalMsg.value
+  const index = feedbackModalIndex.value
+  const rating = feedbackModalRating.value
+  if (!msg || index < 0) return
+  const key = msgFeedbackKey(msg, index)
+  const reason = feedbackModalReason.value.trim() || (rating === 'up' ? '有帮助' : '不太准')
+  feedbackReasons.value[key] = reason
+  feedbackState.value[key] = rating
+  showFeedbackModal.value = false
+  try {
+    await submitAnswerFeedback({
+      conversation_id: conversationId.value,
+      question: questionBefore(index),
+      answer: msg.content,
+      rating,
+      reason,
+      chart_snapshot: chartData.value && lastBirthInfo.value
+        ? {
+            chartData: chartData.value,
+            birthInfo: lastBirthInfo.value,
+            birth_time: lastBirthInfo.value.time,
+            gender: lastBirthInfo.value.gender,
+          }
+        : lastBirthInfo.value
+          ? { birth_time: lastBirthInfo.value.time, gender: lastBirthInfo.value.gender }
+          : {},
+    })
+    feedbackState.value[key] = 'saved'
+  } catch (e: any) {
+    uni.showToast({ title: e?.message || '提交失败', icon: 'none' })
+    delete feedbackState.value[key]
+    delete feedbackReasons.value[key]
+  }
 }
 
 /** 格式化显示内容：处理 ReAct 标记 */
@@ -610,6 +718,7 @@ function onSend() {
       birthTime: birthTimeFull.value || undefined,
       gender: gender.value,
       sect: sect.value,
+      token: getToken(),
       onMessage, onDone, onError, onChartContext,
     })
   } else {
@@ -869,6 +978,11 @@ messages.value.push({
   font-weight: 600;
   border: none;
 }
+.tab.chart-tab {
+  background: rgba(44, 44, 44, 0.06);
+  color: $color-ink;
+  font-weight: 500;
+}
 
 /* === 出生信息面板 === */
 .birth-panel {
@@ -1096,19 +1210,95 @@ messages.value.push({
 .msg-text.thinking { opacity: 0.7; }
 .typing { color: $color-ink-light; }
 
-.report-bar {
-  margin-top: 16rpx;
+/* === 回答反馈栏 === */
+.feedback-bar {
+  margin-top: 12rpx;
   display: flex;
-  gap: 16rpx;
-  max-width: 100%;
-  box-sizing: border-box;
+  align-items: center;
+  gap: 12rpx;
+  flex-wrap: wrap;
 }
-.report-btn {
-  padding: 12rpx 24rpx;
-  font-size: 22rpx;
-  color: $color-primary;
+.feedback-chip {
+  width: 48rpx;
+  height: 48rpx;
+  line-height: 48rpx;
+  text-align: center;
+  font-size: 28rpx;
+  color: $color-ink-light;
   background: rgba(44, 44, 44, 0.04);
   border: 1rpx solid $color-border;
+  border-radius: 50%;
+  transition: all 0.2s;
+  &.active-up {
+    color: #fff;
+    background: #4caf50;
+    border-color: #4caf50;
+  }
+  &.active-down {
+    color: #fff;
+    background: #f44336;
+    border-color: #f44336;
+  }
+}
+.feedback-saved {
+  font-size: 22rpx;
+  color: $color-ink-lighter;
+}
+
+/* === 反馈弹窗 === */
+.feedback-modal-mask {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0, 0, 0, 0.45);
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.feedback-modal {
+  width: 600rpx;
+  background: #fff;
+  border-radius: 24rpx;
+  padding: 40rpx 32rpx 32rpx;
+  display: flex;
+  flex-direction: column;
+  gap: 24rpx;
+}
+.feedback-modal-title {
+  font-size: 30rpx;
+  font-weight: 600;
+  color: $color-primary;
+  text-align: center;
+}
+.feedback-modal-input {
+  width: 100%;
+  min-height: 120rpx;
+  padding: 20rpx 24rpx;
+  font-size: 26rpx;
+  color: $color-ink;
+  background: $color-bg-warm;
+  border: 1rpx solid $color-border;
+  border-radius: 16rpx;
+  box-sizing: border-box;
+}
+.feedback-modal-btns {
+  display: flex;
+  gap: 20rpx;
+  justify-content: flex-end;
+}
+.feedback-modal-cancel {
+  padding: 16rpx 40rpx;
+  font-size: 26rpx;
+  color: $color-ink-light;
+  background: $color-bg-warm;
+  border: 1rpx solid $color-border;
+  border-radius: 20rpx;
+}
+.feedback-modal-submit {
+  padding: 16rpx 40rpx;
+  font-size: 26rpx;
+  color: #fff;
+  background: $color-primary;
   border-radius: 20rpx;
 }
 

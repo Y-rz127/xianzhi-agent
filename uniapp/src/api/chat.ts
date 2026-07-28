@@ -156,12 +156,13 @@ export interface XianzhiChatOptions extends ChatWSCallbacks {
   gender?: string
   sect?: number
   yunSect?: number
+  token?: string
 }
 
 export function chatWithXianzhiWS(message: string, opts: XianzhiChatOptions) {
   return connectChatWS(
     '/api/ai/xianzhi/ws',
-    { message, conversation_id: opts.conversationId, birth_time: opts.birthTime, gender: opts.gender, sect: opts.sect ?? 2, yun_sect: opts.yunSect ?? 1 },
+    { message, conversation_id: opts.conversationId, birth_time: opts.birthTime, gender: opts.gender, sect: opts.sect ?? 2, yun_sect: opts.yunSect ?? 1, token: opts.token || '' },
     opts
   )
 }

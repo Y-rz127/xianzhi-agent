@@ -299,7 +299,7 @@ def expand_knowledge_queries(query: str, limit: int = 4) -> list[str]:
 def search_deduped(
     queries: list[str],
     max_docs: int = 6,
-    max_chars_per_query: int = 850,
+    max_chars_per_query: int = 900,
     max_chars_total: int = 2500,
 ):
     """对多条 query 逐一检索并跨 query 去重，返回 [(query, doc), ...]。

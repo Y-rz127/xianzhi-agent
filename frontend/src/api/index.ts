@@ -121,7 +121,7 @@ export interface ChartData {
   shenGong?: string
 }
 
-export interface ChartCase { id: string; name: string; tags: string[]; birthTime: string; gender: string; createdAt: string; updatedAt: string; bazi?: string; chartData?: ChartData }
+export interface ChartCase { id: string; name: string; tags: string[]; birthTime: string; gender: string; createdAt: string; updatedAt: string; bazi?: string; chartData?: ChartData; bio?: string; analysis?: string; keypoints?: string; domains?: string[] }
 
 export async function getChart(birthTime: string, gender: string, sect = 2, yunSect = 1): Promise<ChartData> {
   const params = new URLSearchParams({
@@ -137,21 +137,25 @@ export async function getChart(birthTime: string, gender: string, sect = 2, yunS
 
 export async function fetchChartCases(): Promise<ChartCase[]> {
   try {
-    const res = await apiFetch(`${API_BASE}/ai/xianzhi/chart_cases`)
+    const res = await apiFetch(`${API_BASE}/ai/xianzhi/cases`)
     if (!res.ok) throw new Error("fail")
     return await res.json()
   } catch { return [] }
 }
 
-export async function createChartCase(payload: Partial<ChartCase>): Promise<{ id?: string; error?: string }> {
-  const body = {
+export async function createChartCase(payload: Partial<ChartCase> & Record<string, any>): Promise<{ id?: string; error?: string }> {
+  const body: Record<string, any> = {
     name: payload.name,
     birth_time: payload.birthTime,
     gender: payload.gender,
     tags: payload.tags,
     chart_data: payload.chartData,
   }
-  const res = await apiFetch(`${API_BASE}/ai/xianzhi/chart_cases`, {
+  if (payload.bio) body.bio = payload.bio
+  if (payload.analysis) body.analysis = payload.analysis
+  if (payload.keypoints) body.keypoints = payload.keypoints
+  if (payload.domains?.length) body.domains = payload.domains
+  const res = await apiFetch(`${API_BASE}/ai/xianzhi/cases`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -163,16 +167,21 @@ export async function createChartCase(payload: Partial<ChartCase>): Promise<{ id
   return await res.json()
 }
 
-export async function updateChartCase(id: string, payload: Partial<ChartCase>): Promise<void> {
-  const res = await apiFetch(`${API_BASE}/ai/xianzhi/chart_cases/${id}`, {
+export async function updateChartCase(id: string, payload: Partial<ChartCase> & Record<string, any>): Promise<void> {
+  const body: Record<string, any> = {
+    name: payload.name,
+    tags: payload.tags,
+    birth_time: payload.birthTime,
+    gender: payload.gender,
+  }
+  if (payload.bio !== undefined) body.bio = payload.bio
+  if (payload.analysis !== undefined) body.analysis = payload.analysis
+  if (payload.keypoints !== undefined) body.keypoints = payload.keypoints
+  if (payload.domains !== undefined) body.domains = payload.domains
+  const res = await apiFetch(`${API_BASE}/ai/xianzhi/cases/${id}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      name: payload.name,
-      tags: payload.tags,
-      birth_time: payload.birthTime,
-      gender: payload.gender,
-    }),
+    body: JSON.stringify(body),
   })
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: `更新失败 ${res.status}` }))
@@ -181,7 +190,7 @@ export async function updateChartCase(id: string, payload: Partial<ChartCase>): 
 }
 
 export async function deleteChartCase(id: string): Promise<void> {
-  const res = await apiFetch(`${API_BASE}/ai/xianzhi/chart_cases/${id}`, { method: "DELETE" })
+  const res = await apiFetch(`${API_BASE}/ai/xianzhi/cases/${id}`, { method: "DELETE" })
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: `删除失败 ${res.status}` }))
     throw new Error(err.detail || `删除失败 ${res.status}`)
@@ -189,14 +198,14 @@ export async function deleteChartCase(id: string): Promise<void> {
 }
 
 export function exportChartCasesJSON(): void {
-  const url = `${API_BASE}/ai/xianzhi/chart_cases/export/json`
+  const url = `${API_BASE}/ai/xianzhi/cases/export/json`
   window.open(url, "_blank")
 }
 
 export async function importChartCasesJSON(file: File): Promise<{ inserted: number; skipped: number }> {
   const text = await file.text()
   const data = JSON.parse(text)
-  const res = await apiFetch(`${API_BASE}/ai/xianzhi/chart_cases/import/json`, {
+  const res = await apiFetch(`${API_BASE}/ai/xianzhi/cases/import/json`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ cases: data.cases || [] }),
@@ -520,6 +529,30 @@ export interface FeedbackItem {
   created_at: string
 }
 
+export interface AnswerFeedbackPayload {
+  conversation_id: string
+  question?: string
+  answer: string
+  rating: "up" | "down"
+  reason?: string
+  chart_snapshot?: Record<string, unknown>
+}
+
+export interface AnswerFeedbackItem {
+  id: string
+  user_id: string | null
+  user_nickname?: string | null
+  conversation_id: string
+  question: string
+  answer: string
+  rating: "up" | "down"
+  reason: string
+  chart_snapshot?: Record<string, unknown>
+  created_at: string
+  reviewed: boolean
+  reviewed_by: string
+}
+
 export async function submitFeedback(content: string, contact?: string): Promise<{ id: string }> {
   const params = new URLSearchParams({ content })
   if (contact) params.set("contact", contact)
@@ -533,6 +566,64 @@ export async function submitFeedback(content: string, contact?: string): Promise
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: `提交失败 ${res.status}` }))
     throw new Error(err.detail || `提交失败 ${res.status}`)
+  }
+  return res.json()
+}
+
+export async function submitAnswerFeedback(payload: AnswerFeedbackPayload): Promise<{ id: string }> {
+  const token = localStorage.getItem("XZ_TOKEN")
+  const params = new URLSearchParams()
+  if (token) params.set("token", token)
+  const res = await apiFetch(`${API_BASE}/ai/feedback/answer?${params.toString()}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: `提交失败 ${res.status}` }))
+    throw new Error(err.detail || `提交失败 ${res.status}`)
+  }
+  return res.json()
+}
+
+export async function fetchAnswerFeedbacks(limit = 200, rating?: "up" | "down"): Promise<AnswerFeedbackItem[]> {
+  const params = new URLSearchParams({ limit: String(limit) })
+  if (rating) params.set("rating", rating)
+  const res = await apiFetch(`${API_BASE}/ai/feedback/answers?${params.toString()}`)
+  if (!res.ok) throw new Error("获取回答反馈失败")
+  const data = await res.json()
+  return data.items || []
+}
+
+export function answerFeedbackSftExportUrl(rating: "up" | "down" = "up", limit = 1000): string {
+  const params = new URLSearchParams({ rating, limit: String(limit) })
+  return withApiKey(`${API_BASE}/ai/feedback/answers/export/sft?${params.toString()}`)
+}
+
+export function answerFeedbackDpoExportUrl(limit = 500): string {
+  const params = new URLSearchParams({ limit: String(limit) })
+  return withApiKey(`${API_BASE}/ai/feedback/answers/export/dpo?${params.toString()}`)
+}
+
+export async function reviewAnswerFeedback(fid: string): Promise<{ ok: boolean }> {
+  const res = await apiFetch(`${API_BASE}/ai/feedback/answers/${fid}/review`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ reviewer: "admin" }),
+  })
+  if (!res.ok) throw new Error("审核失败")
+  return res.json()
+}
+
+export async function promoteAnswerToCase(fid: string): Promise<{ case_id: string; file_path: string }> {
+  const res = await apiFetch(`${API_BASE}/ai/feedback/answers/${fid}/promote`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ reviewer: "admin" }),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: "转案例失败" }))
+    throw new Error(err.detail || "转案例失败")
   }
   return res.json()
 }

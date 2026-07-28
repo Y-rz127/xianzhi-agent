@@ -48,3 +48,5 @@ tests
 学习资料/智能体开发笔记
 学习资料/前端开发笔记
 学习资料/Python开发笔记
+# TypeScript 增量构建缓存
+*.tsbuildinfo

@@ -154,7 +154,7 @@ class Xianzhi(ToolCallAgent):
         self._yun_sect = 1
         self._history_len = 0
 
-    def set_chart_context(self, birth_time: str, gender: str, sect: int = 2, yun_sect: int = 1):
+    def set_chart_context(self, birth_time: str, gender: str, sect: int = 2, yun_sect: int = 1, user_id: str = ""):
         """由外部直接设置当前命盘上下文，AI 回答将基于该盘面。
 
         Args:
@@ -163,11 +163,11 @@ class Xianzhi(ToolCallAgent):
             gender: 性别，男 或 女
             sect: 日柱计算流派，1=按日期精确，2=按日期精确2（默认）
             yun_sect: 大运计算流派，1=按天数和时辰数（默认），2=按分钟数
+            user_id: 用户 ID，用于从命盘画像加载历史断事知识
         """
         try:
-            # 与 bazi_chart 工具入口一致：先标准化为公历，支持农历/时辰/节日输入
             birth_time = _normalize_birth_time(birth_time)
-            workflow_context = build_chart_context(birth_time, gender, sect, yun_sect)
+            workflow_context = build_chart_context(birth_time, gender, sect, yun_sect, user_id)
             chart = render_full_fact_context(workflow_context)
             self.chart_context = (
                 "【当前命盘上下文】\n"
@@ -177,7 +177,7 @@ class Xianzhi(ToolCallAgent):
             )
             self._workflow_context = workflow_context
             self._last_birth_info = {"time": birth_time, "gender": gender, "sect": sect, "yun_sect": yun_sect}
-            log.info("已挂载命盘上下文: {} {}", birth_time, gender)
+            log.info("已挂载命盘上下文: {} {} user={}", birth_time, gender, user_id)
         except Exception as e:
             log.warning("挂载命盘上下文失败: {}", e)
             self.chart_context = ""
@@ -311,20 +311,21 @@ class Xianzhi(ToolCallAgent):
             # 前端已通过 /api/ai/xianzhi/chart 拿到结构化命盘数据
             log.info("[xianzhi] 终止时无文本回答，仅返回工具结果")
 
-    def _run_workflow_once(self, user_prompt: str, history_snapshot=None) -> str:
+    def _run_workflow_once(self, user_prompt: str, history_snapshot=None, summary: str = "") -> str:
         """Run the chart-grounded workflow for one turn."""
         if not self._workflow_context:
             raise RuntimeError("workflow context is not mounted")
         history = list(history_snapshot) if history_snapshot is not None else list(self.message_list)
-        answer = self._workflow.answer(user_prompt, self._workflow_context, history)
+        answer = self._workflow.answer(user_prompt, self._workflow_context, history, summary)
         return answer
 
     def _workflow_stream(self, user_prompt: str):
         try:
             self.state = AgentState.RUNNING
             history_snapshot = list(self.message_list)
+            summary = self._get_session_summary()
             self.message_list.append(HumanMessage(content=user_prompt))
-            answer = self._run_workflow_once(user_prompt, history_snapshot)
+            answer = self._run_workflow_once(user_prompt, history_snapshot, summary)
             self.final_answer = answer
             self.message_list.append(AIMessage(content=answer))
             self.state = AgentState.FINISHED
@@ -341,8 +342,9 @@ class Xianzhi(ToolCallAgent):
         try:
             self.state = AgentState.RUNNING
             history_snapshot = list(self.message_list)
+            summary = self._get_session_summary()
             self.message_list.append(HumanMessage(content=user_prompt))
-            answer = await asyncio.to_thread(self._run_workflow_once, user_prompt, history_snapshot)
+            answer = await asyncio.to_thread(self._run_workflow_once, user_prompt, history_snapshot, summary)
             self.final_answer = answer
             self.message_list.append(AIMessage(content=answer))
             self.state = AgentState.FINISHED
@@ -505,6 +507,59 @@ class Xianzhi(ToolCallAgent):
             ]
             if filtered:
                 self._memory.add(self._conversation_id, filtered)
+        # 每 6 轮触发摘要（异步，不阻塞主流程）
+        self._maybe_summarize()
+
+    def _get_session_summary(self) -> str:
+        """从会话元数据中获取历史摘要。"""
+        try:
+            return self._memory.get_summary(self._conversation_id)
+        except Exception as e:
+            log.warning("获取会话摘要失败: {}", e)
+            return ""
+
+    def _maybe_summarize(self):
+        """每 6 轮对话触发 LLM 增量摘要，压缩后存入 session_metadata。
+
+        摘要上限 600 字，增量累积：旧摘要 + 最近 6 轮 → 新摘要。
+        """
+        try:
+            msg_count = self._memory.get_message_count(self._conversation_id)
+            last_summary_count = self._memory.get_last_summary_count(self._conversation_id)
+            new_since_last = msg_count - last_summary_count
+            if new_since_last < 6:
+                return
+
+            old_summary = self._get_session_summary()
+            recent = self.message_list[-6:]
+            recent_text = "\n".join(
+                f"{m.__class__.__name__.replace('Message','')}: {str(getattr(m,'content',''))[:300]}"
+                for m in recent if str(getattr(m, "content", "")).strip()
+            )
+
+            summary_prompt = (
+                "你是一个会话摘要助手。请根据【旧摘要】和【最近对话】，生成不超过 600 字的增量摘要。\n"
+                "只保留与用户身份、命理、人生事件相关的事实（如：年龄、职业、婚姻、健康、已确认的断事结果）。\n"
+                 "忽略闲聊、问候、天气、心情吐槽等非命理内容，这些不纳入摘要。\n"
+                "合并同类项，丢弃过时或冗余信息，保持简洁。\n\n"
+                f"【旧摘要】\n{old_summary or '（无）'}\n\n"
+                f"【最近对话】\n{recent_text}\n\n"
+                "请输出新摘要（不超过 600 字）："
+            )
+            response = self.chat_model.invoke([
+                SystemMessage(content="你是会话摘要助手，只输出摘要文本，不输出任何解释。"),
+                HumanMessage(content=summary_prompt),
+            ])
+            new_summary = (getattr(response, "content", "") or "").strip()
+            if new_summary and len(new_summary) > 10:
+                # 确保不超过 600 字
+                if len(new_summary) > 600:
+                    new_summary = new_summary[:600]
+                self._memory.save_summary(self._conversation_id, new_summary, msg_count)
+                log.info("[摘要] 会话 {} 已生成摘要 ({}字, 消息数={})",
+                         self._conversation_id, len(new_summary), msg_count)
+        except Exception as e:
+            log.warning("会话摘要生成失败: {}", e)
 
     def cleanup(self):
         self._persist_history()

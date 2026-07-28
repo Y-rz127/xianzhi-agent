@@ -1,4 +1,4 @@
-﻿/**
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿/**
  * API 请求层 - 基于 uni.request，对齐后端 FastAPI 接口
  * 后端路由前缀: /api/ai
  * 基址来自 config.ts，运行时可调用 setConfig({ apiBase }) 覆盖（小程序切局域网 IP 用）
@@ -205,12 +205,16 @@ export interface ChartCase {
   updatedAt: string
   bazi?: string
   chartData?: any
+  bio?: string
+  analysis?: string
+  keypoints?: string
+  domains?: string[]
 }
 
-export const fetchChartCases = () => get<ChartCase[]>('/ai/xianzhi/chart_cases')
+export const fetchChartCases = () => get<ChartCase[]>('/ai/xianzhi/cases')
 
 export const createChartCase = (payload: Partial<ChartCase>) =>
-  post<{ id?: string; error?: string }>('/ai/xianzhi/chart_cases', {
+  post<{ id?: string; error?: string }>('/ai/xianzhi/cases', {
     name: payload.name,
     birth_time: payload.birthTime,
     gender: payload.gender,
@@ -219,14 +223,14 @@ export const createChartCase = (payload: Partial<ChartCase>) =>
   })
 
 export const updateChartCase = (id: string, payload: Partial<ChartCase>) =>
-  put(`/ai/xianzhi/chart_cases/${id}`, {
+  put(`/ai/xianzhi/cases/${id}`, {
     name: payload.name,
     tags: payload.tags,
     birth_time: payload.birthTime,
     gender: payload.gender,
   })
 
-export const deleteChartCase = (id: string) => del(`/ai/xianzhi/chart_cases/${id}`)
+export const deleteChartCase = (id: string) => del(`/ai/xianzhi/cases/${id}`)
 
 /* ============ 会话管理 ============ */
 
@@ -464,3 +468,17 @@ export const fetchMySessions = () => get<ChatSession[]>('/ai/xianzhi/sessions/mi
 
 export const submitFeedback = (content: string, contact?: string) =>
   post('/ai/feedback', { content, contact })
+
+/* ============ 回答反馈（点赞/点踩） ============ */
+
+export interface AnswerFeedbackPayload {
+  conversation_id: string
+  question?: string
+  answer: string
+  rating: 'up' | 'down'
+  reason?: string
+  chart_snapshot?: Record<string, unknown>
+}
+
+export const submitAnswerFeedback = (payload: AnswerFeedbackPayload) =>
+  post<{ id: string }>('/ai/feedback/answer', payload)

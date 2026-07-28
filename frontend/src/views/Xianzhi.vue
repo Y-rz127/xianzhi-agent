@@ -139,6 +139,29 @@
                   下载 PDF 报告
                 </button>
               </div>
+              <div v-if="mode === 'agent' && msg.role === 'assistant' && msg.content && !isThinking(msg.content)" class="answer-feedback-bar">
+                <button
+                  class="feedback-chip"
+                  :class="{ active: feedbackState[messageFeedbackKey(msg, messages.length - visibleMessages.length + i)] === 'up' }"
+                  @click="sendAnswerFeedback(msg, messages.length - visibleMessages.length + i, 'up')"
+                  aria-label="这条回答有帮助"
+                >有帮助</button>
+                <button
+                  class="feedback-chip"
+                  :class="{ active: feedbackState[messageFeedbackKey(msg, messages.length - visibleMessages.length + i)] === 'down' }"
+                  @click="sendAnswerFeedback(msg, messages.length - visibleMessages.length + i, 'down')"
+                  aria-label="这条回答不太准"
+                >不太准</button>
+                <select
+                  v-model="feedbackReasons[messageFeedbackKey(msg, messages.length - visibleMessages.length + i)]"
+                  class="feedback-reason"
+                  aria-label="选择反馈原因"
+                >
+                  <option value="">原因</option>
+                  <option v-for="reason in feedbackReasonOptions" :key="reason" :value="reason">{{ reason }}</option>
+                </select>
+                <span v-if="feedbackState[messageFeedbackKey(msg, messages.length - visibleMessages.length + i)] === 'saved'" class="feedback-saved">已记录</span>
+              </div>
             </div>
           </div>
         </template>
@@ -238,7 +261,7 @@
 <script setup lang="ts">
 defineOptions({ name: 'Xianzhi' })
 import { ref, nextTick, computed, onMounted, onActivated, onUnmounted } from "vue"
-import { chatWithXianzhi, chatWithRag, downloadReport, parsePillars, parseWuxing, parseDayun, parseShensha, fetchSessions, deleteSession as deleteSessionApi, clearSessionMessages, clearRagSessionMessages, getSessionMessages, getSessionBirthInfo, fetchChartCases, createChartCase, deleteChartCase, getChart, type ChatSession, type SessionMessage, type ChartCase, type ChartData, type SSECallbacks } from "../api"
+import { chatWithXianzhi, chatWithRag, downloadReport, parsePillars, parseWuxing, parseDayun, parseShensha, fetchSessions, deleteSession as deleteSessionApi, clearSessionMessages, clearRagSessionMessages, getSessionMessages, getSessionBirthInfo, fetchChartCases, createChartCase, deleteChartCase, getChart, submitAnswerFeedback, type ChatSession, type SessionMessage, type ChartCase, type ChartData, type SSECallbacks } from "../api"
 import BaziCard from "../components/BaziCard.vue"
 import WuxingChart from "../components/WuxingChart.vue"
 import DayunTimeline from "../components/DayunTimeline.vue"
@@ -272,6 +295,9 @@ const caseGender = ref<"男" | "女">("男")
 const sect = ref(2)
 const yunSect = ref(1)
 const showScrollTop = ref(false)
+const feedbackState = ref<Record<string, "up" | "down" | "saved">>({})
+const feedbackReasons = ref<Record<string, string>>({})
+const feedbackReasonOptions = ["分析具体", "结论符合", "事实有误", "太笼统", "风格不喜欢"]
 const pageSize = 30
 const visibleCount = ref(pageSize)
 const hasMoreHistory = computed(() => visibleCount.value < messages.value.length)
@@ -335,6 +361,35 @@ const activeChartCase = computed(() =>
 
 const isThinking = (content: string | undefined) => typeof content === "string" && (content.includes("[思考]") || content.includes("[行动]") || content.includes("[观察]"))
 const msgClass = (role: string) => ["msg", role, "animate-fade-in-up"]
+
+const messageFeedbackKey = (msg: SessionMessage, index: number) =>
+  `${conversationId.value}:${index}:${msg.content.slice(0, 64)}`
+
+function questionBefore(index: number): string {
+  for (let i = index - 1; i >= 0; i--) {
+    const msg = messages.value[i]
+    if (msg?.role === "user") return msg.content
+  }
+  return ""
+}
+
+async function sendAnswerFeedback(msg: SessionMessage, index: number, rating: "up" | "down") {
+  const key = messageFeedbackKey(msg, index)
+  feedbackState.value[key] = rating
+  try {
+    await submitAnswerFeedback({
+      conversation_id: conversationId.value,
+      question: questionBefore(index),
+      answer: msg.content,
+      rating,
+      reason: feedbackReasons.value[key] || (rating === "up" ? "有帮助" : "不太准"),
+      chart_snapshot: chartData.value ? { chartData: chartData.value, birthInfo: lastBirthInfo.value } : {},
+    })
+    feedbackState.value[key] = "saved"
+  } catch (e) {
+    console.warn("提交回答反馈失败", e)
+  }
+}
 const formatTime = (time: string) => time ? time.split("T")[0] : ""
 
 const scrollToBottom = async () => {
@@ -813,6 +868,15 @@ onUnmounted(() => {
   background: rgba(255,255,255,0.03); border: 1px solid var(--border); border-radius: 8px;
   color: var(--text-dim); cursor: pointer; transition: all 0.2s; }
 .report-btn:hover { border-color: var(--accent); color: var(--accent-light); }
+.answer-feedback-bar { display: flex; align-items: center; gap: 8px; padding-top: 2px; }
+.feedback-chip { padding: 5px 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1);
+  background: rgba(255,255,255,0.04); color: var(--text-muted); font-size: 12px; cursor: pointer;
+  transition: all 0.2s; }
+.feedback-chip:hover,
+.feedback-chip.active { color: var(--accent-light); border-color: rgba(212,175,55,0.35); background: rgba(212,175,55,0.1); }
+.feedback-reason { height: 28px; padding: 0 8px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1);
+  background: rgba(15,21,32,0.95); color: var(--text-muted); font-size: 12px; outline: none; }
+.feedback-saved { color: var(--text-muted); font-size: 12px; }
 
 .input-area { margin-top: 12px; }
 .input-wrap { display: flex; gap: 10px; align-items: flex-end; padding: 8px; background: rgba(15,21,32,0.85);

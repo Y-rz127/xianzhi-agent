@@ -135,6 +135,22 @@
                 <option value="女">女</option>
               </select>
             </div>
+            <div class="form-row">
+              <label for="case-bio">生平简介</label>
+              <textarea id="case-bio" v-model="form.bio" placeholder="简要描述此人的生平背景..." rows="3"></textarea>
+            </div>
+            <div class="form-row">
+              <label for="case-analysis">命局结构分析</label>
+              <textarea id="case-analysis" v-model="form.analysis" placeholder="八字命局的结构性分析，如格局、用神、忌神等..." rows="4"></textarea>
+            </div>
+            <div class="form-row">
+              <label for="case-keypoints">命理特征要点</label>
+              <textarea id="case-keypoints" v-model="form.keypoints" placeholder="关键命理特征，每条一个要点..." rows="3"></textarea>
+            </div>
+            <div class="form-row">
+              <label for="case-domains">领域标签</label>
+              <input id="case-domains" v-model="form.domains" placeholder="用逗号分隔，如：帝王,军事,开国" />
+            </div>
           </div>
           <div class="case-modal-footer">
             <button class="btn" @click="closeModal">取消</button>
@@ -196,7 +212,7 @@ const selectedTags = ref<string[]>([])
 const showModal = ref(false)
 const modalMode = ref<"create" | "edit">("create")
 const editingId = ref<string>("")
-const form = ref({ name: "", tags: "", birthTime: "", gender: "男" as "男" | "女" })
+const form = ref({ name: "", tags: "", birthTime: "", gender: "男" as "男" | "女", bio: "", analysis: "", keypoints: "", domains: "" })
 
 const showBaziModal = ref(false)
 const activeCase = ref<ChartCase | null>(null)
@@ -281,7 +297,7 @@ const clearFilters = () => {
 }
 
 const resetForm = () => {
-  form.value = { name: "", tags: "", birthTime: "", gender: "男" }
+  form.value = { name: "", tags: "", birthTime: "", gender: "男", bio: "", analysis: "", keypoints: "", domains: "" }
   editingId.value = ""
 }
 
@@ -299,6 +315,10 @@ const openEditModal = (c: ChartCase) => {
     tags: c.tags?.join(", ") || "",
     birthTime: c.birthTime,
     gender: c.gender === "女" ? "女" : "男",
+    bio: (c as any).bio || "",
+    analysis: (c as any).analysis || "",
+    keypoints: (c as any).keypoints || "",
+    domains: ((c as any).domains || []).join(", "),
   }
   showModal.value = true
 }
@@ -310,12 +330,17 @@ const closeModal = () => {
 
 const saveCase = async () => {
   if (!canSave.value) return
-  const payload = {
+  const payload: Record<string, any> = {
     name: form.value.name.trim(),
     birthTime: form.value.birthTime.trim(),
     gender: form.value.gender,
     tags: form.value.tags.split(/[,，]/).map((s) => s.trim()).filter(Boolean),
   }
+  if (form.value.bio.trim()) payload.bio = form.value.bio.trim()
+  if (form.value.analysis.trim()) payload.analysis = form.value.analysis.trim()
+  if (form.value.keypoints.trim()) payload.keypoints = form.value.keypoints.trim()
+  const domainsArr = form.value.domains.split(/[,，]/).map((s) => s.trim()).filter(Boolean)
+  if (domainsArr.length) payload.domains = domainsArr
   try {
     if (modalMode.value === "create") {
       await createChartCase(payload)
@@ -703,11 +728,14 @@ onMounted(loadCases)
 
 .case-modal {
   width: 90%;
-  max-width: 420px;
+  max-width: 480px;
+  max-height: 85vh;
   background: rgba(15, 21, 32, 0.95);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .case-modal-header {
@@ -740,6 +768,8 @@ onMounted(loadCases)
 
 .case-modal-body {
   padding: 20px;
+  overflow-y: auto;
+  flex: 1;
 }
 
 .form-row {
@@ -754,7 +784,8 @@ onMounted(loadCases)
 }
 
 .form-row input,
-.form-row select {
+.form-row select,
+.form-row textarea {
   width: 100%;
   padding: 10px 12px;
   background: rgba(255, 255, 255, 0.03);
@@ -763,10 +794,13 @@ onMounted(loadCases)
   color: var(--text);
   font-size: 13px;
   outline: none;
+  resize: vertical;
+  font-family: inherit;
 }
 
 .form-row input:focus,
-.form-row select:focus {
+.form-row select:focus,
+.form-row textarea:focus {
   border-color: var(--accent);
 }
 

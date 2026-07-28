@@ -300,7 +300,7 @@ search_deduped(queries, max_docs=6)  ← retrieval.py:295
   └─ 跨 query 去重（来源+前120字），最多6条文档
   │
   ▼
-返回格式化文本给 LLM（单query850，总字符限制2500）
+返回格式化文本给 LLM（单query900，总字符限制2500）
 
 Workflow 路径（xianzhi_workflow.py）
 确定性流程，不走 LLM 工具调用：

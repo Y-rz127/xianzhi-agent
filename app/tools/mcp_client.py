@@ -9,6 +9,9 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import shutil
+import traceback
 from typing import Any
 
 from langchain_core.tools import BaseTool
@@ -110,10 +113,36 @@ class MCPManager:
             log.warning("未安装 mcp 库，跳过 MCP")
             return
 
+        # 解析 npx 可执行文件路径（优先 PATH，其次常见安装位置）
+        npx_cmd = shutil.which("npx.cmd") or shutil.which("npx")
+        nodejs_dir = None
+        if not npx_cmd:
+            for fallback in (
+                r"C:\Program Files\nodejs\npx.cmd",
+                r"C:\Program Files (x86)\nodejs\npx.cmd",
+            ):
+                if os.path.isfile(fallback):
+                    npx_cmd = fallback
+                    nodejs_dir = os.path.dirname(fallback)
+                    break
+        else:
+            nodejs_dir = os.path.dirname(npx_cmd)
+        if not npx_cmd:
+            log.warning("未找到 npx，跳过 MCP（请确认已安装 Node.js 并重启终端）")
+            return
+
+        # 继承当前环境变量，追加 API Key
+        child_env = {**os.environ, "AMAP_MAPS_API_KEY": settings.amap_maps_api_key}
+        # 确保 Node.js 目录在子进程 PATH 中（npx 运行时需要找到 node.exe）
+        if nodejs_dir:
+            current_path = child_env.get("PATH", child_env.get("Path", ""))
+            if nodejs_dir not in current_path:
+                child_env["PATH"] = nodejs_dir + os.pathsep + current_path
+
         server_params = StdioServerParameters(
-            command="npx.cmd",
+            command=npx_cmd,
             args=["-y", "@amap/amap-maps-mcp-server"],
-            env={"AMAP_MAPS_API_KEY": settings.amap_maps_api_key},
+            env=child_env,
         )
 
         async def _run():
@@ -137,6 +166,7 @@ class MCPManager:
                         await self._stop.wait()
             except Exception as e:
                 log.warning("MCP 启动失败（高德地图，需 Node.js/npx）: {}", e)
+                log.warning("MCP 异常详情:\n{}", traceback.format_exc())
                 self._ready.set()
 
         self._task = asyncio.create_task(_run())
