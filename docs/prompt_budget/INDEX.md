@@ -29,13 +29,14 @@
 
 | 文档 | 对话方式 | 一句话说明 | LLM 调用 |
 |---|---|---|---|
-| [react_chitchat.md](./react_chitchat.md) | 闲聊短路 | 无命盘 + 闲聊意图，直接 1 次 LLM，不走循环、无工具 | 1 次 |
+| [react_chitchat.md](./react_chitchat.md) | 闲聊短路 | 无命盘 + 闲聊意图，直接 1 次 LLM，不走循环、无工具（**注意：此"三层"是 ReAct `_is_chitchat` gate，非 Workflow 意图链路**） | 1 次 |
 | [react_loop.md](./react_loop.md) | 工具循环 (think→act→observe) | 完整 ReAct 多步循环，工具 schema 常驻、结果逐轮回灌 | 每步 1 次，≤ max_steps |
 
 ## 三、Workflow 路径文档
 
 | 文档 | 对话方式 / 调用 | 一句话说明 | LLM 调用 |
 |---|---|---|---|
+| [workflow_intent_routing.md](./workflow_intent_routing.md) | 意图分类防护链路（调用 A 之前） | `detect_domain`→`_looks_off_topic`→`_decompose_query`+`classify_question` 兜底；闲聊命中即跳过 LLM 拆解（用户口中的"三层判断"即指此） | 0~1 次 |
 | [workflow_decompose.md](./workflow_decompose.md) | 意图拆解（调用 A） | 非闲聊且非离题时，先 LLM 拆 domain/queries；可被短路跳过 | ≤1 次 |
 | [workflow_chitchat.md](./workflow_chitchat.md) | Worker 主回答·闲聊（调用 B） | 已挂命盘走 Workflow 的闲聊；跳过事实/命例，知识库固定 16 字 | 1 次 |
 | [workflow_theory.md](./workflow_theory.md) | Worker 主回答·理论（调用 B） | 纯命理理论/术语；跳过事实/命例，但真检索知识库 | 1 次 |

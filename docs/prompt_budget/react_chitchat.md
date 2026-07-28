@@ -1,5 +1,7 @@
 # ReAct 路径 · 闲聊短路（_chitchat_reply）
 
+> ⚠️ 澄清：本文的"三层判断"指 ReAct 路径 `_is_chitchat` 的三层 gate（verbose / 命盘上下文 / 意图分类）。**用户另指的"三层防护链路"是 Workflow 路径 `answer()` 入口的意图路由**（`detect_domain` → `_looks_off_topic` → `_decompose_query` + `classify_question` 兜底），详见 [`workflow_intent_routing.md`](./workflow_intent_routing.md)。两者不是一回事。
+
 - **所属路径**：ReAct（`app/agent/xianzhi.py` 的 `Xianzhi` 类）
 - **触发条件**：`run_stream` / `arun_stream` 到达 `_chitchat_reply()`（xianzhi.py:368）前需经过**三层判断**（此前文档漏写了 verbose 层）：
   1. **verbose 开关层** — `run_stream:423` / `arun_stream:449` 的 `not verbose`。`verbose=True`（调试透传 ReAct 步骤）时，即使是闲聊也强制走完整工具循环，**不做短路**。
