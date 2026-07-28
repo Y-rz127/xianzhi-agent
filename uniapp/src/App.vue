@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onLaunch, onShow, onHide } from '@dcloudio/uni-app'
+import { onShow } from '@dcloudio/uni-app'
 import { isLoggedIn } from '@/utils/storage'
 
 const LOGIN_PATH = '/pages/login/index'
@@ -7,19 +7,12 @@ const LOGIN_PATH = '/pages/login/index'
 // 需要登录才能访问的 tabBar 页
 const PROTECTED_TABS = ['/pages/xianzhi/index', '/pages/tarot/index', '/pages/mine/index']
 
-onLaunch(() => {
-  console.log('App Launch')
-})
-
 onShow((options) => {
   // 全局登录拦截：从 tabBar 页进入时检查
   const url = options?.path || ''
   if (PROTECTED_TABS.some(t => url.startsWith(t.replace('/index', ''))) && !isLoggedIn()) {
     uni.reLaunch({ url: LOGIN_PATH })
   }
-})
-onHide(() => {
-  console.log('App Hide')
 })
 </script>
 

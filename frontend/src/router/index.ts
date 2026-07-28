@@ -1,4 +1,4 @@
-﻿import { createRouter, createWebHistory } from "vue-router"
+import { createRouter, createWebHistory } from "vue-router"
 import type { RouteLocationNormalized, RouteRecordRaw } from "vue-router"
 import Xianzhi from "../views/Xianzhi.vue"
 import Disclaimer from "../views/Disclaimer.vue"

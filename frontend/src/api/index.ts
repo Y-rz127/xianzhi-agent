@@ -1,4 +1,4 @@
-﻿const API_BASE = import.meta.env.DEV ? "http://localhost:8123/api" : "/api"
+const API_BASE = import.meta.env.DEV ? "http://localhost:8123/api" : "/api"
 const API_KEY = "xianzhi-yrz-admin"
 
 function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {

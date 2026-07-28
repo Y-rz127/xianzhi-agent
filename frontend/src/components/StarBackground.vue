@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div class="star-bg" aria-hidden="true">
     <div class="nebula"></div>
     <div class="stars">

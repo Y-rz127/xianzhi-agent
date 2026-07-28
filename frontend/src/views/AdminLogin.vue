@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div class="admin-login-page">
     <div class="login-card">
       <div class="login-header">

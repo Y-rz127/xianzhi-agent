@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <view class="page">
     <view class="nav-placeholder" :style="{ height: (statusBarHeight + navBarHeight) + 'px' }"></view>
     <view class="nav-bar">

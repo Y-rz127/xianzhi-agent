@@ -1,4 +1,4 @@
-﻿﻿﻿﻿<template>
+<template>
   <div class="chat-view">
     <div class="sidebar-mask" v-if="!sidebarCollapsed && isMobile" @click="sidebarCollapsed = true"></div>
     <div class="chat-sidebar" :class="{ collapsed: sidebarCollapsed }">

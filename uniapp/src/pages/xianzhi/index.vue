@@ -1,4 +1,4 @@
-﻿﻿﻿﻿<template>
+<template>
   <view class="page">
     <!-- 水墨山水背景 -->
     <view class="landscape" aria-hidden="true">
@@ -229,7 +229,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, nextTick, watch, reactive } from 'vue'
+import { ref, computed, nextTick, watch } from 'vue'
 import { onLoad, onHide, onShow } from '@dcloudio/uni-app'
 import { requireLogin } from '@/utils/authGuard'
 import { chatWithXianzhiWS, chatWithRagWS, closeAllWS } from '@/api/chat'

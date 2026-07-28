@@ -133,7 +133,6 @@ async function doReview(item: AnswerFeedbackItem) {
 async function doPromote(item: AnswerFeedbackItem) {
   try {
     const result = await promoteAnswerToCase(item.id)
-    console.log("案例已沉淀:", result.case_id, result.file_path)
     showToast(`案例已沉淀: ${result.case_id}`, 'success')
   } catch (e: any) {
     console.error("转案例失败", e)

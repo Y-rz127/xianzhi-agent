@@ -78,7 +78,6 @@ function connectChatWS(path: string, payload: Record<string, any>, cb: ChatWSCal
   const myId = ++wsConnId
 
   const url = resolveWsBase() + wsPath(path)
-  console.log('[WS] connecting:', url, 'id=', myId)
 
   let receivedMessage = false
   let doneOrError = false
@@ -89,10 +88,8 @@ function connectChatWS(path: string, payload: Record<string, any>, cb: ChatWSCal
   function doSend() {
     if (sent || doneOrError) return
     sent = true
-    console.log('[WS] sending payload... id=', myId)
     wx.sendSocketMessage({
       data: JSON.stringify(payload),
-      success: () => console.log('[WS] send OK id=', myId),
       fail: (err: any) => {
         console.error('[WS] send fail id=', myId, err)
         if (!doneOrError && isMine()) { doneOrError = true; cb.onError(extractErrMsg(err, '发送失败')) }
@@ -102,7 +99,6 @@ function connectChatWS(path: string, payload: Record<string, any>, cb: ChatWSCal
 
   wx.onSocketOpen(() => {
     if (!isMine()) return
-    console.log('[WS] onSocketOpen id=', myId)
     currentChatActive = true
     doSend()
   })
@@ -112,7 +108,6 @@ function connectChatWS(path: string, payload: Record<string, any>, cb: ChatWSCal
     receivedMessage = true
     try {
       const data = JSON.parse(res.data as string)
-      console.log('[WS] received, type=', data.type, 'id=', myId)
       if (data.type === 'message') cb.onMessage(data.data)
       else if (data.type === 'cards') cb.onCards?.(data.data)
       else if (data.type === 'chart_context') cb.onChartContext?.(data.data?.birth_time, data.data?.gender)
@@ -132,7 +127,6 @@ function connectChatWS(path: string, payload: Record<string, any>, cb: ChatWSCal
   })
 
   wx.onSocketClose(() => {
-    console.log('[WS] onSocketClose id=', myId, 'isMine=', isMine(), 'receivedMsg=', receivedMessage)
     if (!isMine()) return
     currentChatActive = false
   })
@@ -142,7 +136,6 @@ function connectChatWS(path: string, payload: Record<string, any>, cb: ChatWSCal
 
   setTimeout(() => {
     if (!sent && !doneOrError && isMine()) {
-      console.log('[WS] timeout fallback, force send id=', myId)
       doSend()
     }
   }, 500)
@@ -182,7 +175,6 @@ export function drawTarotCards(spread: 'daily' | 'three_card' | 'relationship', 
   currentTarotActive = false
   const myId = ++wsConnId
   const url = resolveWsBase() + wsPath('/api/ai/tarot/ws')
-  console.log('[WS-tarot] connecting:', url, 'id=', myId)
 
   let receivedMessage = false, doneOrError = false, sent = false
   function isMine() { return wsConnId === myId }
@@ -192,12 +184,11 @@ export function drawTarotCards(spread: 'daily' | 'three_card' | 'relationship', 
     sent = true
     wx.sendSocketMessage({
       data: JSON.stringify({ action: 'draw', spread }),
-      success: () => console.log('[WS-tarot] send OK id=', myId),
       fail: (err: any) => { if (!doneOrError && isMine()) { doneOrError = true; cb.onError(extractErrMsg(err, '发送失败')) } },
     })
   }
 
-  wx.onSocketOpen(() => { if (!isMine()) return; console.log('[WS-tarot] open id=', myId); currentTarotActive = true; doSend() })
+  wx.onSocketOpen(() => { if (!isMine()) return; currentTarotActive = true; doSend() })
 
   wx.onSocketMessage((res: any) => {
     if (!isMine() || !currentTarotActive) return
@@ -228,7 +219,6 @@ export function interpretTarotWS(opts: { spread: 'daily' | 'three_card' | 'relat
   currentTarotActive = false
   const myId = ++wsConnId
   const url = resolveWsBase() + wsPath('/api/ai/tarot/ws')
-  console.log('[WS-tarot] interpreting:', url, 'id=', myId)
 
   let receivedMessage = false, doneOrError = false, sent = false
   function isMine() { return wsConnId === myId }
@@ -238,12 +228,11 @@ export function interpretTarotWS(opts: { spread: 'daily' | 'three_card' | 'relat
     sent = true
     wx.sendSocketMessage({
       data: JSON.stringify({ action: 'interpret', spread: opts.spread, question: opts.question || '', cards: opts.cards }),
-      success: () => console.log('[WS-tarot] interpret send OK id=', myId),
       fail: (err: any) => { if (!doneOrError && isMine()) { doneOrError = true; cb.onError(extractErrMsg(err, '发送失败')) } },
     })
   }
 
-  wx.onSocketOpen(() => { if (!isMine()) return; console.log('[WS-tarot] open id=', myId); currentTarotActive = true; doSend() })
+  wx.onSocketOpen(() => { if (!isMine()) return; currentTarotActive = true; doSend() })
 
   wx.onSocketMessage((res: any) => {
     if (!isMine() || !currentTarotActive) return

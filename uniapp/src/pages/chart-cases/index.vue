@@ -75,7 +75,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, onMounted } from 'vue'
 import { fetchChartCases, fetchFavorites, addFavorite, removeFavorite, getChart, type ChartCase, type ChartData } from '@/api'
 import { isLoggedIn } from '@/utils/storage'
 import BaziModal from '@/components/BaziModal/BaziModal.vue'
