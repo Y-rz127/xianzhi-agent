@@ -27,8 +27,8 @@ _FONT_REGISTERED = False
 _FONT_NAME = "Helvetica"
 _FONT_LOCK = threading.Lock()
 
-# 项目内置字体目录（可把字体文件放于此处随应用分发）
-_PROJECT_FONT_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data", "fonts")
+# 项目内置字体目录（随应用分发，不依赖容器系统字体；放在代码目录避免被运行时数据忽略规则屏蔽）
+_PROJECT_FONT_DIR = os.path.join(os.path.dirname(__file__), "fonts")
 
 
 def _register_chinese_font():
@@ -39,22 +39,22 @@ def _register_chinese_font():
     with _FONT_LOCK:
         if _FONT_REGISTERED:
             return _FONT_NAME
+        # 优先级：项目内置字体（随仓库分发，最可靠，不依赖容器系统字体轮廓类型）
+        #         > Windows 本地字体 > Linux 系统字体（Debian/Alpine）> glob 兜底扫描
         candidates = [
-            # Windows
+            # 0) 项目内置（已随仓库分发到 data/fonts/，TrueType 轮廓，reportlab 100% 支持）
+            ("ProjectSimHei", os.path.join(_PROJECT_FONT_DIR, "simhei.ttf")),
+            # 1) Windows 本地开发
             ("SimHei", r"C:\Windows\Fonts\simhei.ttf"),
             ("SimSun", r"C:\Windows\Fonts\simsun.ttc"),
             ("MSYH", r"C:\Windows\Fonts\msyh.ttc"),
-            # Linux Debian/Ubuntu
-            ("NotoSansCJK", "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc"),
-            ("NotoSansCJKsc", "/usr/share/fonts/opentype/noto/NotoSansCJKsc-Regular.otf"),
-            ("NotoSansMonoCJKsc", "/usr/share/fonts/opentype/noto/NotoSansMonoCJKsc-Regular.otf"),
+            # 2) Linux Debian/Ubuntu：fonts-noto-cjk 实际安装路径（opentype 目录，.ttc）
+            ("NotoSansCJK", "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"),
+            ("NotoSerifCJK", "/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc"),
             ("WenQuanYiZenHei", "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc"),
             ("WenQuanYiMicroHei", "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc"),
-            # Alpine
+            # 3) Alpine
             ("NotoSansCJK", "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc"),
-            # 项目内置
-            ("ProjectSimHei", os.path.join(_PROJECT_FONT_DIR, "simhei.ttf")),
-            ("ProjectNotoSC", os.path.join(_PROJECT_FONT_DIR, "NotoSansSC-Regular.otf")),
         ]
         for name, path in candidates:
             if os.path.exists(path):
@@ -65,8 +65,28 @@ def _register_chinese_font():
                     break
                 except Exception as e:
                     log.warning("注册字体 {} 失败: {}", name, e)
+        # 4) glob 兜底：扫描系统字体目录里含 CJK 关键字的字体（路径随发行版变动时仍能命中）
         if _FONT_NAME == "Helvetica":
-            log.warning("未找到中文字体，PDF 中文可能显示为方块。请在 Dockerfile 中安装 fonts-noto-cjk 或于 data/fonts 下放置字体文件。")
+            import glob as _glob
+            for pat in (
+                "/usr/share/fonts/**/NotoSansCJK*.ttc",
+                "/usr/share/fonts/**/NotoSerifCJK*.ttc",
+                "/usr/share/fonts/**/*wqy*.ttc",
+                "/usr/share/fonts/**/*SourceHanSans*",
+                "/usr/share/fonts/**/*simhei*",
+            ):
+                for fpath in _glob.glob(pat, recursive=True):
+                    try:
+                        pdfmetrics.registerFont(TTFont("AutoCJK", fpath))
+                        _FONT_NAME = "AutoCJK"
+                        log.info("PDF 中文字体已通过 glob 注册: {}", fpath)
+                        break
+                    except Exception as e:
+                        log.warning("注册字体 {} 失败: {}", fpath, e)
+                if _FONT_NAME != "Helvetica":
+                    break
+        if _FONT_NAME == "Helvetica":
+            log.warning("未找到中文字体，PDF 中文会显示为黑块。已将 simhei.ttf 内置到 data/fonts/，若仍失败请确认该文件已被打包进镜像。")
         _FONT_REGISTERED = True
         return _FONT_NAME
 
