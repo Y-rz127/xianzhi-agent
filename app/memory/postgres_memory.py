@@ -37,10 +37,10 @@ def _get_pool():
             from psycopg_pool import ConnectionPool
             _pg_pool = ConnectionPool(
                 settings.pg_dsn(),
-                min_size=1,      # 最少保持 1 个连接（空闲也不释放）
-                max_size=5,      # 最多 5 个连接（并发上限）
-                kwargs={"autocommit": True},  # 每条 SQL 自动提交
-                open=False,      # 懒连接：首次使用时才建连，避免启动即卡死
+                min_size=1,
+                max_size=5,
+                kwargs={"autocommit": True},
+                open=True,
             )
         return _pg_pool          # ③ 返回池（已存在则直接返回）
 
