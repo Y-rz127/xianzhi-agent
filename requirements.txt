@@ -32,7 +32,10 @@ loguru>=0.7.2
 mcp>=1.28.0
 
 # PostgreSQL 记忆 / pgvector
+# psycopg[binary] 供 psycopg_pool（记忆表，v3）使用；
+# psycopg2-binary 供 langchain_postgres.PGVector（向量库，SQLAlchemy 默认 postgresql:// 方言）使用，二者独立共存。
 psycopg[binary]>=3.2.0
+psycopg2-binary>=2.9.0
 langchain-postgres>=0.0.17,<0.1.0
 
 # PDF 报告

@@ -315,6 +315,8 @@ def _build_vector_store(embeddings: Embeddings, embedding_id: str, force: bool =
     实际生效类型可能低于配置优先级（如配置了 postgres 但不可用会回退 chroma）。
     指纹记录的是实际生效类型，下次启动优先按指纹记录的类型直接复用索引，
     避免高优先级后端不可用时限重试、每次全量重建（含重复 embedding 调用）。
+    当配置切回高优先级后端（如 postgres 恢复可用）时会自动触发全量重建，
+    无需手动 force。
     """
     docs = _load_knowledge_docs()
     if not docs:
@@ -324,12 +326,16 @@ def _build_vector_store(embeddings: Embeddings, embedding_id: str, force: bool =
 
     # 指纹中记录的实际生效类型：上次回退后落盘的类型。
     # 优先用它判断"索引是否可复用"，从而跳过对已不可用后端的重试。
-    # 注意：改回高优先级后端（如 postgres 恢复）需手动 force 重建索引。
     fp = _load_fingerprint()
     effective_type = fp.get("store_type", configured_type) if fp else configured_type
 
-    # 指纹未变 → 直接加载已有索引，零 embedding API 调用
-    if not force and _is_up_to_date(docs_hash, embedding_id, effective_type,
+    # 显式配置了更高优先级后端（如 postgres）但指纹仍记着回退类型（chroma）：
+    # 视为后端已恢复，忽略指纹、按配置类型全量重建，避免永远卡在 chroma 回退。
+    _priority = {"postgres": 3, "milvus": 2, "chroma": 1}
+    backend_recovered = bool(fp) and _priority.get(configured_type, 1) > _priority.get(effective_type, 1)
+
+    # 指纹未变且未触发后端恢复 → 直接加载已有索引，零 embedding API 调用
+    if not force and not backend_recovered and _is_up_to_date(docs_hash, embedding_id, effective_type,
                                     CHUNK_SIZE, CHUNK_OVERLAP):
         log.info("RAG 文档指纹未变，复用已有向量索引 (store_type={})", effective_type)
         try:
