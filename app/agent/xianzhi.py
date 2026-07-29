@@ -508,7 +508,7 @@ class Xianzhi(ToolCallAgent):
             ]
             if filtered:
                 self._memory.add(self._conversation_id, filtered)
-        # 每 6 轮触发摘要（异步，不阻塞主流程）
+        # 每 6 轮对话（一问一答=1轮，约12条消息）触发摘要（异步，不阻塞主流程）
         self._maybe_summarize()
 
     def _get_session_summary(self) -> str:
@@ -520,22 +520,22 @@ class Xianzhi(ToolCallAgent):
             return ""
 
     def _maybe_summarize(self):
-        """每 6 条消息触发一次增量摘要（后台线程异步执行，不阻塞当次请求）。
+        """每 6 轮对话触发一次增量摘要（一问一答=1轮，约12条消息；后台线程异步，不阻塞当次请求）。
 
         阈值判断与数据快照在主线程完成（线程安全）；
         LLM 调用与落库放进 daemon 线程，避免拖慢用户响应。
-        摘要上限 600 字，增量累积：旧摘要 + 最近 6 条 → 新摘要。
+        摘要上限 600 字，增量累积：旧摘要 + 最近 12 条（约6轮）消息 → 新摘要。
         """
         try:
             msg_count = self._memory.get_message_count(self._conversation_id)
             last_summary_count = self._memory.get_last_summary_count(self._conversation_id)
             new_since_last = msg_count - last_summary_count
-            if new_since_last < 6:
+            if new_since_last < 12:
                 return
 
             # ---- 主线程：先取线程安全所需的快照（避免线程内读共享状态）----
             old_summary = self._get_session_summary()
-            recent = self.message_list[-6:]
+            recent = self.message_list[-12:]
             recent_text = "\n".join(
                 f"{m.__class__.__name__.replace('Message', '')}: {str(getattr(m, 'content', ''))[:300]}"
                 for m in recent if str(getattr(m, "content", "")).strip()
