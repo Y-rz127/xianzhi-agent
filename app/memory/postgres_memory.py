@@ -241,6 +241,19 @@ class PostgresChatMemory:
 _session_uuid_map: dict[str, str] = {}
 
 
+def _strip_user_input_boundary(content: str) -> str:
+    """剥离 base_agent._wrap_user_input 添加的指令注入防护边界标记。
+
+    历史消息从 DB 加载后返回前端时必须调用，否则用户会看到
+    --- USER INPUT BEGIN / END --- 等内部标记。
+    """
+    prefix = "\n--- USER INPUT BEGIN ---\n"
+    suffix = "\n--- USER INPUT END ---\n"
+    if content.startswith(prefix) and content.endswith(suffix):
+        return content[len(prefix):-len(suffix)]
+    return content
+
+
 def _extract_module(conversation_id: str) -> str:
     """从 conversation_id 提取模块前缀。
 
@@ -436,6 +449,9 @@ def get_messages(session_id: str) -> list:
                 continue
             # 映射 role 为前端期望的格式
             role = "user" if raw_role == "human" else "assistant"
+            # 剥离指令注入防护边界标记（base_agent._wrap_user_input 添加的）
+            if role == "user":
+                content = _strip_user_input_boundary(content)
             messages.append({
                 "role": role,
                 "content": content,
