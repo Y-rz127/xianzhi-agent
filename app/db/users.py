@@ -30,28 +30,31 @@ def _ensure_table():
     global _TABLE_READY
     if _TABLE_READY:
         return
-    with _get_pool().connection() as conn:
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS users (
-                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                nickname TEXT NOT NULL UNIQUE,
-                password_hash TEXT NOT NULL,
-                password_salt TEXT NOT NULL,
-                avatar TEXT DEFAULT '',
-                wx_openid TEXT UNIQUE,
-                token TEXT,
-                token_created_at TIMESTAMP WITH TIME ZONE,
-                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-                last_active_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    try:
+        with _get_pool().connection() as conn:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS users (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    nickname TEXT NOT NULL UNIQUE,
+                    password_hash TEXT NOT NULL,
+                    password_salt TEXT NOT NULL,
+                    avatar TEXT DEFAULT '',
+                    wx_openid TEXT UNIQUE,
+                    token TEXT,
+                    token_created_at TIMESTAMP WITH TIME ZONE,
+                    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                    last_active_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+                )
+                """
             )
-            """
-        )
-        conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS wx_openid TEXT UNIQUE")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_users_wx_openid ON users(wx_openid)")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_users_token ON users(token)")
-    _TABLE_READY = True
-    log.info("用户表(users)已就绪")
+            conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS wx_openid TEXT UNIQUE")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_users_wx_openid ON users(wx_openid)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_users_token ON users(token)")
+        _TABLE_READY = True
+        log.info("用户表(users)已就绪")
+    except Exception as e:
+        log.warning("用户表(users)创建失败: {}", e)
 
 
 def create_user(nickname: str, password: str) -> dict:

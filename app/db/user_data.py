@@ -26,6 +26,15 @@ def _ensure_tables():
     global _READY
     if _READY:
         return
+    try:
+        _do_ensure_tables()
+        _READY = True
+        log.info("用户私有数据表已就绪")
+    except Exception as e:
+        log.warning("用户私有数据表创建失败: {}", e)
+
+
+def _do_ensure_tables():
     with _get_pool().connection() as conn:
         conn.execute(
             """
@@ -234,8 +243,6 @@ def _ensure_tables():
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_chart_cases_rating ON chart_cases(rating DESC)"
         )
-    _READY = True
-    log.info("用户私有数据表已就绪")
 
 
 # ---------------- 八字档案 ----------------
