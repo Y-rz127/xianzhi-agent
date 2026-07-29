@@ -159,7 +159,7 @@ async def security_headers_middleware(request, call_next):
 async def metrics_middleware(request: Request, call_next):
     """记录 API 请求指标，跳过静态资源与健康检查路径。"""
     path = request.url.path
-    if path.startswith("/assets/") or path.startswith("/static/") or path == "/health" or path == "/api/ai/health":
+    if path.startswith("/assets/") or path.startswith("/static/") or path in ("/health", "/api/health", "/api/ai/health"):
         return await call_next(request)
 
     start = time.perf_counter()
@@ -170,6 +170,18 @@ async def metrics_middleware(request: Request, call_next):
 
 
 app.include_router(router, prefix="/api")
+
+
+@app.get("/api/health", tags=["Health"])
+async def health():
+    """健康检查（直接挂载，不经过 /ai 前缀，供 CloudBase 探针与外部监控使用）。"""
+    from app.api import state
+    return {
+        "status": "ok",
+        "rag_ready": state._rag_chain is not None,
+        "workflow_backend": state.workflow_backend(),
+        "agent_pool": state.agent_pool_stats(),
+    }
 
 
 if __name__ == "__main__":
