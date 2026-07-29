@@ -8,7 +8,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-# CloudBase 云托管默认注入 PORT（通常为 80），main.py 已优先读取；本地/compose 回退 8123
+# 容器入口监听端口对齐 CloudBase「服务端口设置」(80)；main.py 在容器内强制监听 80（除非显式设置 PORT），本地可用 PORT/APP_PORT 覆盖
 EXPOSE 80
 
 CMD ["python", "main.py"]

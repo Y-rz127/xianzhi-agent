@@ -175,6 +175,11 @@ app.include_router(router, prefix="/api")
 if __name__ == "__main__":
     import os
     import uvicorn
-    # CloudBase 云托管/容器平台会注入 PORT 环境变量；本地与 docker-compose 回退到 APP_PORT 或 8123
-    port = int(os.environ.get("PORT", settings.app_port))
+    # 端口对齐：CloudBase 云托管「服务端口设置」固定为 80，平台不自动注入 PORT 环境变量。
+    # 容器内若未显式设置 PORT（推荐在控制台设为 80），强制监听 80，否则存活探针会因端口不匹配失败。
+    # 本地开发（非容器）沿用 APP_PORT 习惯值，也可用 PORT 环境变量覆盖。
+    port = int(os.environ.get("PORT") or os.environ.get("APP_PORT") or 80)
+    _in_container = os.path.exists("/.dockerenv") or os.environ.get("KUBERNETES_SERVICE_HOST") is not None
+    if not os.environ.get("PORT") and _in_container:
+        port = 80
     uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False)
