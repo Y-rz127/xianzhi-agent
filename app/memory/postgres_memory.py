@@ -36,17 +36,17 @@ def _get_pool():
         if _pg_pool is None:     # ② 双重检查：锁内再判一次，避免重复创建
             from psycopg_pool import ConnectionPool
             _pg_pool = ConnectionPool(
-                settings.postgres_connection_string,
+                settings.pg_dsn(),
                 min_size=1,      # 最少保持 1 个连接（空闲也不释放）
                 max_size=5,      # 最多 5 个连接（并发上限）
                 kwargs={"autocommit": True},  # 每条 SQL 自动提交
-                open=True,       # 创建时立即建立初始连接
+                open=False,      # 懒连接：首次使用时才建连，避免启动即卡死
             )
         return _pg_pool          # ③ 返回池（已存在则直接返回）
 
 
 def _ensure_schema():
-    """建表与索引（进程内只执行一次）。"""
+    """建表与索引（进程内只执行一次；数据库不可达时降级，不阻断启动）。"""
     global _schema_ready
     if _schema_ready:
         return
@@ -54,8 +54,8 @@ def _ensure_schema():
     with _pool_lock:
         if _schema_ready:
             return
-        with pool.connection() as conn:
-            try:
+        try:
+            with pool.connection() as conn:
                 from langchain_postgres import PostgresChatMessageHistory
                 PostgresChatMessageHistory.create_tables(conn, settings.memory_table_name)
                 # 会话元数据表：持久化 UUID -> conversation_id 的映射
@@ -80,9 +80,10 @@ def _ensure_schema():
                     ON {} (session_id, created_at DESC)
                 """.format(settings.memory_table_name))
                 log.info("PG 记忆表已就绪: {}", settings.memory_table_name)
-            except Exception as e:
-                log.warning("PG 记忆表创建失败（可能已存在）: {}", e)
-        _schema_ready = True
+            _schema_ready = True
+        except Exception as e:
+            # 数据库暂不可达：仅告警，保持 _schema_ready=False，下次调用/重启时重试
+            log.warning("PG 记忆表初始化失败（数据库暂不可达，将在重启/首次使用时重试）: {}", e)
 
 
 def close_global_conn():

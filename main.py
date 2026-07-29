@@ -25,8 +25,10 @@ async def lifespan(app: FastAPI):
     # 0. LangSmith 可观测性（最早初始化）
     init_observability()
 
-    # 1. LLM - 使用 OpenAI 兼容模式调用千问（langchain-dashscope 不支持 bind_tools）
-    # extra_body: 禁用 Qwen3 推理模型的 thinking 模式，避免 <think> 标签导致内容重复
+    import asyncio
+    import threading
+
+    # 1. LLM（直连 DashScope，不经系统代理）
     import httpx
     chat_model = ChatOpenAI(
         model=settings.dashscope_model,
@@ -39,60 +41,66 @@ async def lifespan(app: FastAPI):
         http_client=httpx.Client(trust_env=False),
     )
 
-    # 2. 记忆
+    # 2. 记忆（数据库不可达时降级，不阻断端口监听）
     memory = create_chat_memory()
 
-    # 3. RAG 知识库初始化（失败不阻断主流程；内部根据文档指纹决定是否复用已有索引）
-    knowledge_base.init()
-    rag_chain = RagChatChain(chat_model=chat_model)
-
-    # 4. 本地工具（含 RAG 检索）
+    # 3. 本地工具（含 RAG 检索）
     from app.tools.bazi import bazi_tools
     from app.tools.web_search import search_tools
     from app.tools.terminate import terminate_tools
     from app.tools.rag_search import rag_tools
     local_tools = bazi_tools + search_tools + terminate_tools + rag_tools
 
-    # 5. 启动 MCP（高德地图，异步加载，失败不阻断）
-    log.info("正在启动 MCP 服务...")
-    await mcp_manager.start()
+    # 4. RAG 检索链（向量库建连延后到后台）
+    rag_chain = RagChatChain(chat_model=chat_model)
 
-    # 6. 塔罗占卜
+    # 5. 塔罗占卜
     tarot_app = TarotApp(chat_model=chat_model)
 
-    # 7. 注册共享依赖：Xianzhi 按会话池化，首次请求时按需创建实例
+    # 6. 注册共享依赖：Xianzhi 按会话池化，首次请求时按需创建实例
     set_instances(chat_model, local_tools, memory, rag_chain, tarot_app)
 
-    # 暖启动：预热排盘缓存（后台线程执行，不阻塞服务就绪）
-    def _warm_cache():
-        from app.tools.bazi import bazi_chart, bazi_analysis, bazi_dayun
-        warm_dates = ["1990-01-01 12:00", "2000-01-01 12:00", "1985-01-01 12:00", "1995-01-01 12:00"]
-        warm_genders = ["男", "女"]
-        warm_count = 0
-        for dt in warm_dates:
-            for g in warm_genders:
-                try:
-                    bazi_chart.invoke({"birth_time": dt, "gender": g})
-                    bazi_analysis.invoke({"birth_time": dt, "gender": g, "question": "整体命盘"})
-                    bazi_dayun.invoke({"birth_time": dt, "gender": g, "count": 8})
-                    warm_count += 1
-                except Exception:
-                    pass
-        log.info("缓存预热完成: {} 条", warm_count)
+    # 7. 后台完成重/可失败初始化，避免阻塞端口监听导致存活探针失败
+    async def _bg_init():
+        try:
+            await asyncio.to_thread(knowledge_base.init)
+        except Exception as e:
+            log.warning("RAG 知识库初始化失败（可稍后重试）: {}", e)
+        try:
+            log.info("正在启动 MCP 服务...")
+            await mcp_manager.start()
+        except Exception as e:
+            log.warning("MCP 启动失败: {}", e)
 
-    import threading
-    threading.Thread(target=_warm_cache, daemon=True, name="bazi-cache-warmup").start()
+        def _warm_cache():
+            from app.tools.bazi import bazi_chart, bazi_analysis, bazi_dayun
+            warm_dates = ["1990-01-01 12:00", "2000-01-01 12:00", "1985-01-01 12:00", "1995-01-01 12:00"]
+            warm_genders = ["男", "女"]
+            warm_count = 0
+            for dt in warm_dates:
+                for g in warm_genders:
+                    try:
+                        bazi_chart.invoke({"birth_time": dt, "gender": g})
+                        bazi_analysis.invoke({"birth_time": dt, "gender": g, "question": "整体命盘"})
+                        bazi_dayun.invoke({"birth_time": dt, "gender": g, "count": 8})
+                        warm_count += 1
+                    except Exception:
+                        pass
+            log.info("缓存预热完成: {} 条", warm_count)
 
-    # 8. 初始化命例表
-    try:
-        from app.api.cases import ensure_table
-        ensure_table()
-    except Exception as e:
-        log.warning("命例表初始化失败（可能已存在）: {}", e)
+        try:
+            threading.Thread(target=_warm_cache, daemon=True, name="bazi-cache-warmup").start()
+        except Exception:
+            pass
+        try:
+            from app.api.cases import ensure_table
+            ensure_table()
+        except Exception as e:
+            log.warning("命例表初始化失败（可能已存在）: {}", e)
 
-    log.info("先知智能体启动完成 | 端口 {} | 本地工具 {} 个 | MCP 工具 {} 个 | RAG {}",
-             settings.app_port, len(local_tools), len(mcp_manager.get_tools()),
-             "就绪" if knowledge_base.ready else "未就绪")
+    asyncio.create_task(_bg_init())
+
+    log.info("先知智能体启动完成 | 端口 {} | 本地工具 {} 个", settings.app_port, len(local_tools))
 
     yield
 
@@ -103,7 +111,10 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         log.warning("关闭 PG 连接池失败: {}", e)
 
-    await mcp_manager.stop()
+    try:
+        await mcp_manager.stop()
+    except Exception:
+        pass
     log.info("先知智能体已关闭")
 
 

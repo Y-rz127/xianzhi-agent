@@ -99,6 +99,18 @@ class Settings(BaseSettings):
     wechat_appid: str = Field(default="", alias="WECHAT_APPID")
     wechat_secret: str = Field(default="", alias="WECHAT_SECRET")
 
+    def pg_dsn(self, timeout: int = 5) -> str:
+        """返回带 connect_timeout 的 PG 连接串。
+
+        容器与数据库不在同一网络平面时，未设超时会令连接长时间挂起，
+        进而拖垮启动（存活探针失败）。统一在此兜底追加 connect_timeout。
+        """
+        dsn = self.postgres_connection_string
+        if "connect_timeout" in dsn:
+            return dsn
+        sep = "&" if "?" in dsn else "?"
+        return f"{dsn}{sep}connect_timeout={timeout}"
+
 
 settings = Settings()
 settings.memory_dir.mkdir(parents=True, exist_ok=True)

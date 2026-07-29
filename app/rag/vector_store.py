@@ -235,7 +235,7 @@ def _build_postgres(chunks: list[Document], embeddings: Embeddings):
         documents=chunks,
         embedding=embeddings,
         collection_name=settings.postgres_collection,
-        connection=settings.postgres_connection_string,
+        connection=settings.pg_dsn(),
         pre_delete_collection=True,
         use_jsonb=True,
     )
@@ -249,7 +249,7 @@ def _load_postgres(embeddings: Embeddings):
     store = PGVector(
         embeddings=embeddings,
         collection_name=settings.postgres_collection,
-        connection=settings.postgres_connection_string,
+        connection=settings.pg_dsn(),
         use_jsonb=True,
     )
     log.info("Postgres(pgvector) 向量库复用已有索引（文档未变更，跳过 embedding）")
