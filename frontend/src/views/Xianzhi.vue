@@ -129,16 +129,6 @@
                 <MarkdownRender v-if="msg.role === 'assistant'" :content="formatContent(msg.content)" />
                 <pre v-else>{{ msg.content }}</pre>
               </div>
-              <div v-if="mode === 'agent' && msg.role === 'assistant' && lastBirthInfo" class="report-bar">
-                <button class="report-btn" @click="showBaziModal" aria-label="查看命盘详情">
-                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0z"/><path d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
-                  查看命盘详情
-                </button>
-                <button class="report-btn" @click="downloadReport(lastBirthInfo.time, lastBirthInfo.gender)" aria-label="下载 PDF 报告">
-                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M12 18v-6"/><path d="M9 15l3 3 3-3"/></svg>
-                  下载 PDF 报告
-                </button>
-              </div>
               <div v-if="mode === 'agent' && msg.role === 'assistant' && msg.content && !isThinking(msg.content)" class="answer-feedback-bar">
                 <button
                   class="feedback-chip"

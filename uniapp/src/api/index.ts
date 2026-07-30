@@ -292,7 +292,21 @@ export const getSessionBirthInfo = async (id: string): Promise<BirthInfo> => {
 
 /* ============ 文本解析工具（与 Web 端 frontend/src/api 一致） ============ */
 
-export interface Pillar { name: string; ganzhi: string; nayin: string }
+export interface Pillar {
+  name: string
+  ganzhi: string
+  nayin: string
+  gan?: string
+  zhi?: string
+  ganWuxing?: string
+  zhiWuxing?: string
+  hiddenStems?: string[]
+  shishenGan?: string
+  shishenZhi?: string[]
+  changsheng?: string
+  zizuo?: string
+  xunkong?: string
+}
 export function parsePillars(text: string): Pillar[] {
   if (!text) return []
   const result: Pillar[] = []

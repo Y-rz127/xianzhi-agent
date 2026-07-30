@@ -19,20 +19,72 @@
               <template v-if="shenGong">身宫 {{ shenGong }}</template>
             </text>
           </view>
-          <view class="pillars-grid">
-            <view
-              v-for="p in pillars"
-              :key="p.name"
-              :class="['pillar-card', p.name === '日柱' && 'day-master']"
-            >
-              <text class="pillar-name">{{ p.name }}</text>
-              <text class="pillar-gan" :style="{ color: ganColor(p.ganzhi[0]) }">{{ p.ganzhi[0] }}</text>
-              <text class="pillar-zhi" :style="{ color: zhiColor(p.ganzhi[1]) }">{{ p.ganzhi[1] }}</text>
-              <text class="pillar-nayin">{{ p.nayin }}</text>
-              <!-- 该柱神煞竖排（点击查看寓意） -->
-              <view v-if="shenshaByPillar[p.name]?.length" class="pillar-shensha">
+          <!-- 四柱命盘表格（11行×4列） -->
+          <view class="bazi-table">
+            <!-- 列头 -->
+            <view class="bt-row bt-head">
+              <text class="bt-cell bt-label"></text>
+              <text v-for="p in pillars" :key="p.name" :class="['bt-cell bt-col-head', p.name === '日柱' && 'bt-day']">{{ p.name }}</text>
+            </view>
+            <!-- 主星 -->
+            <view class="bt-row">
+              <text class="bt-cell bt-label">主星</text>
+              <text v-for="p in pillars" :key="p.name" :class="['bt-cell', p.name === '日柱' && 'bt-day']">{{ p.shishenGan || '—' }}</text>
+            </view>
+            <!-- 天干 -->
+            <view class="bt-row">
+              <text class="bt-cell bt-label">天干</text>
+              <view v-for="p in pillars" :key="p.name" :class="['bt-cell', p.name === '日柱' && 'bt-day']">
+                <text class="bt-gan" :style="{ color: ganColor(p.ganzhi[0]) }">{{ p.ganzhi[0] }}</text>
+              </view>
+            </view>
+            <!-- 地支 -->
+            <view class="bt-row">
+              <text class="bt-cell bt-label">地支</text>
+              <view v-for="p in pillars" :key="p.name" :class="['bt-cell', p.name === '日柱' && 'bt-day']">
+                <text class="bt-zhi" :style="{ color: zhiColor(p.ganzhi[1]) }">{{ p.ganzhi[1] }}</text>
+              </view>
+            </view>
+            <!-- 藏干 -->
+            <view class="bt-row">
+              <text class="bt-cell bt-label">藏干</text>
+              <view v-for="p in pillars" :key="p.name" :class="['bt-cell bt-multi', p.name === '日柱' && 'bt-day']">
+                <text v-for="(g, i) in (p.hiddenStems || [])" :key="i" class="bt-cang" :style="{ color: ganColor(g) }">{{ g }}</text>
+              </view>
+            </view>
+            <!-- 副星 -->
+            <view class="bt-row">
+              <text class="bt-cell bt-label">副星</text>
+              <view v-for="p in pillars" :key="p.name" :class="['bt-cell bt-multi', p.name === '日柱' && 'bt-day']">
+                <text v-for="(s, i) in (p.shishenZhi || [])" :key="i" class="bt-fu">{{ s }}</text>
+              </view>
+            </view>
+            <!-- 星运 -->
+            <view class="bt-row">
+              <text class="bt-cell bt-label">星运</text>
+              <text v-for="p in pillars" :key="p.name" :class="['bt-cell', p.name === '日柱' && 'bt-day']">{{ p.changsheng || '—' }}</text>
+            </view>
+            <!-- 自坐 -->
+            <view class="bt-row">
+              <text class="bt-cell bt-label">自坐</text>
+              <text v-for="p in pillars" :key="p.name" :class="['bt-cell', p.name === '日柱' && 'bt-day']">{{ p.zizuo || '—' }}</text>
+            </view>
+            <!-- 空亡 -->
+            <view class="bt-row">
+              <text class="bt-cell bt-label">空亡</text>
+              <text v-for="p in pillars" :key="p.name" :class="['bt-cell', p.name === '日柱' && 'bt-day']">{{ p.xunkong || '—' }}</text>
+            </view>
+            <!-- 纳音 -->
+            <view class="bt-row">
+              <text class="bt-cell bt-label">纳音</text>
+              <text v-for="p in pillars" :key="p.name" :class="['bt-cell', p.name === '日柱' && 'bt-day']">{{ p.nayin }}</text>
+            </view>
+            <!-- 神煞 -->
+            <view class="bt-row">
+              <text class="bt-cell bt-label">神煞</text>
+              <view v-for="p in pillars" :key="p.name" :class="['bt-cell bt-multi', p.name === '日柱' && 'bt-day']">
                 <text
-                  v-for="(s, i) in shenshaByPillar[p.name]"
+                  v-for="(s, i) in (shenshaByPillar[p.name] || [])"
                   :key="i"
                   class="ps-tag"
                   :class="'ps-' + s._cat"
@@ -367,59 +419,37 @@ async function generateReport() {
   border-radius: 3rpx;
 }
 
-/* 四柱 */
-.pillars-grid {
+/* 四柱命盘表格（11行×4列，CSS Grid 兼容小程序） */
+.bazi-table {
   display: flex;
-  gap: 8rpx;
-  box-sizing: border-box;
-}
-.pillar-card {
-  flex: 1;
-  min-width: 0;
-  background: $color-bg-card;
-  border-radius: 12rpx;
-  padding: 20rpx 8rpx;
-  text-align: center;
+  flex-direction: column;
   border: 1rpx solid $color-border;
-  box-sizing: border-box;
-}
-.pillar-card.day-master {
-  background: $color-paper-warm;
-  border-color: $color-vermilion;
-  border-width: 2rpx;
-  box-shadow: 0 2rpx 8rpx rgba(184, 72, 60, 0.12);
-}
-.pillar-name {
-  display: block;
-  font-size: 20rpx;
-  color: $color-ink-light;
-  margin-bottom: 12rpx;
-  letter-spacing: 2rpx;
-}
-.pillar-gan {
-  display: block;
-  font-size: 40rpx;
-  font-weight: bold;
-  color: $color-ink;
-  font-family: $font-family-display;
-  letter-spacing: 4rpx;
-  margin-bottom: 4rpx;
-}
-.pillar-card.day-master .pillar-gan { color: $color-vermilion; }
-.pillar-zhi {
-  display: block;
-  font-size: 32rpx;
-  color: $color-ink;
-  font-family: $font-family-display;
+  border-radius: 12rpx;
+  overflow: hidden;
   margin-bottom: 8rpx;
-  letter-spacing: 4rpx;
 }
-.pillar-card.day-master .pillar-zhi { color: $color-vermilion; }
-.pillar-nayin {
-  display: block;
-  font-size: 20rpx;
-  color: $color-ink-lighter;
+.bt-row {
+  display: flex;
+  flex-direction: row;
+  border-bottom: 1rpx solid $color-border;
 }
+.bt-row:last-child { border-bottom: none; }
+.bt-head { background: $color-paper-warm; }
+.bt-cell {
+  flex: 1; padding: 10rpx 4rpx; text-align: center; font-size: 22rpx; color: $color-ink;
+  display: flex; align-items: center; justify-content: center;
+  border-right: 1rpx solid $color-border; box-sizing: border-box; min-height: 0;
+}
+.bt-cell:last-child { border-right: none; }
+.bt-label { flex: 0 0 80rpx; font-size: 18rpx; color: $color-ink-light; background: rgba(0,0,0,0.03); font-weight: 500; }
+.bt-col-head { font-size: 20rpx; font-weight: 600; color: $color-ink; letter-spacing: 2px; }
+.bt-day { background: rgba(184, 72, 60, 0.06); }
+.bt-head .bt-day { background: rgba(184, 72, 60, 0.1); }
+.bt-gan { font-size: 32rpx; font-weight: bold; font-family: $font-family-display; }
+.bt-zhi { font-size: 26rpx; font-family: $font-family-display; }
+.bt-multi { flex-direction: column; gap: 2rpx; padding: 8rpx 4rpx; }
+.bt-cang { font-size: 20rpx; font-weight: 600; line-height: 1.5; }
+.bt-fu { font-size: 17rpx; color: $color-ink-light; line-height: 1.5; }
 
 /* 五行 */
 .wuxing-grid {

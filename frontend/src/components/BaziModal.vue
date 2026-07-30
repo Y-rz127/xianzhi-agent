@@ -513,8 +513,8 @@ const downloadFullPDF = () => {
   margin-bottom: 14px; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
 .gong-info { font-size: 11px; color: var(--text-dim); letter-spacing: normal; }
 .chart-table-wrap { margin-bottom: 10px; overflow-x: auto; }
-.chart-table { width: 100%; border-collapse: collapse; font-size: 12px; }
-.chart-table th, .chart-table td { border: 1px solid var(--border); padding: 7px 6px; text-align: center; vertical-align: middle; }
+.chart-table { width: 100%; border-collapse: collapse; font-size: 12px; table-layout: fixed; }
+.chart-table th, .chart-table td { border: 1px solid var(--border); padding: 6px 4px; text-align: center; vertical-align: middle; }
 .chart-table thead .col-head { font-size: 12px; color: var(--accent-light); letter-spacing: 1px; background: rgba(255,255,255,0.04); }
 .chart-table .row-label { font-size: 11px; color: var(--text-dim); background: rgba(255,255,255,0.02); white-space: nowrap; width: 52px; }
 .chart-table tbody td { color: var(--text); line-height: 1.5; }
@@ -523,9 +523,9 @@ const downloadFullPDF = () => {
 .chart-table thead .day-master { background: linear-gradient(135deg, rgba(212,175,55,0.16), rgba(139,92,246,0.08)); }
 .chart-table .big-gan { font-size: 22px; font-weight: bold; }
 .chart-table .big-zhi { font-size: 18px; }
-.chart-table .cang-gan { display: flex; flex-direction: column; gap: 2px; align-items: center; }
-.chart-table .cang-item { font-size: 13px; font-weight: 600; }
-.chart-table .fu-star { display: flex; flex-direction: column; gap: 2px; align-items: center; font-size: 11px; color: var(--text-dim); }
+.chart-table .cang-gan { display: flex; flex-wrap: wrap; gap: 2px 6px; justify-content: center; align-items: center; }
+.chart-table .cang-item { font-size: 12px; font-weight: 600; }
+.chart-table .fu-star { display: flex; flex-wrap: wrap; gap: 2px 6px; justify-content: center; align-items: center; font-size: 10px; color: var(--text-dim); }
 .chart-table .shensha-cell { display: flex; flex-wrap: wrap; gap: 4px; justify-content: center; align-items: center; }
 .wuxing-grid { display: flex; justify-content: space-around; align-items: flex-end; height: 140px; margin-bottom: 10px; }
 .wuxing-item { display: flex; flex-direction: column; align-items: center; gap: 6px; width: 16%; }
