@@ -987,11 +987,14 @@ def _compute_shensha(pillars: list[Pillar], gender_int: int | None = None) -> li
                 add("元辰", f"别而不合、诸事不顺（{ylabel} {year_zhi}冲{chong}→{yuan}）", p.name)
 
     # 天罗地网（戌亥为天罗、辰巳为地网；需戌亥互见 / 辰巳互见）
+    # 标注到具体柱：天罗标含"戌"的柱，地网标含"辰"的柱
     all_zhi = [p.zhi for p in pillars]
     if "戌" in all_zhi and "亥" in all_zhi:
-        add("天罗", "困顿羁绊、难挣脱（戌亥互见）", "")
+        p_xu = next((p for p in pillars if p.zhi == "戌"), None)
+        add("天罗", "困顿羁绊、难挣脱（戌亥互见）", p_xu.name if p_xu else "")
     if "辰" in all_zhi and "巳" in all_zhi:
-        add("地网", "困顿羁绊、事业受阻（辰巳互见）", "")
+        p_chen = next((p for p in pillars if p.zhi == "辰"), None)
+        add("地网", "困顿羁绊、事业受阻（辰巳互见）", p_chen.name if p_chen else "")
 
     # ================================================================
     # 五、特殊组合类神煞（日柱特定组合 / 日柱纳音等）
@@ -1057,14 +1060,14 @@ def _compute_shensha(pillars: list[Pillar], gender_int: int | None = None) -> li
     if len(pillars) > 3:
         for d, t, lu_zhi in GONG_LU:
             if pillars[2].zhi == d and pillars[3].zhi == t:
-                add("拱禄", f"日时拱夹禄位{lu_zhi}，财禄拱护、富贵双全", "日时")
+                add("拱禄", f"日时拱夹禄位{lu_zhi}，财禄拱护、富贵双全", "日柱")
 
     # 三奇贵人（天干相连且须含日干）
     for triple in SAN_QI:
         if day_gan in triple:
             idxs = [all_gan.index(g) for g in triple if g in all_gan]
             if len(idxs) == 3 and idxs == sorted(idxs):
-                add("三奇贵人", f"天干相连见{' '.join(triple)}，襟怀卓越、博学多能", "")
+                add("三奇贵人", f"天干相连见{' '.join(triple)}，襟怀卓越、博学多能", "日柱")
                 break
 
     # 童子煞（月令 + 年柱纳音 + 日/时支分别判断，对齐 07_神煞初探.md）
