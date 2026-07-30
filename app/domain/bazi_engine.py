@@ -1584,14 +1584,15 @@ def format_chart_text(chart: BaziChart) -> str:
         f"  命宫: {chart.ming_gong} ({chart.ming_gong_nayin})",
         f"  身宫: {chart.shen_gong} ({chart.shen_gong_nayin})",
     ]
-    shensha = _compute_shensha(chart.pillars, parse_gender(chart.birth.gender))
-    if shensha:
-        lines += ["", "【神煞】"]
-        seen = set()
-        for s in shensha:
-            if s["name"] not in seen:
-                seen.add(s["name"])
-                lines.append(f"  {s['name']}: {s['description']}")
+    shensha_all = _compute_shensha(chart.pillars, parse_gender(chart.birth.gender))
+    if shensha_all:
+        shensha_by_pillar: dict[str, list[str]] = {}
+        for _s in shensha_all:
+            shensha_by_pillar.setdefault(_s.get("pillar") or "全局", []).append(_s["name"])
+        lines += ["", "【神煞（按柱）】"]
+        for p in chart.pillars:
+            names = shensha_by_pillar.get(p.name, [])
+            lines.append(f"  {p.name}: {'、'.join(names) if names else '—'}")
     if chart.warnings:
         lines += ["", "【校验提示】"] + [f"  - {w}" for w in chart.warnings]
     return "\n".join(lines)
