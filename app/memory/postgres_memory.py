@@ -30,6 +30,16 @@ _pg_pool = None           # 全局单例，None 表示还没创建
 _pool_lock = threading.Lock()  # 互斥锁，防止并发创建多个池
 _schema_ready = False
 
+def _check_connection(conn) -> bool:
+    """借出连接前的健康检查：探活失败则丢弃重建。"""
+    try:
+        conn.execute("SELECT 1")
+        return True
+    except Exception as e:  # noqa: BLE001 - 任何异常都视为连接不可用
+        log.warning("连接池健康检查失败，丢弃该连接: {}", e)
+        return False
+
+
 def _get_pool():
     global _pg_pool
     with _pool_lock:             # ① 加锁，同一时刻只有一个线程进入
@@ -40,6 +50,10 @@ def _get_pool():
                 min_size=1,
                 max_size=5,
                 kwargs={"autocommit": True},
+                # 借出前先 SELECT 1 探活，避免把被服务端超时断开的死连接借给请求
+                check=_check_connection,
+                # 空闲连接最长存活 30 分钟，主动回收，降低踩到 PG 空闲超时的概率
+                max_lifetime=1800,
                 open=True,
             )
         return _pg_pool          # ③ 返回池（已存在则直接返回）
