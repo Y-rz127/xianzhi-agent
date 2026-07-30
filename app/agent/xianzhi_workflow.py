@@ -1180,6 +1180,16 @@ class XianzhiWorkflow:
         """单张命盘的紧凑事实块（不含对方盘逻辑，供 _compact_facts 复用）。"""
         today = _dt.date.today()
         pillars = " ".join(f"{p.name}:{p.ganzhi}({p.nayin})" for p in chart.pillars)
+        # 四柱详述：藏干/副星/星运/自坐/空亡（表格新增字段，必须随排盘事实进 LLM 才能正确推理）
+        pillar_detail = "\n".join(
+            f"  {p.name}{'（日主）' if p.name == '日柱' else ''} {p.ganzhi}: "
+            f"藏干[{'、'.join(p.hidden_stems) or '—'}] "
+            f"副星[{'、'.join(p.shishen_zhi) or '—'}] "
+            f"星运[{p.changsheng or '—'}] "
+            f"自坐[{p.zizuo or '—'}] "
+            f"空亡[{p.xunkong or '—'}]"
+            for p in chart.pillars
+        )
         dayun_lines = [
             f"{item.ganzhi} {item.start_year}-{item.end_year} {item.start_age}-{item.end_age}岁"
             for item in chart.dayun
@@ -1211,6 +1221,7 @@ class XianzhiWorkflow:
             f"当前日期: {today.year}年{today.month}月{today.day}日{current_age}",
             f"出生: {chart.birth.solar}; 性别: {chart.birth.gender}; 农历: {chart.birth.lunar}; 生肖: {chart.birth.shengxiao}",
             f"四柱: {pillars}",
+            f"四柱详述:\n{pillar_detail}",
             f"日主: {chart.wuxing.day_master}({chart.wuxing.day_master_wuxing}); 强弱: {chart.wuxing.strength}; 分数: {chart.wuxing.strength_score}",
             f"五行权重: {chart.wuxing.counts}; 最旺: {chart.wuxing.strongest}; 最弱: {chart.wuxing.weakest}",
             f"用神提示: {chart.wuxing.useful_hint}",

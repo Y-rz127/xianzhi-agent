@@ -1567,6 +1567,11 @@ def format_chart_text(chart: BaziChart) -> str:
     for p in chart.pillars:
         mark = "  ← 日主" if p.name == "日柱" else ""
         lines.append(f"  {p.name}: {p.ganzhi} ({p.nayin}){mark}")
+        lines.append(
+            f"    藏干: {', '.join(p.hidden_stems) or '-'} | "
+            f"副星: {', '.join(p.shishen_zhi) or '-'} | "
+            f"星运: {p.changsheng or '-'} | 自坐: {p.zizuo or '-'} | 空亡: {p.xunkong or '-'}"
+        )
     lines += [
         "",
         "【空亡】",
