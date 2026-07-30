@@ -519,10 +519,9 @@ const downloadFullPDF = () => {
   margin-bottom: 14px; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
 .gong-info { font-size: 11px; color: var(--text-dim); letter-spacing: normal; }
 .chart-table-wrap { margin-bottom: 10px; overflow-x: auto; }
-/* === 11 行 × 5 列 CSS Grid 表格（label + 年月日时 4 柱）=== */
+/* === 11 行 × 5 列：外层 block 容器 + 内层每行独立 grid === */
 .chart-grid {
-  display: grid;
-  grid-template-columns: 52px repeat(4, 1fr);
+  display: block;
   border: 1px solid var(--border);
   border-radius: 10px;
   overflow: hidden;
