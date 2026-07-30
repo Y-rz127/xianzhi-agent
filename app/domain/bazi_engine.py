@@ -1635,6 +1635,15 @@ def format_analysis_text(chart: BaziChart, question: str = "整体运势") -> st
         "【口径说明】",
     ]
     lines += [f"  - {note}" for note in wx.notes]
+    # 神煞（按柱分组，与 _fact_block / format_chart_text 一致）
+    _ss = _compute_shensha(chart.pillars, parse_gender(chart.birth.gender))
+    _ss_by_p: dict[str, list[str]] = {}
+    for _s in _ss:
+        _ss_by_p.setdefault(_s.get("pillar") or "全局", []).append(_s["name"])
+    lines += ["", "【神煞（按柱）】"]
+    for p in chart.pillars:
+        _names = _ss_by_p.get(p.name, [])
+        lines.append(f"  {p.name}: {'、'.join(_names) if _names else '—'}")
     return "\n".join(lines)
 
 
