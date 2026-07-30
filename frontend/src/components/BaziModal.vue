@@ -606,21 +606,28 @@ const downloadFullPDF = () => {
   transition: all 0.2s; white-space: nowrap; user-select: none; display: inline-block; }
 .ps-tag:hover { filter: brightness(1.2); }
 .ps-active { outline: 1px solid currentColor; }
-.ps-good { color: #4ade80; background: rgba(74,222,128,0.1); }
-.ps-bad { color: #f87171; background: rgba(248,113,113,0.1); }
-.ps-love { color: #f472b6; background: rgba(244,114,182,0.1); }
-.ps-career { color: #60a5fa; background: rgba(96,165,250,0.1); }
-.ps-other { color: #94a3b8; background: rgba(148,163,184,0.1); }
+.ps-good { color: #4ade80; }
+.ps-bad { color: #f87171; }
+.ps-love { color: #f472b6; }
+.ps-career { color: #60a5fa; }
+.ps-other { color: #94a3b8; }
+/* 标题上的分类色只保留文字色，不加背景 */
+.ps-popover-title.ps-good,
+.ps-popover-title.ps-bad,
+.ps-popover-title.ps-love,
+.ps-popover-title.ps-career,
+.ps-popover-title.ps-other { background: none; }
 /* 神煞寓意浮层 */
 .ps-popover { position: fixed; inset: 0; background: rgba(0,0,0,0.55); display: flex; align-items: center;
   justify-content: center; z-index: 1100; padding: 20px; box-sizing: border-box; cursor: pointer;
   animation: fadeIn 0.15s ease; }
 .ps-popover-card { background: linear-gradient(135deg, rgba(28,36,56,0.98), rgba(18,24,40,0.98));
-  border: 1px solid var(--border-bright); border-radius: 12px; padding: 16px 20px; max-width: 340px;
+  border: 1px solid var(--border-bright); border-radius: 12px; padding: 20px 24px; max-width: 340px;
   box-shadow: 0 10px 30px rgba(0,0,0,0.5); cursor: default; animation: slideUp 0.2s ease-out; }
-.ps-popover-title { font-size: 15px; font-weight: 600; margin-bottom: 10px; letter-spacing: 1px; }
-.ps-popover-desc { font-size: 13px; color: var(--text-dim); line-height: 1.7; margin-bottom: 12px; }
-.ps-popover-close { display: inline-block; padding: 6px 14px; background: rgba(255,255,255,0.05);
+.ps-popover-title { font-size: 16px; font-weight: 600; margin-bottom: 12px; letter-spacing: 2px;
+  text-align: center; }
+.ps-popover-desc { font-size: 13px; color: var(--text-dim); line-height: 1.8; margin-bottom: 16px; text-align: center; }
+.ps-popover-close { display: block; margin: 0 auto; padding: 7px 28px; background: rgba(255,255,255,0.06);
   border: 1px solid var(--border); border-radius: 6px; color: var(--text-dim); font-size: 12px;
   cursor: pointer; transition: all 0.2s; }
 .ps-popover-close:hover { border-color: var(--accent); color: var(--accent); }
