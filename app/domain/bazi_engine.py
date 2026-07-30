@@ -45,6 +45,16 @@ GENERATES = {"木": "火", "火": "土", "土": "金", "金": "水", "水": "木
 CONTROLS = {"木": "土", "土": "水", "水": "火", "火": "金", "金": "木"}    #相克
 WUXING_ORDER = ("金", "木", "水", "火", "土")      # 五行
 
+# 十二长生（星运/自坐共用顺序）
+CHANG_SHENG = ("长生", "沐浴", "冠带", "临官", "帝旺", "衰", "病", "死", "墓", "绝", "胎", "养")
+# 各天干长生所在地支（阳干顺行、阴干逆行）
+_GAN_CHANGSHENG_ZHI = {
+    "甲": "亥", "丙": "寅", "戊": "寅", "庚": "巳", "壬": "申",
+    "乙": "午", "丁": "酉", "己": "酉", "辛": "子", "癸": "卯",
+}
+_YANG_GAN = {"甲", "丙", "戊", "庚", "壬"}
+_ZHI_SEQ = ["子", "丑", "寅", "卯", "辰", "巳", "午", "未", "申", "酉", "戌", "亥"]
+
 LIU_HE = {
     frozenset(("子", "丑")): "子丑合土",
     frozenset(("寅", "亥")): "寅亥合木",
@@ -450,7 +460,7 @@ class BirthInfo:
 
 @dataclass(frozen=True)
 class Pillar:
-    """单柱（年/月/日/时）的结构化数据：干支、五行、纳音、空亡、藏干、十神。"""
+    """单柱（年/月/日/时）的结构化数据：干支、五行、纳音、空亡、藏干、十神、星运、自坐。"""
     name: str
     ganzhi: str
     gan: str
@@ -462,6 +472,8 @@ class Pillar:
     hidden_stems: list[str]
     shishen_gan: str
     shishen_zhi: list[str]
+    changsheng: str          # 星运：日干在四柱地支的十二长生
+    zizuo: str               # 自坐：本柱天干在本柱地支的十二长生
 
 
 @dataclass(frozen=True)
@@ -1276,7 +1288,21 @@ def _build_domain_analysis(pillars: list[Pillar], wuxing: WuxingAnalysis) -> Dom
     )
 
 
-def _pillar(name: str, ganzhi: str, nayin: str, xunkong: str, hidden: str, shishen_gan: str, shishen_zhi: Any) -> Pillar:
+def _zizuo(gan: str, zhi: str) -> str:
+    """天干在其本柱地支的十二长生状态（自坐）。阳干顺行、阴干逆行。"""
+    if not gan or not zhi:
+        return ""
+    base = _GAN_CHANGSHENG_ZHI.get(gan)
+    if not base or base not in _ZHI_SEQ or zhi not in _ZHI_SEQ:
+        return ""
+    i_base = _ZHI_SEQ.index(base)
+    i_zhi = _ZHI_SEQ.index(zhi)
+    offset = (i_zhi - i_base) % 12 if gan in _YANG_GAN else (i_base - i_zhi) % 12
+    return CHANG_SHENG[offset]
+
+
+def _pillar(name: str, ganzhi: str, nayin: str, xunkong: str, hidden: str, shishen_gan: str, shishen_zhi: Any,
+            changsheng: str = "", zizuo: str = "") -> Pillar:
     gan = ganzhi[0] if ganzhi else ""
     zhi = ganzhi[1] if len(ganzhi) > 1 else ""
     if isinstance(shishen_zhi, str):
@@ -1295,6 +1321,8 @@ def _pillar(name: str, ganzhi: str, nayin: str, xunkong: str, hidden: str, shish
         hidden_stems=[s.strip() for s in str(hidden).replace("[", "").replace("]", "").replace("'", "").split(",") if s.strip()],
         shishen_gan=shishen_gan,
         shishen_zhi=[s.strip() for s in zhi_shishen],
+        changsheng=changsheng,
+        zizuo=zizuo,
     )
 
 
@@ -1399,10 +1427,14 @@ def build_bazi_chart(
     dayun_direction = "顺排" if (year_is_yang == (gender_int == 1)) else "逆排"
 
     pillars = [
-        _pillar("年柱", ec.getYear(), ec.getYearNaYin(), ec.getYearXunKong(), ec.getYearHideGan(), ec.getYearShiShenGan(), ec.getYearShiShenZhi()),
-        _pillar("月柱", ec.getMonth(), ec.getMonthNaYin(), ec.getMonthXunKong(), ec.getMonthHideGan(), ec.getMonthShiShenGan(), ec.getMonthShiShenZhi()),
-        _pillar("日柱", ec.getDay(), ec.getDayNaYin(), ec.getDayXunKong(), ec.getDayHideGan(), "日主", ec.getDayShiShenZhi()),
-        _pillar("时柱", ec.getTime(), ec.getTimeNaYin(), ec.getTimeXunKong(), ec.getTimeHideGan(), ec.getTimeShiShenGan(), ec.getTimeShiShenZhi()),
+        _pillar("年柱", ec.getYear(), ec.getYearNaYin(), ec.getYearXunKong(), ec.getYearHideGan(), ec.getYearShiShenGan(), ec.getYearShiShenZhi(),
+                changsheng=ec.getYearDiShi(), zizuo=_zizuo(ec.getYearGan(), ec.getYearZhi())),
+        _pillar("月柱", ec.getMonth(), ec.getMonthNaYin(), ec.getMonthXunKong(), ec.getMonthHideGan(), ec.getMonthShiShenGan(), ec.getMonthShiShenZhi(),
+                changsheng=ec.getMonthDiShi(), zizuo=_zizuo(ec.getMonthGan(), ec.getMonthZhi())),
+        _pillar("日柱", ec.getDay(), ec.getDayNaYin(), ec.getDayXunKong(), ec.getDayHideGan(), "日主", ec.getDayShiShenZhi(),
+                changsheng=ec.getDayDiShi(), zizuo=_zizuo(ec.getDayGan(), ec.getDayZhi())),
+        _pillar("时柱", ec.getTime(), ec.getTimeNaYin(), ec.getTimeXunKong(), ec.getTimeHideGan(), ec.getTimeShiShenGan(), ec.getTimeShiShenZhi(),
+                changsheng=ec.getTimeDiShi(), zizuo=_zizuo(ec.getTimeGan(), ec.getTimeZhi())),
     ]
     wuxing = _build_wuxing_analysis(ec)
     analysis = _build_domain_analysis(pillars, wuxing)
@@ -1466,6 +1498,8 @@ def chart_to_api_dict(chart: BaziChart) -> dict[str, Any]:
                 "hiddenStems": p.hidden_stems,
                 "shishenGan": p.shishen_gan,
                 "shishenZhi": p.shishen_zhi,
+                "changsheng": p.changsheng,
+                "zizuo": p.zizuo,
             }
             for p in chart.pillars
         ],

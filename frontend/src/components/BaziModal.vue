@@ -46,22 +46,73 @@
                 <template v-if="props.shenGong">身宫 {{ props.shenGong }}</template>
               </span>
             </div>
-            <div class="pillars-grid">
-              <div v-for="p in pillars" :key="p.name" :class="['pillar-card', p.name === '日柱' ? 'day-master' : '']">
-                <div class="pillar-name">{{ p.name }}</div><div class="pillar-gan" :style="{ color: ganColor(p.ganzhi[0]) }">{{ p.ganzhi[0] }}</div>
-                <div class="pillar-zhi" :style="{ color: zhiColor(p.ganzhi[1]) }">{{ p.ganzhi[1] }}</div>
-                <div class="pillar-nayin">{{ p.nayin }}</div>
-                <!-- 该柱神煞竖排（点击查看寓意） -->
-                <div v-if="shenshaByPillar[p.name]?.length" class="pillar-shensha">
-                  <span
-                    v-for="(s, i) in shenshaByPillar[p.name]"
-                    :key="i"
-                    class="ps-tag"
-                    :class="['ps-' + s._cat, { 'ps-active': activeShensha === s }]"
-                    @click.stop="toggleShensha(s)"
-                  >{{ s.name }}</span>
-                </div>
-              </div>
+            <div class="chart-table-wrap">
+              <table class="chart-table">
+                <thead>
+                  <tr>
+                    <th class="row-label"></th>
+                    <th v-for="p in pillars" :key="p.name" :class="['col-head', p.name === '日柱' ? 'day-master' : '']">{{ p.name }}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="row-label">主星</td>
+                    <td v-for="p in pillars" :key="p.name" :class="p.name === '日柱' ? 'day-master' : ''">{{ p.shishenGan || '—' }}</td>
+                  </tr>
+                  <tr>
+                    <td class="row-label">天干</td>
+                    <td v-for="p in pillars" :key="p.name" :class="p.name === '日柱' ? 'day-master' : ''">
+                      <span class="big-gan" :style="{ color: ganColor(p.ganzhi[0]) }">{{ p.ganzhi[0] }}</span>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td class="row-label">地支</td>
+                    <td v-for="p in pillars" :key="p.name" :class="p.name === '日柱' ? 'day-master' : ''">
+                      <span class="big-zhi" :style="{ color: zhiColor(p.ganzhi[1]) }">{{ p.ganzhi[1] }}</span>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td class="row-label">藏干</td>
+                    <td v-for="p in pillars" :key="p.name" :class="['cang-gan', p.name === '日柱' ? 'day-master' : '']">
+                      <span v-for="(g, i) in p.hiddenStems" :key="i" class="cang-item" :style="{ color: ganColor(g) }">{{ g }}</span>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td class="row-label">副星</td>
+                    <td v-for="p in pillars" :key="p.name" :class="['fu-star', p.name === '日柱' ? 'day-master' : '']">
+                      <span v-for="(s, i) in p.shishenZhi" :key="i" class="fu-item">{{ s }}</span>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td class="row-label">星运</td>
+                    <td v-for="p in pillars" :key="p.name" :class="p.name === '日柱' ? 'day-master' : ''">{{ p.changsheng || '—' }}</td>
+                  </tr>
+                  <tr>
+                    <td class="row-label">自坐</td>
+                    <td v-for="p in pillars" :key="p.name" :class="p.name === '日柱' ? 'day-master' : ''">{{ p.zizuo || '—' }}</td>
+                  </tr>
+                  <tr>
+                    <td class="row-label">空亡</td>
+                    <td v-for="p in pillars" :key="p.name" :class="p.name === '日柱' ? 'day-master' : ''">{{ p.xunkong || '—' }}</td>
+                  </tr>
+                  <tr>
+                    <td class="row-label">纳音</td>
+                    <td v-for="p in pillars" :key="p.name" :class="p.name === '日柱' ? 'day-master' : ''">{{ p.nayin }}</td>
+                  </tr>
+                  <tr>
+                    <td class="row-label">神煞</td>
+                    <td v-for="p in pillars" :key="p.name" :class="['shensha-cell', p.name === '日柱' ? 'day-master' : '']">
+                      <span
+                        v-for="(s, i) in (shenshaByPillar[p.name] || [])"
+                        :key="i"
+                        class="ps-tag"
+                        :class="['ps-' + s._cat, { 'ps-active': activeShensha === s }]"
+                        @click.stop="toggleShensha(s)"
+                      >{{ s.name }}</span>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
           </div>
 
@@ -313,7 +364,17 @@ const formattedChartText = computed(() => {
   if (props.pillars.length) {
     lines.push('')
     lines.push('【四柱命盘】')
-    props.pillars.forEach(p => lines.push(`${p.name}: ${p.ganzhi} (${p.nayin})`))
+    props.pillars.forEach(p => {
+      lines.push(`${p.name}: ${p.ganzhi} (${p.nayin})`)
+      const parts: string[] = []
+      if (p.shishenGan) parts.push(`主星=${p.shishenGan}`)
+      if (p.changsheng) parts.push(`星运=${p.changsheng}`)
+      if (p.zizuo) parts.push(`自坐=${p.zizuo}`)
+      if (p.xunkong) parts.push(`空亡=${p.xunkong}`)
+      if (p.hiddenStems?.length) parts.push(`藏干=${p.hiddenStems.join('')}`)
+      if (p.shishenZhi?.length) parts.push(`副星=${p.shishenZhi.join('')}`)
+      if (parts.length) lines.push('  ' + parts.join('，'))
+    })
   }
   if (props.wuxing.length) {
     lines.push('')
@@ -451,17 +512,21 @@ const downloadFullPDF = () => {
 .section-title-row { display: flex; align-items: baseline; justify-content: space-between;
   margin-bottom: 14px; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
 .gong-info { font-size: 11px; color: var(--text-dim); letter-spacing: normal; }
-.pillars-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 10px; }
-.pillar-card { background: rgba(255,255,255,0.03); border-radius: 12px; padding: 14px 8px; text-align: center;
-  border: 1px solid var(--border); transition: all 0.25s; }
-.pillar-card.day-master { background: linear-gradient(135deg, rgba(212,175,55,0.1), rgba(139,92,246,0.06));
-  border-color: rgba(212,175,55,0.35); box-shadow: 0 0 16px rgba(212,175,55,0.1); }
-.pillar-card:hover { transform: translateY(-2px); border-color: rgba(212,175,55,0.2); }
-.pillar-name { font-size: 10px; color: var(--text-dim); margin-bottom: 8px; }
-.pillar-gan { font-size: 26px; font-weight: bold; color: var(--text); margin-bottom: 2px; }
-.pillar-card.day-master .pillar-gan { color: var(--accent-light); text-shadow: 0 0 10px rgba(212,175,55,0.4); }
-.pillar-zhi { font-size: 20px; color: var(--text-dim); margin-bottom: 6px; }
-.pillar-nayin { font-size: 10px; color: rgba(138,155,176,0.7); }
+.chart-table-wrap { margin-bottom: 10px; overflow-x: auto; }
+.chart-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.chart-table th, .chart-table td { border: 1px solid var(--border); padding: 7px 6px; text-align: center; vertical-align: middle; }
+.chart-table thead .col-head { font-size: 12px; color: var(--accent-light); letter-spacing: 1px; background: rgba(255,255,255,0.04); }
+.chart-table .row-label { font-size: 11px; color: var(--text-dim); background: rgba(255,255,255,0.02); white-space: nowrap; width: 52px; }
+.chart-table tbody td { color: var(--text); line-height: 1.5; }
+.chart-table .day-master { background: linear-gradient(135deg, rgba(212,175,55,0.1), rgba(139,92,246,0.06));
+  border-color: rgba(212,175,55,0.35); }
+.chart-table thead .day-master { background: linear-gradient(135deg, rgba(212,175,55,0.16), rgba(139,92,246,0.08)); }
+.chart-table .big-gan { font-size: 22px; font-weight: bold; }
+.chart-table .big-zhi { font-size: 18px; }
+.chart-table .cang-gan { display: flex; flex-direction: column; gap: 2px; align-items: center; }
+.chart-table .cang-item { font-size: 13px; font-weight: 600; }
+.chart-table .fu-star { display: flex; flex-direction: column; gap: 2px; align-items: center; font-size: 11px; color: var(--text-dim); }
+.chart-table .shensha-cell { display: flex; flex-wrap: wrap; gap: 4px; justify-content: center; align-items: center; }
 .wuxing-grid { display: flex; justify-content: space-around; align-items: flex-end; height: 140px; margin-bottom: 10px; }
 .wuxing-item { display: flex; flex-direction: column; align-items: center; gap: 6px; width: 16%; }
 .wuxing-bar-container { width: 100%; height: 90px; background: rgba(255,255,255,0.03); border-radius: 6px 6px 0 0;

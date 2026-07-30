@@ -225,7 +225,21 @@ export function downloadFullReportPDF(birthTime: string, gender: string, section
   window.open(url, "_blank")
 }
 
-export interface Pillar { name: string; ganzhi: string; nayin: string }
+export interface Pillar {
+  name: string
+  ganzhi: string
+  nayin: string
+  gan?: string
+  zhi?: string
+  ganWuxing?: string
+  zhiWuxing?: string
+  xunkong?: string
+  hiddenStems?: string[]
+  shishenGan?: string
+  shishenZhi?: string[]
+  changsheng?: string
+  zizuo?: string
+}
 export function parsePillars(text: string): Pillar[] {
   if (!text) return []
   const result: Pillar[] = []
