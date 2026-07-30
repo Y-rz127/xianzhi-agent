@@ -523,10 +523,10 @@ const downloadFullPDF = () => {
 .chart-table thead .day-master { background: linear-gradient(135deg, rgba(212,175,55,0.16), rgba(139,92,246,0.08)); }
 .chart-table .big-gan { font-size: 22px; font-weight: bold; }
 .chart-table .big-zhi { font-size: 18px; }
-.chart-table .cang-gan { display: flex; flex-wrap: wrap; gap: 2px 6px; justify-content: center; align-items: center; }
-.chart-table .cang-item { font-size: 12px; font-weight: 600; }
-.chart-table .fu-star { display: flex; flex-wrap: wrap; gap: 2px 6px; justify-content: center; align-items: center; font-size: 10px; color: var(--text-dim); }
-.chart-table .shensha-cell { display: flex; flex-wrap: wrap; gap: 4px; justify-content: center; align-items: center; }
+.chart-table .cang-gan { display: flex; flex-direction: row; flex-wrap: wrap; gap: 1px 5px; justify-content: center; align-items: center; }
+.chart-table .cang-item { font-size: 11px; font-weight: 600; white-space: nowrap; }
+.chart-table .fu-star { display: flex; flex-direction: row; flex-wrap: wrap; gap: 1px 5px; justify-content: center; align-items: center; font-size: 10px; color: var(--text-dim); }
+.chart-table .shensha-cell { display: flex; flex-direction: row; flex-wrap: wrap; gap: 2px 3px; justify-content: center; align-items: center; }
 .wuxing-grid { display: flex; justify-content: space-around; align-items: flex-end; height: 140px; margin-bottom: 10px; }
 .wuxing-item { display: flex; flex-direction: column; align-items: center; gap: 6px; width: 16%; }
 .wuxing-bar-container { width: 100%; height: 90px; background: rgba(255,255,255,0.03); border-radius: 6px 6px 0 0;
@@ -559,8 +559,8 @@ const downloadFullPDF = () => {
 /* ===== 每柱神煞竖排 ===== */
 .pillar-shensha { display: flex; flex-wrap: wrap; gap: 4px; justify-content: center;
   margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.05); }
-.ps-tag { font-size: 10px; padding: 2px 7px; border-radius: 5px; line-height: 1.6; cursor: pointer;
-  transition: all 0.2s; white-space: nowrap; user-select: none; }
+.ps-tag { font-size: 9px; padding: 1px 5px; border-radius: 4px; line-height: 1.6; cursor: pointer;
+  transition: all 0.2s; white-space: nowrap; user-select: none; display: inline-block; }
 .ps-tag:hover { filter: brightness(1.2); }
 .ps-active { outline: 1px solid currentColor; }
 .ps-good { color: #4ade80; background: rgba(74,222,128,0.1); }
