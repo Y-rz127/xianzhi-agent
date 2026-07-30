@@ -122,7 +122,7 @@ export interface ChartData {
   shenGong?: string
 }
 
-export interface ChartCase { id: string; name: string; tags: string[]; birthTime: string; gender: string; createdAt: string; updatedAt: string; bazi?: string; chartData?: ChartData; bio?: string; analysis?: string; keypoints?: string; domains?: string[] }
+export interface ChartCase { id: string; name: string; tags: string[]; birthTime: string; gender: string; createdAt: string; updatedAt: string; bazi?: string; chartData?: ChartData; bio?: string; analysis?: string; keypoints?: string }
 
 export async function getChart(birthTime: string, gender: string, sect = 2, yunSect = 1): Promise<ChartData> {
   const params = new URLSearchParams({
@@ -155,7 +155,6 @@ export async function createChartCase(payload: Partial<ChartCase> & Record<strin
   if (payload.bio) body.bio = payload.bio
   if (payload.analysis) body.analysis = payload.analysis
   if (payload.keypoints) body.keypoints = payload.keypoints
-  if (payload.domains?.length) body.domains = payload.domains
   const res = await apiFetch(`${API_BASE}/ai/xianzhi/cases`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -178,7 +177,6 @@ export async function updateChartCase(id: string, payload: Partial<ChartCase> & 
   if (payload.bio !== undefined) body.bio = payload.bio
   if (payload.analysis !== undefined) body.analysis = payload.analysis
   if (payload.keypoints !== undefined) body.keypoints = payload.keypoints
-  if (payload.domains !== undefined) body.domains = payload.domains
   const res = await apiFetch(`${API_BASE}/ai/xianzhi/cases/${id}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },

@@ -12,6 +12,16 @@
     </view>
 
     <view class="body">
+      <!-- 服务器地址配置 -->
+      <view class="server-url-row">
+        <text class="url-label">服务器地址</text>
+        <view class="url-input-wrap">
+          <input class="url-input" v-model="serverUrl" placeholder="如：https://your-domain.com/api" />
+          <text :class="['url-btn', serverUrl && 'active']" @tap="onSaveUrl">保存</text>
+        </view>
+        <text v-if="currentUrl && currentUrl !== defaultServerUrl" class="url-current">当前：{{ currentUrl }}</text>
+      </view>
+
       <view class="card">
         <view class="seg-tabs">
           <text :class="['seg', mode === 'login' && 'active']" @tap="mode = 'login'">登录</text>
@@ -54,6 +64,7 @@ import { ref } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import { login, register, wxLogin } from '@/api'
 import { getUser, setToken, setUser, clearAuth } from '@/utils/storage'
+import { getConfig, setConfig } from '@/config'
 
 const mode = ref<'login' | 'register'>('login')
 const nickname = ref('')
@@ -63,9 +74,42 @@ const errMsg = ref('')
 const loggedUser = ref<any>(null)
 const wxLoggingIn = ref(false)
 
+// 服务器地址
+const defaultServerUrl = 'http://localhost:8123/api'
+const serverUrl = ref('')
+const currentUrl = ref('')
+
 onShow(() => {
   loggedUser.value = getUser()
+  // 读取当前配置的地址
+  const cfg = getConfig()
+  currentUrl.value = cfg.apiBase || ''
+  // 如果不是默认值，显示在输入框
+  if (cfg.apiBase && cfg.apiBase !== defaultServerUrl) {
+    serverUrl.value = cfg.apiBase
+  }
 })
+
+/** 保存服务器地址 */
+function onSaveUrl() {
+  const url = serverUrl.value.trim()
+  if (!url) {
+    errMsg.value = '请输入服务器地址'
+    return
+  }
+  // 自动补 /api 后缀
+  let apiBase = url
+  if (!apiBase.endsWith('/api')) {
+    apiBase = apiBase.replace(/\/+$/, '') + '/api'
+  }
+  // 补全协议
+  if (!apiBase.startsWith('http://') && !apiBase.startsWith('https://')) {
+    apiBase = 'https://' + apiBase
+  }
+  setConfig({ apiBase: apiBase })
+  currentUrl.value = apiBase
+  uni.showToast({ title: '已保存', icon: 'success' })
+}
 
 /** 微信一键登录 */
 async function onWxLogin() {
@@ -164,6 +208,36 @@ function onLogout() {
 .hero-sub { margin-top: 16rpx; font-size: 24rpx; color: $color-ink-light; letter-spacing: 2rpx; }
 
 .body { flex: 1; padding: 40rpx 32rpx; }
+.server-url-row {
+  background: $color-bg-card;
+  border: 1rpx solid $color-border;
+  border-radius: 24rpx;
+  padding: 24rpx 28rpx;
+  margin-bottom: 24rpx;
+}
+.url-label { font-size: 24rpx; color: $color-ink-light; margin-bottom: 16rpx; display: block; }
+.url-input-wrap {
+  display: flex; align-items: center; gap: 12rpx;
+}
+.url-input {
+  flex: 1;
+  padding: 18rpx 22rpx;
+  background: rgba(107, 123, 142, 0.06);
+  border: 1rpx solid $color-border;
+  border-radius: 18rpx;
+  font-size: 24rpx;
+  color: $color-ink;
+}
+.url-btn {
+  flex: 0 0 auto;
+  padding: 14rpx 28rpx;
+  border-radius: 16rpx;
+  font-size: 24rpx;
+  color: $color-ink-lighter;
+  background: rgba(107, 123, 142, 0.08);
+  &.active { color: #fff; background: linear-gradient(135deg, $color-primary, $color-primary-dark); }
+}
+.url-current { font-size: 22rpx; color: $color-ink-lighter; margin-top: 12rpx; display: block; word-break: break-all; }
 .card {
   background: $color-bg-card;
   border: 1rpx solid $color-border;

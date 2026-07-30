@@ -208,7 +208,6 @@ export interface ChartCase {
   bio?: string
   analysis?: string
   keypoints?: string
-  domains?: string[]
 }
 
 export const fetchChartCases = () => get<ChartCase[]>('/ai/xianzhi/cases')

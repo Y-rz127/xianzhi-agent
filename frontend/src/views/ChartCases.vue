@@ -147,10 +147,6 @@
               <label for="case-keypoints">命理特征要点</label>
               <textarea id="case-keypoints" v-model="form.keypoints" placeholder="关键命理特征，每条一个要点..." rows="3"></textarea>
             </div>
-            <div class="form-row">
-              <label for="case-domains">领域标签</label>
-              <input id="case-domains" v-model="form.domains" placeholder="用逗号分隔，如：帝王,军事,开国" />
-            </div>
           </div>
           <div class="case-modal-footer">
             <button class="btn" @click="closeModal">取消</button>
@@ -212,7 +208,7 @@ const selectedTags = ref<string[]>([])
 const showModal = ref(false)
 const modalMode = ref<"create" | "edit">("create")
 const editingId = ref<string>("")
-const form = ref({ name: "", tags: "", birthTime: "", gender: "男" as "男" | "女", bio: "", analysis: "", keypoints: "", domains: "" })
+const form = ref({ name: "", tags: "", birthTime: "", gender: "男" as "男" | "女", bio: "", analysis: "", keypoints: "" })
 
 const showBaziModal = ref(false)
 const activeCase = ref<ChartCase | null>(null)
@@ -297,7 +293,7 @@ const clearFilters = () => {
 }
 
 const resetForm = () => {
-  form.value = { name: "", tags: "", birthTime: "", gender: "男", bio: "", analysis: "", keypoints: "", domains: "" }
+  form.value = { name: "", tags: "", birthTime: "", gender: "男", bio: "", analysis: "", keypoints: "" }
   editingId.value = ""
 }
 
@@ -318,7 +314,6 @@ const openEditModal = (c: ChartCase) => {
     bio: (c as any).bio || "",
     analysis: (c as any).analysis || "",
     keypoints: (c as any).keypoints || "",
-    domains: ((c as any).domains || []).join(", "),
   }
   showModal.value = true
 }
@@ -339,8 +334,6 @@ const saveCase = async () => {
   if (form.value.bio.trim()) payload.bio = form.value.bio.trim()
   if (form.value.analysis.trim()) payload.analysis = form.value.analysis.trim()
   if (form.value.keypoints.trim()) payload.keypoints = form.value.keypoints.trim()
-  const domainsArr = form.value.domains.split(/[,，]/).map((s) => s.trim()).filter(Boolean)
-  if (domainsArr.length) payload.domains = domainsArr
   try {
     if (modalMode.value === "create") {
       await createChartCase(payload)

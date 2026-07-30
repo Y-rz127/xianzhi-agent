@@ -30,7 +30,6 @@ from app.rag.retrieval import (
     detect_domain,
     detect_theory_topic,
 )
-from app.rag.case_store import case_library
 from app.rag.vector_store import knowledge_base
 from app.tools.text_clean import clean_think_tags, dedupe_content as _dedupe_content_impl
 
@@ -1068,32 +1067,12 @@ class XianzhiWorkflow:
         chart_facts_text = self._get_chart_facts_text(ctx)
         if chart_facts_text:
             human += f"【历史断事参考】\n{chart_facts_text}\n\n"
-        similar_cases = self._retrieve_similar_cases(intent, ctx, user_prompt)
-        if similar_cases:
-            human += (
-                "【相似命例参考】\n"
-                "下面案例只用于参考断法路径和表达范式，不得照搬结论；当前命盘事实仍以【系统排盘事实】为准。\n"
-                f"{similar_cases}\n\n"
-            )
         human += (
             f"【命理规则检索】\n{knowledge}\n\n"
             f"【输出要求】\n{length_rule}\n"
             "如果提到具体年份，必须同时核对该年流年干支和所在大运。"
         )
         return [SystemMessage(content=system), HumanMessage(content=human)]
-
-    def _retrieve_similar_cases(self, intent: QuestionIntent, ctx: WorkflowChartContext, user_text: str) -> str:
-        """检索与当前命盘/问题相近的经验案例，作为 few-shot 参考。"""
-        if intent.domain in {"chitchat", "theory"}:
-            return ""
-        try:
-            records = case_library.search(ctx.chart, user_text, intent.domain, top_k=1)
-            if records:
-                log.info("[case检索] domain={} 命中命例 {}", intent.domain, [r.id for r in records])
-            return case_library.format_for_prompt(records)
-        except Exception as e:
-            log.warning("[case检索] 相似命例检索失败: {}", e)
-            return ""
 
     def _get_chart_facts_text(self, ctx: WorkflowChartContext) -> str:
         """从命盘画像中获取历史断事知识，供 LLM 上下文注入。"""
