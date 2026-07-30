@@ -600,4 +600,36 @@ def bazi_full(birth_time: str, gender: str, sect: int = 2, yun_sect: int = 1) ->
         return "完整排盘失败: {}".format(e)
 
 
-bazi_tools = [lunar_to_solar, bazi_chart, bazi_analysis, bazi_dayun, bazi_liunian, bazi_liuyue, bazi_liuri, bazi_hehun, bazi_full]
+@tool
+def bazi_infer_dates(pillars: str, gender: str, top_n: int = 3) -> str:
+    """根据八字反推可能的出生日期。
+
+    当用户只提供八字（如"我的八字是甲申庚午壬申甲辰，我是男命"）而不知精确出生时间时调用。
+    返回若干候选出生日期，请向用户展示并请其确认实际出生日期（可回复序号或具体日期），
+    确认后用对应 birth_time 调用 bazi_full 等工具排盘。
+
+    Args:
+        pillars: 八字四柱连续干支，如 "甲申庚午壬申甲辰"
+        gender: 男/女
+        top_n: 最多返回候选数（默认 3）
+
+    Returns:
+        候选出生日期列表与选择指引
+    """
+    try:
+        from app.domain.bazi_engine import find_birth_dates_from_pillars
+        candidates = find_birth_dates_from_pillars(pillars, gender, top_n=top_n)
+    except ValueError as e:
+        return "八字解析失败: {}".format(e)
+    except Exception as e:
+        return "反推出生日期失败: {}".format(e)
+    if not candidates:
+        return "未能根据八字 {}（{}）反推出候选出生日期，请确认八字是否正确。".format(pillars, gender)
+    lines = ["根据你提供的八字 {}（{}），反推可能的出生日期如下：".format(pillars, gender)]
+    for i, c in enumerate(candidates, 1):
+        lines.append("  {}. {}（{}，{}）".format(i, c["birth_time"], c["ganzhi"], c["shi_chen"]))
+    lines.append("请回复序号或具体日期确认你的实际出生日期，我再用该日期为你完整排盘。")
+    return "\n".join(lines)
+
+
+bazi_tools = [lunar_to_solar, bazi_chart, bazi_analysis, bazi_dayun, bazi_liunian, bazi_liuyue, bazi_liuri, bazi_hehun, bazi_full, bazi_infer_dates]

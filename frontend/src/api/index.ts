@@ -136,6 +136,21 @@ export async function getChart(birthTime: string, gender: string, sect = 2, yunS
   return await res.json()
 }
 
+export interface BaziCandidate { birth_time: string; ganzhi: string; shi_chen: string }
+
+export async function inferBaziDates(payload: { pillars: string; gender: string; top_n?: number }): Promise<{ candidates: BaziCandidate[] }> {
+  const res = await apiFetch(`${API_BASE}/ai/xianzhi/bazi/infer-dates`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ pillars: payload.pillars, gender: payload.gender, top_n: payload.top_n || 3 }),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: `反推失败 ${res.status}` }))
+    throw new Error(err.detail || `反推失败 ${res.status}`)
+  }
+  return await res.json()
+}
+
 export async function fetchChartCases(): Promise<ChartCase[]> {
   try {
     const res = await apiFetch(`${API_BASE}/ai/xianzhi/cases`)

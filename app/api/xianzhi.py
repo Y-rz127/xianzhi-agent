@@ -266,6 +266,31 @@ async def get_chart(birth_time: str, gender: str, sect: int = 2, yun_sect: int =
     return payload
 
 
+_GAN = "甲乙丙丁戊己庚辛壬癸"
+_ZHI = "子丑寅卯辰巳午未申酉戌亥"
+
+
+@router.post("/bazi/infer-dates")
+async def infer_bazi_dates(payload: dict):
+    """根据八字反推候选出生日期：用户只知八字、不知精确时间时调用。
+
+    请求体: {"pillars": "甲申庚午壬申甲辰", "gender": "男", "top_n": 3}
+    返回: {"pillars": "...", "candidates": [{"birth_time", "ganzhi", "shi_chen"}, ...]}
+    """
+    from app.domain.bazi_engine import find_birth_dates_from_pillars
+    pillars = (payload.get("pillars") or "").strip()
+    gender = (payload.get("gender") or "男").strip() or "男"
+    top_n = int(payload.get("top_n") or 3)
+    seq = [c for c in pillars if c in _GAN or c in _ZHI]
+    if len(seq) < 8:
+        raise HTTPException(status_code=400, detail="八字应为 4 个干支共 8 字，如 甲申庚午壬申甲辰")
+    try:
+        candidates = find_birth_dates_from_pillars(pillars, gender, top_n=top_n)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"pillars": pillars, "gender": gender, "candidates": candidates}
+
+
 @router.get("/report")
 async def generate_report(birth_time: str, gender: str):
     from fastapi import Response

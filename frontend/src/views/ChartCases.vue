@@ -125,9 +125,42 @@
               <input id="case-tags" v-model="form.tags" placeholder="用逗号分隔，如：事业，婚姻" />
             </div>
             <div class="form-row">
+              <label>录入方式</label>
+              <div class="mode-toggle">
+                <label class="mode-opt"><input type="radio" value="time" v-model="inputMode" /> 按出生时间</label>
+                <label class="mode-opt"><input type="radio" value="bazi" v-model="inputMode" /> 按八字录入</label>
+              </div>
+            </div>
+
+            <div v-if="inputMode === 'time'" class="form-row">
               <label for="case-birth-time">出生时间</label>
               <input id="case-birth-time" v-model="form.birthTime" placeholder="1990-05-20 14:30" />
             </div>
+
+            <template v-else>
+              <div class="form-row">
+                <label>八字四柱</label>
+                <div class="pillar-inputs">
+                  <input v-model="form.pillars.year" maxlength="2" placeholder="年柱" />
+                  <input v-model="form.pillars.month" maxlength="2" placeholder="月柱" />
+                  <input v-model="form.pillars.day" maxlength="2" placeholder="日柱" />
+                  <input v-model="form.pillars.time" maxlength="2" placeholder="时柱" />
+                </div>
+                <button class="btn btn-sm" @click="inferDates" :disabled="baziInferring || !canInferBazi">
+                  {{ baziInferring ? "推算中…" : "计算候选日期" }}
+                </button>
+              </div>
+              <div v-if="baziCandidates.length" class="form-row">
+                <label>选择出生日期</label>
+                <div class="candidate-list">
+                  <label v-for="(c, i) in baziCandidates" :key="c.birth_time" class="candidate-opt">
+                    <input type="radio" :value="c.birth_time" v-model="form.birthTime" />
+                    <span>{{ i + 1 }}. {{ c.birth_time }}（{{ c.ganzhi }} {{ c.shi_chen }}）</span>
+                  </label>
+                </div>
+                <p class="hint">同一八字可能对应多个日期，请选择你实际的出生日期。</p>
+              </div>
+            </template>
             <div class="form-row">
               <label for="case-gender">性别</label>
               <select id="case-gender" v-model="form.gender">
@@ -196,8 +229,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, type Ref } from "vue"
-import { fetchChartCases, createChartCase, updateChartCase, deleteChartCase, getChart, exportChartCasesJSON, importChartCasesJSON, type ChartCase, type ChartData } from "../api"
+import { ref, computed, onMounted, watch, type Ref } from "vue"
+import { fetchChartCases, createChartCase, updateChartCase, deleteChartCase, getChart, exportChartCasesJSON, importChartCasesJSON, inferBaziDates, type ChartCase, type ChartData, type BaziCandidate } from "../api"
 import BaziModal from "../components/BaziModal.vue"
 
 const cases = ref<ChartCase[]>([])
@@ -208,7 +241,17 @@ const selectedTags = ref<string[]>([])
 const showModal = ref(false)
 const modalMode = ref<"create" | "edit">("create")
 const editingId = ref<string>("")
-const form = ref({ name: "", tags: "", birthTime: "", gender: "男" as "男" | "女", bio: "", analysis: "", keypoints: "" })
+const form = ref({ name: "", tags: "", birthTime: "", gender: "男" as "男" | "女", bio: "", analysis: "", keypoints: "", pillars: { year: "", month: "", day: "", time: "" } })
+
+// 八字录入模式：反推候选 + 选择
+const inputMode = ref<"time" | "bazi">("time")
+const baziInferring = ref(false)
+const baziCandidates = ref<BaziCandidate[]>([])
+const canInferBazi = computed(() =>
+  !!form.value.pillars.year.trim() && !!form.value.pillars.month.trim() &&
+  !!form.value.pillars.day.trim() && !!form.value.pillars.time.trim() &&
+  (form.value.gender === "男" || form.value.gender === "女")
+)
 
 const showBaziModal = ref(false)
 const activeCase = ref<ChartCase | null>(null)
@@ -293,8 +336,10 @@ const clearFilters = () => {
 }
 
 const resetForm = () => {
-  form.value = { name: "", tags: "", birthTime: "", gender: "男", bio: "", analysis: "", keypoints: "" }
+  form.value = { name: "", tags: "", birthTime: "", gender: "男", bio: "", analysis: "", keypoints: "", pillars: { year: "", month: "", day: "", time: "" } }
   editingId.value = ""
+  inputMode.value = "time"
+  baziCandidates.value = []
 }
 
 const openCreateModal = () => {
@@ -314,8 +359,37 @@ const openEditModal = (c: ChartCase) => {
     bio: (c as any).bio || "",
     analysis: (c as any).analysis || "",
     keypoints: (c as any).keypoints || "",
+    pillars: { year: "", month: "", day: "", time: "" },
   }
+  inputMode.value = "time"
+  baziCandidates.value = []
   showModal.value = true
+}
+
+// 切换录入方式时清理对方模式的冗余数据
+watch(inputMode, (m) => {
+  if (m === "bazi") {
+    form.value.birthTime = ""
+  } else {
+    form.value.pillars = { year: "", month: "", day: "", time: "" }
+    baziCandidates.value = []
+  }
+})
+
+const inferDates = async () => {
+  if (!canInferBazi.value || baziInferring.value) return
+  baziInferring.value = true
+  try {
+    const pillars = form.value.pillars.year + form.value.pillars.month + form.value.pillars.day + form.value.pillars.time
+    const res = await inferBaziDates({ pillars, gender: form.value.gender, top_n: 3 })
+    baziCandidates.value = res.candidates || []
+    form.value.birthTime = ""  // 重新选择前清空旧选择
+    if (!baziCandidates.value.length) showToast("未反推到候选日期，请确认八字是否正确", "error")
+  } catch (e: any) {
+    showToast(e?.message || "反推失败", "error")
+  } finally {
+    baziInferring.value = false
+  }
 }
 
 const closeModal = () => {
@@ -800,6 +874,61 @@ onMounted(loadCases)
 .form-row select option {
   background: #0f1520;
   color: var(--text);
+}
+
+.mode-toggle {
+  display: flex;
+  gap: 18px;
+}
+.mode-opt {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+}
+.pillar-inputs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.pillar-inputs input {
+  width: 100%;
+  min-width: 0;
+  text-align: center;
+  padding: 10px 4px;
+}
+.candidate-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.candidate-opt {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.02);
+}
+.candidate-opt:hover {
+  border-color: var(--accent);
+}
+.hint {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin: 6px 0 0;
+}
+.btn-sm {
+  align-self: flex-start;
+  padding: 8px 14px;
+  font-size: 12px;
 }
 
 .case-modal-footer {

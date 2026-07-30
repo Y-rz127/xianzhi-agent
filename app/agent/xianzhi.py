@@ -21,6 +21,7 @@ import threading
 
 
 from app.agent.xianzhi_workflow import XianzhiWorkflow, WorkflowChartContext, build_chart_context, render_full_fact_context, classify_question, _dedupe_content
+from app.domain.bazi_engine import find_birth_dates_from_pillars
 from app.tools.bazi import _normalize_birth_time
 from app.tools.text_clean import clean_think_tags
 
@@ -34,6 +35,10 @@ _BIRTH_INFO_RE2 = re.compile(
     r"(?P<year>\d{4})[-年/](?P<month>\d{1,2})[-月/](?P<day>\d{1,2})[日\s]*(?P<hour>\d{1,2})[:：](?P<minute>\d{1,2})[^\d]*(?P<gender>男|女)",
     re.UNICODE,
 )
+
+# 从用户输入中识别八字四柱（如 "甲申庚午壬申甲辰"），用于反推候选出生日期
+_PILLARS_RE = re.compile(r"([甲乙丙丁戊己庚辛壬癸][子丑寅卯辰巳午未申酉戌亥]){4}")
+_GENDER_RE = re.compile(r"(男|女|乾造|坤造|乾命|坤命)")
 
 
 SYSTEM_PROMPT = """你是先知，拥有数十年实战经验的八字命理师傅，气质通透沉稳，像阅历丰富的老友。
@@ -66,6 +71,7 @@ SYSTEM_PROMPT = """你是先知，拥有数十年实战经验的八字命理师�
 核心原则：
 - 客观理性，秉持命由天定、运由己造，不制造焦虑
 - 排盘必须确认用户提供了：出生时间（年月日时）和性别
+- 若用户只给了八字四柱（如"我的八字是甲申庚午壬申甲辰，我是男命"）而不知精确出生时间：调用 bazi_infer_dates 反推候选出生日期，展示后请用户确认实际出生日期（回复序号或具体年份均可），确认后再用对应 birth_time 排盘；不要自行猜测日期排盘
 - 日期处理（重要）：所有排盘工具（bazi_chart/bazi_full/bazi_analysis 等）均直接支持公历、农历、传统时辰、农历节日（如"端午""中秋"）等多种输入格式，可直接将用户原始表达传给工具，无需预先换算。示例：bazi_chart 可直接接收 "农历2004年五月初五 辰时" 或 "1990-05-20 辰时"。仅当需要向用户展示公历对照或自行校验换算结果时，才调用 lunar_to_solar 辅助工具
 - 知识库检索技巧：search_knowledge 的 query 用命理概念和断法方向的关键词（如"感情桃花 恋爱 断法"、"流年运势 大运 应期"），不要带具体年份（如"2017年"）、人名、具体事件等知识库无法匹配的细节。知识库为通用命理文档（古籍原文/断法体系/基础理论/术语表），不按年份或人名索引，检索词越聚焦命理概念命中越准。
 """
@@ -80,6 +86,7 @@ NEXT_STEP_PROMPT = """根据用户需求选择最合适的工具，复杂任务�
 工具用途：
 - lunar_to_solar: 农历日期/节日/时辰转公历的辅助工具（如"2004年端午节 辰时" → "2004-06-22 08:00"）。需向用户展示公历对照或自行校验换算时调用；排盘工具已内置农历支持，无需强制先调本工具
 - bazi_full: 完整排盘（详批/终身格局首调，信息最全）。支持公历、农历、时辰输入
+- bazi_infer_dates: 用户只给八字四柱（无精确出生时间）时调用，反推候选出生日期供用户确认；确认后再用对应 birth_time 调 bazi_full 排盘
 - bazi_chart/bazi_analysis/bazi_dayun/bazi_liunian/bazi_liuyue/bazi_liuri: 单项查询（简单问某项时用，勿与 bazi_full 同轮重复调用）
 - bazi_hehun: 合婚分析
 - search_knowledge: 命理知识库（术语/理论/断法/古籍/命例）；query 用泛化词，不带具体干支
@@ -123,6 +130,7 @@ class Xianzhi(ToolCallAgent):
         self._last_birth_info: Optional[dict] = None
         self._sect = 2
         self._yun_sect = 1
+        self._bazi_pending: Optional[dict] = None  # 八字待确认候选: {"pillars","gender","candidates"}
         self._lock = asyncio.Lock()
 
     @property
@@ -140,6 +148,7 @@ class Xianzhi(ToolCallAgent):
             self.chart_context = ""
             self._workflow_context = None
             self._last_birth_info = None
+            self._bazi_pending = None
         self._conversation_id = new_id
 
     def reset(self):
@@ -154,6 +163,7 @@ class Xianzhi(ToolCallAgent):
         self._sect = 2
         self._yun_sect = 1
         self._history_len = 0
+        self._bazi_pending = None
 
     def set_chart_context(self, birth_time: str, gender: str, sect: int = 2, yun_sect: int = 1, user_id: str = ""):
         """由外部直接设置当前命盘上下文，AI 回答将基于该盘面。
@@ -199,12 +209,85 @@ class Xianzhi(ToolCallAgent):
         return None, None
 
     def mount_chart_context(self, text: str, sect: int = 2, yun_sect: int = 1):
-        """如果用户输入包含出生信息，自动挂载命盘上下文。"""
+        """如果用户输入包含出生信息，自动挂载命盘上下文。
+
+        支持两类输入：
+        1. 完整出生时间（年-月-日 时:分）+ 性别 -> 直接排盘；
+        2. 仅八字四柱（如"甲申庚午壬申甲辰"）+ 性别 -> 反推候选出生日期，
+           交由用户确认其一后，再用选定日期排盘（见 _resolve_bazi_selection）。
+        """
         birth_time, gender = self._extract_birth_info(text)
         if birth_time and gender:
             self.set_chart_context(birth_time, gender, sect, yun_sect)
             return True
+        # 已有待确认八字候选：尝试把本轮输入解析为用户的选择
+        if self._bazi_pending:
+            bt = self._resolve_bazi_selection(text, self._bazi_pending)
+            if bt:
+                self.set_chart_context(bt, self._bazi_pending["gender"], sect, yun_sect)
+                self._bazi_pending = None
+                return True
+        # 首次检测到八字：反推候选日期，交由 LLM 向用户确认
+        pillars, gender = self._extract_pillars(text)
+        if pillars and gender:
+            try:
+                cands = find_birth_dates_from_pillars(pillars, gender, top_n=3)
+            except Exception:
+                cands = []
+            self._bazi_pending = {"pillars": pillars, "gender": gender, "candidates": cands}
+            return True
         return False
+
+    def _extract_pillars(self, text: str):
+        """从文本中提取八字四柱与性别，返回 (pillars8字, gender) 或 (None, None)。"""
+        m = _PILLARS_RE.search(text or "")
+        if not m:
+            return None, None
+        gm = _GENDER_RE.search(text or "")
+        if not gm:
+            return None, None
+        g = gm.group(1)
+        gender = "男" if g in ("男", "乾造", "乾命") else ("女" if g in ("女", "坤造", "坤命") else None)
+        if not gender:
+            return None, None
+        return m.group(0), gender
+
+    def _resolve_bazi_selection(self, text: str, pending: dict):
+        """把用户回复解析为已选定的出生日期（birth_time）。
+
+        支持：①回复候选序号（"第一个"/"第2个"/"选2"/"1"）；②回复候选年份（"2004年"）。
+        未匹配返回 None，交由 LLM 继续追问。
+        """
+        import re as _re
+        cands = pending.get("candidates") or []
+        if not cands:
+            return None
+        # ① 年份命中
+        for c in cands:
+            bt = c.get("birth_time", "")
+            y = bt[:4]
+            if y and (y in text or _re.search(r"(?<!\d)" + y + r"(?!\d)", text)):
+                return bt
+        # ② 序号：第N个 / 选N / 开头 N（支持中文数字 一二三…）
+        _CN = {"一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}
+        m = _re.search(r"第\s*([0-9]+|[" + "".join(_CN.keys()) + r"])", text)
+        if not m:
+            m = _re.search(r"选\s*([0-9]+|[" + "".join(_CN.keys()) + r"])", text)
+        if not m:
+            m = _re.match(r"\s*([0-9]+)", text)
+        if m:
+            tok = m.group(1)
+            idx = _CN.get(tok, None)
+            if idx is None:
+                try:
+                    idx = int(tok)
+                except ValueError:
+                    idx = None
+            if idx is not None:
+                idx -= 1
+                if 0 <= idx < len(cands):
+                    return cands[idx].get("birth_time")
+        return None
 
     def _build_messages(self):
         """构建发送给 LLM 的消息列表，附加命盘上下文到 system prompt。"""
@@ -214,6 +297,17 @@ class Xianzhi(ToolCallAgent):
             if self.chart_context:
                 content += "\n\n" + self.chart_context
                 content += "\n\n" + FACT_GUARDRAILS
+            if self._bazi_pending:
+                cands = self._bazi_pending.get("candidates") or []
+                block = "\n\n【待确认八字】用户提供了八字 {}（{}），已反推以下候选出生日期：\n".format(
+                    self._bazi_pending.get("pillars"), self._bazi_pending.get("gender"))
+                if cands:
+                    for i, c in enumerate(cands, 1):
+                        block += "  {}. {}（{}，{}）\n".format(i, c.get("birth_time"), c.get("ganzhi"), c.get("shi_chen"))
+                    block += "请直接向用户展示以上候选，请其确认实际出生日期（回复序号『第一个』或具体年份『2004年』均可）。待用户确认后，用对应 birth_time 调用排盘工具，不要自行猜测日期排盘。\n"
+                else:
+                    block += "  未能反推出候选日期，请直接向用户说明并索取精确出生时间或确认八字是否有误。\n"
+                content += block
             msgs.append(SystemMessage(content=content))
         msgs.extend(self.message_list)
         return msgs
@@ -234,6 +328,8 @@ class Xianzhi(ToolCallAgent):
         result = super().think()
         # 拦截排盘工具调用，从参数中提取 birth_time/gender（覆盖自然语言输入场景）
         self._capture_birth_from_tool_calls()
+        # 同步八字反推候选（LLM 主动调用 bazi_infer_dates 时也记录，便于后续解析用户选择）
+        self._capture_pending_from_tool_calls()
         return result
 
     def _capture_birth_from_tool_calls(self):
@@ -255,6 +351,25 @@ class Xianzhi(ToolCallAgent):
                     if bt and gd:
                         log.info("[xianzhi] 从工具调用提取出生信息: {} {}", bt, gd)
                         self.set_chart_context(bt, gd, self._sect, self._yun_sect)
+                        return
+
+    def _capture_pending_from_tool_calls(self):
+        """当 LLM 主动调用 bazi_infer_dates 时，记录候选以便解析用户后续选择。"""
+        if self._bazi_pending:
+            return
+        for msg in reversed(self.message_list):
+            tool_calls = getattr(msg, "tool_calls", None) or []
+            for tc in tool_calls:
+                if tc.get("name") == "bazi_infer_dates":
+                    args = tc.get("args", {}) or {}
+                    p = args.get("pillars")
+                    g = args.get("gender")
+                    if p and g:
+                        try:
+                            cands = find_birth_dates_from_pillars(p, g, top_n=int(args.get("top_n") or 3))
+                        except Exception:
+                            cands = []
+                        self._bazi_pending = {"pillars": p, "gender": g, "candidates": cands}
                         return
 
     def _extract_chart_summary(self) -> str:

@@ -10,7 +10,7 @@ import datetime as _dt
 from dataclasses import asdict, dataclass
 from typing import Any
 
-from lunar_python import Solar
+from lunar_python import Lunar, Solar
 
 
 GAN_WUXING = {
@@ -1676,6 +1676,112 @@ def format_liunian_text(chart: BaziChart) -> str:
         lines.append(f"  {item.year}年: {item.ganzhi} | {item.age}虚岁{dy}")
     lines += ["", "注: 流年干支采用立春口径，并逐年绑定所在大运。"]
     return "\n".join(lines)
+
+
+# 反推候选出生日期：四柱 -> 少量可能日期，由用户确认其一
+_GAN_SEQ = "甲乙丙丁戊己庚辛壬癸"
+_ZHI_SEQ2 = "子丑寅卯辰巳午未申酉戌亥"
+# 各时辰中点小时（用于反推时取代表时刻，整时辰干支相同）
+_ZHI_MID_HOUR = {
+    "子": 0, "丑": 2, "寅": 4, "卯": 6, "辰": 8, "巳": 10,
+    "午": 12, "未": 14, "申": 16, "酉": 18, "戌": 20, "亥": 22,
+}
+
+
+def _parse_pillars(pillars: str) -> tuple[str, str, str, str]:
+    """把 '甲申庚午壬申甲辰' / '甲申 庚午 壬申 甲辰' / '甲申年庚午月...' 统一拆成四柱。"""
+    import re as _re
+    s = (pillars or "").strip()
+    s = _re.sub(r"[\s/、，,年日月时\-]", "", s)
+    chars = [c for c in s if c in _GAN_SEQ or c in _ZHI_SEQ2]
+    seq = "".join(chars)
+    if len(seq) < 8:
+        raise ValueError("八字应为 4 个干支共 8 字，如 甲申庚午壬申甲辰")
+    seq = seq[:8]
+    out = []
+    for i in range(4):
+        gz = seq[i * 2: i * 2 + 2]
+        if gz[0] not in _GAN_SEQ or gz[1] not in _ZHI_SEQ2:
+            raise ValueError(f"非法干支: {gz}")
+        out.append(gz)
+    return tuple(out)
+
+
+def _jdn(y: int, m: int, d: int) -> int:
+    a = (14 - m) // 12
+    yy = y + 4800 - a
+    mm = m + 12 * a - 3
+    return d + (153 * mm + 2) // 5 + 365 * yy + yy // 4 - yy // 100 + yy // 400 - 32045
+
+
+def _day_gz_from_jdn(j: int) -> str:
+    """日柱快速公式（与 lunar 标定一致）。"""
+    return _GAN_SEQ[(j + _DAY_OFF_G) % 10] + _ZHI_SEQ2[(j + _DAY_OFF_Z) % 12]
+
+
+# 用 lunar 标定日柱相对 JDN 的偏移（模块加载时执行一次）
+_REF = _jdn(2000, 1, 1)
+_REF_EC = Lunar.fromSolar(Solar.fromYmd(2000, 1, 1)).getEightChar().getDay()
+_DAY_OFF_G = (_GAN_SEQ.index(_REF_EC[0]) - _REF) % 10
+_DAY_OFF_Z = (_ZHI_SEQ2.index(_REF_EC[1]) - _REF) % 12
+
+
+def find_birth_dates_from_pillars(
+    pillars: str,
+    gender: str = "男",
+    max_years_back: int = 120,
+    top_n: int = 3,
+) -> list[dict[str, Any]]:
+    """根据四柱反推候选出生日期。
+
+    用户只知道八字（如「甲申庚午壬申甲辰」）、不知道精确出生时间时，
+    用日柱 60 天周期 + 年/月/时柱逐层过滤，反推出少量候选出生日期，
+    由用户确认其一即可获得精确 birth_time 以排大运/流年/命宫。
+
+    Returns: [{"birth_time", "ganzhi", "shi_chen"}, ...] 按日期倒序，最多 top_n 个。
+    """
+    y_gz, m_gz, d_gz, t_gz = _parse_pillars(pillars)
+    today = _dt.date.today()
+    today_jdn = _jdn(*today.timetuple()[:3])
+    min_jdn = _jdn(today.year - max_years_back, 1, 1)
+
+    t_zhi = t_gz[1]
+    results: list[dict[str, Any]] = []
+    seen_dates: set[str] = set()
+
+    j = today_jdn
+    while j >= min_jdn:
+        if _day_gz_from_jdn(j) == d_gz:
+            y, mo, d = _date_from_jdn(j)
+            key = f"{y}-{mo:02d}-{d:02d}"
+            if key not in seen_dates:
+                hour = _ZHI_MID_HOUR[t_zhi]
+                solar = Solar.fromYmdHms(y, mo, d, hour, 0, 0)
+                ec = solar.getLunar().getEightChar()
+                if ec.getYear() == y_gz and ec.getMonth() == m_gz and ec.getTime() == t_gz:
+                    seen_dates.add(key)
+                    results.append({
+                        "birth_time": f"{y}-{mo:02d}-{d:02d} {hour:02d}:00",
+                        "ganzhi": f"{ec.getYear()} {ec.getMonth()} {ec.getDay()} {t_gz}",
+                        "shi_chen": f"{t_zhi}时",
+                    })
+        j -= 1
+
+    results.sort(key=lambda r: r["birth_time"], reverse=True)
+    return results[:top_n]
+
+
+def _date_from_jdn(j: int) -> tuple[int, int, int]:
+    a = j + 32044
+    b = (4 * a + 3) // 146097
+    c = a - (146097 * b) // 4
+    d = (4 * c + 3) // 1461
+    e = c - (1461 * d) // 4
+    m = (5 * e + 2) // 153
+    day = e - (153 * m + 2) // 5 + 1
+    month = m + 3 - 12 * (m // 10)
+    year = 100 * b + d - 4800 + m // 10
+    return year, month, day
 
 
 def format_fact_context(chart: BaziChart) -> str:
