@@ -13,7 +13,13 @@ from typing import Any
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 
-from app.domain.bazi_engine import BaziChart, build_bazi_chart, format_fact_context
+from app.domain.bazi_engine import (
+    BaziChart,
+    build_bazi_chart,
+    format_fact_context,
+    _compute_shensha,
+    parse_gender,
+)
 from app.agent.base_agent import _wrap_user_input
 from app.logger import log
 # 检索策略（领域关键词/领域检索词/理论术语检索词/术语识别）统一由 app.rag.retrieval 提供，
@@ -1190,6 +1196,15 @@ class XianzhiWorkflow:
             f"空亡[{p.xunkong or '—'}]"
             for p in chart.pillars
         )
+        # 神煞：按柱分组注入，确保与前端表格展示一致（此前完全缺失，LLM 看不到神煞）
+        shensha_all = _compute_shensha(chart.pillars, parse_gender(chart.birth.gender))
+        shensha_by_pillar: dict[str, list[str]] = {}
+        for _s in shensha_all:
+            shensha_by_pillar.setdefault(_s.get("pillar") or "全局", []).append(_s["name"])
+        shensha_line = "；".join(
+            f"{p.name}:{'、'.join(shensha_by_pillar.get(p.name, [])) or '—'}"
+            for p in chart.pillars
+        )
         dayun_lines = [
             f"{item.ganzhi} {item.start_year}-{item.end_year} {item.start_age}-{item.end_age}岁"
             for item in chart.dayun
@@ -1222,6 +1237,7 @@ class XianzhiWorkflow:
             f"出生: {chart.birth.solar}; 性别: {chart.birth.gender}; 农历: {chart.birth.lunar}; 生肖: {chart.birth.shengxiao}",
             f"四柱: {pillars}",
             f"四柱详述:\n{pillar_detail}",
+            f"神煞（按柱）: {shensha_line}",
             f"日主: {chart.wuxing.day_master}({chart.wuxing.day_master_wuxing}); 强弱: {chart.wuxing.strength}; 分数: {chart.wuxing.strength_score}",
             f"五行权重: {chart.wuxing.counts}; 最旺: {chart.wuxing.strongest}; 最弱: {chart.wuxing.weakest}",
             f"用神提示: {chart.wuxing.useful_hint}",
