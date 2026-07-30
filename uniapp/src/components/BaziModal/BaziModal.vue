@@ -446,7 +446,7 @@ async function generateReport() {
 .bt-day { background: rgba(184, 72, 60, 0.06); }
 .bt-head .bt-day { background: rgba(184, 72, 60, 0.1); }
 .bt-gan { font-size: 32rpx; font-weight: bold; font-family: $font-family-display; }
-.bt-zhi { font-size: 26rpx; font-family: $font-family-display; }
+.bt-zhi { font-size: 32rpx; font-family: $font-family-display; }
 .bt-multi { flex-direction: column; gap: 2rpx; padding: 8rpx 4rpx; }
 .bt-cang { font-size: 20rpx; font-weight: 600; line-height: 1.5; }
 .bt-fu { font-size: 17rpx; color: $color-ink-light; line-height: 1.5; }

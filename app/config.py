@@ -62,7 +62,7 @@ class Settings(BaseSettings):
 
     # RAG 知识库
     embedding_local_model: str = Field(default="sentence-transformers", alias="EMBEDDING_LOCAL_MODEL")
-    embedding_model: str = Field(default="text-embedding-v2", alias="EMBEDDING_MODEL")
+    embedding_model: str = Field(default="qwen3.7-text-embedding", alias="EMBEDDING_MODEL")
     embedding_api_key: str = Field(default="", alias="EMBEDDING_API_KEY")
     # 向量数据库类型：chroma | postgres
     vector_store_type: str = Field(default="chroma", alias="VECTOR_STORE_TYPE")
