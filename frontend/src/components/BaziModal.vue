@@ -46,73 +46,79 @@
                 <template v-if="props.shenGong">身宫 {{ props.shenGong }}</template>
               </span>
             </div>
-            <div class="chart-table-wrap">
-              <table class="chart-table">
-                <thead>
-                  <tr>
-                    <th class="row-label"></th>
-                    <th v-for="p in pillars" :key="p.name" :class="['col-head', p.name === '日柱' ? 'day-master' : '']">{{ p.name }}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr>
-                    <td class="row-label">主星</td>
-                    <td v-for="p in pillars" :key="p.name" :class="p.name === '日柱' ? 'day-master' : ''">{{ p.shishenGan || '—' }}</td>
-                  </tr>
-                  <tr>
-                    <td class="row-label">天干</td>
-                    <td v-for="p in pillars" :key="p.name" :class="p.name === '日柱' ? 'day-master' : ''">
-                      <span class="big-gan" :style="{ color: ganColor(p.ganzhi[0]) }">{{ p.ganzhi[0] }}</span>
-                    </td>
-                  </tr>
-                  <tr>
-                    <td class="row-label">地支</td>
-                    <td v-for="p in pillars" :key="p.name" :class="p.name === '日柱' ? 'day-master' : ''">
-                      <span class="big-zhi" :style="{ color: zhiColor(p.ganzhi[1]) }">{{ p.ganzhi[1] }}</span>
-                    </td>
-                  </tr>
-                  <tr>
-                    <td class="row-label">藏干</td>
-                    <td v-for="p in pillars" :key="p.name" :class="['cang-gan', p.name === '日柱' ? 'day-master' : '']">
-                      <span v-for="(g, i) in p.hiddenStems" :key="i" class="cang-item" :style="{ color: ganColor(g) }">{{ g }}</span>
-                    </td>
-                  </tr>
-                  <tr>
-                    <td class="row-label">副星</td>
-                    <td v-for="p in pillars" :key="p.name" :class="['fu-star', p.name === '日柱' ? 'day-master' : '']">
-                      <span v-for="(s, i) in p.shishenZhi" :key="i" class="fu-item">{{ s }}</span>
-                    </td>
-                  </tr>
-                  <tr>
-                    <td class="row-label">星运</td>
-                    <td v-for="p in pillars" :key="p.name" :class="p.name === '日柱' ? 'day-master' : ''">{{ p.changsheng || '—' }}</td>
-                  </tr>
-                  <tr>
-                    <td class="row-label">自坐</td>
-                    <td v-for="p in pillars" :key="p.name" :class="p.name === '日柱' ? 'day-master' : ''">{{ p.zizuo || '—' }}</td>
-                  </tr>
-                  <tr>
-                    <td class="row-label">空亡</td>
-                    <td v-for="p in pillars" :key="p.name" :class="p.name === '日柱' ? 'day-master' : ''">{{ p.xunkong || '—' }}</td>
-                  </tr>
-                  <tr>
-                    <td class="row-label">纳音</td>
-                    <td v-for="p in pillars" :key="p.name" :class="p.name === '日柱' ? 'day-master' : ''">{{ p.nayin }}</td>
-                  </tr>
-                  <tr>
-                    <td class="row-label">神煞</td>
-                    <td v-for="p in pillars" :key="p.name" :class="['shensha-cell', p.name === '日柱' ? 'day-master' : '']">
-                      <span
-                        v-for="(s, i) in (shenshaByPillar[p.name] || [])"
-                        :key="i"
-                        class="ps-tag"
-                        :class="['ps-' + s._cat, { 'ps-active': activeShensha === s }]"
-                        @click.stop="toggleShensha(s)"
-                      >{{ s.name }}</span>
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
+            <!-- 11 行 × 4 列：用 CSS Grid 彻底摆脱 <td>+flex 兼容性问题 -->
+            <div class="chart-grid">
+              <!-- 列头 -->
+              <div class="cg-row cg-head">
+                <div class="cg-label"></div>
+                <div v-for="p in pillars" :key="'h-' + p.name" :class="['cg-cell cg-col-head', p.name === '日柱' ? 'day-master' : '']">{{ p.name }}</div>
+              </div>
+              <!-- 主星 -->
+              <div class="cg-row">
+                <div class="cg-label">主星</div>
+                <div v-for="p in pillars" :key="'m-' + p.name" :class="['cg-cell', p.name === '日柱' ? 'day-master' : '']">{{ p.shishenGan || '—' }}</div>
+              </div>
+              <!-- 天干 -->
+              <div class="cg-row">
+                <div class="cg-label">天干</div>
+                <div v-for="p in pillars" :key="'g-' + p.name" :class="['cg-cell', p.name === '日柱' ? 'day-master' : '']">
+                  <span class="big-gan" :style="{ color: ganColor(p.ganzhi[0]) }">{{ p.ganzhi[0] }}</span>
+                </div>
+              </div>
+              <!-- 地支 -->
+              <div class="cg-row">
+                <div class="cg-label">地支</div>
+                <div v-for="p in pillars" :key="'z-' + p.name" :class="['cg-cell', p.name === '日柱' ? 'day-master' : '']">
+                  <span class="big-zhi" :style="{ color: zhiColor(p.ganzhi[1]) }">{{ p.ganzhi[1] }}</span>
+                </div>
+              </div>
+              <!-- 藏干 -->
+              <div class="cg-row">
+                <div class="cg-label">藏干</div>
+                <div v-for="p in pillars" :key="'c-' + p.name" :class="['cg-cell cg-multi', p.name === '日柱' ? 'day-master' : '']">
+                  <span v-for="(g, i) in p.hiddenStems" :key="'c-' + p.name + '-' + i" class="cang-item" :style="{ color: ganColor(g) }">{{ g }}</span>
+                </div>
+              </div>
+              <!-- 副星 -->
+              <div class="cg-row">
+                <div class="cg-label">副星</div>
+                <div v-for="p in pillars" :key="'f-' + p.name" :class="['cg-cell cg-multi', p.name === '日柱' ? 'day-master' : '']">
+                  <span v-for="(s, i) in p.shishenZhi" :key="'f-' + p.name + '-' + i" class="fu-item">{{ s }}</span>
+                </div>
+              </div>
+              <!-- 星运 -->
+              <div class="cg-row">
+                <div class="cg-label">星运</div>
+                <div v-for="p in pillars" :key="'cs-' + p.name" :class="['cg-cell', p.name === '日柱' ? 'day-master' : '']">{{ p.changsheng || '—' }}</div>
+              </div>
+              <!-- 自坐 -->
+              <div class="cg-row">
+                <div class="cg-label">自坐</div>
+                <div v-for="p in pillars" :key="'zz-' + p.name" :class="['cg-cell', p.name === '日柱' ? 'day-master' : '']">{{ p.zizuo || '—' }}</div>
+              </div>
+              <!-- 空亡 -->
+              <div class="cg-row">
+                <div class="cg-label">空亡</div>
+                <div v-for="p in pillars" :key="'xk-' + p.name" :class="['cg-cell', p.name === '日柱' ? 'day-master' : '']">{{ p.xunkong || '—' }}</div>
+              </div>
+              <!-- 纳音 -->
+              <div class="cg-row">
+                <div class="cg-label">纳音</div>
+                <div v-for="p in pillars" :key="'ny-' + p.name" :class="['cg-cell', p.name === '日柱' ? 'day-master' : '']">{{ p.nayin }}</div>
+              </div>
+              <!-- 神煞 -->
+              <div class="cg-row">
+                <div class="cg-label">神煞</div>
+                <div v-for="p in pillars" :key="'ss-' + p.name" :class="['cg-cell cg-multi cg-tags', p.name === '日柱' ? 'day-master' : '']">
+                  <span
+                    v-for="(s, i) in (shenshaByPillar[p.name] || [])"
+                    :key="'ss-' + p.name + '-' + i"
+                    class="ps-tag"
+                    :class="['ps-' + s._cat, { 'ps-active': activeShensha === s }]"
+                    @click.stop="toggleShensha(s)"
+                  >{{ s.name }}</span>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -513,20 +519,58 @@ const downloadFullPDF = () => {
   margin-bottom: 14px; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
 .gong-info { font-size: 11px; color: var(--text-dim); letter-spacing: normal; }
 .chart-table-wrap { margin-bottom: 10px; overflow-x: auto; }
-.chart-table { width: 100%; border-collapse: collapse; font-size: 12px; table-layout: fixed; }
-.chart-table th, .chart-table td { border: 1px solid var(--border); padding: 6px 4px; text-align: center; vertical-align: middle; }
-.chart-table thead .col-head { font-size: 12px; color: var(--accent-light); letter-spacing: 1px; background: rgba(255,255,255,0.04); }
-.chart-table .row-label { font-size: 11px; color: var(--text-dim); background: rgba(255,255,255,0.02); white-space: nowrap; width: 52px; }
-.chart-table tbody td { color: var(--text); line-height: 1.5; }
-.chart-table .day-master { background: linear-gradient(135deg, rgba(212,175,55,0.1), rgba(139,92,246,0.06));
-  border-color: rgba(212,175,55,0.35); }
-.chart-table thead .day-master { background: linear-gradient(135deg, rgba(212,175,55,0.16), rgba(139,92,246,0.08)); }
-.chart-table .big-gan { font-size: 22px; font-weight: bold; }
-.chart-table .big-zhi { font-size: 18px; }
-.chart-table .cang-gan { display: flex; flex-direction: row; flex-wrap: wrap; gap: 1px 5px; justify-content: center; align-items: center; }
-.chart-table .cang-item { font-size: 11px; font-weight: 600; white-space: nowrap; }
-.chart-table .fu-star { display: flex; flex-direction: row; flex-wrap: wrap; gap: 1px 5px; justify-content: center; align-items: center; font-size: 10px; color: var(--text-dim); }
-.chart-table .shensha-cell { display: flex; flex-direction: row; flex-wrap: wrap; gap: 2px 3px; justify-content: center; align-items: center; }
+/* === 11 行 × 5 列 CSS Grid 表格（label + 年月日时 4 柱）=== */
+.chart-grid {
+  display: grid;
+  grid-template-columns: 52px repeat(4, 1fr);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  margin-bottom: 10px;
+  font-size: 12px;
+}
+.cg-row {
+  display: grid;
+  grid-template-columns: 52px repeat(4, 1fr);
+  border-bottom: 1px solid var(--border);
+}
+.cg-row:last-child { border-bottom: none; }
+.cg-head { background: rgba(255,255,255,0.04); }
+.cg-label {
+  font-size: 11px;
+  color: var(--text-dim);
+  background: rgba(255,255,255,0.02);
+  padding: 8px 4px;
+  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-right: 1px solid var(--border);
+  white-space: nowrap;
+}
+.cg-cell {
+  padding: 6px 4px;
+  text-align: center;
+  color: var(--text);
+  line-height: 1.5;
+  border-right: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  word-break: break-all;
+  min-height: 28px;
+}
+.cg-cell:last-child { border-right: none; }
+.cg-head .cg-cell { font-size: 12px; color: var(--accent-light); letter-spacing: 1px; padding: 8px 4px; }
+.cg-cell.day-master { background: linear-gradient(135deg, rgba(212,175,55,0.1), rgba(139,92,246,0.06)); }
+.cg-head .cg-cell.day-master { background: linear-gradient(135deg, rgba(212,175,55,0.16), rgba(139,92,246,0.08)); }
+.big-gan { font-size: 22px; font-weight: bold; }
+.big-zhi { font-size: 18px; }
+/* 多标签列：横向 flex-wrap 排布 */
+.cg-multi { flex-direction: row; flex-wrap: wrap; gap: 2px 5px; justify-content: center; align-items: center; padding: 4px 2px; }
+.cang-item { font-size: 11px; font-weight: 600; padding: 1px 2px; }
+.fu-item { font-size: 10px; color: var(--text-dim); padding: 1px 2px; }
+.cg-tags { padding: 4px 2px; }
 .wuxing-grid { display: flex; justify-content: space-around; align-items: flex-end; height: 140px; margin-bottom: 10px; }
 .wuxing-item { display: flex; flex-direction: column; align-items: center; gap: 6px; width: 16%; }
 .wuxing-bar-container { width: 100%; height: 90px; background: rgba(255,255,255,0.03); border-radius: 6px 6px 0 0;
