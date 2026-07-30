@@ -1,19 +1,8 @@
 <script setup lang="ts">
 import { onShow } from '@dcloudio/uni-app'
-import { isLoggedIn } from '@/utils/storage'
 
-const LOGIN_PATH = '/pages/login/index'
-
-// 需要登录才能访问的 tabBar 页
-const PROTECTED_TABS = ['/pages/xianzhi/index', '/pages/tarot/index', '/pages/mine/index']
-
-onShow((options) => {
-  // 全局登录拦截：从 tabBar 页进入时检查
-  const url = options?.path || ''
-  if (PROTECTED_TABS.some(t => url.startsWith(t.replace('/index', ''))) && !isLoggedIn()) {
-    uni.reLaunch({ url: LOGIN_PATH })
-  }
-})
+// 临时关闭全局强制登录拦截，允许未登录直接访问各 tab 页
+onShow(() => {})
 </script>
 
 <style lang="scss">
