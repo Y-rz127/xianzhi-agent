@@ -151,7 +151,86 @@ def _fingerprint_path() -> Path:
     return settings.vector_db_dir / _FINGERPRINT_FILE
 
 
+# ----------------------------------------------------------------------
+# 指纹持久化到 PostgreSQL
+# 容器重启后本地文件系统会被重置，原指纹文件丢失会导致每次启动误判
+# "需全量重建"，进而重复 embedding 全部知识片段（约 761 个）。PG 中的
+# 向量索引本身已持久，只要指纹能存活，重启即可直接复用现成索引、零 embedding。
+# 本地文件保留为兜底（首次迁移 / PG 不可用降级）。
+# ----------------------------------------------------------------------
+_fp_pool = None
+_fp_lock = threading.Lock()
+
+
+def _fp_pool_get():
+    global _fp_pool
+    if _fp_pool is None:
+        with _fp_lock:
+            if _fp_pool is None:
+                from psycopg_pool import ConnectionPool
+
+                def _check(c):
+                    try:
+                        c.execute("SELECT 1")
+                        return True
+                    except Exception:
+                        return False
+
+                _fp_pool = ConnectionPool(
+                    settings.pg_dsn(),
+                    min_size=1,
+                    max_size=2,
+                    kwargs={"autocommit": True},
+                    check=_check,
+                    max_lifetime=1800,
+                    open=False,
+                )
+    return _fp_pool
+
+
+def _fp_ensure_table(conn) -> None:
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS rag_fingerprint ("
+        " id smallint PRIMARY KEY DEFAULT 1,"
+        " data jsonb NOT NULL,"
+        " updated_at timestamptz DEFAULT now())"
+    )
+
+
+def _load_fingerprint_pg() -> dict | None:
+    try:
+        pool = _fp_pool_get()
+        with pool.connection() as conn:
+            _fp_ensure_table(conn)
+            row = conn.execute("SELECT data FROM rag_fingerprint WHERE id=1").fetchone()
+            if row and row[0] is not None:
+                return row[0] if isinstance(row[0], dict) else json.loads(row[0])
+    except Exception as e:
+        log.warning("PG 指纹读取失败，回退本地文件: {}", e)
+    return None
+
+
+def _save_fingerprint_pg(data: dict) -> None:
+    try:
+        pool = _fp_pool_get()
+        with pool.connection() as conn:
+            _fp_ensure_table(conn)
+            conn.execute(
+                "INSERT INTO rag_fingerprint (id, data, updated_at) "
+                "VALUES (1, %(data)s::jsonb, now()) "
+                "ON CONFLICT (id) DO UPDATE SET data=%(data)s::jsonb, updated_at=now()",
+                {"data": json.dumps(data, ensure_ascii=False)},
+            )
+    except Exception as e:
+        log.warning("PG 指纹写入失败（不影响启动，下次从本地文件恢复）: {}", e)
+
+
 def _load_fingerprint() -> dict | None:
+    # 优先从 PostgreSQL 读取（容器重启后本地文件会被清空）
+    fp = _load_fingerprint_pg()
+    if fp:
+        return fp
+    # 回退本地文件（兼容首次迁移 / PG 不可用降级）
     p = _fingerprint_path()
     if not p.exists():
         return None
@@ -163,16 +242,20 @@ def _load_fingerprint() -> dict | None:
 
 def _save_fingerprint(docs_hash: str, embedding_id: str, store_type: str,
                       chunk_size: int, chunk_overlap: int) -> None:
-    p = _fingerprint_path()
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps({
+    data = {
         "docs_hash": docs_hash,
         "embedding_id": embedding_id,
         "store_type": store_type,
         "chunk_size": chunk_size,
         "chunk_overlap": chunk_overlap,
         "updated_at": time.time(),
-    }, ensure_ascii=False, indent=2), encoding="utf-8")
+    }
+    # 本地文件兜底
+    p = _fingerprint_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    # 同时持久化到 PostgreSQL，避免容器重启后丢失
+    _save_fingerprint_pg(data)
 
 
 def _is_up_to_date(docs_hash: str, embedding_id: str, store_type: str,
