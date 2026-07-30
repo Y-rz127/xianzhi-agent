@@ -680,25 +680,27 @@ def _compute_shensha(pillars: list[Pillar], gender_int: int | None = None) -> li
             if p.zhi == yangren:
                 add("羊刃", "刚烈勇猛、有勇有谋；得制化为武贵，失制化易招灾", p.name)
 
-    # 学堂 / 词馆（年柱纳音五行查长生/临官位；禄命法）
+    # 学堂 / 词馆（年柱纳音五行查月日时支的长生/临官位；禄命法）
+    # 注意：只查月日时三柱（pillars[1:]），不包含年柱自身（古诀"见其他三支"）
+    _other_three = pillars[1:]
     xt = XUE_TANG.get(year_nayin_wx)
     if xt:
-        for p in pillars:
+        for p in _other_three:
             if p.zhi == xt:
                 add("学堂", "纳音长生，聪明好学、文才出众、功名显达", p.name)
     cg = CI_GUAN.get(year_nayin_wx)
     if cg:
-        for p in pillars:
+        for p in _other_three:
             if p.zhi == cg:
                 add("词馆", "纳音临官，文章出类、学业精专", p.name)
     zxt = ZHENG_XUE_TANG.get(year_nayin_wx)
     if zxt:
-        for p in pillars:
+        for p in _other_three:
             if p.ganzhi == zxt:
                 add("正学堂", "纳音长生正位，学问正统、贵气十足", p.name)
     zcg = ZHENG_CI_GUAN.get(year_nayin_wx)
     if zcg:
-        for p in pillars:
+        for p in _other_three:
             if p.ganzhi == zcg:
                 add("正词馆", "纳音临官正位，文章锦绣、文采斐然", p.name)
 
