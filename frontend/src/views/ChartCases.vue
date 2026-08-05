@@ -155,7 +155,7 @@
                 <div class="candidate-list">
                   <label v-for="(c, i) in baziCandidates" :key="c.birth_time" class="candidate-opt">
                     <input type="radio" :value="c.birth_time" v-model="form.birthTime" />
-                    <span>{{ i + 1 }}. {{ c.birth_time }}（{{ c.ganzhi }} {{ c.shi_chen }}）</span>
+                    <span>{{ Number(i) + 1 }}. {{ c.birth_time }}（{{ c.ganzhi }} {{ c.shi_chen }}）</span>
                   </label>
                 </div>
                 <p class="hint">同一八字可能对应多个日期，请选择你实际的出生日期。</p>
