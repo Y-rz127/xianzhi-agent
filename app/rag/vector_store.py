@@ -41,14 +41,31 @@ CHUNK_SIZE = 350
 CHUNK_OVERLAP = 70
 
 
+class BatchEmbeddings(Embeddings):
+    """把大批量 embed_documents 拆成小批次，规避 DashScope 单次 ≤20 条限制。"""
+
+    def __init__(self, wrapped: Embeddings, batch_size: int = 20):
+        self._wrapped = wrapped
+        self._batch_size = batch_size
+
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        result: list[list[float]] = []
+        for i in range(0, len(texts), self._batch_size):
+            result.extend(self._wrapped.embed_documents(texts[i:i + self._batch_size]))
+        return result
+
+    def embed_query(self, text: str) -> list[float]:
+        return self._wrapped.embed_query(text)
+
+
 def get_embeddings() -> Embeddings:
     """DashScope 文本嵌入模型（对应笔记 07 的 DashScopeEmbeddings）。"""
     from langchain_community.embeddings import DashScopeEmbeddings
-    return DashScopeEmbeddings(
+    return BatchEmbeddings(DashScopeEmbeddings(
         model=settings.embedding_model,
         max_retries=3,
         dashscope_api_key=settings.embedding_api_key,
-    )
+    ))
 
 
 def _get_local_embeddings() -> Embeddings:
@@ -183,7 +200,7 @@ def _fp_pool_get():
                     kwargs={"autocommit": True},
                     check=_check,
                     max_lifetime=1800,
-                    open=False,
+                    open=True,
                 )
     return _fp_pool
 
