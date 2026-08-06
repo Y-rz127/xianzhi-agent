@@ -1320,7 +1320,6 @@ messages.value.push({
   max-width: calc(100% - 88rpx);
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
   overflow-x: hidden;
   box-sizing: border-box;
 }
@@ -1329,6 +1328,7 @@ messages.value.push({
   margin-left: auto;
 }
 .msg-text {
+  width: 100%;
   max-width: 88%;
   padding: 22rpx 32rpx;
   border-radius: 8rpx 28rpx 28rpx 28rpx;
@@ -1342,6 +1342,11 @@ messages.value.push({
   box-sizing: border-box;
   overflow: hidden;
   box-shadow: $shadow-sm;
+}
+.msg.user .msg-text {
+  width: auto;
+  max-width: 88%;
+  text-align: right;
 }
 .msg.user .msg-text {
   text-align: right;
