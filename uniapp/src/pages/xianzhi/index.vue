@@ -1327,7 +1327,7 @@ messages.value.push({
   margin-left: auto;
 }
 .msg-text {
-  width: 100%;
+  display: inline-block;
   padding: 22rpx 32rpx;
   border-radius: 8rpx 28rpx 28rpx 28rpx;
   font-size: 32rpx;
@@ -1337,6 +1337,7 @@ messages.value.push({
   background: $color-bg-card;
   border: 1rpx solid $color-border;
   color: $color-ink;
+  max-width: 85%;
   box-sizing: border-box;
   overflow: hidden;
   box-shadow: $shadow-sm;
