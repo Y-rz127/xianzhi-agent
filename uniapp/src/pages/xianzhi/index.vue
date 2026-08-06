@@ -545,6 +545,8 @@ async function switchToSession(session: ChatSession) {
   feedbackState.value = {}
   feedbackReasons.value = {}
   closeHistoryDrawer()
+  // 延迟滚到底部：等抽屉关闭动画 + 消息列表渲染完毕
+  setTimeout(() => scrollToBottom(), 350)
 }
 
 async function deleteHistorySession(id: string) {
