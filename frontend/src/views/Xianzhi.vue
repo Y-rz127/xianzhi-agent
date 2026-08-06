@@ -75,6 +75,10 @@
             <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0z"/><path d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
             命盘
           </button>
+          <span v-if="birthPlace" class="header-place" :title="'出生地：' + birthPlace + '（用于真太阳时校正）'">
+            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+            {{ birthPlace }}
+          </span>
           <button class="btn header-btn" @click="newSession" title="新会话">
             <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
           </button>
@@ -245,6 +249,7 @@
 defineOptions({ name: 'Xianzhi' })
 import { ref, nextTick, computed, onMounted, onActivated, onUnmounted } from "vue"
 import { chatWithXianzhi, downloadReport, parsePillars, parseWuxing, parseDayun, parseShensha, fetchSessions, deleteSession as deleteSessionApi, getSessionMessages, getSessionBirthInfo, fetchChartCases, createChartCase, deleteChartCase, getChart, submitAnswerFeedback, type ChatSession, type SessionMessage, type ChartCase, type ChartData, type SSECallbacks } from "../api"
+import { matchCityByName } from "../utils/region-data"
 import BaziCard from "../components/BaziCard.vue"
 import WuxingChart from "../components/WuxingChart.vue"
 import DayunTimeline from "../components/DayunTimeline.vue"
@@ -259,6 +264,8 @@ const loading = ref(false)
 const messagesEl = ref<HTMLElement | null>(null)
 const lastBirthInfo = ref<BirthInfo | null>(null)
 const chartData = ref<ChartData | null>(null)
+const birthPlace = ref("")
+const birthLongitude = ref(0)
 const conversationId = ref("web-xianzhi-" + Date.now())
 const sidebarCollapsed = ref(true)
 const isMobile = ref(false)
@@ -409,7 +416,7 @@ const handleKeydown = (e: KeyboardEvent) => {
 
 const fetchChartData = async (birthTime: string, gender: string) => {
   try {
-    chartData.value = await getChart(birthTime, gender, sect.value, yunSect.value)
+    chartData.value = await getChart(birthTime, gender, sect.value, yunSect.value, birthLongitude.value || undefined)
   } catch {
     chartData.value = null
   }
@@ -440,6 +447,8 @@ const newSession = () => {
   messages.value = []
   lastBirthInfo.value = null
   chartData.value = null
+  birthPlace.value = ""
+  birthLongitude.value = 0
   input.value = ""
   loadSessions()
 }
@@ -484,6 +493,15 @@ const loadSession = async (s: ChatSession) => {
   // 从后端恢复命盘上下文（支持农历/节日/时辰等自然语言输入场景）
   lastBirthInfo.value = null
   chartData.value = null
+  // 从本地存储恢复出生地（后端 birth-info 接口不含出生地）
+  const savedPlace = localStorage.getItem("xianzhi-birth-place-" + s.id)
+  if (savedPlace) {
+    try {
+      const obj = JSON.parse(savedPlace)
+      birthPlace.value = obj.place || ""
+      birthLongitude.value = obj.longitude || 0
+    } catch { birthPlace.value = ""; birthLongitude.value = 0 }
+  } else { birthPlace.value = ""; birthLongitude.value = 0 }
   const bi = await getSessionBirthInfo(s.id)
   if (bi.time && bi.gender) {
     const time = zhiHourToHHMM(bi.time)
@@ -624,6 +642,7 @@ const send = () => {
   const opts = lastBirthInfo.value ? {
     birth_time: lastBirthInfo.value.time,
     gender: lastBirthInfo.value.gender,
+    birth_place: birthPlace.value || undefined,
     sect: sect.value,
     yun_sect: yunSect.value,
   } : undefined
@@ -633,10 +652,19 @@ const send = () => {
     onError: () => { aiMsg.content += "\n[连接中断]"; loading.value = false },
     onDone: () => { loading.value = false; scrollToBottom(); loadSessions(); loadChartCases() },
     // 后端从 LLM 工具调用中提取到出生信息时回调（覆盖自然语言输入场景）
-    onChartContext: async (birthTime, gender) => {
+    onChartContext: async (birthTime, gender, birthPlaceStr) => {
       if (!birthTime || !gender) return
       const time = zhiHourToHHMM(birthTime)
       lastBirthInfo.value = { time, gender }
+      // 后端从对话中提取到出生地 → 模糊匹配城市经度，填充信息面板 + 持久化
+      if (birthPlaceStr && !birthPlace.value) {
+        const matched = matchCityByName(birthPlaceStr)
+        if (matched) {
+          birthPlace.value = `${matched.province} ${matched.city}`
+          birthLongitude.value = matched.longitude
+          localStorage.setItem("xianzhi-birth-place-" + conversationId.value, JSON.stringify({ place: birthPlace.value, longitude: birthLongitude.value }))
+        }
+      }
       await fetchChartData(time, gender)
     },
   } as SSECallbacks, opts)

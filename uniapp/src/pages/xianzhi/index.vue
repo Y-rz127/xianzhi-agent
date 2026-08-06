@@ -85,7 +85,7 @@
     </view>
 
     <!-- 消息列表 -->
-    <scroll-view class="messages" scroll-y :scroll-top="scrollTop" scroll-with-animation @scroll="onMsgScroll">
+    <scroll-view class="messages" scroll-y :scroll-top="scrollTop" scroll-with-animation @scroll="onMsgScroll" :style="messagesStyle">
       <view v-if="!messages.length" class="empty-state">
         <view class="empty-avatar display-font">易</view>
         <text class="empty-title">先知命理</text>
@@ -134,8 +134,10 @@
           :auto-height="true"
           :show-confirm-bar="false"
           :cursor-spacing="20"
+          :adjust-position="false"
           confirm-type="send"
           @confirm="onSend"
+          @focus="onInputFocus"
         />
       </view>
       <view
@@ -308,7 +310,7 @@ import {
 } from '@/api'
 import { getLocalDateString } from '@/utils/datetimePicker'
 import { currentUserId, isLoggedIn, getToken, getUser, getBirthPlaceLocal, setBirthPlaceLocal } from '@/utils/storage'
-import { regionData, type City } from '@/utils/region-data'
+import { regionData, matchCityByName, type City } from '@/utils/region-data'
 
 interface Message { role: 'user' | 'assistant'; content: string }
 interface BirthInfo { time: string; gender: string }
@@ -583,22 +585,50 @@ try {
   statusBarHeight.value = sysInfo.statusBarHeight || 20
 } catch {}
 
-// 键盘高度：监听 onKeyboardHeightChange，键盘弹起时把输入栏上移，避免遮挡
+// 键盘高度：键盘弹起时让输入栏固定在键盘上方，同时给消息区留出底部空间
 const keyboardHeight = ref(0)
+const INPUT_BAR_BASE_RPX = 128 // 输入栏基础高度（含上下 padding），与样式保持一致
 const inputBarStyle = computed(() => {
-  if (keyboardHeight.value <= 0) return ''
-  return `transform: translateY(-${keyboardHeight.value}px); transition: transform 0.15s ease;`
+  // 输入栏 fixed 在视口底部，键盘弹起时抬高 bottom
+  const bottom = keyboardHeight.value > 0 ? keyboardHeight.value : 0
+  return `bottom: ${bottom}px;`
+})
+const messagesStyle = computed(() => {
+  const kb = keyboardHeight.value > 0 ? keyboardHeight.value : 0
+  return `padding-bottom: calc(${INPUT_BAR_BASE_RPX}rpx + ${kb}px + env(safe-area-inset-bottom));`
 })
 let _kbHandler: ((res: any) => void) | null = null
+let _visualViewportHandler: (() => void) | null = null
 onMounted(() => {
   // #ifdef MP-WEIXIN
-  _kbHandler = (res: any) => { keyboardHeight.value = res?.height || 0 }
+  _kbHandler = (res: any) => {
+    keyboardHeight.value = res?.height || 0
+    if (keyboardHeight.value > 0) setTimeout(scrollToBottom, 150)
+  }
   uni.onKeyboardHeightChange(_kbHandler)
+  // #endif
+
+  // #ifdef H5
+  if (typeof window !== 'undefined' && (window as any).visualViewport) {
+    const vv = (window as any).visualViewport
+    const updateH5KeyboardHeight = () => {
+      const h = Math.max(0, window.innerHeight - vv.height)
+      keyboardHeight.value = h
+      if (h > 0) setTimeout(scrollToBottom, 150)
+    }
+    _visualViewportHandler = updateH5KeyboardHeight
+    vv.addEventListener('resize', updateH5KeyboardHeight)
+  }
   // #endif
 })
 onBeforeUnmount(() => {
   // #ifdef MP-WEIXIN
   if (_kbHandler) uni.offKeyboardHeightChange(_kbHandler)
+  // #endif
+  // #ifdef H5
+  if (_visualViewportHandler && typeof window !== 'undefined' && (window as any).visualViewport) {
+    (window as any).visualViewport.removeEventListener('resize', _visualViewportHandler)
+  }
   // #endif
 })
 
@@ -610,7 +640,7 @@ const birthSummary = computed(() =>
   birthTimeFull.value ? `${birthTimeFull.value} ${gender.value}${birthPlace.value ? ' · ' + birthPlace.value : ''}` : '点击设置出生信息'
 )
 
-const placeholderText = '报上生辰排盘，或直接请教命理问题…'
+const placeholderText = '请输入你的问题…'
 
 // 抽屉用户区：头像与昵称（取自登录态）
 // 用 ref 而非 computed(getUser())，因为 uni.getStorageSync 不被 Vue 响应追踪，
@@ -803,6 +833,12 @@ function scrollToBottom() {
   })
 }
 
+function onInputFocus() {
+  // 聚焦时延迟滚动到底部，避免键盘弹起过程中消息被遮挡
+  setTimeout(scrollToBottom, 200)
+  setTimeout(scrollToBottom, 400)
+}
+
 /** 最后一条助手消息（用于解析命盘数据给 modal） */
 const lastAssistantContent = computed(() => {
   for (let i = messages.value.length - 1; i >= 0; i--) {
@@ -875,17 +911,26 @@ function onSend() {
     targetList[idx].content = targetList[idx].content || `[出错] ${err}`
   }
   // 后端从 LLM 工具调用中提取到出生信息时回调（覆盖自然语言输入场景）
-  const onChartContext = async (bt: string, g: string) => {
+  const onChartContext = async (bt: string, g: string, bp?: string) => {
     if (!bt || !g) return
     const [d, t] = bt.split(' ')
     birthDate.value = d || ''
     birthTime.value = zhiHourToHHMM(t)
     gender.value = g as '男' | '女'
     lastBirthInfo.value = { time: bt, gender: g as '男' | '女' }
+    // 后端从对话中提取到出生地 → 模糊匹配城市经度，填充信息面板 + 持久化
+    if (bp && !birthPlace.value) {
+      const matched = matchCityByName(bp)
+      if (matched) {
+        birthPlace.value = `${matched.province} ${matched.city}`
+        birthLongitude.value = matched.longitude
+        if (conversationId.value) setBirthPlaceLocal(conversationId.value, birthPlace.value, birthLongitude.value)
+      }
+    }
     // 主动拉取结构化命盘数据（命盘详情弹窗内容）
     _skipNextChartWatch = true
     try {
-      chartData.value = await getChart(bt, g, 2, 1)
+      chartData.value = await getChart(bt, g, 2, 1, birthLongitude.value || undefined)
     } catch {
       chartData.value = null
     }
@@ -895,6 +940,7 @@ function onSend() {
     conversationId: conversationId.value,
     birthTime: birthTimeFull.value || undefined,
     gender: gender.value,
+    birthPlace: birthPlace.value || undefined,
     sect: sect.value,
     token: getToken(),
     onMessage, onDone, onError, onChartContext,
@@ -904,7 +950,7 @@ function onSend() {
 // 初始欢迎语
 messages.value.push({
   role: 'assistant',
-  content: '您好，我是先知。可直接请教命理问题，如「什么是七杀？」；也可报上生辰，如「男，1990-05-20 14:30，排盘分析事业」。',
+  content: '您好，我是先知。可直接请教命理问题，如「什么是七杀？」；也可报上生辰和出生地，如「男，1990-05-20 14:30，广西钦州浦北县出生」我会帮你分析命盘。',
 })
 </script>
 
@@ -1216,7 +1262,7 @@ messages.value.push({
 /* === 消息列表 === */
 .messages {
   flex: 1;
-  padding: 24rpx 24rpx;
+  padding: 24rpx 24rpx calc(24rpx + 128rpx + env(safe-area-inset-bottom));
   overflow-x: hidden;
   width: 100%;
   box-sizing: border-box;
@@ -1450,13 +1496,16 @@ messages.value.push({
 .input-bar {
   display: flex;
   align-items: flex-end;
-  padding: 16rpx 32rpx 16rpx;
+  padding: 16rpx 32rpx calc(16rpx + env(safe-area-inset-bottom));
   background: $color-bg-card;
   border-top: 1rpx solid $color-border;
   gap: 16rpx;
-  position: relative;
-  z-index: 1;
-  margin-bottom: -16rpx;
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 100;
+  transition: bottom 0.15s ease;
 }
 .input-wrap {
   flex: 1;

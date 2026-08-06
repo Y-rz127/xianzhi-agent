@@ -641,9 +641,9 @@ const downloadFullPDF = () => {
 .loading-dots span:nth-child(2) { animation-delay: 0.2s; }
 .loading-dots span:nth-child(3) { animation-delay: 0.4s; }
 @keyframes dot { 0%, 80%, 100% { transform: scale(0); opacity: 0.5; } 40% { transform: scale(1); opacity: 1; } }
-.modal-footer { display: flex; justify-content: flex-end; gap: 10px; padding: 16px 20px;
+.modal-footer { display: flex; justify-content: center; gap: 10px; padding: 16px 20px;
   border-top: 1px solid var(--border); background: rgba(255,255,255,0.02); flex-wrap: wrap; }
-.modal-footer .btn { display: inline-flex; align-items: center; gap: 6px; }
+.modal-footer .btn { display: inline-flex; align-items: center; gap: 6px; min-width: 140px; justify-content: center; }
 
 @media (max-width: 640px) {
   .pillars-grid { grid-template-columns: repeat(2, 1fr); }

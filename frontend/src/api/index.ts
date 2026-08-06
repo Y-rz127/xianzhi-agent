@@ -19,12 +19,13 @@ export interface SSECallbacks {
   onMessage?: (data: string) => void
   onError?: (err: Event) => void
   onDone?: () => void
-  onChartContext?: (birthTime: string, gender: string) => void
+  onChartContext?: (birthTime: string, gender: string, birthPlace?: string) => void
 }
 
 export interface ChatOptions {
   birth_time?: string
   gender?: string
+  birth_place?: string
   sect?: number
   yun_sect?: number
 }
@@ -44,7 +45,7 @@ export function connectSSE(path: string, params: Record<string, string | undefin
   es.addEventListener("chart_context", (e) => {
     try {
       const data = JSON.parse((e as MessageEvent).data)
-      if (data?.birth_time && data?.gender) cb.onChartContext?.(data.birth_time, data.gender)
+      if (data?.birth_time && data?.gender) cb.onChartContext?.(data.birth_time, data.gender, data.birth_place)
     } catch {}
   })
   // 监听后端自定义 error 事件（如 event: error）
@@ -63,6 +64,7 @@ export const chatWithXianzhi = (message: string, conversationId: string, cb: SSE
     conversation_id: conversationId,
     birth_time: opts?.birth_time,
     gender: opts?.gender,
+    birth_place: opts?.birth_place,
     sect: opts?.sect !== undefined ? String(opts.sect) : undefined,
     yun_sect: opts?.yun_sect !== undefined ? String(opts.yun_sect) : undefined,
   }, cb)
@@ -121,13 +123,14 @@ export interface ChartData {
 
 export interface ChartCase { id: string; name: string; tags: string[]; birthTime: string; gender: string; createdAt: string; updatedAt: string; bazi?: string; chartData?: ChartData; bio?: string; analysis?: string; keypoints?: string }
 
-export async function getChart(birthTime: string, gender: string, sect = 2, yunSect = 1): Promise<ChartData> {
+export async function getChart(birthTime: string, gender: string, sect = 2, yunSect = 1, longitude?: number): Promise<ChartData> {
   const params = new URLSearchParams({
     birth_time: birthTime,
     gender,
     sect: String(sect),
     yun_sect: String(yunSect),
   })
+  if (longitude !== undefined && longitude !== 0) params.set("longitude", String(longitude))
   const res = await apiFetch(`${API_BASE}/ai/xianzhi/chart?${params.toString()}`)
   if (!res.ok) throw new Error(`排盘失败 ${res.status}`)
   return await res.json()

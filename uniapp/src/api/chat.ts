@@ -34,7 +34,7 @@ export interface ChatWSCallbacks {
   onMessage: (data: string) => void
   onDone: () => void
   onError: (err: string) => void
-  onChartContext?: (birthTime: string, gender: string) => void
+  onChartContext?: (birthTime: string, gender: string, birthPlace?: string) => void
   onCards?: (cards: any[]) => void
 }
 
@@ -109,7 +109,7 @@ function connectChatWS(path: string, payload: Record<string, any>, cb: ChatWSCal
       const data = JSON.parse(res.data as string)
       if (data.type === 'message') cb.onMessage(data.data)
       else if (data.type === 'cards') cb.onCards?.(data.data)
-      else if (data.type === 'chart_context') cb.onChartContext?.(data.data?.birth_time, data.data?.gender)
+      else if (data.type === 'chart_context') cb.onChartContext?.(data.data?.birth_time, data.data?.gender, data.data?.birth_place)
       else if (data.type === 'done') { doneOrError = true; cb.onDone(); currentChatActive = false }
       else if (data.type === 'error') { doneOrError = true; cb.onError(data.data || '服务错误'); currentChatActive = false }
     } catch (e: any) {
@@ -146,6 +146,7 @@ export interface XianzhiChatOptions extends ChatWSCallbacks {
   conversationId: string
   birthTime?: string
   gender?: string
+  birthPlace?: string
   sect?: number
   yunSect?: number
   token?: string
@@ -154,7 +155,7 @@ export interface XianzhiChatOptions extends ChatWSCallbacks {
 export function chatWithXianzhiWS(message: string, opts: XianzhiChatOptions) {
   return connectChatWS(
     '/api/ai/xianzhi/ws',
-    { message, conversation_id: opts.conversationId, birth_time: opts.birthTime, gender: opts.gender, sect: opts.sect ?? 2, yun_sect: opts.yunSect ?? 1, token: opts.token || '' },
+    { message, conversation_id: opts.conversationId, birth_time: opts.birthTime, gender: opts.gender, birth_place: opts.birthPlace, sect: opts.sect ?? 2, yun_sect: opts.yunSect ?? 1, token: opts.token || '' },
     opts
   )
 }

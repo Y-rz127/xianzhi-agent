@@ -50,3 +50,10 @@ tests
 学习资料/Python开发笔记
 # TypeScript 增量构建缓存
 *.tsbuildinfo
+
+# TRAE 工作区记忆
+.workbuddy/
+
+# 前端构建生成的类型声明
+frontend/*.config.d.ts
+uniapp/*.config.d.ts

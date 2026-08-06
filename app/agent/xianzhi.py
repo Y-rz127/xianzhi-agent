@@ -40,6 +40,13 @@ _BIRTH_INFO_RE2 = re.compile(
 _PILLARS_RE = re.compile(r"([甲乙丙丁戊己庚辛壬癸][子丑寅卯辰巳午未申酉戌亥]){4}")
 _GENDER_RE = re.compile(r"(男|女|乾造|坤造|乾命|坤命)")
 
+# 从用户输入中提取出生地（城市名，交给前端 region-data 匹配经度）
+_BIRTH_PLACE_RE = re.compile(
+    r"(?:出生于|出生在|出生地|生在|老家(?:是|在|位于)?|籍贯(?:是|在)?)[:：为]?\s*"
+    r"([\u4e00-\u9fa5]{2,8}?)(?=[\s,，。.!！?？;；、）)）]|$)",
+    re.UNICODE,
+)
+
 
 SYSTEM_PROMPT = """你是先知，拥有数十年实战经验的八字命理师傅，气质通透沉稳，像阅历丰富的老友。
 
@@ -128,6 +135,7 @@ class Xianzhi(ToolCallAgent):
         self._workflow = XianzhiWorkflow(chat_model)
         self._workflow_context: WorkflowChartContext | None = None
         self._last_birth_info: Optional[dict] = None
+        self._last_user_text: str = ""
         self._sect = 2
         self._yun_sect = 1
         self._bazi_pending: Optional[dict] = None  # 八字待确认候选: {"pillars","gender","candidates"}
@@ -165,7 +173,7 @@ class Xianzhi(ToolCallAgent):
         self._history_len = 0
         self._bazi_pending = None
 
-    def set_chart_context(self, birth_time: str, gender: str, sect: int = 2, yun_sect: int = 1, user_id: str = ""):
+    def set_chart_context(self, birth_time: str, gender: str, sect: int = 2, yun_sect: int = 1, user_id: str = "", birth_place: str = ""):
         """由外部直接设置当前命盘上下文，AI 回答将基于该盘面。
 
         Args:
@@ -175,6 +183,7 @@ class Xianzhi(ToolCallAgent):
             sect: 日柱计算流派，1=按日期精确，2=按日期精确2（默认）
             yun_sect: 大运计算流派，1=按天数和时辰数（默认），2=按分钟数
             user_id: 用户 ID，用于从命盘画像加载历史断事知识
+            birth_place: 出生地（城市名），用于真太阳时校正；无则空字符串
         """
         try:
             birth_time = _normalize_birth_time(birth_time)
@@ -187,13 +196,30 @@ class Xianzhi(ToolCallAgent):
                 f"{chart}\n"
             )
             self._workflow_context = workflow_context
-            self._last_birth_info = {"time": birth_time, "gender": gender, "sect": sect, "yun_sect": yun_sect}
+            self._last_birth_info = {
+                "time": birth_time, "gender": gender, "sect": sect,
+                "yun_sect": yun_sect, "place": birth_place or "",
+            }
             log.info("已挂载命盘上下文: {} {} user={}", birth_time, gender, user_id)
         except Exception as e:
             log.warning("挂载命盘上下文失败: {}", e)
             self.chart_context = ""
             self._workflow_context = None
             self._last_birth_info = None
+
+    def _extract_birth_place(self, text: str):
+        """从用户输入中提取出生地（城市名原文，未匹配返回 None）。
+
+        仅提取出生地关键词附近的中文地名，交给前端 region-data 匹配经度。
+        """
+        m = _BIRTH_PLACE_RE.search(text or "")
+        if not m:
+            return None
+        place = m.group(1).strip()
+        # 过滤明显的非地名内容（纯时间/数字/无意义词）
+        if not place or any(ch.isdigit() for ch in place):
+            return None
+        return place
 
     def _extract_birth_info(self, text: str):
         """从用户输入中提取出生时间和性别。"""
@@ -216,9 +242,10 @@ class Xianzhi(ToolCallAgent):
         2. 仅八字四柱（如"甲申庚午壬申甲辰"）+ 性别 -> 反推候选出生日期，
            交由用户确认其一后，再用选定日期排盘（见 _resolve_bazi_selection）。
         """
+        self._last_user_text = text or ""
         birth_time, gender = self._extract_birth_info(text)
         if birth_time and gender:
-            self.set_chart_context(birth_time, gender, sect, yun_sect)
+            self.set_chart_context(birth_time, gender, sect, yun_sect, birth_place=self._extract_birth_place(text) or "")
             return True
         # 已有待确认八字候选：尝试把本轮输入解析为用户的选择
         if self._bazi_pending:
@@ -350,7 +377,9 @@ class Xianzhi(ToolCallAgent):
                     gd = args.get("gender")
                     if bt and gd:
                         log.info("[xianzhi] 从工具调用提取出生信息: {} {}", bt, gd)
-                        self.set_chart_context(bt, gd, self._sect, self._yun_sect)
+                        # 工具调用不含出生地，从用户原始输入补充提取（用于真太阳时校正）
+                        bp = self._extract_birth_place(self._last_user_text) if self._last_user_text else None
+                        self.set_chart_context(bt, gd, self._sect, self._yun_sect, birth_place=bp or "")
                         return
 
     def _capture_pending_from_tool_calls(self):

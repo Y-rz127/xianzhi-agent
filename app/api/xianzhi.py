@@ -12,11 +12,11 @@ from app.logger import log
 router = APIRouter(prefix="/xianzhi", tags=["Xianzhi"])
 
 
-def _mount_chart_context(agent, birth_time: str | None, gender: str | None, sect: int = 2, yun_sect: int = 1, user_id: str = ""):
+def _mount_chart_context(agent, birth_time: str | None, gender: str | None, sect: int = 2, yun_sect: int = 1, user_id: str = "", birth_place: str = ""):
     """如果提供了出生信息，直接挂载到该会话 Agent 上下文。"""
     if birth_time and gender:
         try:
-            agent.set_chart_context(birth_time, gender, sect, yun_sect, user_id)
+            agent.set_chart_context(birth_time, gender, sect, yun_sect, user_id, birth_place=birth_place)
         except Exception as e:
             log.warning("通过 API 挂载命盘上下文失败: {}", e)
 
@@ -30,6 +30,7 @@ async def chat_with_xianzhi(
     sect: int = 2,
     yun_sect: int = 1,
     verbose: bool = False,
+    birth_place: str = "",
     token: str = Query(None),
 ):
     """先知 SSE 流式对话接口（支持挂载出生信息，流式返回 + 可选 chart_context 事件）。"""
@@ -50,7 +51,7 @@ async def chat_with_xianzhi(
         async with lock:
             agent._sect = sect
             agent._yun_sect = yun_sect
-            _mount_chart_context(agent, birth_time, gender, sect, yun_sect, uid)
+            _mount_chart_context(agent, birth_time, gender, sect, yun_sect, uid, birth_place)
             try:
                 async for chunk in agent.arun_stream(message, verbose=verbose):
                     yield {"event": "message", "data": chunk}
@@ -58,9 +59,12 @@ async def chat_with_xianzhi(
                 if agent._last_birth_info:
                     bi = agent._last_birth_info
                     import json as _json
+                    payload = {"birth_time": bi.get("time"), "gender": bi.get("gender")}
+                    if bi.get("place"):
+                        payload["birth_place"] = bi["place"]
                     yield {
                         "event": "chart_context",
-                        "data": _json.dumps({"birth_time": bi.get("time"), "gender": bi.get("gender")}),
+                        "data": _json.dumps(payload),
                     }
                 yield {"event": "message", "data": "[DONE]"}
             except Exception as e:
@@ -93,6 +97,7 @@ async def ws_chat_with_xianzhi(websocket: WebSocket):
             sect = data.get("sect", 2)
             yun_sect = data.get("yun_sect", 1)
             verbose = bool(data.get("verbose", False))
+            birth_place = data.get("birth_place") or ""
             token = data.get("token") or ""
             uid = ""
             if token:
@@ -112,7 +117,7 @@ async def ws_chat_with_xianzhi(websocket: WebSocket):
             async with lock:
                 agent._sect = sect
                 agent._yun_sect = yun_sect
-                _mount_chart_context(agent, birth_time, gender, sect, yun_sect, uid)
+                _mount_chart_context(agent, birth_time, gender, sect, yun_sect, uid, birth_place)
                 client_alive = True
                 try:
                     async for chunk in agent.arun_stream(message, verbose=verbose):
@@ -128,9 +133,12 @@ async def ws_chat_with_xianzhi(websocket: WebSocket):
                 # 流结束后，如果后端从工具调用中提取到出生信息，通知前端（覆盖自然语言输入场景）
                 if client_alive and agent._last_birth_info:
                     bi = agent._last_birth_info
+                    ws_payload = {"birth_time": bi.get("time"), "gender": bi.get("gender")}
+                    if bi.get("place"):
+                        ws_payload["birth_place"] = bi["place"]
                     await _safe_ws_send(websocket, {
                         "type": "chart_context",
-                        "data": {"birth_time": bi.get("time"), "gender": bi.get("gender")},
+                        "data": ws_payload,
                     })
                 if client_alive:
                     await _safe_ws_send(websocket, {"type": "done"})
@@ -149,6 +157,7 @@ async def chat_with_xianzhi_sync(
     gender: str | None = None,
     sect: int = 2,
     yun_sect: int = 1,
+    birth_place: str = "",
     token: str = Query(None),
 ):
     """先知同步对话接口（run 在线程池执行，避免阻塞事件循环）。"""
@@ -165,7 +174,7 @@ async def chat_with_xianzhi_sync(
     async with lock:
         agent._sect = sect
         agent._yun_sect = yun_sect
-        _mount_chart_context(agent, birth_time, gender, sect, yun_sect, uid)
+        _mount_chart_context(agent, birth_time, gender, sect, yun_sect, uid, birth_place)
         try:
             # run 是同步阻塞调用，放到线程池避免卡住事件循环
             import asyncio

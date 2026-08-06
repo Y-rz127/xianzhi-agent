@@ -665,7 +665,7 @@ async function generateReport() {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: fit-content;
+  width: 80%;
   margin: 24rpx auto 0;
   padding: 22rpx 48rpx;
   font-size: 30rpx;
