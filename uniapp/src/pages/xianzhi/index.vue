@@ -1327,8 +1327,7 @@ messages.value.push({
   margin-left: auto;
 }
 .msg-text {
-  width: fit-content;
-  max-width: 85%;
+  width: 100%;
   padding: 22rpx 32rpx;
   border-radius: 8rpx 28rpx 28rpx 28rpx;
   font-size: 32rpx;
