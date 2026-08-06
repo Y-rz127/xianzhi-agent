@@ -37,7 +37,15 @@ HEHUN_SYSTEM_PROMPT = """你是一位有几十年实战经验的八字合婚师�
 
 
 @router.get("/hehun")
-async def hehun(birth_time_a: str, gender_a: str, birth_time_b: str, gender_b: str):
+async def hehun(
+    birth_time_a: str,
+    gender_a: str,
+    birth_time_b: str,
+    gender_b: str,
+    sect: int = 2,
+    longitude_a: float | None = None,
+    longitude_b: float | None = None,
+):
     """合婚分析。先调规则工具拿基础数据，再调 LLM 做综合解读。"""
     from fastapi import HTTPException
     from app.tools.bazi import bazi_hehun
@@ -46,6 +54,8 @@ async def hehun(birth_time_a: str, gender_a: str, birth_time_b: str, gender_b: s
         base_result = await asyncio.to_thread(bazi_hehun.invoke, {
             "birth_time_a": birth_time_a, "gender_a": gender_a,
             "birth_time_b": birth_time_b, "gender_b": gender_b,
+            "sect": sect,
+            "longitude_a": longitude_a, "longitude_b": longitude_b,
         })
         if base_result and base_result.startswith("合婚失败"):
             raise HTTPException(status_code=400, detail=base_result)

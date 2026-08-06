@@ -60,13 +60,13 @@ const zhiColor = (c: string) => zhiWx[c] || '#e5e7eb'
   margin-bottom: 28rpx;
 }
 .card-title {
-  font-size: 24rpx;
+  font-size: 28rpx;
   color: #e6c068;
   letter-spacing: 6rpx;
   font-weight: 600;
 }
 .card-sub {
-  font-size: 20rpx;
+  font-size: 24rpx;
   color: #64748b;
   letter-spacing: 4rpx;
 }
@@ -91,14 +91,14 @@ const zhiColor = (c: string) => zhiWx[c] || '#e5e7eb'
 }
 .pillar-name {
   display: block;
-  font-size: 20rpx;
+  font-size: 24rpx;
   color: #64748b;
   margin-bottom: 16rpx;
   letter-spacing: 4rpx;
 }
 .pillar-gan {
   display: block;
-  font-size: 40rpx;
+  font-size: 46rpx;
   font-weight: bold;
   color: #e5e7eb;
   letter-spacing: 4rpx;
@@ -109,7 +109,7 @@ const zhiColor = (c: string) => zhiWx[c] || '#e5e7eb'
 }
 .pillar-zhi {
   display: block;
-  font-size: 40rpx;
+  font-size: 46rpx;
   font-weight: bold;
   color: #e5e7eb;
   letter-spacing: 4rpx;
@@ -120,7 +120,7 @@ const zhiColor = (c: string) => zhiWx[c] || '#e5e7eb'
 }
 .pillar-nayin {
   display: block;
-  font-size: 20rpx;
+  font-size: 24rpx;
   color: #64748b;
 }
 .day-badge {

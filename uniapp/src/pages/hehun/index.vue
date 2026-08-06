@@ -49,6 +49,15 @@
               <text :class="['seg', a.gender === '女' && 'active']" @tap="a.gender = '女'">女</text>
             </view>
           </view>
+
+          <view class="form-row">
+            <text class="label">出生地</text>
+            <view class="picker place-picker" @tap="openRegionPicker('a')">
+              <text class="picker-text">{{ a.place || '选择地点（校正真太阳时）' }}</text>
+              <text class="picker-icon">📍</text>
+            </view>
+            <text v-if="solarOffsetA !== 0" class="solar-hint">真太阳时{{ solarOffsetA > 0 ? '+' : '' }}{{ solarOffsetA }}分</text>
+          </view>
         </view>
       </view>
 
@@ -97,6 +106,27 @@
               <text :class="['seg', b.gender === '女' && 'active']" @tap="b.gender = '女'">女</text>
             </view>
           </view>
+
+          <view class="form-row">
+            <text class="label">出生地</text>
+            <view class="picker place-picker" @tap="openRegionPicker('b')">
+              <text class="picker-text">{{ b.place || '选择地点（校正真太阳时）' }}</text>
+              <text class="picker-icon">📍</text>
+            </view>
+            <text v-if="solarOffsetB !== 0" class="solar-hint">真太阳时{{ solarOffsetB > 0 ? '+' : '' }}{{ solarOffsetB }}分</text>
+          </view>
+        </view>
+      </view>
+
+      <!-- 子时流派 -->
+      <view class="sect-card">
+        <view class="sect-head">
+          <text class="sect-label">子时流派</text>
+          <text class="sect-desc">影响子时出生者的日柱归属</text>
+        </view>
+        <view class="seg-group sect-seg">
+          <text :class="['seg', sect === 2 && 'active']" @tap="sect = 2">晚子时</text>
+          <text :class="['seg', sect === 1 && 'active']" @tap="sect = 1">早子时</text>
         </view>
       </view>
 
@@ -123,20 +153,204 @@
         </view>
       </view>
 
+      <!-- 省市区选择器弹窗 -->
+      <view v-if="showRegionPicker" class="region-picker-mask" @tap="showRegionPicker = false">
+        <view class="region-picker" @tap.stop>
+          <view class="rp-header">
+            <view class="rp-tabs">
+              <text :class="['rp-tab', 'active']">国内</text>
+            </view>
+            <text class="rp-confirm" @tap="confirmRegionPicker">确定</text>
+          </view>
+          <view class="rp-search">
+            <text class="rp-search-icon">🔍</text>
+            <input
+              class="rp-search-input"
+              v-model="regionSearchText"
+              placeholder="搜索全国城市及地区"
+              placeholder-class="rp-search-ph"
+            />
+          </view>
+          <view class="rp-col-labels">
+            <text class="rp-col-label">省份</text>
+            <text class="rp-col-label">城市</text>
+            <text class="rp-col-label">区县</text>
+          </view>
+          <view class="rp-columns">
+            <scroll-view scroll-y :style="{ height: scrollHeight + 'px' }" class="rp-col">
+              <text
+                v-for="(p, pi) in filteredProvinces"
+                :key="p.name"
+                :class="['rp-item', regionSelProvince === p.name && 'active']"
+                @tap="onSelectProvince(p.name)"
+              >{{ p.name }}</text>
+            </scroll-view>
+            <scroll-view scroll-y :style="{ height: scrollHeight + 'px' }" class="rp-col">
+              <text
+                v-for="c in filteredCities"
+                :key="c.name"
+                :class="['rp-item', regionSelCity === c.name && 'active']"
+                @tap="onSelectCity(c)"
+              >{{ c.name }}</text>
+            </scroll-view>
+            <scroll-view scroll-y :style="{ height: scrollHeight + 'px' }" class="rp-col">
+              <text
+                v-for="d in filteredDistricts"
+                :key="d.name"
+                :class="['rp-item', regionSelDistrict === d.name && 'active']"
+                @tap="regionSelDistrict = d.name"
+              >{{ d.name }}</text>
+            </scroll-view>
+          </view>
+        </view>
+      </view>
+
       <view class="bottom-spacer"></view>
     </scroll-view>
   </view>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, reactive } from 'vue'
+import { ref, computed, reactive, watch } from 'vue'
 import { hehun } from '@/api'
+import { regionData, type City } from '@/utils/region-data'
 
 const today = new Date().toISOString().slice(0, 10)
-const a = reactive({ date: '', time: '', gender: '男' as '男' | '女' })
-const b = reactive({ date: '', time: '', gender: '女' as '男' | '女' })
+const a = reactive({ date: '', time: '', gender: '男' as '男' | '女', place: '', longitude: 0 })
+const b = reactive({ date: '', time: '', gender: '女' as '男' | '女', place: '', longitude: 0 })
 const loading = ref(false)
 const result = ref('')
+
+// 子时流派：2=晚子时（默认，子正换日），1=早子时（子时换日）
+const sect = ref(2)
+
+/** 真太阳时修正量（分钟）。基准经度 120°E（北京时间），每度差 4 分钟 */
+const solarOffsetA = computed(() => (a.longitude ? Math.round((120 - a.longitude) * 4) : 0))
+const solarOffsetB = computed(() => (b.longitude ? Math.round((120 - b.longitude) * 4) : 0))
+
+// ---- 省市区选择器弹窗状态 ----
+const showRegionPicker = ref(false)
+/** 当前编辑的卡片：'a'=甲方，'b'=乙方 */
+const editingSide = ref<'a' | 'b'>('a')
+const regionSearchText = ref('')
+const regionSelProvince = ref('')
+const regionSelCity = ref('')
+const regionSelDistrict = ref('')
+const regionSelLongitude = ref(0)
+/** scroll-view 固定高度（px），uni-app 要求具体数值才能滚动 */
+const scrollHeight = ref(380)
+
+// 搜索过滤
+const filteredProvinces = computed(() => {
+  if (!regionSearchText.value) return regionData
+  const kw = regionSearchText.value.trim()
+  return regionData.filter(p =>
+    p.name.includes(kw) ||
+    p.cities.some(c => c.name.includes(kw)) ||
+    p.cities.some(c => c.districts.some(d => d.name.includes(kw)))
+  )
+})
+const filteredCities = computed(() => {
+  const prov = regionData.find(p => p.name === regionSelProvince.value)
+  if (!prov) return []
+  return prov.cities
+})
+const filteredDistricts = computed(() => {
+  const prov = regionData.find(p => p.name === regionSelProvince.value)
+  if (!prov) return []
+  const city = prov.cities.find(c => c.name === regionSelCity.value)
+  if (!city) return []
+  return city.districts
+})
+
+/** 搜索命中时自动定位到对应省市（用于搜区县名的情况） */
+function autoLocateBySearch(kw: string) {
+  for (const p of regionData) {
+    for (const c of p.cities) {
+      const match = c.districts.find(d => d.name.includes(kw))
+      if (match) {
+        regionSelProvince.value = p.name
+        regionSelCity.value = c.name
+        regionSelDistrict.value = match.name
+        regionSelLongitude.value = c.longitude
+        return true
+      }
+    }
+  }
+  for (const p of regionData) {
+    const c = p.cities.find(city => city.name.includes(kw))
+    if (c) {
+      regionSelProvince.value = p.name
+      regionSelCity.value = c.name
+      regionSelLongitude.value = c.longitude
+      if (c.districts.length > 0) regionSelDistrict.value = c.districts[0].name
+      return true
+    }
+  }
+  return false
+}
+
+function onSelectProvince(name: string) {
+  regionSelProvince.value = name
+  regionSelCity.value = ''
+  regionSelDistrict.value = ''
+  regionSearchText.value = ''
+}
+function onSelectCity(c: City) {
+  regionSelCity.value = c.name
+  regionSelLongitude.value = c.longitude
+  if (c.districts.length > 0 && !c.districts.some(d => d.name === regionSelDistrict.value)) {
+    regionSelDistrict.value = c.districts[0].name
+  }
+  regionSearchText.value = ''
+}
+watch(regionSearchText, (kw) => {
+  const t = (kw || '').trim()
+  if (!t) return
+  autoLocateBySearch(t)
+})
+
+function openRegionPicker(side: 'a' | 'b') {
+  editingSide.value = side
+  const target = side === 'a' ? a : b
+  // 已有选择时预填
+  regionSearchText.value = ''
+  regionSelProvince.value = ''
+  regionSelCity.value = ''
+  regionSelDistrict.value = ''
+  regionSelLongitude.value = 0
+  if (target.place) {
+    const parts = target.place.split(' ')
+    if (parts.length >= 2) {
+      const prov = regionData.find(x => x.name === parts[0])
+      if (prov) {
+        regionSelProvince.value = prov.name
+        const city = prov.cities.find(c => c.name === parts[1])
+        if (city) {
+          regionSelCity.value = city.name
+          regionSelLongitude.value = city.longitude
+          if (parts[2] && city.districts.some(d => d.name === parts[2])) {
+            regionSelDistrict.value = parts[2]
+          } else if (city.districts.length > 0) {
+            regionSelDistrict.value = city.districts[0].name
+          }
+        }
+      }
+    }
+  }
+  showRegionPicker.value = true
+}
+
+function confirmRegionPicker() {
+  if (regionSelProvince.value && regionSelCity.value) {
+    const parts = [regionSelProvince.value, regionSelCity.value]
+    if (regionSelDistrict.value) parts.push(regionSelDistrict.value)
+    const target = editingSide.value === 'a' ? a : b
+    target.place = parts.join(' ')
+    target.longitude = regionSelLongitude.value
+  }
+  showRegionPicker.value = false
+}
 
 // 状态栏高度
 const statusBarHeight = ref(20)
@@ -161,6 +375,9 @@ async function onAnalyze() {
       genderA: a.gender,
       birthTimeB: `${b.date} ${b.time}`,
       genderB: b.gender,
+      sect: sect.value,
+      longitudeA: a.longitude || undefined,
+      longitudeB: b.longitude || undefined,
     })
     result.value = res.result || '无结果'
   } catch (e: any) {
@@ -427,6 +644,139 @@ async function onAnalyze() {
   color: $color-ink;
   white-space: pre-wrap;
   letter-spacing: 0.02em;
+}
+
+/* 出生地 */
+.place-picker { cursor: pointer; }
+.solar-hint {
+  font-size: 22rpx;
+  color: $color-primary;
+  flex-shrink: 0;
+}
+
+/* === 子时流派 === */
+.sect-card {
+  margin: 32rpx 32rpx 0;
+  background: $color-bg-card;
+  border: 1rpx solid $color-border;
+  border-radius: 24rpx;
+  padding: 28rpx 32rpx;
+}
+.sect-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 20rpx;
+}
+.sect-label {
+  font-size: 26rpx;
+  font-weight: 600;
+  color: $color-ink;
+  letter-spacing: 0.06em;
+}
+.sect-desc {
+  font-size: 22rpx;
+  color: $color-ink-lighter;
+}
+.sect-seg { height: 72rpx; }
+
+/* === 省市区选择器弹窗 === */
+.region-picker-mask {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.5);
+  z-index: 999;
+  display: flex;
+  align-items: flex-end;
+}
+.region-picker {
+  width: 100%;
+  background: #fff;
+  border-radius: 24rpx 24rpx 0 0;
+  padding-bottom: env(safe-area-inset-bottom);
+  max-height: 58vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.rp-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 24rpx 32rpx 12rpx;
+  flex-shrink: 0;
+}
+.rp-tabs {
+  display: flex;
+  gap: 12rpx;
+}
+.rp-tab {
+  padding: 10rpx 28rpx;
+  font-size: 26rpx;
+  border-radius: 30rpx;
+  background: #f5f5f5;
+  color: #888;
+}
+.rp-tab.active {
+  background: #1a1a1a;
+  color: #fff;
+  font-weight: 600;
+}
+.rp-confirm {
+  padding: 14rpx 36rpx;
+  background: #1a1a1a;
+  color: #fff;
+  font-size: 26rpx;
+  border-radius: 30rpx;
+  font-weight: 600;
+}
+.rp-search {
+  margin: 6rpx 32rpx 14rpx;
+  display: flex;
+  align-items: center;
+  gap: 10rpx;
+  padding: 16rpx 24rpx;
+  background: #f7f7f7;
+  border-radius: 12rpx;
+  border: 1rpx solid #eee;
+  flex-shrink: 0;
+}
+.rp-search-icon { font-size: 26rpx; }
+.rp-search-input { flex: 1; font-size: 26rpx; }
+.rp-search-ph { color: #bbb; }
+.rp-col-labels {
+  display: flex;
+  padding: 10rpx 32rpx 6rpx;
+  flex-shrink: 0;
+}
+.rp-col-label {
+  flex: 1;
+  text-align: center;
+  font-size: 26rpx;
+  color: #999;
+  font-weight: 500;
+}
+.rp-columns {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+  min-height: 0;
+}
+.rp-col {
+  flex: 1;
+}
+.rp-item {
+  display: block;
+  padding: 24rpx 16rpx;
+  font-size: 30rpx;
+  color: #333;
+  text-align: center;
+  line-height: 1.5;
+}
+.rp-item.active {
+  color: #1a1a1a;
+  font-weight: 700;
+  background: rgba(212,175,55,0.08);
 }
 
 .bottom-spacer { height: 48rpx; }

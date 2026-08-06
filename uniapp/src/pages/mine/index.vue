@@ -180,13 +180,13 @@ function onLogout() {
 }
 .hero-info { flex: 1; margin-left: 28rpx; }
 .nickname { display: block; font-size: 38rpx; font-weight: 700; color: $color-paper; letter-spacing: 4rpx; }
-.sub { display: block; margin-top: 10rpx; font-size: 25rpx; color: $color-ink-light; }
+.sub { display: block; margin-top: 10rpx; font-size: 28rpx; color: $color-ink-light; }
 .arrow { color: $color-ink-light; font-size: 40rpx; }
 
 .scroll { flex: 1; padding: 28rpx 28rpx 0; overflow-x: hidden; width: 100%; box-sizing: border-box; }
 .login-tip {
   padding: 30rpx; background: rgba(107,123,142,0.08); border: 1rpx solid $color-border;
-  border-radius: 24rpx; font-size: 25rpx; color: $color-ink-light; line-height: 1.7; margin-bottom: 28rpx;
+  border-radius: 24rpx; font-size: 28rpx; color: $color-ink-light; line-height: 1.7; margin-bottom: 28rpx;
   width: 100%; box-sizing: border-box;
 }
 
@@ -195,10 +195,10 @@ function onLogout() {
 .entry-card:active { transform: scale(0.98); opacity: 0.9; transition: all 0.15s ease; }
 .entry-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12rpx; }
 .card-title-row { display: flex; align-items: center; min-width: 0; overflow: hidden; }
-.card-dot { color: $color-vermilion; font-size: 24rpx; margin-right: 14rpx; flex-shrink: 0; }
-.card-title { font-size: 31rpx; font-weight: 600; color: $color-ink; letter-spacing: 4rpx; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card-dot { color: $color-vermilion; font-size: 28rpx; margin-right: 14rpx; flex-shrink: 0; }
+.card-title { font-size: 34rpx; font-weight: 600; color: $color-ink; letter-spacing: 4rpx; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .entry-arrow { font-size: 36rpx; color: $color-primary; flex-shrink: 0; padding-left: 16rpx; }
-.entry-hint { display: block; font-size: 25rpx; color: $color-ink-lighter; letter-spacing: 2rpx; }
+.entry-hint { display: block; font-size: 28rpx; color: $color-ink-lighter; letter-spacing: 2rpx; }
 
 /* 卡片基础 */
 .card {
@@ -210,11 +210,11 @@ function onLogout() {
 
 /* 链接列表 */
 .links { padding: 10rpx 28rpx; }
-.link-row { display: flex; align-items: center; justify-content: space-between; padding: 30rpx 0; border-bottom: 1rpx solid $color-border; font-size: 29rpx; color: $color-ink; }
+.link-row { display: flex; align-items: center; justify-content: space-between; padding: 34rpx 0; border-bottom: 1rpx solid $color-border; font-size: 32rpx; color: $color-ink; }
 .link-row:last-child { border-bottom: none; }
-.link-arrow { color: $color-ink-lighter; font-size: 34rpx; }
+.link-arrow { color: $color-ink-lighter; font-size: 38rpx; }
 
-.logout-btn { text-align: center; padding: 30rpx 0; margin: 16rpx 0 28rpx; border-radius: 24rpx; font-size: 29rpx; color: $color-vermilion; background: rgba(184,72,60,0.08); border: 1rpx solid rgba(184,72,60,0.25); width: 100%; box-sizing: border-box; }
+.logout-btn { text-align: center; padding: 32rpx 0; margin: 16rpx 0 28rpx; border-radius: 24rpx; font-size: 32rpx; color: $color-vermilion; background: rgba(184,72,60,0.08); border: 1rpx solid rgba(184,72,60,0.25); width: 100%; box-sizing: border-box; }
 .bottom-spacer { height: 50rpx; width: 100%; }
 .nav-back {
   position: fixed;

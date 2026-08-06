@@ -1121,7 +1121,7 @@ messages.value.push({
 }
 .birth-summary {
   color: $color-ink;
-  font-size: 26rpx;
+  font-size: 30rpx;
   letter-spacing: 0.05em;
 }
 .arrow {
@@ -1139,7 +1139,7 @@ messages.value.push({
 }
 .label {
   width: 140rpx;
-  font-size: 24rpx;
+  font-size: 28rpx;
   color: $color-ink-lighter;
 }
 .picker {
@@ -1147,18 +1147,18 @@ messages.value.push({
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 18rpx 24rpx;
+  padding: 20rpx 24rpx;
   background: $color-bg-warm;
   border-radius: 20rpx;
   border: 1rpx solid $color-border;
 }
 .picker-text {
-  font-size: 26rpx;
+  font-size: 30rpx;
   color: $color-ink;
 }
 .picker-icon {
   color: $color-ink-lighter;
-  font-size: 28rpx;
+  font-size: 30rpx;
 }
 .seg-group {
   flex: 1;
@@ -1170,8 +1170,8 @@ messages.value.push({
 .seg {
   flex: 1;
   text-align: center;
-  padding: 16rpx 0;
-  font-size: 26rpx;
+  padding: 18rpx 0;
+  font-size: 30rpx;
   color: $color-ink-light;
   background: $color-bg-warm;
 }
@@ -1180,14 +1180,14 @@ messages.value.push({
   color: $color-primary;
 }
 .legal-link {
-  font-size: 22rpx;
+  font-size: 26rpx;
   color: $color-ink-light;
   margin-top: 8rpx;
 }
 .place-picker { cursor: pointer; }
 .solar-hint {
   display: block;
-  font-size: 20rpx;
+  font-size: 24rpx;
   color: $color-primary;
   margin-top: 6rpx;
   padding-left: 156rpx;
@@ -1253,14 +1253,14 @@ messages.value.push({
   border: 1rpx solid $color-primary;
 }
 .empty-title {
-  font-size: 34rpx;
+  font-size: 38rpx;
   font-weight: 600;
   color: $color-ink;
   margin-bottom: 12rpx;
   letter-spacing: 0.05em;
 }
 .empty-desc {
-  font-size: 24rpx;
+  font-size: 28rpx;
   color: $color-ink-lighter;
 }
 
@@ -1307,9 +1307,9 @@ messages.value.push({
   align-items: flex-end;
 }
 .msg-text {
-  padding: 20rpx 28rpx;
+  padding: 22rpx 32rpx;
   border-radius: 8rpx 28rpx 28rpx 28rpx;
-  font-size: 28rpx;
+  font-size: 32rpx;
   line-height: 1.6;
   word-break: break-all;
   overflow-wrap: break-word;
@@ -1446,7 +1446,7 @@ messages.value.push({
   min-height: 64rpx;
   max-height: 200rpx;
   padding: 14rpx 0;
-  font-size: 28rpx;
+  font-size: 32rpx;
   color: $color-ink;
 }
 .input-placeholder {
@@ -1494,20 +1494,20 @@ messages.value.push({
   border-bottom: 1rpx solid rgba(44, 44, 44, 0.1);
 }
 .drawer-title {
-  font-size: 34rpx;
+  font-size: 38rpx;
   font-weight: 600;
   color: $color-primary;
   font-family: 'STKaiti', 'KaiTi', serif;
 }
 .drawer-close {
-  font-size: 36rpx;
+  font-size: 40rpx;
   color: $color-ink-light;
   padding: 8rpx 16rpx;
 }
 .drawer-loading, .drawer-empty {
   padding: 60rpx 0;
   text-align: center;
-  font-size: 26rpx;
+  font-size: 30rpx;
   color: $color-ink-light;
 }
 .drawer-list {
@@ -1515,7 +1515,7 @@ messages.value.push({
   padding: 12rpx 0;
 }
 .drawer-item {
-  padding: 24rpx 32rpx;
+  padding: 28rpx 32rpx;
   border-bottom: 1rpx solid rgba(44, 44, 44, 0.06);
   transition: background 0.2s;
 }
@@ -1529,7 +1529,7 @@ messages.value.push({
   margin-bottom: 8rpx;
 }
 .drawer-item-title {
-  font-size: 28rpx;
+  font-size: 32rpx;
   color: $color-ink;
   font-weight: 500;
   flex: 1;
@@ -1538,13 +1538,13 @@ messages.value.push({
   white-space: nowrap;
 }
 .drawer-item-del {
-  font-size: 28rpx;
+  font-size: 32rpx;
   color: $color-ink-light;
   padding: 4rpx 12rpx;
 }
 .drawer-item-msg {
   display: block;
-  font-size: 24rpx;
+  font-size: 28rpx;
   color: $color-ink-light;
   margin-bottom: 6rpx;
   overflow: hidden;
@@ -1556,7 +1556,7 @@ messages.value.push({
   justify-content: space-between;
 }
 .drawer-item-time, .drawer-item-count {
-  font-size: 22rpx;
+  font-size: 26rpx;
   color: $color-ink-light;
 }
 .drawer-footer {
@@ -1566,8 +1566,8 @@ messages.value.push({
 .drawer-new-btn {
   display: block;
   text-align: center;
-  padding: 18rpx 0;
-  font-size: 28rpx;
+  padding: 22rpx 0;
+  font-size: 32rpx;
   color: $color-bg-warm;
   background: $color-primary;
   border-radius: 12rpx;
@@ -1600,12 +1600,12 @@ messages.value.push({
   min-width: 0;
 }
 .drawer-nickname {
-  font-size: 30rpx;
+  font-size: 34rpx;
   font-weight: 600;
   color: $color-ink;
 }
 .drawer-profile-sub {
-  font-size: 22rpx;
+  font-size: 26rpx;
   color: $color-ink-light;
   margin-top: 4rpx;
 }
@@ -1621,8 +1621,8 @@ messages.value.push({
   align-items: center;
   justify-content: center;
   gap: 10rpx;
-  padding: 22rpx 0;
-  font-size: 28rpx;
+  padding: 24rpx 0;
+  font-size: 30rpx;
   color: $color-ink;
   background: rgba(44, 44, 44, 0.04);
   border: 1rpx solid $color-border;

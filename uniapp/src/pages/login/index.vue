@@ -205,7 +205,7 @@ function onLogout() {
 .hero-content { position: relative; z-index: 1; display: flex; flex-direction: column; align-items: center; }
 .hero-icon { font-size: 72rpx; color: $color-paper; text-shadow: 0 0 24rpx rgba(107, 123, 142, 0.8); }
 .hero-title { font-size: 52rpx; font-weight: 800; color: $color-paper; letter-spacing: 12rpx; margin-top: 12rpx; }
-.hero-sub { margin-top: 16rpx; font-size: 24rpx; color: $color-ink-light; letter-spacing: 2rpx; }
+.hero-sub { margin-top: 16rpx; font-size: 28rpx; color: $color-ink-light; letter-spacing: 2rpx; }
 
 .body { flex: 1; padding: 40rpx 32rpx; }
 .server-url-row {
@@ -215,7 +215,7 @@ function onLogout() {
   padding: 24rpx 28rpx;
   margin-bottom: 24rpx;
 }
-.url-label { font-size: 24rpx; color: $color-ink-light; margin-bottom: 16rpx; display: block; }
+.url-label { font-size: 28rpx; color: $color-ink-light; margin-bottom: 16rpx; display: block; }
 .url-input-wrap {
   display: flex; align-items: center; gap: 12rpx;
 }
@@ -225,19 +225,19 @@ function onLogout() {
   background: rgba(107, 123, 142, 0.06);
   border: 1rpx solid $color-border;
   border-radius: 18rpx;
-  font-size: 24rpx;
+  font-size: 28rpx;
   color: $color-ink;
 }
 .url-btn {
   flex: 0 0 auto;
   padding: 14rpx 28rpx;
   border-radius: 16rpx;
-  font-size: 24rpx;
+  font-size: 28rpx;
   color: $color-ink-lighter;
   background: rgba(107, 123, 142, 0.08);
   &.active { color: #fff; background: linear-gradient(135deg, $color-primary, $color-primary-dark); }
 }
-.url-current { font-size: 22rpx; color: $color-ink-lighter; margin-top: 12rpx; display: block; word-break: break-all; }
+.url-current { font-size: 26rpx; color: $color-ink-lighter; margin-top: 12rpx; display: block; word-break: break-all; }
 .card {
   background: $color-bg-card;
   border: 1rpx solid $color-border;
@@ -254,30 +254,30 @@ function onLogout() {
 .seg {
   flex: 1;
   text-align: center;
-  padding: 18rpx 0;
-  font-size: 28rpx;
+  padding: 20rpx 0;
+  font-size: 32rpx;
   color: $color-ink-light;
   border-radius: 16rpx;
 }
 .seg.active { background: $color-bg; color: $color-primary; font-weight: 600; box-shadow: $shadow-sm; }
 .form-row { display: flex; align-items: center; margin-bottom: 24rpx; }
-.label { flex: 0 0 120rpx; font-size: 26rpx; color: $color-ink-light; }
+.label { flex: 0 0 120rpx; font-size: 30rpx; color: $color-ink-light; }
 .input {
   flex: 1;
   padding: 20rpx 24rpx;
   background: rgba(107, 123, 142, 0.06);
   border: 1rpx solid $color-border;
   border-radius: 20rpx;
-  font-size: 28rpx;
+  font-size: 32rpx;
   color: $color-ink;
 }
-.err { font-size: 24rpx; color: $color-vermilion; margin-bottom: 16rpx; }
+.err { font-size: 28rpx; color: $color-vermilion; margin-bottom: 16rpx; }
 .btn-primary {
   margin-top: 12rpx;
   text-align: center;
-  padding: 26rpx 0;
+  padding: 28rpx 0;
   border-radius: 24rpx;
-  font-size: 30rpx;
+  font-size: 34rpx;
   letter-spacing: 6rpx;
   color: $color-bg;
   background: linear-gradient(135deg, $color-primary, $color-primary-dark);
@@ -300,16 +300,16 @@ function onLogout() {
   }
 }
 .divider-text {
-  font-size: 22rpx; color: $color-ink-lighter;
+  font-size: 26rpx; color: $color-ink-lighter;
   padding: 0 24rpx; white-space: nowrap;
 }
 .wx-btn {
   display: flex; align-items: center; justify-content: center;
-  gap: 12rpx; padding: 26rpx 0; border-radius: 24rpx;
-  font-size: 30rpx; font-weight: 600; letter-spacing: 4rpx;
+  gap: 12rpx; padding: 28rpx 0; border-radius: 24rpx;
+  font-size: 34rpx; font-weight: 600; letter-spacing: 4rpx;
   background: #07C160; color: #fff;
   &.disabled { opacity: 0.6; }
   &:active { opacity: 0.85; transform: scale(0.98); }
 }
-.wx-icon { font-size: 28rpx; }
+.wx-icon { font-size: 32rpx; }
 </style>

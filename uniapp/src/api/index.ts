@@ -98,12 +98,27 @@ export const chatWithXianzhiSync = (
 
 export interface HehunResult { result?: string }
 
-export const hehun = (a: { birthTimeA: string; genderA: string; birthTimeB: string; genderB: string }) =>
+export interface HehunParams {
+  birthTimeA: string
+  genderA: string
+  birthTimeB: string
+  genderB: string
+  /** 日柱流派：1=早子时（子时换日），2=晚子时（默认） */
+  sect?: number
+  /** 出生地经度（°E），用于真太阳时校正 */
+  longitudeA?: number
+  longitudeB?: number
+}
+
+export const hehun = (a: HehunParams) =>
   get<HehunResult>('/ai/xianzhi/hehun', {
     birth_time_a: a.birthTimeA,
     gender_a: a.genderA,
     birth_time_b: a.birthTimeB,
     gender_b: a.genderB,
+    sect: a.sect ?? 2,
+    longitude_a: a.longitudeA,
+    longitude_b: a.longitudeB,
   })
 
 export const getCacheStats = () => get('/ai/xianzhi/cache_stats')

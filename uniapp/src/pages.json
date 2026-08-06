@@ -24,7 +24,7 @@
     },
     {
       "path": "pages/settings/index",
-      "style": { "navigationBarTitleText": "服务器设置" }
+      "style": { "navigationBarTitleText": "" }
     },
     {
       "path": "pages/chart-cases/index",
@@ -70,7 +70,7 @@
     },
     {
       "path": "pages/about/index",
-      "style": { "navigationBarTitleText": "关于我们" }
+      "style": { "navigationBarTitleText": "" }
     },
     {
       "path": "pages/legal/disclaimer",

@@ -404,7 +404,7 @@ function saveRecord() {
 .hero-sub {
   display: block;
   margin-top: 12rpx;
-  font-size: 24rpx;
+  font-size: 28rpx;
   color: rgba(232, 224, 240, 0.6);
   letter-spacing: 0.08em;
 }
@@ -421,7 +421,7 @@ function saveRecord() {
 }
 .section-title {
   display: block;
-  font-size: 28rpx;
+  font-size: 32rpx;
   color: #f0d060;
   letter-spacing: 0.1em;
   margin-bottom: 20rpx;
@@ -439,7 +439,7 @@ function saveRecord() {
   min-height: 72rpx;
   max-height: 160rpx;
   padding: 16rpx 0;
-  font-size: 28rpx;
+  font-size: 32rpx;
   color: #f0e8d8;
   line-height: 1.5;
 }
@@ -486,12 +486,12 @@ function saveRecord() {
   color: #f0d060;
 }
 .spread-name {
-  font-size: 26rpx;
+  font-size: 30rpx;
   color: #f0e8d8;
   margin-bottom: 6rpx;
 }
 .spread-desc {
-  font-size: 20rpx;
+  font-size: 24rpx;
   color: rgba(232, 224, 240, 0.5);
   text-align: center;
   white-space: normal;
@@ -526,7 +526,7 @@ function saveRecord() {
   color: #fff;
 }
 .cta-text {
-  font-size: 30rpx;
+  font-size: 34rpx;
   font-weight: 600;
   color: #1a1040;
   letter-spacing: 0.1em;
@@ -607,20 +607,20 @@ function saveRecord() {
   text-shadow: 0 0 16rpx rgba(240, 208, 96, 0.4);
 }
 .card-name {
-  font-size: 24rpx;
+  font-size: 28rpx;
   color: #f0e8d8;
   text-align: center;
   line-height: 1.3;
   margin-bottom: 6rpx;
 }
 .card-name-en {
-  font-size: 18rpx;
+  font-size: 22rpx;
   color: rgba(232, 224, 240, 0.5);
   text-align: center;
 }
 .card-pos {
   margin-top: 10rpx;
-  font-size: 20rpx;
+  font-size: 24rpx;
   color: rgba(240, 208, 96, 0.6);
   letter-spacing: 0.05em;
 }
@@ -630,7 +630,7 @@ function saveRecord() {
   padding: 16rpx 0;
 }
 .flip-hint-text {
-  font-size: 24rpx;
+  font-size: 28rpx;
   color: rgba(232, 224, 240, 0.5);
   letter-spacing: 0.1em;
 }
@@ -645,13 +645,13 @@ function saveRecord() {
 }
 .meaning-title {
   display: block;
-  font-size: 28rpx;
+  font-size: 32rpx;
   color: #f0d060;
   letter-spacing: 0.08em;
   margin-bottom: 16rpx;
 }
 .meaning-text {
-  font-size: 26rpx;
+  font-size: 30rpx;
   line-height: 1.7;
   color: #e8e0f0;
 }

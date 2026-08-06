@@ -14,8 +14,7 @@
       </view>
 
       <view class="links">
-        <view class="link-row" @tap="goFeedback"><text>问题反馈</text><text class="arrow">›</text></view>
-        <view class="link-row" @tap="goPrivacy"><text>隐私政策</text><text class="arrow">›</text></view>
+        <view class="link-row" @tap="goDisclaimer"><text>免责声明</text><text class="arrow">›</text></view>
         <view class="link-row" @tap="goTerms"><text>服务条款</text><text class="arrow">›</text></view>
       </view>
 
@@ -25,8 +24,7 @@
 </template>
 
 <script setup lang="ts">
-function goFeedback() { uni.navigateTo({ url: '/pages/feedback/index' }) }
-function goPrivacy() { uni.navigateTo({ url: '/pages/legal/privacy' }) }
+function goDisclaimer() { uni.navigateTo({ url: '/pages/legal/disclaimer' }) }
 function goTerms() { uni.navigateTo({ url: '/pages/legal/terms' }) }
 </script>
 
@@ -35,15 +33,15 @@ function goTerms() { uni.navigateTo({ url: '/pages/legal/terms' }) }
 .body { padding: 48rpx 32rpx; display: flex; flex-direction: column; align-items: center; }
 .logo { font-size: 120rpx; color: $color-primary; text-shadow: 0 0 32rpx rgba(107, 123, 142, 0.5); }
 .app-name { font-size: 40rpx; font-weight: 700; color: $color-ink; letter-spacing: 6rpx; margin-top: 16rpx; }
-.slogan { font-size: 24rpx; color: $color-ink-light; margin-top: 12rpx; letter-spacing: 4rpx; }
+.slogan { font-size: 28rpx; color: $color-ink-light; margin-top: 12rpx; letter-spacing: 4rpx; }
 .card { width: 100%; margin-top: 48rpx; background: $color-bg-card; border: 1rpx solid $color-border; border-radius: 24rpx; padding: 12rpx 28rpx; }
 .row { display: flex; justify-content: space-between; align-items: center; padding: 22rpx 0; }
-.k { font-size: 26rpx; color: $color-ink-light; }
-.v { font-size: 26rpx; color: $color-ink; text-align: right; flex: 1; margin-left: 24rpx; }
+.k { font-size: 30rpx; color: $color-ink-light; }
+.v { font-size: 30rpx; color: $color-ink; text-align: right; flex: 1; margin-left: 24rpx; }
 .divider { height: 1rpx; background: $color-border; }
 .links { width: 100%; margin-top: 32rpx; background: $color-bg-card; border: 1rpx solid $color-border; border-radius: 24rpx; overflow: hidden; }
-.link-row { display: flex; justify-content: space-between; align-items: center; padding: 28rpx 28rpx; border-bottom: 1rpx solid $color-border; font-size: 28rpx; color: $color-ink; }
+.link-row { display: flex; justify-content: space-between; align-items: center; padding: 32rpx 28rpx; border-bottom: 1rpx solid $color-border; font-size: 32rpx; color: $color-ink; }
 .link-row:last-child { border-bottom: none; }
-.arrow { color: $color-ink-lighter; font-size: 32rpx; }
-.footer { margin-top: 48rpx; font-size: 22rpx; color: $color-ink-lighter; letter-spacing: 2rpx; padding-bottom: 48rpx; }
+.arrow { color: $color-ink-lighter; font-size: 36rpx; }
+.footer { margin-top: 48rpx; font-size: 26rpx; color: $color-ink-lighter; letter-spacing: 2rpx; padding-bottom: 48rpx; }
 </style>

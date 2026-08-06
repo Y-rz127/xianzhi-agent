@@ -161,6 +161,18 @@ def _parse_gender(gender):
     return parse_gender(gender)
 
 
+def _apply_solar_time(y: int, m: int, d: int, h: int, mi: int, longitude: float | None) -> tuple:
+    """真太阳时校正：基准经度 120°E（北京时间），每度差 4 分钟。返回校正后的 (y, m, d, h, mi)。"""
+    import datetime as _dt
+    corr = 0
+    if longitude and 60 <= longitude <= 140:
+        corr = round((120 - longitude) * 4)
+    if corr == 0:
+        return y, m, d, h, mi
+    corrected = _dt.datetime(y, m, d, h, mi) + _dt.timedelta(minutes=corr)
+    return corrected.year, corrected.month, corrected.day, corrected.hour, corrected.minute
+
+
 def _normalize_birth_time(birth_time: str) -> str:
     """将农历/节日/时辰等格式标准化为公历字符串 YYYY-MM-DD HH:MM。
 
@@ -468,7 +480,7 @@ def bazi_liuri(birth_time: str, gender: str, year: int = None, month: int = None
 
 
 @tool
-def bazi_hehun(birth_time_a: str, gender_a: str, birth_time_b: str, gender_b: str, sect: int = 2) -> str:
+def bazi_hehun(birth_time_a: str, gender_a: str, birth_time_b: str, gender_b: str, sect: int = 2, longitude_a: float | None = None, longitude_b: float | None = None) -> str:
     """合婚分析：对比两个人的八字。
 
     Args:
@@ -476,7 +488,9 @@ def bazi_hehun(birth_time_a: str, gender_a: str, birth_time_b: str, gender_b: st
         gender_a: 男方性别（男）
         birth_time_b: 女方出生时间
         gender_b: 女方性别（女）
-        sect: 日柱计算流派
+        sect: 日柱计算流派，1=早子时（子时换日），2=晚子时（默认，子正换日）
+        longitude_a: 男方出生地经度（°E，用于真太阳时校正，可选）
+        longitude_b: 女方出生地经度（°E，用于真太阳时校正，可选）
 
     Returns:
         双方命盘对比、五行互补分析、合婚建议
@@ -484,14 +498,15 @@ def bazi_hehun(birth_time_a: str, gender_a: str, birth_time_b: str, gender_b: st
     try:
         birth_time_a = _normalize_birth_time(birth_time_a)
         birth_time_b = _normalize_birth_time(birth_time_b)
-        # 合婚结果对双方输入确定，走缓存（双方时间+性别组合为 key）
-        cache_key_a = "{}|{}".format(birth_time_a, gender_a)
-        cache_key_b = "{}|{}".format(birth_time_b, gender_b)
+        # 合婚结果对双方输入确定，走缓存（双方时间+性别+流派+经度组合为 key）
+        cache_key_a = "{}|{}|{}|{}".format(birth_time_a, gender_a, sect, longitude_a)
+        cache_key_b = "{}|{}|{}|{}".format(birth_time_b, gender_b, sect, longitude_b)
         cached = bazi_cache.get(cache_key_a, cache_key_b, sect, 1, "hehun")
         if cached:
             return cached
 
         y_a, m_a, d_a, h_a, mi_a = parse_birth(birth_time_a)
+        y_a, m_a, d_a, h_a, mi_a = _apply_solar_time(y_a, m_a, d_a, h_a, mi_a, longitude_a)
         g_a = _parse_gender(gender_a)
         solar_a = Solar.fromYmdHms(y_a, m_a, d_a, h_a, mi_a, 0)
         ec_a = solar_a.getLunar().getEightChar()
@@ -499,6 +514,7 @@ def bazi_hehun(birth_time_a: str, gender_a: str, birth_time_b: str, gender_b: st
             ec_a.setSect(sect)
 
         y_b, m_b, d_b, h_b, mi_b = parse_birth(birth_time_b)
+        y_b, m_b, d_b, h_b, mi_b = _apply_solar_time(y_b, m_b, d_b, h_b, mi_b, longitude_b)
         g_b = _parse_gender(gender_b)
         solar_b = Solar.fromYmdHms(y_b, m_b, d_b, h_b, mi_b, 0)
         ec_b = solar_b.getLunar().getEightChar()
@@ -568,7 +584,15 @@ def bazi_hehun(birth_time_a: str, gender_a: str, birth_time_b: str, gender_b: st
             "",
             "【五行互补评分】{}分".format(min(complement_score, 100)),
         ] + ["  - " + r for r in complement_reasons]
-        lines += ["", "注: 此为基础合婚分析，完整合婚需结合大运流年，由 LLM 综合判断"]
+        if longitude_a and 60 <= longitude_a <= 140:
+            corr_a = round((120 - longitude_a) * 4)
+            if corr_a != 0:
+                lines.append("注: 男方出生地经度 {}°E，真太阳时校正 {:+d} 分钟".format(longitude_a, corr_a))
+        if longitude_b and 60 <= longitude_b <= 140:
+            corr_b = round((120 - longitude_b) * 4)
+            if corr_b != 0:
+                lines.append("注: 女方出生地经度 {}°E，真太阳时校正 {:+d} 分钟".format(longitude_b, corr_b))
+        lines.append("注: 此为基础合婚分析，完整合婚需结合大运流年，由 LLM 综合判断")
 
         result = "\n".join(lines)
         bazi_cache.set(cache_key_a, cache_key_b, result, sect, 1, "hehun")

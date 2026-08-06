@@ -7,7 +7,6 @@
       <view class="hero-orb orb-2"></view>
       <view class="hero-content">
         <text class="hero-icon">⚙</text>
-        <text class="hero-title">服务器设置</text>
         <text class="hero-sub">配置后端连接地址</text>
       </view>
     </view>
@@ -152,16 +151,9 @@ async function onSave() {
   margin-bottom: 16rpx;
   text-shadow: 0 0 24rpx rgba(107, 123, 142, 0.8);
 }
-.hero-title {
-  font-size: 44rpx;
-  font-weight: 800;
-  color: $color-paper;
-  letter-spacing: 8rpx;
-  text-shadow: 0 0 24rpx rgba(107, 123, 142, 0.6);
-}
 .hero-sub {
   margin-top: 10rpx;
-  font-size: 24rpx;
+  font-size: 28rpx;
   color: $color-ink-light;
   letter-spacing: 4rpx;
 }
@@ -198,11 +190,11 @@ async function onSave() {
 }
 .card-dot {
   color: $color-vermilion;
-  font-size: 22rpx;
+  font-size: 26rpx;
   margin-right: 12rpx;
 }
 .card-title {
-  font-size: 28rpx;
+  font-size: 32rpx;
   font-weight: 600;
   color: $color-ink;
   letter-spacing: 4rpx;
@@ -215,17 +207,17 @@ async function onSave() {
   margin-bottom: 24rpx;
 }
 .label {
-  font-size: 24rpx;
+  font-size: 28rpx;
   color: $color-ink-light;
   margin-bottom: 12rpx;
   letter-spacing: 2rpx;
 }
 .input {
-  padding: 20rpx 24rpx;
+  padding: 22rpx 24rpx;
   background: rgba(107, 123, 142, 0.06);
   border: 1rpx solid $color-border;
   border-radius: 20rpx;
-  font-size: 26rpx;
+  font-size: 30rpx;
   color: $color-ink;
 }
 .ph {
@@ -242,7 +234,7 @@ async function onSave() {
 }
 .hint-line {
   display: block;
-  font-size: 22rpx;
+  font-size: 26rpx;
   color: $color-vermilion-light;
   line-height: 1.7;
   letter-spacing: 1rpx;
@@ -261,9 +253,9 @@ async function onSave() {
 .btn {
   flex: 1;
   text-align: center;
-  padding: 24rpx 0;
+  padding: 28rpx 0;
   border-radius: 24rpx;
-  font-size: 28rpx;
+  font-size: 32rpx;
   letter-spacing: 4rpx;
 }
 .btn-ghost {
@@ -281,9 +273,9 @@ async function onSave() {
 .test-result {
   display: flex;
   align-items: center;
-  padding: 24rpx;
+  padding: 26rpx;
   border-radius: 24rpx;
-  font-size: 26rpx;
+  font-size: 30rpx;
 }
 .test-result.ok {
   background: rgba(107, 142, 90, 0.12);
@@ -295,7 +287,7 @@ async function onSave() {
 }
 .test-icon {
   margin-right: 16rpx;
-  font-size: 28rpx;
+  font-size: 32rpx;
 }
 .test-result.ok .test-icon { color: $state-success; }
 .test-result.fail .test-icon { color: $color-vermilion; }
