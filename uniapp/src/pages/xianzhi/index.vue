@@ -563,7 +563,7 @@ const birthTimeFull = computed(() =>
   birthDate.value && birthTime.value ? `${birthDate.value} ${birthTime.value}` : ''
 )
 const birthSummary = computed(() =>
-  birthTimeFull.value ? `${birthTimeFull.value} ${gender.value}${birthPlace ? ' · ' + birthPlace : ''}` : '点击设置出生信息'
+  birthTimeFull.value ? `${birthTimeFull.value} ${gender.value}${birthPlace.value ? ' · ' + birthPlace.value : ''}` : '点击设置出生信息'
 )
 
 const placeholderText = '报上生辰排盘，或直接请教命理问题…'
