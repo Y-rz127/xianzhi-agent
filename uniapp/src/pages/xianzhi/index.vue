@@ -1344,14 +1344,7 @@ messages.value.push({
   box-shadow: $shadow-sm;
 }
 .msg.user .msg-text {
-  width: auto;
-  max-width: 88%;
   text-align: right;
-}
-.msg.user .msg-text {
-  text-align: right;
-}
-.msg.user .msg-text {
   background: $color-primary;
   border-radius: 28rpx 8rpx 28rpx 28rpx;
   color: $color-bg;
