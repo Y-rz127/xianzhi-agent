@@ -1315,6 +1315,7 @@ messages.value.push({
   border-color: $color-vermilion;
 }
 .msg-body {
+  flex: 1;
   min-width: 0;
   max-width: calc(100% - 88rpx);
   display: flex;
