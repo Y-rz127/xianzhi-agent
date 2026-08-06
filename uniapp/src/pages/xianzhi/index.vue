@@ -85,7 +85,7 @@
     </view>
 
     <!-- 消息列表 -->
-    <scroll-view class="messages" scroll-y :scroll-top="scrollTop" scroll-with-animation>
+    <scroll-view class="messages" scroll-y :scroll-top="scrollTop" scroll-with-animation @scroll="onMsgScroll">
       <view v-if="!messages.length" class="empty-state">
         <view class="empty-avatar display-font">易</view>
         <text class="empty-title">先知命理</text>
@@ -117,6 +117,11 @@
         </view>
       </view>
     </scroll-view>
+
+    <!-- 回到底部悬浮按钮 -->
+    <view v-if="showScrollBottom" class="scroll-bottom-btn" @tap="scrollToBottom">
+      <text class="scroll-bottom-icon">↓</text>
+    </view>
 
     <!-- 输入栏 -->
     <view class="input-bar">
@@ -453,6 +458,15 @@ const feedbackModalReason = ref('')
 // 排盘与命理问答合并为同一条对话流：术语请教与排盘断事共用一份会话历史
 const messages = ref<Message[]>([])
 const scrollTop = ref(0)
+const showScrollBottom = ref(false)
+const SCROLL_BOTTOM_THRESHOLD = 200 // 距离底部超过此值(px)时显示按钮
+
+function onMsgScroll(e: any) {
+  const { scrollTop: st, scrollHeight, clientHeight } = e.detail
+  // 距离底部的距离
+  const distFromBottom = scrollHeight - st - clientHeight
+  showScrollBottom.value = distFromBottom > SCROLL_BOTTOM_THRESHOLD
+}
 const lastBirthInfo = ref<BirthInfo | null>(null)
 // 防止 watch 与显式 getChart 调用重复请求的标志
 let _skipNextChartWatch = false
@@ -753,6 +767,7 @@ function formatContent(text: string): string {
 }
 
 function scrollToBottom() {
+  showScrollBottom.value = false
   nextTick(() => {
     scrollTop.value = scrollTop.value === 99998 ? 99999 : 99998
   })
@@ -1182,6 +1197,32 @@ messages.value.push({
 .messages::-webkit-scrollbar-track { background: rgba(255,255,255,0.03); border-radius: 5px; }
 .messages::-webkit-scrollbar-thumb { background: rgba(212,175,55,0.25); border-radius: 5px; border: 2px solid transparent; background-clip: padding-box; min-height: 60px; }
 .messages::-webkit-scrollbar-thumb:hover { background: rgba(212,175,55,0.5); border: 2px solid transparent; background-clip: padding-box; }
+
+/* 回到底部悬浮按钮 */
+.scroll-bottom-btn {
+  position: absolute;
+  right: 24rpx;
+  bottom: 180rpx;
+  width: 72rpx;
+  height: 72rpx;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 4rpx 20rpx rgba(0,0,0,0.12);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+  animation: fadeInUp 0.2s ease-out;
+}
+.scroll-bottom-icon {
+  font-size: 36rpx;
+  color: #666;
+  font-weight: 600;
+}
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(16rpx); }
+  to   { opacity: 1; transform: translateY(0); }
+}
 .empty-state {
   display: flex;
   flex-direction: column;
