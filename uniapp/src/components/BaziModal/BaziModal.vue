@@ -361,7 +361,7 @@ async function generateReport() {
   background: $color-paper-warm;
 }
 .modal-title {
-  font-size: 32rpx;
+  font-size: 36rpx;
   font-weight: 600;
   color: $color-ink;
   letter-spacing: 6rpx;
@@ -393,12 +393,12 @@ async function generateReport() {
   border-bottom: 1rpx solid $color-border;
 }
 .gong-info {
-  font-size: 20rpx;
+  font-size: 24rpx;
   color: $color-ink-light;
 }
 .section-title {
   display: block;
-  font-size: 26rpx;
+  font-size: 30rpx;
   color: $color-ink;
   letter-spacing: 6rpx;
   font-weight: 600;
@@ -436,7 +436,7 @@ async function generateReport() {
 .bt-row:last-child { border-bottom: none; }
 .bt-head { background: $color-paper-warm; }
 .bt-cell {
-  flex: 1; padding: 10rpx 4rpx; text-align: center; font-size: 22rpx; color: $color-ink;
+  flex: 1; padding: 10rpx 4rpx; text-align: center; font-size: 26rpx; color: $color-ink;
   display: flex; align-items: center; justify-content: center;
   border-right: 1rpx solid $color-border; box-sizing: border-box; min-height: 0;
 }
@@ -479,12 +479,12 @@ async function generateReport() {
   min-height: 6rpx;
 }
 .wuxing-label {
-  font-size: 26rpx;
+  font-size: 30rpx;
   font-weight: bold;
   margin-top: 8rpx;
 }
 .wuxing-count {
-  font-size: 22rpx;
+  font-size: 26rpx;
   color: $color-ink-light;
 }
 
@@ -507,7 +507,7 @@ async function generateReport() {
 }
 .dayun-year {
   display: block;
-  font-size: 28rpx;
+  font-size: 32rpx;
   font-weight: bold;
   color: $color-ink;
   font-family: $font-family-display;
@@ -516,13 +516,13 @@ async function generateReport() {
 }
 .dayun-range {
   display: block;
-  font-size: 18rpx;
+  font-size: 22rpx;
   color: $color-ink-light;
   margin-bottom: 2rpx;
 }
 .dayun-age {
   display: block;
-  font-size: 18rpx;
+  font-size: 22rpx;
   color: $color-ink-lighter;
 }
 
@@ -542,13 +542,13 @@ async function generateReport() {
 }
 .consult-label {
   display: block;
-  font-size: 20rpx;
+  font-size: 24rpx;
   color: $color-ink-light;
   margin-bottom: 6rpx;
 }
 .consult-main {
   display: block;
-  font-size: 28rpx;
+  font-size: 32rpx;
   color: $color-vermilion;
   font-weight: 700;
   font-family: $font-family-display;
@@ -556,7 +556,7 @@ async function generateReport() {
 }
 .consult-sub {
   display: block;
-  font-size: 20rpx;
+  font-size: 24rpx;
   color: $color-ink-light;
 }
 .consult-note {
@@ -567,7 +567,7 @@ async function generateReport() {
   border-left: 4rpx solid $color-vermilion;
   border-radius: 8rpx;
   color: $color-ink;
-  font-size: 22rpx;
+  font-size: 26rpx;
   line-height: 1.55;
 }
 .liunian-strip {
@@ -592,9 +592,9 @@ async function generateReport() {
   display: block;
   text-align: center;
 }
-.ln-year { font-size: 20rpx; color: $color-ink-light; }
-.ln-gz { font-size: 26rpx; color: $color-ink; font-family: $font-family-display; font-weight: 700; margin: 4rpx 0; }
-.ln-dy { font-size: 20rpx; color: $color-ink-light; }
+.ln-year { font-size: 24rpx; color: $color-ink-light; }
+.ln-gz { font-size: 30rpx; color: $color-ink; font-family: $font-family-display; font-weight: 700; margin: 4rpx 0; }
+.ln-dy { font-size: 24rpx; color: $color-ink-light; }
 .warning-list {
   display: flex;
   flex-direction: column;
@@ -608,7 +608,7 @@ async function generateReport() {
   border-left: 4rpx solid $state-warning;
   border-radius: 8rpx;
   color: $color-ink;
-  font-size: 22rpx;
+  font-size: 26rpx;
   line-height: 1.5;
 }
 
@@ -623,7 +623,7 @@ async function generateReport() {
   border-top: 1rpx solid $color-border;
 }
 .ps-tag {
-  font-size: 18rpx;
+  font-size: 22rpx;
   padding: 3rpx 12rpx;
   border-radius: 8rpx;
   line-height: 1.6;
@@ -645,14 +645,14 @@ async function generateReport() {
   padding: 32rpx;
   text-align: center;
   color: $color-ink-light;
-  font-size: 26rpx;
+  font-size: 30rpx;
   letter-spacing: 2rpx;
 }
 .report-placeholder {
   padding: 32rpx;
   text-align: center;
   color: $color-ink-lighter;
-  font-size: 24rpx;
+  font-size: 28rpx;
 }
 .report-content {
   background: $color-paper-warm;
@@ -679,7 +679,7 @@ async function generateReport() {
   background: $color-bg-card;
   border: 1rpx solid $color-border;
   border-radius: 16rpx;
-  font-size: 24rpx;
+  font-size: 28rpx;
   color: $color-ink;
   letter-spacing: 2rpx;
   box-sizing: border-box;
