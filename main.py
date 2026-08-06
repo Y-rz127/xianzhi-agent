@@ -15,7 +15,6 @@ from app.memory import create_chat_memory
 from app.observability import init_observability, record_request
 from app.logger import log
 from app.rag.vector_store import knowledge_base
-from app.rag.rag_chain import RagChatChain
 from app.tarot_app import TarotApp
 from app.tools.mcp_client import mcp_manager
 
@@ -51,16 +50,13 @@ async def lifespan(app: FastAPI):
     from app.tools.rag_search import rag_tools
     local_tools = bazi_tools + search_tools + terminate_tools + rag_tools
 
-    # 4. RAG 检索链（向量库建连延后到后台）
-    rag_chain = RagChatChain(chat_model=chat_model)
-
-    # 5. 塔罗占卜
+    # 4. 塔罗占卜
     tarot_app = TarotApp(chat_model=chat_model)
 
-    # 6. 注册共享依赖：Xianzhi 按会话池化，首次请求时按需创建实例
-    set_instances(chat_model, local_tools, memory, rag_chain, tarot_app)
+    # 5. 注册共享依赖：Xianzhi 按会话池化，首次请求时按需创建实例
+    set_instances(chat_model, local_tools, memory, tarot_app)
 
-    # 7. 后台完成重/可失败初始化，避免阻塞端口监听导致存活探针失败
+    # 6. 后台完成重/可失败初始化，避免阻塞端口监听导致存活探针失败
     async def _bg_init():
         try:
             await asyncio.to_thread(knowledge_base.init)
@@ -178,7 +174,7 @@ async def health():
     from app.api import state
     return {
         "status": "ok",
-        "rag_ready": state._rag_chain is not None,
+        "rag_ready": knowledge_base.ready,
         "workflow_backend": state.workflow_backend(),
         "agent_pool": state.agent_pool_stats(),
     }

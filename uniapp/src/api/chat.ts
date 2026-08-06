@@ -5,8 +5,7 @@
  * 生产环境必须使用 wss:// (小程序强制)。
  *
  * 后端 WS 接口:
- *   - /ai/xianzhi/ws      先知智能体
- *   - /api/ai/xianzhi/rag/ws   RAG 知识库
+ *   - /ai/xianzhi/ws      先知智能体（命理问答与排盘统一入口）
  *   - /api/ai/tarot/ws       塔罗占卜
  *
  * 协议:
@@ -158,12 +157,6 @@ export function chatWithXianzhiWS(message: string, opts: XianzhiChatOptions) {
     { message, conversation_id: opts.conversationId, birth_time: opts.birthTime, gender: opts.gender, sect: opts.sect ?? 2, yun_sect: opts.yunSect ?? 1, token: opts.token || '' },
     opts
   )
-}
-
-export interface RagChatOptions extends ChatWSCallbacks { sessionId: string }
-
-export function chatWithRagWS(message: string, opts: RagChatOptions) {
-  return connectChatWS('/api/ai/xianzhi/rag/ws', { message, session_id: opts.sessionId }, opts)
 }
 
 export interface TarotDrawCallbacks { onCards: (cards: any[]) => void; onError: (err: string) => void }

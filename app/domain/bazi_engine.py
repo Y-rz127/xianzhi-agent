@@ -1399,6 +1399,7 @@ def build_bazi_chart(
     dayun_count: int = 8,
     liunian_years: int = 5,
     liunian_start_year: int | None = None,
+    longitude: float | None = None,
 ) -> BaziChart:
     """构建完整八字命盘（BaziChart）。
 
@@ -1410,11 +1411,26 @@ def build_bazi_chart(
         dayun_count: 推算多少柱大运（默认 8）
         liunian_years: 推算多少年流年（默认 5）
         liunian_start_year: 流年起始年（默认当前年）
+        longitude: 出生地经度，用于真太阳时校正（基准 120°E，每度差 4 分钟）
     Returns:
         结构化 BaziChart（四柱/五行/十神/大运/流年/命宫/身宫/起运）
     """
+    from datetime import timedelta
+
     y, m, d, h, mi = parse_birth(birth_time)
     gender_int = parse_gender(gender)
+
+    # 真太阳时校正：根据出生地经度修正时钟时间
+    solar_correction_min = 0
+    if longitude and 60 <= longitude <= 140:
+        solar_correction_min = round((120 - longitude) * 4)
+    if solar_correction_min != 0:
+        corrected = _dt.datetime(y, m, d, h, mi) + _dt.timedelta(minutes=solar_correction_min)
+        h, mi = corrected.hour, corrected.minute
+        # 跨日处理
+        if corrected.date() != _dt.date(y, m, d):
+            y, m, d = corrected.year, corrected.month, corrected.day
+
     solar = Solar.fromYmdHms(y, m, d, h, mi, 0)
     lunar = solar.getLunar()
     ec = lunar.getEightChar()
@@ -1450,6 +1466,9 @@ def build_bazi_chart(
     warnings = [
         "流年干支采用立春口径；具体到立春前后的事件判断，应结合准确日期时刻。",
     ]
+    if solar_correction_min != 0:
+        sign = '+' if solar_correction_min > 0 else ''
+        warnings.append(f"已根据出生地经度（{longitude}°E）校正真太阳时：{sign}{solar_correction_min}分钟。")
     if h == 23 or h == 0:
         warnings.append("出生时间接近子时，日柱可能受 sect 流派影响，建议保留早晚子时口径。")
 

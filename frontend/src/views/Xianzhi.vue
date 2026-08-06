@@ -56,12 +56,12 @@
             <svg v-else viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg>
           </button>
           <div>
-            <h2>{{ mode === "agent" ? "先知·八字命理" : "命理知识库" }}</h2>
-            <div class="header-info">{{ mode === "agent" ? "更懂你的AI命理师" : "探索命理奥秘" }}</div>
+            <h2>先知·八字命理</h2>
+            <div class="header-info">更懂你的AI命理师</div>
           </div>
         </div>
         <div class="header-right">
-          <div class="sect-selector" v-if="mode === 'agent'">
+          <div class="sect-selector">
             <select id="sect-select" name="sect-select" aria-label="日柱精度" v-model="sect" class="sect-select">
               <option :value="2">精确2</option>
               <option :value="1">精确1</option>
@@ -71,16 +71,9 @@
               <option :value="2">分钟数</option>
             </select>
           </div>
-          <div class="mode-tabs">
-            <button :class="['tab', { active: mode === 'agent' }]" @click="switchMode('agent')" aria-label="智能体排盘">排盘</button>
-            <button :class="['tab', { active: mode === 'rag' }]" @click="switchMode('rag')" aria-label="知识问答">问答</button>
-          </div>
-          <button v-if="mode === 'agent'" class="btn header-btn btn-accent" @click="showBaziModal" title="命盘详情">
+          <button class="btn header-btn btn-accent" @click="showBaziModal" title="命盘详情">
             <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0z"/><path d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
             命盘
-          </button>
-          <button class="btn header-btn" @click="clearChat" title="清空">
-            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
           </button>
           <button class="btn header-btn" @click="newSession" title="新会话">
             <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
@@ -88,7 +81,7 @@
           <button class="btn header-btn" @click="exportChat" title="导出">
             <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>
           </button>
-          <button v-if="mode === 'agent' && lastBirthInfo" class="btn header-btn btn-accent" @click="openCaseModal" title="保存命例">
+          <button v-if="lastBirthInfo" class="btn header-btn btn-accent" @click="openCaseModal" title="保存命例">
             <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
             存命例
           </button>
@@ -99,9 +92,9 @@
         <div v-if="!messages.length" class="empty-state">
           <div class="orbit-ring"></div>
           <div class="empty-center">
-            <div class="empty-icon">{{ mode === "agent" ? "易" : "问" }}</div>
-            <h3>{{ mode === "agent" ? "欢迎来到先知命理" : "命理知识问答" }}</h3>
-            <p>{{ mode === "agent" ? "输入出生时间与性别，开启你的命理推演之旅" : "向先知请教命理理论" }}</p>
+            <div class="empty-icon">易</div>
+            <h3>欢迎来到先知命理</h3>
+            <p>输入出生时间与性别开启推演，也可直接请教命理理论</p>
           </div>
           <div class="examples">
             <button v-for="ex in currentExamples" :key="ex" class="example-btn" @click="useExample(ex)" aria-label="示例">{{ ex }}</button>
@@ -122,14 +115,14 @@
               <div class="msg-role">{{ msg.role === "user" ? "你" : "先知" }}</div>
             </div>
             <div class="msg-body">
-              <BaziCard v-if="mode === 'agent' && msg.role === 'assistant'" :pillars="parsePillars(msg.content)" />
-              <WuxingChart v-if="mode === 'agent' && msg.role === 'assistant'" :items="parseWuxing(msg.content)" />
-              <DayunTimeline v-if="mode === 'agent' && msg.role === 'assistant' && parsedDayun.length" :dayun="parsedDayun" />
+              <BaziCard v-if="msg.role === 'assistant'" :pillars="parsePillars(msg.content)" />
+              <WuxingChart v-if="msg.role === 'assistant'" :items="parseWuxing(msg.content)" />
+              <DayunTimeline v-if="msg.role === 'assistant' && parsedDayun.length" :dayun="parsedDayun" />
               <div class="msg-content" :class="{ 'thinking': isThinking(msg.content) }">
                 <MarkdownRender v-if="msg.role === 'assistant'" :content="formatContent(msg.content)" />
                 <pre v-else>{{ msg.content }}</pre>
               </div>
-              <div v-if="mode === 'agent' && msg.role === 'assistant' && msg.content && !isThinking(msg.content)" class="answer-feedback-bar">
+              <div v-if="msg.role === 'assistant' && msg.content && !isThinking(msg.content)" class="answer-feedback-bar">
                 <button
                   class="feedback-chip"
                   :class="{ active: feedbackState[messageFeedbackKey(msg, messages.length - visibleMessages.length + i)] === 'up' }"
@@ -251,7 +244,7 @@
 <script setup lang="ts">
 defineOptions({ name: 'Xianzhi' })
 import { ref, nextTick, computed, onMounted, onActivated, onUnmounted } from "vue"
-import { chatWithXianzhi, chatWithRag, downloadReport, parsePillars, parseWuxing, parseDayun, parseShensha, fetchSessions, deleteSession as deleteSessionApi, clearSessionMessages, clearRagSessionMessages, getSessionMessages, getSessionBirthInfo, fetchChartCases, createChartCase, deleteChartCase, getChart, submitAnswerFeedback, type ChatSession, type SessionMessage, type ChartCase, type ChartData, type SSECallbacks } from "../api"
+import { chatWithXianzhi, downloadReport, parsePillars, parseWuxing, parseDayun, parseShensha, fetchSessions, deleteSession as deleteSessionApi, getSessionMessages, getSessionBirthInfo, fetchChartCases, createChartCase, deleteChartCase, getChart, submitAnswerFeedback, type ChatSession, type SessionMessage, type ChartCase, type ChartData, type SSECallbacks } from "../api"
 import BaziCard from "../components/BaziCard.vue"
 import WuxingChart from "../components/WuxingChart.vue"
 import DayunTimeline from "../components/DayunTimeline.vue"
@@ -264,12 +257,9 @@ const messages = ref<SessionMessage[]>([])
 const input = ref("")
 const loading = ref(false)
 const messagesEl = ref<HTMLElement | null>(null)
-const mode = ref<"agent" | "rag">("agent")
 const lastBirthInfo = ref<BirthInfo | null>(null)
 const chartData = ref<ChartData | null>(null)
 const conversationId = ref("web-xianzhi-" + Date.now())
-const ragSessionId = ref(localStorage.getItem("rag-session-id") || ("rag-" + Date.now()))
-localStorage.setItem("rag-session-id", ragSessionId.value)
 const sidebarCollapsed = ref(true)
 const isMobile = ref(false)
 const appSidebarOpen = ref(false)
@@ -297,10 +287,8 @@ const visibleMessages = computed(() => {
   return messages.value.slice(start)
 })
 
-const agentExamples = ["男，1990-05-20 14:30，排盘并分析事业", "女，1995-08-15 08:00，看近五年运势", "男，1988-12-01 23:30，大运流年推算"]
-const ragExamples = ["什么是七杀？有什么含义？", "用神怎么取？", "大运顺逆排的规则是什么？"]
-const currentExamples = computed(() => mode.value === "agent" ? agentExamples : ragExamples)
-const placeholderText = computed(() => mode.value === "agent" ? "例如：男，1990-05-20 14:30，排盘分析事业" : "请教命理理论问题...")
+const currentExamples = ["男，1990-05-20 14:30，排盘并分析事业", "女，1995-08-15 08:00，看近五年运势", "什么是七杀？有什么含义？", "用神怎么取？"]
+const placeholderText = "说说你的出生时间，或直接请教命理问题…"
 
 const lastAssistantMsg = computed(() => {
   for (let i = messages.value.length - 1; i >= 0; i--) {
@@ -447,31 +435,8 @@ const formatContent = (text: string) => {
     .replace(/\[结束\].*/g, "")
 }
 
-const switchMode = (m: "agent" | "rag") => {
-  if (mode.value === m) return
-  mode.value = m
-  messages.value = []
-  input.value = ""
-  lastBirthInfo.value = null
-}
-
-const clearChat = async () => {
-  // 清空当前会话：删除数据库消息记录，保留会话ID与命盘上下文
-  if (mode.value === "rag" && ragSessionId.value) {
-    await clearRagSessionMessages(ragSessionId.value)
-  }
-  if (mode.value === "agent" && conversationId.value) {
-    await clearSessionMessages("xianzhi", conversationId.value)
-  }
-  messages.value = []
-  input.value = ""
-  loadSessions()
-}
-
 const newSession = () => {
   conversationId.value = "web-xianzhi-" + Date.now()
-  ragSessionId.value = "rag-" + Date.now()
-  localStorage.setItem("rag-session-id", ragSessionId.value)
   messages.value = []
   lastBirthInfo.value = null
   chartData.value = null
@@ -651,22 +616,19 @@ const send = () => {
   messages.value.push({ role: "user", content: userMsg })
   input.value = ""
   loading.value = true
-  if (mode.value === "agent") tryExtractBirth(userMsg)
+  tryExtractBirth(userMsg)
   const aiMsg: SessionMessage = { role: "assistant", content: "" }
   messages.value.push(aiMsg)
   scrollToBottom()
 
-  const sessionId = mode.value === "agent" ? conversationId.value : ragSessionId.value
-  const chatFn = mode.value === "agent" ? chatWithXianzhi : chatWithRag
-
-  const opts = mode.value === "agent" && lastBirthInfo.value ? {
+  const opts = lastBirthInfo.value ? {
     birth_time: lastBirthInfo.value.time,
     gender: lastBirthInfo.value.gender,
     sect: sect.value,
     yun_sect: yunSect.value,
   } : undefined
 
-  chatFn(userMsg, sessionId, {
+  chatWithXianzhi(userMsg, conversationId.value, {
     onMessage: (data) => { aiMsg.content += data; scrollToBottom() },
     onError: () => { aiMsg.content += "\n[连接中断]"; loading.value = false },
     onDone: () => { loading.value = false; scrollToBottom(); loadSessions(); loadChartCases() },
@@ -687,6 +649,7 @@ const checkMobile = () => {
 onMounted(() => {
   loadSessions(); loadChartCases(); checkMobile(); window.addEventListener("resize", checkMobile)
   window.addEventListener("app-sidebar-state", onAppSidebarState)
+  window.addEventListener("xianzhi-new-session", newSession)
 })
 onActivated(() => {
   // keep-alive 切换回来时刷新会话列表，确保历史记录最新
@@ -695,6 +658,7 @@ onActivated(() => {
 onUnmounted(() => {
   window.removeEventListener("resize", checkMobile)
   window.removeEventListener("app-sidebar-state", onAppSidebarState)
+  window.removeEventListener("xianzhi-new-session", newSession)
 })
 </script>
 
@@ -775,12 +739,6 @@ onUnmounted(() => {
   cursor: pointer; }
 .sect-select:focus { border-color: var(--accent); color: var(--text); }
 .sect-select option { background: #0f1520; color: var(--text); }
-
-.mode-tabs { display: flex; background: rgba(255,255,255,0.03); border-radius: 8px; padding: 3px; }
-.tab { padding: 6px 16px; font-size: 12px; border: none; background: transparent;
-  color: var(--text-dim); cursor: pointer; border-radius: 6px; transition: all 0.2s; }
-.tab:hover { color: var(--text); }
-.tab.active { background: rgba(212,175,55,0.15); color: var(--accent-light); }
 
 .messages { flex: 1; overflow-y: auto; padding: 8px; min-height: 0; }
 .messages::-webkit-scrollbar { width: 10px; }
@@ -930,7 +888,6 @@ textarea:disabled { opacity: 0.5; cursor: not-allowed; }
   .header-btn { padding: 5px 8px; font-size: 11px; min-width: 34px; }
   .header-btn span { display: none; }
   .sect-select { padding: 4px 6px; font-size: 11px; }
-  .tab { padding: 4px 8px; font-size: 11px; }
   .msg-body { max-width: 88%; }
   .msg.user .msg-body { max-width: 88%; }
   .empty-icon { width: 60px; height: 60px; font-size: 28px; }

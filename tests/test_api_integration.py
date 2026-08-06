@@ -7,7 +7,7 @@
     pytest tests/test_api_integration.py
 
 说明：
-- 标记为 `@pytest.mark.integration` 的测试依赖完整的应用栈（xianzhi、rag_chain）。
+- 标记为 `@pytest.mark.integration` 的测试依赖完整的应用栈（xianzhi、知识库）。
 - 如果应用无法启动，或某个所需单例未初始化，相关测试会被跳过，而不是失败。
 - 测试保持确定性且快速：SSE 接口只校验状态码与响应头，不消费完整流。
 """
@@ -25,12 +25,6 @@ BIRTH_TIME = "1990-05-20 14:30"
 GENDER = "男"
 BIRTH_TIME_B = "1992-08-15 08:00"
 GENDER_B = "女"
-
-
-def _skip_if_uninitialized(attr: str) -> None:
-    """如果所需单例未初始化，则跳过当前集成测试。"""
-    if getattr(app_state, attr, None) is None:
-        pytest.skip(f"{attr} 未初始化，跳过集成测试")
 
 
 @pytest.fixture(scope="module")
@@ -108,16 +102,13 @@ def test_sessions(client: TestClient) -> None:
     assert isinstance(data, list)
 
 
-@pytest.mark.integration
-def test_rag_sync(client: TestClient) -> None:
-    _skip_if_uninitialized("_rag_chain")
-    response = client.get(
-        "/api/ai/xianzhi/rag/sync",
-        params={"message": "你好", "session_id": "integration-test"},
-    )
+def test_rag_status(client: TestClient) -> None:
+    """知识库状态端点：问答已并入先知对话流，此处只校验知识库本身可用。"""
+    response = client.get("/api/ai/rag/status")
     assert response.status_code == 200
     data = response.json()
-    assert "result" in data or "error" in data
+    assert isinstance(data.get("ready"), bool)
+    assert isinstance(data.get("count"), int)
 
 
 @pytest.mark.integration

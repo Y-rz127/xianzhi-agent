@@ -67,9 +67,6 @@ export const chatWithXianzhi = (message: string, conversationId: string, cb: SSE
     yun_sect: opts?.yun_sect !== undefined ? String(opts.yun_sect) : undefined,
   }, cb)
 
-export const chatWithRag = (message: string, sessionId: string, cb: SSECallbacks) =>
-  connectSSE("/ai/xianzhi/rag", { message, session_id: sessionId }, cb)
-
 export function downloadReport(birthTime: string, gender: string): void {
   const qs = `birth_time=${encodeURIComponent(birthTime)}&gender=${encodeURIComponent(gender)}`
   const url = `${API_BASE}/ai/xianzhi/report?${qs}`
@@ -319,20 +316,6 @@ export async function deleteSession(type: "xianzhi", id: string): Promise<void> 
   if (!id) return
   try {
     await apiFetch(`${API_BASE}/ai/xianzhi/sessions/${id}`, { method: "DELETE" })
-  } catch {}
-}
-
-export async function clearSessionMessages(type: "xianzhi", id: string): Promise<void> {
-  if (!id) return
-  try {
-    await apiFetch(`${API_BASE}/ai/xianzhi/sessions/${id}/clear`, { method: "POST" })
-  } catch {}
-}
-
-export async function clearRagSessionMessages(sessionId: string): Promise<void> {
-  if (!sessionId) return
-  try {
-    await apiFetch(`${API_BASE}/ai/xianzhi/rag/sessions/${encodeURIComponent(sessionId)}/clear`, { method: "POST" })
   } catch {}
 }
 

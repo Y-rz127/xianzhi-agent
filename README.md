@@ -250,7 +250,6 @@ xianzhi-agent/
 │   │   └── cache.py              # 排盘缓存
 │   ├── rag/                     # RAG 知识库
 │   │   ├── vector_store.py       # 向量库封装
-│   │   ├── rag_chain.py          # RAG 链
 │   │   ├── retrieval.py          # 检索器
 │   │   └── knowledge_docs/       # 命理文档（40份）
 │   ├── memory/                  # 记忆系统

@@ -93,16 +93,5 @@
     "backgroundColorTop": "#FAFAF8",
     "backgroundColorBottom": "#FAFAF8",
     "backgroundTextStyle": "dark"
-  },
-  "tabBar": {
-    "color": "#888888",
-    "selectedColor": "#2C2C2C",
-    "backgroundColor": "#FFFFFF",
-    "borderStyle": "white",
-    "list": [
-      { "pagePath": "pages/xianzhi/index", "text": "先知" },
-      { "pagePath": "pages/tarot/index", "text": "塔罗" },
-      { "pagePath": "pages/mine/index", "text": "我的" }
-    ]
   }
 }

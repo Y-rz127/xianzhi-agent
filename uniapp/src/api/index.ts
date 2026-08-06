@@ -94,9 +94,6 @@ export const chatWithXianzhiSync = (
     yun_sect: opts?.yun_sect,
   })
 
-export const chatWithRagSync = (message: string, sessionId = 'default') =>
-  get<ChatResult>('/ai/xianzhi/rag/sync', { message, session_id: sessionId })
-
 /* ============ 命理工具 ============ */
 
 export interface HehunResult { result?: string }
@@ -132,12 +129,13 @@ export interface ChartData {
   shenGong?: string
 }
 
-export const getChart = (birthTime: string, gender: string, sect = 2, yunSect = 1) =>
+export const getChart = (birthTime: string, gender: string, sect = 2, yunSect = 1, longitude?: number) =>
   get<ChartData>('/ai/xianzhi/chart', {
     birth_time: birthTime,
     gender,
     sect,
     yun_sect: yunSect,
+    ...(longitude ? { longitude } : {}),
   })
 
 /* ============ 命理报告 ============ */
@@ -251,14 +249,6 @@ export const deleteSession = (type: 'xianzhi', id: string) => {
   return del(`/ai/xianzhi/sessions/${id}`)
 }
 
-/** 清空指定会话的消息记录，但保留会话本身（不新建会话） */
-export const clearSessionMessages = (type: 'xianzhi', id: string) => {
-  return post(`/ai/xianzhi/sessions/${id}/clear`, {})
-}
-
-export const clearRagSessionMessages = (sessionId: string) => {
-  return post(`/ai/xianzhi/rag/sessions/${encodeURIComponent(sessionId)}/clear`, {})
-}
 export interface SessionMessage {
   role: 'user' | 'assistant'
   content: string

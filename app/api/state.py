@@ -7,7 +7,7 @@ Xianzhi 智能体按会话池化：
 - 池容量有限（LRU 淘汰最久未用实例），对话历史与出生信息均可从
   持久化记忆（PG/文件）恢复，淘汰无数据损失。
 
-RagChatChain / TarotApp 本身不持有会话级可变状态
+TarotApp 本身不持有会话级可变状态
 （历史均从记忆存储按会话读取），保持单例即可。
 """
 from __future__ import annotations
@@ -17,7 +17,6 @@ from collections import OrderedDict
 
 from app.logger import log
 
-_rag_chain = None
 _tarot_app = None
 _chat_model = None
 _local_tools = None
@@ -30,13 +29,12 @@ _agents: "OrderedDict[str, tuple]" = OrderedDict()
 _pool_lock = threading.Lock()
 
 
-def set_instances(chat_model, local_tools, memory, rag_chain=None, tarot_app=None):
+def set_instances(chat_model, local_tools, memory, tarot_app=None):
     """保存 Agent 工厂所需的共享依赖（启动时调用一次）。"""
-    global _chat_model, _local_tools, _memory, _rag_chain, _tarot_app
+    global _chat_model, _local_tools, _memory, _tarot_app
     _chat_model = chat_model
     _local_tools = local_tools
     _memory = memory
-    _rag_chain = rag_chain
     _tarot_app = tarot_app
 
 

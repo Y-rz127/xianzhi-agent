@@ -21,3 +21,13 @@
 - 服务 `reload=False`，改代码后必须 `taskkill` 旧进程并重启才生效。
 - 前端源码量很小（frontend/src≈29、uniapp/src≈31 文件），项目总文件数的大头是 node_modules/dist。BOM 可能是**多重叠加**（最多见 11 层连续 EF BB BF），剥离要循环去首 3 字节直到无 BOM；前端无 eslint，可用各自 node_modules 里已装的 typescript 做离线 AST 分析。
 - 部署（CloudBase 云托管+腾讯云 PG）：main.py 已读 `PORT` 环境变量、Dockerfile EXPOSE 80；腾讯云 PostgreSQL 默认不带 pgvector 需手动 `CREATE EXTENSION vector;`，连接串必须 `?sslmode=require`；小程序自用时开发版+真机调试勾「不校验合法域名」即免备案（体验版/正式版/自有域名 H5 才需备案）。详见仓库 `DEPLOY.md`。
+
+## 小程序 UI 改造方向（已与用户确认，待落地代码）
+- 先知页定位=问答型智能体，聊天流是绝对主角（非工具集合页）。
+- 排盘/问答合并为一个对话流，去掉 mode-tabs（后端 tryExtractBirth 已能自然语言识别生辰与意图）。
+- 去底部 tabBar，改标题左侧汉堡菜单。
+- 汉堡展开页结构：头像+昵称（点头像进「我的」）/ 合婚+塔罗横排按钮 / 对话历史（按今天·最近一周·更早分组）/ 新建对话吸底固定（不随列表滚动）。
+- 命盘详情入口：缩到对话框右上角图标，仅在已解析出命盘时出现；不做对话内内联链接、不做顶部 pill。
+- 欢迎语干净，不带引导 chips；合婚由对话内自然语言触发（"帮我合婚"），不堆按钮。
+- 进入小程序自动恢复上一次对话（onShow 已有 XZ_LAUNCH 机制，冷启动取最近 session 加载即可）。
+- 设计稿交付：ardot 画布持续 NO_ADAPTER，暂用对话内 show_widget 预览；画布恢复后需落成正式 .ardot 高保真稿。

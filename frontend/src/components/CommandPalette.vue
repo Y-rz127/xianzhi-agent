@@ -74,10 +74,10 @@ const items: CmdItem[] = [
   },
   {
     id: "rag",
-    title: "知识问答",
-    desc: "命理知识库检索，古籍经典查询",
+    title: "知识库管理",
+    desc: "命理古籍文档上传与索引重建",
     icon: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>',
-    action: () => { router.push("/xianzhi"); setTimeout(() => window.dispatchEvent(new CustomEvent("xianzhi-switch-rag")), 100) },
+    action: () => router.push("/rag-manager"),
   },
   {
     id: "new-session",

@@ -1,6 +1,10 @@
 <template>
   <view class="page">
-    <view class="nav-placeholder" :style="{ height: (statusBarHeight + navBarHeight) + 'px' }"></view>
+    <view class="nav-placeholder" :style="{ height: (statusBarHeight + navBarHeight) + 'px' }">
+    <view class="nav-back" :style="{ top: statusBarHeight + 'px' }" @tap="goBack">
+      <text class="nav-back-arrow">‹</text>
+    </view>
+  </view>
 
     <!-- 用户头部 -->
     <view class="hero">
@@ -85,6 +89,12 @@ import {
   fetchTarotRecords,
   updateMe,
 } from '@/api'
+
+function goBack() {
+  const pages = getCurrentPages()
+  if (pages.length > 1) uni.navigateBack()
+  else uni.reLaunch({ url: '/pages/xianzhi/index' })
+}
 
 const statusBarHeight = ref(20)
 const navBarHeight = ref(44)
@@ -223,4 +233,18 @@ function onLogout() {
 
 .logout-btn { text-align: center; padding: 30rpx 0; margin: 16rpx 0 28rpx; border-radius: 24rpx; font-size: 29rpx; color: $color-vermilion; background: rgba(184,72,60,0.08); border: 1rpx solid rgba(184,72,60,0.25); width: 100%; box-sizing: border-box; }
 .bottom-spacer { height: 50rpx; width: 100%; }
+.nav-back {
+  position: fixed;
+  left: 24rpx;
+  z-index: 100;
+  width: 64rpx;
+  height: 64rpx;
+  line-height: 60rpx;
+  text-align: center;
+  font-size: 48rpx;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: 50%;
+}
+.nav-back-arrow { font-size: 48rpx; line-height: 1; }
 </style>

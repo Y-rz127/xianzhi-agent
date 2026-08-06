@@ -203,14 +203,6 @@ async def delete_xianzhi_session(session_id: str):
     return {"status": "ok"}
 
 
-@router.post("/sessions/{session_id}/clear")
-async def clear_xianzhi_session(session_id: str):
-    """清空当前会话的消息记录，但保留会话本身（不新建会话）。"""
-    from app.memory.postgres_memory import clear_session
-    clear_session(session_id)
-    return {"status": "ok"}
-
-
 @router.get("/sessions/{session_id}/messages")
 async def get_xianzhi_session_messages(session_id: str):
     """获取会话的完整消息记录。"""
@@ -234,8 +226,12 @@ async def cache_stats():
 
 
 @router.get("/chart")
-async def get_chart(birth_time: str, gender: str, sect: int = 2, yun_sect: int = 1):
-    """直接排盘，返回四柱/五行/大运/流年等结构化数据。"""
+async def get_chart(birth_time: str, gender: str, sect: int = 2, yun_sect: int = 1, longitude: float | None = None):
+    """直接排盘，返回四柱/五行/大运/流年等结构化数据。
+
+    Args:
+        longitude: 出生地经度（用于真太阳时校正，可选）
+    """
     from app.domain.bazi_engine import (
         build_bazi_chart,
         chart_to_api_dict,
@@ -255,7 +251,7 @@ async def get_chart(birth_time: str, gender: str, sect: int = 2, yun_sect: int =
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    chart = build_bazi_chart(birth_time, gender, sect=sect, yun_sect=yun_sect, dayun_count=8, liunian_years=5)
+    chart = build_bazi_chart(birth_time, gender, sect=sect, yun_sect=yun_sect, dayun_count=8, liunian_years=5, longitude=longitude)
     payload = chart_to_api_dict(chart)
     payload.update({
         "chartText": format_chart_text(chart),

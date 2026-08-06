@@ -17,33 +17,19 @@
     <!-- 状态栏占位 -->
     <view class="status-bar" :style="{ height: statusBarHeight + 'px' }"></view>
 
-    <!-- 顶部能量渐变头：标题 + 设置 + 模式 pill -->
+    <!-- 顶部头：汉堡(左) + 标题 + 命盘 -->
     <view class="header">
       <view class="header-top">
-        <text class="header-title display-font">先知</text>
-        <view class="header-icons">
+        <view class="header-left">
           <text class="icon-btn" @tap="openHistoryDrawer">☰</text>
-          <text class="icon-btn" @tap="goSettings">⚙</text>
-          <text class="icon-btn" @tap="confirmClear">🗑</text>
-          <text class="icon-btn" @tap="confirmNew">+</text>
+          <text class="header-title display-font">先知</text>
+          <text v-if="chartData" class="icon-btn bazi-btn" @tap="openBaziModal">☯</text>
         </view>
-      </view>
-      <view class="mode-tabs">
-        <text
-          :class="['tab', mode === 'agent' && 'active']"
-          @tap="switchMode('agent')"
-        >排盘</text>
-        <text
-          :class="['tab', mode === 'rag' && 'active']"
-          @tap="switchMode('rag')"
-        >问答</text>
-        <text class="tab" @tap="goHehun">合婚</text>
-        <text v-if="chartData" class="tab chart-tab" @tap="openBaziModal">命盘</text>
       </view>
     </view>
 
-    <!-- 出生信息玻璃面板（仅 agent 模式） -->
-    <view v-if="mode === 'agent'" class="birth-panel">
+    <!-- 出生信息玻璃面板 -->
+    <view class="birth-panel">
       <view class="birth-bar" @tap="showBirth = !showBirth">
         <view class="birth-bar-left">
           <text class="birth-icon">✦</text>
@@ -78,6 +64,16 @@
           </view>
         </view>
         <view class="form-row">
+          <text class="label">出生地</text>
+          <view class="picker place-picker" @tap="showRegionPicker = true">
+            <text class="picker-text">{{ birthPlace || '选择地点（校准真太阳时）' }}</text>
+            <text class="picker-icon">📍</text>
+          </view>
+          <text v-if="solarTimeOffset !== 0" class="solar-hint">
+            真太阳时{{ solarTimeOffset > 0 ? '+' : '' }}{{ solarTimeOffset }}分
+          </text>
+        </view>
+        <view class="form-row">
           <text class="label">子时派</text>
           <view class="seg-group">
             <text :class="['seg', sect === 2 && 'active']" @tap="sect = 2">晚子时</text>
@@ -91,9 +87,9 @@
     <!-- 消息列表 -->
     <scroll-view class="messages" scroll-y :scroll-top="scrollTop" scroll-with-animation>
       <view v-if="!messages.length" class="empty-state">
-        <view class="empty-avatar display-font">{{ mode === 'agent' ? '易' : '问' }}</view>
-        <text class="empty-title">{{ mode === 'agent' ? '先知命理' : '命理问答' }}</text>
-        <text class="empty-desc">{{ mode === 'agent' ? '输入出生时间，开启命理推演' : '向先知请教命理理论' }}</text>
+        <view class="empty-avatar display-font">易</view>
+        <text class="empty-title">先知命理</text>
+        <text class="empty-desc">说出你的疑问，或报上生辰开启推演</text>
       </view>
 
       <view v-for="(msg, i) in messages" :key="i" :class="['msg', msg.role]">
@@ -107,7 +103,7 @@
             <text v-else>{{ formatContent(msg.content) }}</text>
           </view>
           <!-- 回答反馈栏（点赞/点踩） -->
-          <view v-if="mode === 'agent' && msg.role === 'assistant' && msg.content && !isThinking(msg.content)" class="feedback-bar">
+          <view v-if="msg.role === 'assistant' && msg.content && !isThinking(msg.content)" class="feedback-bar">
             <text
               :class="['feedback-chip', feedbackState[msgFeedbackKey(msg, i)] === 'up' && 'active-up']"
               @tap="openFeedbackModal(msg, i, 'up')"
@@ -118,19 +114,6 @@
             >✗</text>
             <text v-if="feedbackState[msgFeedbackKey(msg, i)] === 'saved'" class="feedback-saved">已记录</text>
           </view>
-        </view>
-      </view>
-
-      <!-- 示例问题 -->
-      <view v-if="!messages.length" class="examples">
-        <text class="examples-title">你可以问我</text>
-        <view class="examples-list">
-          <text
-            v-for="ex in currentExamples"
-            :key="ex"
-            class="example-chip"
-            @tap="useExample(ex)"
-          >{{ ex }}</text>
         </view>
       </view>
     </scroll-view>
@@ -178,6 +161,26 @@
     <!-- 历史会话抽屉 -->
     <view v-if="showHistoryDrawer" class="drawer-mask" @tap="closeHistoryDrawer">
       <view class="drawer-panel" @tap.stop :style="{ paddingTop: (statusBarHeight + 10) + 'px' }">
+        <!-- 用户区：头像 + 昵称 -->
+        <view class="drawer-profile" @tap="goMine">
+          <view class="drawer-avatar">{{ avatarText }}</view>
+          <view class="drawer-profile-info">
+            <text class="drawer-nickname">{{ nickname }}</text>
+            <text class="drawer-profile-sub">{{ isLoggedIn() ? '我的档案 ›' : '点击登录 ›' }}</text>
+          </view>
+        </view>
+        <!-- 快捷功能：合婚 / 塔罗 / 设置 -->
+        <view class="drawer-quick">
+          <view class="drawer-quick-btn" @tap="goHehun">
+            <text class="dq-icon">合</text><text>合婚</text>
+          </view>
+          <view class="drawer-quick-btn" @tap="goTarot">
+            <text class="dq-icon">塔</text><text>塔罗</text>
+          </view>
+          <view class="drawer-quick-btn" @tap="goSettings">
+            <text class="dq-icon">⚙</text><text>设置</text>
+          </view>
+        </view>
         <view class="drawer-header">
           <text class="drawer-title">历史会话</text>
           <text class="drawer-close" @tap="closeHistoryDrawer">✕</text>
@@ -225,6 +228,62 @@
         </view>
       </view>
     </view>
+
+    <!-- 省市区选择器弹窗 -->
+    <view v-if="showRegionPicker" class="region-picker-mask" @tap="showRegionPicker = false">
+      <view class="region-picker" @tap.stop>
+        <!-- 顶部：tab + 确定 -->
+        <view class="rp-header">
+          <view class="rp-tabs">
+            <text :class="['rp-tab', 'active']">国内</text>
+          </view>
+          <text class="rp-confirm" @tap="confirmRegionPicker">确定</text>
+        </view>
+        <!-- 搜索框 -->
+        <view class="rp-search">
+          <text class="rp-search-icon">🔍</text>
+          <input
+            class="rp-search-input"
+            v-model="regionSearchText"
+            placeholder="搜索全国城市及地区"
+            placeholder-class="rp-search-ph"
+          />
+        </view>
+        <!-- 列标题（三列） -->
+        <view class="rp-col-labels">
+          <text class="rp-col-label">省份</text>
+          <text class="rp-col-label">城市</text>
+          <text class="rp-col-label">区县</text>
+        </view>
+        <!-- 三列滚动：省份 / 城市 / 区县 -->
+        <view class="rp-columns">
+          <scroll-view scroll-y :style="{ height: scrollHeight + 'px' }" class="rp-col">
+            <text
+              v-for="(p, pi) in filteredProvinces"
+              :key="p.name"
+              :class="['rp-item', regionSelProvince === p.name && 'active']"
+              @tap="onSelectProvince(p.name)"
+            >{{ p.name }}</text>
+          </scroll-view>
+          <scroll-view scroll-y :style="{ height: scrollHeight + 'px' }" class="rp-col">
+            <text
+              v-for="c in filteredCities"
+              :key="c.name"
+              :class="['rp-item', regionSelCity === c.name && 'active']"
+              @tap="onSelectCity(c)"
+            >{{ c.name }}</text>
+          </scroll-view>
+          <scroll-view scroll-y :style="{ height: scrollHeight + 'px' }" class="rp-col">
+            <text
+              v-for="d in filteredDistricts"
+              :key="d.name"
+              :class="['rp-item', regionSelDistrict === d.name && 'active']"
+              @tap="regionSelDistrict = d.name"
+            >{{ d.name }}</text>
+          </scroll-view>
+        </view>
+      </view>
+    </view>
   </view>
 </template>
 
@@ -232,17 +291,18 @@
 import { ref, computed, nextTick, watch } from 'vue'
 import { onLoad, onHide, onShow } from '@dcloudio/uni-app'
 import { requireLogin } from '@/utils/authGuard'
-import { chatWithXianzhiWS, chatWithRagWS, closeAllWS } from '@/api/chat'
+import { chatWithXianzhiWS, closeAllWS } from '@/api/chat'
 import {
   parsePillars, parseWuxing, parseDayun, parseShensha,
   downloadReport, getChart,
-  fetchSessions, fetchMySessions, deleteSession as deleteSessionApi, clearSessionMessages, clearRagSessionMessages, getSessionMessages,
+  fetchSessions, fetchMySessions, deleteSession as deleteSessionApi, getSessionMessages,
   getSessionBirthInfo,
   submitAnswerFeedback,
   type ChartData, type ChatSession,
 } from '@/api'
 import { getLocalDateString } from '@/utils/datetimePicker'
-import { currentUserId, isLoggedIn, getToken } from '@/utils/storage'
+import { currentUserId, isLoggedIn, getToken, getUser } from '@/utils/storage'
+import { regionData, type City } from '@/utils/region-data'
 
 interface Message { role: 'user' | 'assistant'; content: string }
 interface BirthInfo { time: string; gender: string }
@@ -263,12 +323,82 @@ function zhiHourToHHMM(t?: string): string {
   return t
 }
 
-const mode = ref<'agent' | 'rag'>('agent')
 const showBirth = ref(false)
 const birthDate = ref('')
 const birthTime = ref('')
 const gender = ref<'男' | '女'>('男')
 const sect = ref<number>(2)
+// 真太阳时：出生地与经度
+const birthPlace = ref('')
+const birthLongitude = ref(0)
+/** 真太阳时修正量（分钟）。基准经度 120°E（北京时间），每度差 4 分钟 */
+const solarTimeOffset = computed(() => {
+  if (!birthLongitude.value || birthLongitude.value === 0) return 0
+  return Math.round((120 - birthLongitude.value) * 4)
+})
+
+// ---- 省市区选择器弹窗状态 ----
+const showRegionPicker = ref(false)
+const regionSearchText = ref('')
+const regionSelProvince = ref('')
+const regionSelCity = ref('')
+const regionSelDistrict = ref('')
+const regionSelLongitude = ref(0)
+/** scroll-view 固定高度（px），uni-app 要求具体数值才能滚动 */
+const scrollHeight = ref(380)
+
+// 搜索过滤
+const filteredProvinces = computed(() => {
+  if (!regionSearchText.value) return regionData
+  const kw = regionSearchText.value.trim()
+  return regionData.filter(p =>
+    p.name.includes(kw) || p.cities.some(c => c.name.includes(kw))
+  )
+})
+const filteredCities = computed(() => {
+  const prov = regionData.find(p => p.name === regionSelProvince.value)
+  if (!prov) return []
+  if (!regionSearchText.value.trim()) return prov.cities
+  const kw = regionSearchText.value.trim()
+  return prov.cities.filter(c => c.name.includes(kw))
+})
+const filteredDistricts = computed(() => {
+  const prov = regionData.find(p => p.name === regionSelProvince.value)
+  if (!prov) return []
+  const city = prov.cities.find(c => c.name === regionSelCity.value)
+  if (!city) return []
+  return city.districts
+})
+
+function onSelectProvince(name: string) {
+  regionSelProvince.value = name
+  regionSelCity.value = ''
+  regionSelDistrict.value = ''
+}
+function onSelectCity(c: City) {
+  regionSelCity.value = c.name
+  regionSelLongitude.value = c.longitude
+  // 默认选第一个区县
+  if (c.districts.length > 0 && !c.districts.some(d => d.name === regionSelDistrict.value)) {
+    regionSelDistrict.value = c.districts[0].name
+  }
+}
+function confirmRegionPicker() {
+  if (regionSelProvince.value && regionSelCity.value) {
+    const parts = [regionSelProvince.value, regionSelCity.value]
+    if (regionSelDistrict.value) parts.push(regionSelDistrict.value)
+    birthPlace.value = parts.join(' ')
+    birthLongitude.value = regionSelLongitude.value
+    // 已有出生时间则自动重排
+    if (birthDate.value && birthTime.value && gender.value) {
+      const time = `${birthDate.value} ${birthTime.value}`
+      lastBirthInfo.value = { time, gender: gender.value }
+      _skipNextChartWatch = true
+      getChart(time, gender.value, sect.value, 1, birthLongitude.value).then(d => { chartData.value = d }).catch(() => { chartData.value = null })
+    }
+  }
+  showRegionPicker.value = false
+}
 const inputText = ref('')
 const thinking = ref(false)
 const feedbackState = ref<Record<string, 'up' | 'down' | 'saved'>>({})
@@ -280,11 +410,8 @@ const feedbackModalMsg = ref<Message | null>(null)
 const feedbackModalIndex = ref(-1)
 const feedbackModalRating = ref<'up' | 'down'>('up')
 const feedbackModalReason = ref('')
-// 排盘与问答使用独立的会话历史，互不干扰
-const agentMessages = ref<Message[]>([])
-const ragMessages = ref<Message[]>([])
-// 命例 tab 单独有页面，cases 模式下不显示聊天
-const messages = computed(() => mode.value === 'rag' ? ragMessages.value : agentMessages.value)
+// 排盘与命理问答合并为同一条对话流：术语请教与排盘断事共用一份会话历史
+const messages = ref<Message[]>([])
 const scrollTop = ref(0)
 const lastBirthInfo = ref<BirthInfo | null>(null)
 // 防止 watch 与显式 getChart 调用重复请求的标志
@@ -298,8 +425,6 @@ function genConversationId(): string {
 }
 const conversationId = ref(genConversationId())
 
-const ragSessionId = ref(uni.getStorageSync('rag-session-id') || ('rag-' + Date.now()))
-uni.setStorageSync('rag-session-id', ragSessionId.value)
 // 历史会话抽屉
 const showHistoryDrawer = ref(false)
 const historySessions = ref<ChatSession[]>([])
@@ -333,28 +458,23 @@ async function switchToSession(session: ChatSession) {
   // 拉取该会话的历史消息
   try {
     const msgs = await getSessionMessages('xianzhi', session.id)
-    const target: Message[] = msgs.map(m => ({ role: m.role, content: m.content }))
-    if (mode.value === 'rag') {
-      ragMessages.value = target
-    } else {
-      agentMessages.value = target
-      // 从后端恢复命盘上下文（支持农历/节日/时辰等自然语言输入场景）
-      lastBirthInfo.value = null
-      chartData.value = null
-      birthDate.value = ''
-      birthTime.value = ''
-      gender.value = '男' as '男' | '女'
-      const bi = await getSessionBirthInfo(session.id)
-      if (bi.time && bi.gender) {
-        lastBirthInfo.value = { time: bi.time, gender: bi.gender }
-        const [d, t] = bi.time.split(' ')
-        birthDate.value = d || ''
-        // 时辰（如"辰时"）映射为 HH:MM，确保 time picker 能正常显示
-        birthTime.value = zhiHourToHHMM(t)
-        gender.value = bi.gender as '男' | '女'
-        _skipNextChartWatch = true
-        try { chartData.value = await getChart(bi.time, bi.gender, 2, 1) } catch { chartData.value = null }
-      }
+    messages.value = msgs.map(m => ({ role: m.role, content: m.content }))
+    // 从后端恢复命盘上下文（支持农历/节日/时辰等自然语言输入场景）
+    lastBirthInfo.value = null
+    chartData.value = null
+    birthDate.value = ''
+    birthTime.value = ''
+    gender.value = '男' as '男' | '女'
+    const bi = await getSessionBirthInfo(session.id)
+    if (bi.time && bi.gender) {
+      lastBirthInfo.value = { time: bi.time, gender: bi.gender }
+      const [d, t] = bi.time.split(' ')
+      birthDate.value = d || ''
+      // 时辰（如"辰时"）映射为 HH:MM，确保 time picker 能正常显示
+      birthTime.value = zhiHourToHHMM(t)
+      gender.value = bi.gender as '男' | '女'
+      _skipNextChartWatch = true
+      try { chartData.value = await getChart(bi.time, bi.gender, 2, 1) } catch { chartData.value = null }
     }
   } catch (e) {
     uni.showToast({ title: '加载消息失败', icon: 'none' })
@@ -402,23 +522,28 @@ const birthTimeFull = computed(() =>
   birthDate.value && birthTime.value ? `${birthDate.value} ${birthTime.value}` : ''
 )
 const birthSummary = computed(() =>
-  birthTimeFull.value ? `${birthTimeFull.value} ${gender.value}` : '点击设置出生信息'
+  birthTimeFull.value ? `${birthTimeFull.value} ${gender.value}${birthPlace ? ' · ' + birthPlace : ''}` : '点击设置出生信息'
 )
 
-const agentExamples = ['男，1990-05-20 14:30，排盘并分析事业', '女，1995-08-15 08:00，看近五年运势', '男，1988-12-01 23:30，大运流年推算']
-const ragExamples = ['什么是七杀？', '用神怎么取？', '大运顺逆排的规则？']
-const currentExamples = computed(() => mode.value === 'agent' ? agentExamples : ragExamples)
-const placeholderText = computed(() => mode.value === 'agent' ? '如：男，1990-05-20 14:30，分析事业' : '请教命理理论问题…')
+const placeholderText = '报上生辰排盘，或直接请教命理问题…'
+
+// 抽屉用户区：头像与昵称（取自登录态）
+const profileUser = computed(() => getUser())
+const nickname = computed(() => profileUser.value?.nickname || (isLoggedIn() ? '我的' : '未登录'))
+const avatarText = computed(() => {
+  const n = profileUser.value?.nickname
+  return n ? n.charAt(0) : (isLoggedIn() ? '我' : '易')
+})
 
 // 出生信息面板手动修改时，自动重拉 chartData
-watch([birthDate, birthTime, gender], async ([d, t, g]) => {
+watch([birthDate, birthTime, gender, birthLongitude], async ([d, t, g]) => {
   // 显式调用 getChart 的地方（applyBirth/onChartContext/switchToSession/tryExtractBirth）
   // 已自行处理 chartData，跳过 watch 避免重复请求
   if (_skipNextChartWatch) { _skipNextChartWatch = false; return }
   if (d && t && g) {
     const time = `${d} ${t}`
     lastBirthInfo.value = { time, gender: g }
-    try { chartData.value = await getChart(time, g, 2, 1) } catch { chartData.value = null }
+    try { chartData.value = await getChart(time, g, 2, 1, birthLongitude.value || undefined) } catch { chartData.value = null }
   }
 })
 
@@ -466,11 +591,9 @@ function onDateChange(e: any) { birthDate.value = e.detail.value }
 function onTimeChange(e: any) { birthTime.value = e.detail.value }
 function goDisclaimer() { uni.navigateTo({ url: '/pages/legal/disclaimer' }) }
 function goSettings() { uni.navigateTo({ url: '/pages/settings/index' }) }
-function useExample(ex: string) { inputText.value = ex; onSend() }
-
-function switchMode(m: 'agent' | 'rag') {
-  if (mode.value === m) return
-  mode.value = m
+function goTarot() { uni.navigateTo({ url: '/pages/tarot/index' }) }
+function goMine() {
+  uni.navigateTo({ url: isLoggedIn() ? '/pages/mine/index' : '/pages/login/index' })
 }
 
 /** 跳转合婚页面 */
@@ -478,52 +601,19 @@ function goHehun() {
   uni.navigateTo({ url: '/pages/hehun/index' })
 }
 
-/** 清空当前会话的消息记录，保留会话ID与命盘上下文 */
-async function clearChat() {
-  try {
-    if (mode.value === "rag" && ragSessionId.value) {
-      await clearRagSessionMessages(ragSessionId.value)
-    } else {
-      await clearSessionMessages("xianzhi", conversationId.value)
-    }
-  } catch {}
-  // 按当前 mode 清空对应的会话数组
-  const target = mode.value === "rag" ? ragMessages.value : agentMessages.value
-  target.splice(0, target.length)
-  inputText.value = ''
-}
-/** 清空前确认 */
-function confirmClear() {
-  uni.showModal({
-    title: '清空对话',
-    content: '确定清空当前会话的所有消息吗？命盘信息会保留。',
-    success: (res) => { if (res.confirm) clearChat() },
-  })
-}
-
 /** 新建会话：生成新会话ID并清空命盘上下文 */
 function newSession() {
   conversationId.value = genConversationId()
-  ragSessionId.value = 'rag-' + Date.now()
-  uni.setStorageSync('rag-session-id', ragSessionId.value)
-  agentMessages.value.splice(0, agentMessages.value.length)
-  ragMessages.value.splice(0, ragMessages.value.length)
+  messages.value.splice(0, messages.value.length)
   inputText.value = ''
   lastBirthInfo.value = null
   chartData.value = null
   birthDate.value = ''
   birthTime.value = ''
+  birthPlace.value = ''
+  birthLongitude.value = 0
   feedbackState.value = {}
   feedbackReasons.value = {}
-}
-
-/** 新建会话前确认 */
-function confirmNew() {
-  uni.showModal({
-    title: '新建会话',
-    content: '确定新建会话吗？当前对话和命盘信息将被清空。',
-    success: (res) => { if (res.confirm) newSession() },
-  })
 }
 
 /** 从 ReAct 输出中提取 [回答] 部分（用于解析可视化数据） */
@@ -544,10 +634,8 @@ const msgFeedbackKey = (msg: Message, index: number) =>
 
 /** 获取指定消息之前的最后一条用户消息 */
 function questionBefore(index: number): string {
-  if (mode.value === 'agent') {
-    for (let i = index - 1; i >= 0; i--) {
-      if (agentMessages.value[i]?.role === 'user') return agentMessages.value[i].content
-    }
+  for (let i = index - 1; i >= 0; i--) {
+    if (messages.value[i]?.role === 'user') return messages.value[i].content
   }
   return ''
 }
@@ -674,11 +762,10 @@ function downloadPdfReport() {
 function onSend() {
   const text = inputText.value.trim()
   if (!text || thinking.value) return
-  // 排盘 / 问答 写入不同的会话数组
-  const targetList = mode.value === 'rag' ? ragMessages.value : agentMessages.value
+  const targetList = messages.value
   targetList.push({ role: 'user', content: text })
   inputText.value = ''
-  if (mode.value === 'agent') tryExtractBirth(text)
+  tryExtractBirth(text)
   thinking.value = true
   scrollToBottom()
 
@@ -712,29 +799,20 @@ function onSend() {
     }
   }
 
-  if (mode.value === 'agent') {
-    chatWithXianzhiWS(text, {
-      conversationId: conversationId.value,
-      birthTime: birthTimeFull.value || undefined,
-      gender: gender.value,
-      sect: sect.value,
-      token: getToken(),
-      onMessage, onDone, onError, onChartContext,
-    })
-  } else {
-    chatWithRagWS(text, {
-      sessionId: ragSessionId.value,
-      onMessage, onDone, onError,
-    })
-  }
+  chatWithXianzhiWS(text, {
+    conversationId: conversationId.value,
+    birthTime: birthTimeFull.value || undefined,
+    gender: gender.value,
+    sect: sect.value,
+    token: getToken(),
+    onMessage, onDone, onError, onChartContext,
+  })
 }
 
 // 初始欢迎语
 messages.value.push({
   role: 'assistant',
-  content: mode.value === 'agent'
-    ? '您好，我是先知。请设置出生信息后提问，如「男，1990-05-20 14:30，排盘分析事业」。'
-    : '您好，可向我请教命理理论问题，如「什么是七杀？」。',
+  content: '您好，我是先知。可直接请教命理问题，如「什么是七杀？」；也可报上生辰，如「男，1990-05-20 14:30，排盘分析事业」。',
 })
 </script>
 
@@ -913,28 +991,20 @@ messages.value.push({
   box-sizing: border-box;
   background: $color-bg;
   border-bottom: 1rpx solid $color-border;
-  padding: 16rpx 32rpx 28rpx;
+  padding: 16rpx 32rpx 20rpx;
   overflow: hidden;
   position: relative;
   z-index: 1;
 }
 .header-top {
-  position: relative;
   display: flex;
   align-items: center;
-  justify-content: flex-start;
+  justify-content: space-between;
 }
-.header-icons {
-  position: absolute;
-  left: 0;
-  right: 0;
+.header-left {
   display: flex;
-  justify-content: center;
-  gap: 24rpx;
-  pointer-events: none;
-}
-.header-icons .icon-btn {
-  pointer-events: auto;
+  align-items: center;
+  gap: 8rpx;
 }
 .header-title {
   font-size: 40rpx;
@@ -950,38 +1020,9 @@ messages.value.push({
   color: $color-ink-light;
   font-size: 36rpx;
 }
-
-/* 模式切换 pill */
-.mode-tabs {
-  display: flex;
-  gap: 16rpx;
-  margin-top: 24rpx;
-  width: 100%;
-  box-sizing: border-box;
-  overflow: hidden;
-  align-items: center;
-}
-.tab {
-  flex: 1;
-  min-width: 0;
-  max-width: 160rpx;
-  padding: 12rpx 0;
-  font-size: 26rpx;
-  text-align: center;
-  color: $color-ink-light;
-  border-radius: 9999rpx;
-  border: 1rpx solid $color-border;
-}
-.tab.active {
-  background: $color-primary;
-  color: $color-bg;
-  font-weight: 600;
-  border: none;
-}
-.tab.chart-tab {
-  background: rgba(44, 44, 44, 0.06);
-  color: $color-ink;
-  font-weight: 500;
+.bazi-btn {
+  color: $color-primary;
+  font-size: 40rpx;
 }
 
 /* === 出生信息面板 === */
@@ -1071,6 +1112,14 @@ messages.value.push({
   color: $color-ink-light;
   margin-top: 8rpx;
 }
+.place-picker { cursor: pointer; }
+.solar-hint {
+  display: block;
+  font-size: 20rpx;
+  color: $color-primary;
+  margin-top: 6rpx;
+  padding-left: 156rpx;
+}
 
 /* === 消息列表 === */
 .messages {
@@ -1115,30 +1164,6 @@ messages.value.push({
 .empty-desc {
   font-size: 24rpx;
   color: $color-ink-lighter;
-}
-
-.examples {
-  margin-top: 48rpx;
-}
-.examples-title {
-  display: block;
-  font-size: 22rpx;
-  color: $color-ink-lighter;
-  margin-bottom: 16rpx;
-}
-.examples-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 16rpx;
-}
-.example-chip {
-  display: inline-block;
-  padding: 12rpx 24rpx;
-  font-size: 24rpx;
-  color: $color-ink-light;
-  background: rgba(44, 44, 44, 0.04);
-  border: 1rpx solid $color-border;
-  border-radius: 28rpx;
 }
 
 /* === 消息项 === */
@@ -1451,5 +1476,176 @@ messages.value.push({
   color: $color-bg-warm;
   background: $color-primary;
   border-radius: 12rpx;
+}
+
+/* 抽屉用户区 + 快捷功能 */
+.drawer-profile {
+  display: flex;
+  align-items: center;
+  gap: 20rpx;
+  padding: 24rpx 32rpx 20rpx;
+}
+.drawer-avatar {
+  width: 88rpx;
+  height: 88rpx;
+  line-height: 88rpx;
+  text-align: center;
+  border-radius: 50%;
+  background: $color-primary;
+  color: $color-bg;
+  font-size: 40rpx;
+  font-weight: 600;
+  font-family: $font-family-display;
+  flex-shrink: 0;
+}
+.drawer-profile-info {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-width: 0;
+}
+.drawer-nickname {
+  font-size: 30rpx;
+  font-weight: 600;
+  color: $color-ink;
+}
+.drawer-profile-sub {
+  font-size: 22rpx;
+  color: $color-ink-light;
+  margin-top: 4rpx;
+}
+.drawer-quick {
+  display: flex;
+  gap: 20rpx;
+  padding: 8rpx 32rpx 24rpx;
+  border-bottom: 1rpx solid rgba(44, 44, 44, 0.08);
+}
+.drawer-quick-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10rpx;
+  padding: 22rpx 0;
+  font-size: 28rpx;
+  color: $color-ink;
+  background: rgba(44, 44, 44, 0.04);
+  border: 1rpx solid $color-border;
+  border-radius: 16rpx;
+}
+.drawer-quick-btn:active {
+  background: rgba(44, 44, 44, 0.08);
+}
+.dq-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40rpx;
+  height: 40rpx;
+  border-radius: 50%;
+  background: $color-primary;
+  color: $color-bg;
+  font-size: 22rpx;
+  font-family: $font-family-display;
+}
+
+/* === 省市区选择器弹窗 === */
+.region-picker-mask {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.5);
+  z-index: 999;
+  display: flex;
+  align-items: flex-end;
+}
+.region-picker {
+  width: 100%;
+  background: #fff;
+  border-radius: 24rpx 24rpx 0 0;
+  padding-bottom: env(safe-area-inset-bottom);
+  max-height: 58vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.rp-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 24rpx 32rpx 12rpx;
+  flex-shrink: 0;
+}
+.rp-tabs {
+  display: flex;
+  gap: 12rpx;
+}
+.rp-tab {
+  padding: 10rpx 28rpx;
+  font-size: 26rpx;
+  border-radius: 30rpx;
+  background: #f5f5f5;
+  color: #888;
+}
+.rp-tab.active {
+  background: #1a1a1a;
+  color: #fff;
+  font-weight: 600;
+}
+.rp-confirm {
+  padding: 14rpx 36rpx;
+  background: #1a1a1a;
+  color: #fff;
+  font-size: 26rpx;
+  border-radius: 30rpx;
+  font-weight: 600;
+}
+.rp-search {
+  margin: 6rpx 32rpx 14rpx;
+  display: flex;
+  align-items: center;
+  gap: 10rpx;
+  padding: 16rpx 24rpx;
+  background: #f7f7f7;
+  border-radius: 12rpx;
+  border: 1rpx solid #eee;
+  flex-shrink: 0;
+}
+.rp-search-icon { font-size: 26rpx; }
+.rp-search-input { flex: 1; font-size: 26rpx; }
+.rp-search-ph { color: #bbb; }
+.rp-col-labels {
+  display: flex;
+  padding: 10rpx 32rpx 6rpx;
+  flex-shrink: 0;
+}
+.rp-col-label {
+  flex: 1;
+  text-align: center;
+  font-size: 26rpx;
+  color: #999;
+  font-weight: 500;
+}
+/* 三列滚动容器 */
+.rp-columns {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+  min-height: 0;
+}
+.rp-col {
+  flex: 1;
+}
+.rp-item {
+  display: block;
+  padding: 24rpx 16rpx;
+  font-size: 30rpx;
+  color: #333;
+  text-align: center;
+  line-height: 1.5;
+}
+.rp-item.active {
+  color: #1a1a1a;
+  font-weight: 700;
+  background: rgba(212,175,55,0.08);
 }
 </style>

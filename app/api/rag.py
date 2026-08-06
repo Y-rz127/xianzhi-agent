@@ -1,19 +1,19 @@
-"""RAG 知识库问答与管理接口。"""
+"""RAG 知识库管理接口。
+
+知识问答已并入先知对话流（app/agent/xianzhi_workflow.py 的 theory worker），
+本模块只负责知识库文档的增删查与向量索引重建。
+"""
 from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import APIRouter, File, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
-from sse_starlette.sse import EventSourceResponse
+from fastapi import APIRouter, File, HTTPException, UploadFile
 
-from app.api import state
-from app.api.common import check_message_length, client_error, is_message_too_long, message_too_long_text
+from app.api.common import client_error
 from app.logger import log
 from app.rag.vector_store import KNOWLEDGE_DIR, knowledge_base
 
-# 问答相关接口（保持与前端已有调用兼容）
-chat_router = APIRouter(prefix="/xianzhi", tags=["RAG"])
 # 知识库管理接口
 mgmt_router = APIRouter(prefix="/rag", tags=["RAG"])
 
@@ -45,97 +45,6 @@ def _list_markdown_files() -> list[dict]:
         })
     return files
 
-
-# ---------- 问答接口 ----------
-
-@chat_router.get("/rag")
-async def chat_with_rag(message: str, session_id: str = "default"):
-    """RAG 知识库 SSE 流式问答接口。"""
-    check_message_length(message)
-    if state._rag_chain is None:
-        return {"error": "RAG chain not initialized"}
-
-    async def event_stream():
-        try:
-            async for chunk in state._rag_chain.chat_stream(message, session_id):
-                yield {"event": "message", "data": chunk}
-            yield {"event": "message", "data": "[DONE]"}
-        except Exception as e:
-            log.exception("RAG SSE stream error")
-            yield {"event": "error", "data": client_error(e)}
-
-    return EventSourceResponse(event_stream())
-
-
-async def _safe_ws_send(websocket: WebSocket, data: dict) -> bool:
-    """安全发送 WS 消息，客户端已断开时返回 False 而非抛异常。"""
-    try:
-        await websocket.send_json(data)
-        return True
-    except (WebSocketDisconnect, RuntimeError, Exception):
-        return False
-
-
-@chat_router.websocket("/rag/ws")
-async def ws_chat_with_rag(websocket: WebSocket):
-    """RAG 知识库 WebSocket 流式接口（小程序无 EventSource，用 WS 替代 SSE）。"""
-    await websocket.accept()
-    try:
-        while True:
-            data = await websocket.receive_json()
-            message = data.get("message", "")
-            session_id = data.get("session_id", data.get("conversation_id", "default"))
-            if is_message_too_long(message):
-                if not await _safe_ws_send(websocket, {"type": "error", "data": message_too_long_text(message)}):
-                    break
-                continue
-            if state._rag_chain is None:
-                if not await _safe_ws_send(websocket, {"type": "error", "data": "RAG chain not initialized"}):
-                    break
-                continue
-            client_alive = True
-            try:
-                async for chunk in state._rag_chain.chat_stream(message, session_id):
-                    if not await _safe_ws_send(websocket, {"type": "message", "data": chunk}):
-                        client_alive = False
-                        log.info("客户端已断开，停止流式发送")
-                        break
-            except Exception as e:
-                log.exception("RAG WebSocket stream error")
-                if client_alive:
-                    await _safe_ws_send(websocket, {"type": "error", "data": client_error(e)})
-                client_alive = False
-            if client_alive:
-                await _safe_ws_send(websocket, {"type": "done"})
-    except WebSocketDisconnect:
-        log.info("RAG WebSocket disconnected")
-    except Exception as e:
-        log.exception("RAG WebSocket error")
-        await _safe_ws_send(websocket, {"type": "error", "data": client_error(e)})
-
-
-@chat_router.get("/rag/sync")
-async def chat_with_rag_sync(message: str, session_id: str = "default"):
-    """RAG 知识库同步问答接口（一次性返回完整结果）。"""
-    if state._rag_chain is None:
-        return {"error": "RAG chain not initialized"}
-    return {"result": state._rag_chain.chat(message, session_id)}
-
-
-
-@chat_router.post("/rag/sessions/{session_id}/clear")
-async def clear_rag_session(session_id: str):
-    """清空 RAG 问答会话的消息记录，保留会话 ID。"""
-    import uuid
-    from app.memory.postgres_memory import _get_pool
-    try:
-        session_uuid = str(uuid.uuid5(uuid.NAMESPACE_DNS, session_id))
-        with _get_pool().connection() as conn:
-            conn.execute("DELETE FROM rag_message_store WHERE session_id = %s", (session_uuid,))
-        return {"status": "ok"}
-    except Exception as e:
-        log.exception("清空 RAG 会话消息失败: {}", session_id)
-        return {"status": "error", "detail": str(e)}
 
 # ---------- 知识库管理接口 ----------
 

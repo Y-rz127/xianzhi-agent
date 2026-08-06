@@ -2,6 +2,10 @@
   <view class="page">
     <view class="status-bar" :style="{ height: statusBarHeight + 'px' }"></view>
 
+    <view class="nav-back" :style="{ top: statusBarHeight + 'px' }" @tap="goBack">
+      <text class="nav-back-arrow">‹</text>
+    </view>
+
     <scroll-view class="scroll" scroll-y :scroll-top="scrollTop" scroll-with-animation>
       <!-- 宇宙能量入口 Hero -->
       <view class="hero">
@@ -136,6 +140,12 @@ import { requireLogin } from '@/utils/authGuard'
 import { drawTarotCards, interpretTarotWS, closeAllWS } from '@/api/chat'
 import { createTarotRecord } from '@/api'
 import { isLoggedIn } from '@/utils/storage'
+
+function goBack() {
+  const pages = getCurrentPages()
+  if (pages.length > 1) uni.navigateBack()
+  else uni.reLaunch({ url: '/pages/xianzhi/index' })
+}
 
 interface DrawnCard {
   name: string
@@ -653,4 +663,18 @@ function saveRecord() {
 .bottom-spacer {
   height: 80rpx;
 }
+.nav-back {
+  position: fixed;
+  left: 24rpx;
+  z-index: 100;
+  width: 64rpx;
+  height: 64rpx;
+  line-height: 60rpx;
+  text-align: center;
+  font-size: 48rpx;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: 50%;
+}
+.nav-back-arrow { font-size: 48rpx; line-height: 1; }
 </style>
