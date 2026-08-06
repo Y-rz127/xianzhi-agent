@@ -1316,7 +1316,7 @@ messages.value.push({
   background: $color-bg-card;
   border: 1rpx solid $color-border;
   color: $color-ink;
-  max-width: 100%;
+  max-width: 75%;
   box-sizing: border-box;
   overflow: hidden;
   box-shadow: $shadow-sm;
