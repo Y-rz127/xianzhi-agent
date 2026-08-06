@@ -51,3 +51,28 @@ export function currentUserId(): string {
   const u = getUser()
   return u?.id || ''
 }
+
+/* ============ 会话级出生地（本地持久化，用于重新进入历史会话时恢复） ============ */
+const BIRTH_PLACE_PREFIX = 'XZ_BIRTH_PLACE_'
+
+export interface LocalBirthPlace { place: string; longitude: number }
+
+export function getBirthPlaceLocal(sessionId: string): LocalBirthPlace | null {
+  try {
+    return uni.getStorageSync(BIRTH_PLACE_PREFIX + sessionId) || null
+  } catch {
+    return null
+  }
+}
+
+export function setBirthPlaceLocal(sessionId: string, place: string, longitude: number) {
+  try {
+    if (sessionId) uni.setStorageSync(BIRTH_PLACE_PREFIX + sessionId, { place, longitude })
+  } catch {}
+}
+
+export function clearBirthPlaceLocal(sessionId: string) {
+  try {
+    if (sessionId) uni.removeStorageSync(BIRTH_PLACE_PREFIX + sessionId)
+  } catch {}
+}

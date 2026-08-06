@@ -306,7 +306,7 @@ import {
   type ChartData, type ChatSession,
 } from '@/api'
 import { getLocalDateString } from '@/utils/datetimePicker'
-import { currentUserId, isLoggedIn, getToken, getUser } from '@/utils/storage'
+import { currentUserId, isLoggedIn, getToken, getUser, getBirthPlaceLocal, setBirthPlaceLocal } from '@/utils/storage'
 import { regionData, type City } from '@/utils/region-data'
 
 interface Message { role: 'user' | 'assistant'; content: string }
@@ -434,6 +434,8 @@ function confirmRegionPicker() {
     if (regionSelDistrict.value) parts.push(regionSelDistrict.value)
     birthPlace.value = parts.join(' ')
     birthLongitude.value = regionSelLongitude.value
+    // 持久化出生地到本地，便于重新进入历史会话时恢复
+    if (conversationId.value) setBirthPlaceLocal(conversationId.value, birthPlace.value, birthLongitude.value)
     // 已有出生时间则自动重排
     if (birthDate.value && birthTime.value && gender.value) {
       const time = `${birthDate.value} ${birthTime.value}`
@@ -530,6 +532,12 @@ async function switchToSession(session: ChatSession) {
       gender.value = bi.gender as '男' | '女'
       _skipNextChartWatch = true
       try { chartData.value = await getChart(bi.time, bi.gender, 2, 1) } catch { chartData.value = null }
+    }
+    // 从本地存储恢复出生地/经度（后端 birth-info 接口不含这两项）
+    const bp = getBirthPlaceLocal(session.id)
+    if (bp) {
+      birthPlace.value = bp.place
+      birthLongitude.value = bp.longitude
     }
   } catch (e) {
     uni.showToast({ title: '加载消息失败', icon: 'none' })
