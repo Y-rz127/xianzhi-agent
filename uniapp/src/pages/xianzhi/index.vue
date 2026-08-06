@@ -368,10 +368,8 @@ const filteredDistricts = computed(() => {
   if (!prov) return []
   const city = prov.cities.find(c => c.name === regionSelCity.value)
   if (!city) return []
-  // 有搜索词时过滤区县（用户可能直接搜区县名）
-  const kw = regionSearchText.value.trim()
-  if (!kw) return city.districts
-  return city.districts.filter(d => d.name.includes(kw))
+  // 已选城市时直接展示全部区县（避免搜索词导致区县列为空）
+  return city.districts
 })
 
 /** 搜索命中时自动定位到对应省市（用于搜区县名的情况） */
@@ -416,6 +414,8 @@ function onSelectCity(c: City) {
   if (c.districts.length > 0 && !c.districts.some(d => d.name === regionSelDistrict.value)) {
     regionSelDistrict.value = c.districts[0].name
   }
+  // 选城市后清搜索词，避免区县列表被搜索词过度过滤
+  regionSearchText.value = ''
 }
 // 搜索词变化时自动定位到匹配的区县/城市（搜"浦北县"直接跳到广西钦州市浦北县）
 watch(regionSearchText, (kw) => {
