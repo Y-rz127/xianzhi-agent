@@ -445,6 +445,7 @@ async function loadHistorySessions() {
 
 function openHistoryDrawer() {
   showHistoryDrawer.value = true
+  refreshProfile()
   loadHistorySessions()
 }
 
@@ -528,12 +529,18 @@ const birthSummary = computed(() =>
 const placeholderText = '报上生辰排盘，或直接请教命理问题…'
 
 // 抽屉用户区：头像与昵称（取自登录态）
-const profileUser = computed(() => getUser())
+// 用 ref 而非 computed(getUser())，因为 uni.getStorageSync 不被 Vue 响应追踪，
+// computed 会永久缓存首次求值结果导致登录后仍显示"未登录"
+const profileUser = ref<any>(null)
 const nickname = computed(() => profileUser.value?.nickname || (isLoggedIn() ? '我的' : '未登录'))
 const avatarText = computed(() => {
   const n = profileUser.value?.nickname
   return n ? n.charAt(0) : (isLoggedIn() ? '我' : '易')
 })
+/** 从 storage 刷新登录态（打开抽屉 / 页面 onShow 时调用） */
+function refreshProfile() {
+  profileUser.value = getUser()
+}
 
 // 出生信息面板手动修改时，自动重拉 chartData
 watch([birthDate, birthTime, gender, birthLongitude], async ([d, t, g]) => {

@@ -45,15 +45,6 @@
         <text class="entry-hint">{{ favorites.length ? `共 ${favorites.length} 条收藏` : '还没有收藏' }}</text>
       </view>
 
-      <!-- 我的对话 -->
-      <view v-if="user" class="card entry-card" @tap="uni.navigateTo({ url: '/pages/mine/sessions' })">
-        <view class="entry-head">
-          <view class="card-title-row"><text class="card-dot">✦</text><text class="card-title">我的对话</text></view>
-          <text class="entry-arrow">›</text>
-        </view>
-        <text class="entry-hint">{{ sessions.length ? `共 ${sessions.length} 条对话` : '还没有对话记录' }}</text>
-      </view>
-
       <!-- 塔罗记录 -->
       <view v-if="user" class="card entry-card" @tap="uni.navigateTo({ url: '/pages/mine/tarots' })">
         <view class="entry-head">
@@ -68,7 +59,6 @@
         <view class="link-row" @tap="goAbout"><text>关于我们</text><text class="link-arrow">›</text></view>
         <view class="link-row" @tap="goFeedback"><text>问题反馈</text><text class="link-arrow">›</text></view>
         <view class="link-row" @tap="goPrivacy"><text>隐私政策</text><text class="link-arrow">›</text></view>
-        <view class="link-row" @tap="goSettings"><text>服务器设置</text><text class="link-arrow">›</text></view>
       </view>
 
       <view v-if="user" class="logout-btn" @tap="onLogout">退出登录</view>
@@ -85,7 +75,6 @@ import { requireLogin } from '@/utils/authGuard'
 import {
   fetchProfiles,
   fetchFavorites,
-  fetchMySessions,
   fetchTarotRecords,
   updateMe,
 } from '@/api'
@@ -108,7 +97,6 @@ try {
 const user = ref<any>(null)
 const profiles = ref<any[]>([])
 const favorites = ref<any[]>([])
-const sessions = ref<any[]>([])
 const tarots = ref<any[]>([])
 
 const avatarText = computed(() => (user.value?.nickname ? user.value.nickname.slice(0, 1) : '☯'))
@@ -119,26 +107,22 @@ onShow(() => {
   if (user.value) {
     loadProfiles()
     loadFavorites()
-    loadSessions()
     loadTarots()
   } else {
     profiles.value = []
     favorites.value = []
-    sessions.value = []
     tarots.value = []
   }
 })
 
 async function loadProfiles() { try { profiles.value = await fetchProfiles() } catch { profiles.value = [] } }
 async function loadFavorites() { try { favorites.value = await fetchFavorites() } catch { favorites.value = [] } }
-async function loadSessions() { try { sessions.value = await fetchMySessions() } catch { sessions.value = [] } }
 async function loadTarots() { try { tarots.value = await fetchTarotRecords() } catch { tarots.value = [] } }
 
 function goLogin() { uni.navigateTo({ url: '/pages/login/index' }) }
 function goAbout() { uni.navigateTo({ url: '/pages/about/index' }) }
 function goFeedback() { uni.navigateTo({ url: '/pages/feedback/index' }) }
 function goPrivacy() { uni.navigateTo({ url: '/pages/legal/privacy' }) }
-function goSettings() { uni.navigateTo({ url: '/pages/settings/index' }) }
 
 function onHeaderTap() {
   if (!user.value) { goLogin(); return }
@@ -170,7 +154,6 @@ function onLogout() {
     user.value = null
     profiles.value = []
     favorites.value = []
-    sessions.value = []
     tarots.value = []
     uni.showToast({ title: '已退出', icon: 'none' })
   }})
