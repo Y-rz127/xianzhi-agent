@@ -1315,7 +1315,6 @@ messages.value.push({
   border-color: $color-vermilion;
 }
 .msg-body {
-  flex: 0 1 auto;
   min-width: 0;
   max-width: calc(100% - 88rpx);
   display: flex;
@@ -1328,7 +1327,6 @@ messages.value.push({
   margin-left: auto;
 }
 .msg-text {
-  display: inline-block;
   padding: 22rpx 32rpx;
   border-radius: 8rpx 28rpx 28rpx 28rpx;
   font-size: 32rpx;
@@ -1342,6 +1340,9 @@ messages.value.push({
   box-sizing: border-box;
   overflow: hidden;
   box-shadow: $shadow-sm;
+}
+.msg.user .msg-text {
+  text-align: right;
 }
 .msg.user .msg-text {
   background: $color-primary;

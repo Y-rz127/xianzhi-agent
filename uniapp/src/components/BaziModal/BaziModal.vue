@@ -663,6 +663,9 @@ async function generateReport() {
 }
 .section-cta {
   flex: 1 1 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   margin-top: 24rpx;
   padding: 24rpx 12rpx;
   font-size: 30rpx;
