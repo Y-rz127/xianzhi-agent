@@ -1278,19 +1278,7 @@ messages.value.push({
   flex-direction: row-reverse;
 }
 .avatar {
-  flex-shrink: 0;
-  width: 64rpx;
-  height: 64rpx;
-  line-height: 64rpx;
-  text-align: center;
-  background: $color-primary;
-  color: $color-bg;
-  border-radius: 50%;
-  font-size: 24rpx;
-  font-weight: 600;
-  border: 1rpx solid $color-primary;
-  position: relative;
-  z-index: 2;
+  display: none;
 }
 .msg.user .avatar {
   background: $color-vermilion;
@@ -1299,7 +1287,7 @@ messages.value.push({
 .msg-body {
   flex: 1;
   min-width: 0;
-  max-width: calc(100% - 80rpx);
+  max-width: 100%;
   display: flex;
   flex-direction: column;
   overflow-x: hidden;
