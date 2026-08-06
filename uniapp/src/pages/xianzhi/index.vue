@@ -352,28 +352,62 @@ const filteredProvinces = computed(() => {
   if (!regionSearchText.value) return regionData
   const kw = regionSearchText.value.trim()
   return regionData.filter(p =>
-    p.name.includes(kw) || p.cities.some(c => c.name.includes(kw))
+    p.name.includes(kw) ||
+    p.cities.some(c => c.name.includes(kw)) ||
+    p.cities.some(c => c.districts.some(d => d.name.includes(kw)))
   )
 })
 const filteredCities = computed(() => {
   const prov = regionData.find(p => p.name === regionSelProvince.value)
   if (!prov) return []
-  if (!regionSearchText.value.trim()) return prov.cities
-  const kw = regionSearchText.value.trim()
-  return prov.cities.filter(c => c.name.includes(kw))
+  // 有搜索词时不过滤城市列表（避免搜省名后点省份城市列为空）
+  return prov.cities
 })
 const filteredDistricts = computed(() => {
   const prov = regionData.find(p => p.name === regionSelProvince.value)
   if (!prov) return []
   const city = prov.cities.find(c => c.name === regionSelCity.value)
   if (!city) return []
-  return city.districts
+  // 有搜索词时过滤区县（用户可能直接搜区县名）
+  const kw = regionSearchText.value.trim()
+  if (!kw) return city.districts
+  return city.districts.filter(d => d.name.includes(kw))
 })
+
+/** 搜索命中时自动定位到对应省市（用于搜区县名的情况） */
+function autoLocateBySearch(kw: string) {
+  for (const p of regionData) {
+    for (const c of p.cities) {
+      const match = c.districts.find(d => d.name.includes(kw))
+      if (match) {
+        regionSelProvince.value = p.name
+        regionSelCity.value = c.name
+        regionSelDistrict.value = match.name
+        regionSelLongitude.value = c.longitude
+        return true
+      }
+    }
+  }
+  // 搜城市名也自动定位
+  for (const p of regionData) {
+    const c = p.cities.find(city => city.name.includes(kw))
+    if (c) {
+      regionSelProvince.value = p.name
+      regionSelCity.value = c.name
+      regionSelLongitude.value = c.longitude
+      if (c.districts.length > 0) regionSelDistrict.value = c.districts[0].name
+      return true
+    }
+  }
+  return false
+}
 
 function onSelectProvince(name: string) {
   regionSelProvince.value = name
   regionSelCity.value = ''
   regionSelDistrict.value = ''
+  // 选省后清搜索词，避免城市列表被搜索词过度过滤
+  regionSearchText.value = ''
 }
 function onSelectCity(c: City) {
   regionSelCity.value = c.name
@@ -383,6 +417,12 @@ function onSelectCity(c: City) {
     regionSelDistrict.value = c.districts[0].name
   }
 }
+// 搜索词变化时自动定位到匹配的区县/城市（搜"浦北县"直接跳到广西钦州市浦北县）
+watch(regionSearchText, (kw) => {
+  const t = (kw || '').trim()
+  if (!t) return
+  autoLocateBySearch(t)
+})
 function confirmRegionPicker() {
   if (regionSelProvince.value && regionSelCity.value) {
     const parts = [regionSelProvince.value, regionSelCity.value]
