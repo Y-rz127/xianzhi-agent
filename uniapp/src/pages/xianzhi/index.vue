@@ -124,7 +124,7 @@
     </view>
 
     <!-- 输入栏 -->
-    <view class="input-bar">
+    <view class="input-bar" :style="inputBarStyle">
       <view class="input-wrap">
         <textarea
           class="input"
@@ -133,6 +133,7 @@
           placeholder-class="input-placeholder"
           :auto-height="true"
           :show-confirm-bar="false"
+          :cursor-spacing="20"
           confirm-type="send"
           @confirm="onSend"
         />
@@ -293,7 +294,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, nextTick, watch } from 'vue'
+import { ref, computed, nextTick, watch, onMounted, onBeforeUnmount } from 'vue'
 import { onLoad, onHide, onShow } from '@dcloudio/uni-app'
 import { requireLogin } from '@/utils/authGuard'
 import { chatWithXianzhiWS, closeAllWS } from '@/api/chat'
@@ -581,6 +582,25 @@ try {
   const sysInfo = uni.getWindowInfo()
   statusBarHeight.value = sysInfo.statusBarHeight || 20
 } catch {}
+
+// 键盘高度：监听 onKeyboardHeightChange，键盘弹起时把输入栏上移，避免遮挡
+const keyboardHeight = ref(0)
+const inputBarStyle = computed(() => {
+  if (keyboardHeight.value <= 0) return ''
+  return `transform: translateY(-${keyboardHeight.value}px); transition: transform 0.15s ease;`
+})
+let _kbHandler: ((res: any) => void) | null = null
+onMounted(() => {
+  // #ifdef MP-WEIXIN
+  _kbHandler = (res: any) => { keyboardHeight.value = res?.height || 0 }
+  uni.onKeyboardHeightChange(_kbHandler)
+  // #endif
+})
+onBeforeUnmount(() => {
+  // #ifdef MP-WEIXIN
+  if (_kbHandler) uni.offKeyboardHeightChange(_kbHandler)
+  // #endif
+})
 
 const today = getLocalDateString()
 const birthTimeFull = computed(() =>
@@ -1295,7 +1315,7 @@ messages.value.push({
   border-color: $color-vermilion;
 }
 .msg-body {
-  flex: 1;
+  flex: 0 1 auto;
   min-width: 0;
   max-width: calc(100% - 88rpx);
   display: flex;
@@ -1305,8 +1325,10 @@ messages.value.push({
 }
 .msg.user .msg-body {
   align-items: flex-end;
+  margin-left: auto;
 }
 .msg-text {
+  display: inline-block;
   padding: 22rpx 32rpx;
   border-radius: 8rpx 28rpx 28rpx 28rpx;
   font-size: 32rpx;

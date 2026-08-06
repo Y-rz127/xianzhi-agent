@@ -176,16 +176,17 @@
           <view v-else class="report-placeholder">
             <text>点击下方按钮生成 AI 分节命理报告</text>
           </view>
+          <text
+            v-if="!reportLoading"
+            :class="['btn', 'btn-primary', 'section-cta', reportLoading && 'disabled']"
+            @tap="generateReport"
+          >{{ reportContent ? '重新生成报告' : '生成完整报告' }}</text>
         </view>
       </scroll-view>
 
       <!-- 底部操作栏 -->
       <view class="modal-footer">
         <text class="btn" @tap="handleDownloadPdf">下载 PDF</text>
-        <text
-          :class="['btn', 'btn-primary', reportLoading && 'disabled']"
-          @tap="generateReport"
-        >{{ reportLoading ? '生成中…' : '生成完整报告' }}</text>
         <text v-if="reportContent" class="btn" @tap="downloadFullPdf">导出完整 PDF</text>
         <text class="btn" @tap="close">关闭</text>
       </view>
@@ -660,6 +661,15 @@ async function generateReport() {
   border-radius: 12rpx;
   padding: 24rpx;
 }
+.section-cta {
+  flex: 1 1 100%;
+  margin-top: 24rpx;
+  padding: 24rpx 12rpx;
+  font-size: 30rpx;
+  font-weight: 600;
+  letter-spacing: 4rpx;
+  box-shadow: 0 4rpx 16rpx rgba(184, 72, 60, 0.25);
+}
 
 /* 底部 */
 .modal-footer {
@@ -672,7 +682,7 @@ async function generateReport() {
   background: $color-paper-warm;
 }
 .btn {
-  flex: 1 1 calc(50% - 6rpx);
+  flex: 1 1 0;
   min-width: 0;
   text-align: center;
   padding: 16rpx 12rpx;
