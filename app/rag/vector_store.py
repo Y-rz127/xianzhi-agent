@@ -89,6 +89,13 @@ def _select_embeddings() -> tuple[Embeddings, str]:
     embedding_id 参与文档指纹计算，换模型后指纹不匹配会自动重建索引，
     保证查询向量与入库向量来自同一模型。
     """
+    # EMBEDDING_MODEL 为空时直接走本地（避免无谓的远程 ping 调用）
+    if not settings.embedding_model or not settings.embedding_model.strip():
+        if not settings.embedding_local_fallback:
+            raise RuntimeError("EMBEDDING_MODEL 未配置且 EMBEDDING_LOCAL_FALLBACK=false")
+        local = _get_local_embeddings()
+        local.embed_query("ping")  # 触发模型加载，不可用则抛错
+        return local, "local:{}".format(settings.embedding_local_model)
     dashscope = get_embeddings()
     try:
         dashscope.embed_query("ping")

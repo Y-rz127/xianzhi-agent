@@ -57,3 +57,6 @@ tests
 # 前端构建生成的类型声明
 frontend/*.config.d.ts
 uniapp/*.config.d.ts
+
+# 本地向量模型
+models/*
