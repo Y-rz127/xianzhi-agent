@@ -1391,7 +1391,8 @@ messages.value.push({
   box-shadow: $shadow-sm;
 }
 .msg.user .msg-text {
-  text-align: right;
+  /* 多行文字从左开始排列（与 AI 消息一致），气泡仍右贴齐 */
+  text-align: left;
   background: $color-primary;
   border-radius: 28rpx 8rpx 28rpx 28rpx;
   color: $color-bg;
