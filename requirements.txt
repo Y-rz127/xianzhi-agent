@@ -1,4 +1,4 @@
-﻿langchain-classic
+langchain-classic
 langchain
 # AI 框架
 # 注意：langchain-dashscope 0.1.8 不支持 bind_tools(Function Calling)，
@@ -46,4 +46,4 @@ chromadb>=1.0.0,<2.0.0
 langchain-chroma>=1.0.0,<2.0.0
 langchain-text-splitters>=0.2.0
 dashscope>=1.20.0
-sentence-transformers>=2.7.0  # 本地 embedding 兜底
+sentence-transformers>=2.7.0  # 本地 embedding 兜底（BGE）

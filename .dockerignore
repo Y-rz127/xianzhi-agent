@@ -3,6 +3,9 @@ frontend/
 uniapp/
 学习资料/
 
+# 本地下载的模型（由 Dockerfile 构建时下载，避免污染镜像）
+models/
+
 # 敏感配置（禁止打进镜像）
 .env
 .env.local
