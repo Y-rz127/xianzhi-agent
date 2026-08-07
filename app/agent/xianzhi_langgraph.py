@@ -125,10 +125,12 @@ def create_xianzhi_graph(workflow):
         if repaired_review.ok:
             log.info("[Reflextion] {} Worker 修复后通过校验 ✓", getattr(worker, "label", "?"))
             return {"final_answer": repaired, "issues": []}
-        log.warning("[Reflextion] {} Worker 修复后仍未通过 ✗", getattr(worker, "label", "?"))
+        # 修复后仍未通过：issues 仅写日志，不再硬拼到用户可见回复中（之前的「口径校验：...」调试信息会泄露给用户，已移除）
+        log.warning("[Reflextion] {} Worker 修复后仍未通过 ✗，降级返回 repaired (残留 {} 条 issue 仅记日志)",
+                    getattr(worker, "label", "?"), len(repaired_review.issues))
         for i, issue in enumerate(repaired_review.issues, 1):
             log.warning("[Reflextion]   残留issue[{}]: {}", i, issue)
-        return {"final_answer": repaired.rstrip() + "\n\n口径校验：" + "；".join(repaired_review.issues), "issues": repaired_review.issues}
+        return {"final_answer": repaired, "issues": repaired_review.issues}
 
     def route_after_check(state: XianzhiGraphState) -> str:
         """条件路由：有 issues 走 repair，否则结束。"""

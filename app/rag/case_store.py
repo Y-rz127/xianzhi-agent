@@ -22,7 +22,7 @@ class CaseRecord:
     source: str = ""
     rating: int = 4
     verified: bool = True
-    features: dict[str, Any] = field(default_factory=dict)
+    features: dict[str] = field(default_factory=dict)
 
 
 def _read_db_cases() -> list[CaseRecord]:
