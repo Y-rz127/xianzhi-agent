@@ -186,7 +186,7 @@
 
       <!-- 底部操作栏 -->
       <view class="modal-footer">
-        <text class="btn" @tap="handleDownloadPdf">下载 PDF</text>
+        <text v-if="!reportContent" class="btn" @tap="handleDownloadPdf">下载 PDF</text>
         <text v-if="reportContent" class="btn" @tap="downloadFullPdf">导出完整 PDF</text>
         <text class="btn" @tap="close">关闭</text>
       </view>
