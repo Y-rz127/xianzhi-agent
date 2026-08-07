@@ -2,8 +2,10 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# 国内 pip 镜像加速构建（保留）
-ENV PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+# 国内 pip 镜像加速构建（腾讯云内网镜像 + 重试/超时，避开清华 403 问题）
+ENV PIP_INDEX_URL=https://mirrors.cloud.tencent.com/pypi/simple \
+    PIP_RETRIES=5 \
+    PIP_TIMEOUT=60
 
 COPY requirements.txt .
 RUN apt-get update && apt-get install -y --no-install-recommends fonts-noto-cjk && rm -rf /var/lib/apt/lists/*
