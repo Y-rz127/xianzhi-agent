@@ -195,7 +195,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import type { Pillar, WuxingItem, DayunItem, ShenshaItem, LiuNianItem, ChartAnalysis } from '@/api'
 import { generateFullReport, downloadReport, downloadFullReportPdf } from '@/api'
 import MarkdownRender from '@/components/MarkdownRender/MarkdownRender.vue'
@@ -236,6 +236,18 @@ const zhiColor = (c: string) => zhiWx[c] || '#e5e7eb'
 
 const reportContent = ref('')
 const reportLoading = ref(false)
+
+// 弹窗关闭/出生时间变化时清空报告，避免不同八字之间互相串台
+watch(() => props.visible, (v) => {
+  if (!v) {
+    reportContent.value = ''
+    reportLoading.value = false
+  }
+})
+watch(() => props.birthTime, () => {
+  reportContent.value = ''
+  reportLoading.value = false
+})
 
 const maxWuxing = computed(() => Math.max(...props.wuxing.map((w) => w.count), 1))
 const liunian = computed(() => props.liunian || [])

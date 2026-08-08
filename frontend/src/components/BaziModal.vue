@@ -333,7 +333,16 @@ watch(() => props.visible, (v) => {
     activeTab.value = 'pillars'
   } else {
     activeShensha.value = null
+    // 关闭弹窗时清空报告状态，避免下次打开不同八字时显示上一次的报告
+    reportContent.value = ""
+    reportLoading.value = false
   }
+})
+
+// 出生时间变化时（同一弹窗内切换/重新传入不同八字）也清空报告
+watch(() => props.birthTime, () => {
+  reportContent.value = ""
+  reportLoading.value = false
 })
 
 watch(activeTab, (tab) => {
