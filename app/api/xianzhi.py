@@ -1,11 +1,12 @@
 """先知（Xianzhi）相关接口。"""
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
 from sse_starlette.sse import EventSourceResponse
 
 from app.api import state
 from app.api.common import check_message_length, client_error, is_message_too_long, message_too_long_text
+from app.api.deps import require_admin
 from app.db import users as user_store
 from app.logger import log
 
@@ -184,7 +185,7 @@ async def chat_with_xianzhi_sync(
             return {"error": client_error(e)}
 
 
-@router.get("/sessions")
+@router.get("/sessions", dependencies=[Depends(require_admin)])
 async def list_xianzhi_sessions(prefix: str = "web-xianzhi"):
     """获取先知会话列表。
     prefix 可选值：web-xianzhi（默认，PC 端）/ mp-xianzhi（小程序端）。
@@ -204,7 +205,7 @@ async def list_my_sessions(token: str = Query(None)):
     return get_session_info(prefix="mp-xianzhi", user_id=user["id"])
 
 
-@router.delete("/sessions/{session_id}")
+@router.delete("/sessions/{session_id}", dependencies=[Depends(require_admin)])
 async def delete_xianzhi_session(session_id: str):
     """删除先知会话（含消息记录）。"""
     from app.memory.postgres_memory import delete_session
@@ -212,14 +213,14 @@ async def delete_xianzhi_session(session_id: str):
     return {"status": "ok"}
 
 
-@router.get("/sessions/{session_id}/messages")
+@router.get("/sessions/{session_id}/messages", dependencies=[Depends(require_admin)])
 async def get_xianzhi_session_messages(session_id: str):
     """获取会话的完整消息记录。"""
     from app.memory.postgres_memory import get_messages
     return get_messages(session_id)
 
 
-@router.get("/sessions/{session_id}/birth-info")
+@router.get("/sessions/{session_id}/birth-info", dependencies=[Depends(require_admin)])
 async def get_xianzhi_session_birth_info(session_id: str):
     """从会话历史中的排盘工具调用提取出生信息，供前端恢复命盘上下文。"""
     from app.memory.postgres_memory import get_birth_info_from_session

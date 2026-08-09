@@ -568,14 +568,13 @@ export interface AnswerFeedbackItem {
 }
 
 export async function submitFeedback(content: string, contact?: string): Promise<{ id: string }> {
-  const params = new URLSearchParams({ content })
-  if (contact) params.set("contact", contact)
   const token = localStorage.getItem("XZ_TOKEN")
-  const headers: Record<string, string> = { "Content-Type": "application/x-www-form-urlencoded" }
-  if (token) headers["Authorization"] = `Bearer ${token}`
+  const params = new URLSearchParams()
+  if (token) params.set("token", token)
   const res = await apiFetch(`${API_BASE}/ai/feedback?${params.toString()}`, {
     method: "POST",
-    headers,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ content, contact: contact || "" }),
   })
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: `提交失败 ${res.status}` }))

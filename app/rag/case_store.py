@@ -39,7 +39,7 @@ def _read_db_cases() -> list[CaseRecord]:
             records.append(CaseRecord(
                 id=str(item.get("id") or ""),
                 title=str(item.get("title") or ""),
-                question_domain=str(item.get("domains") or ["general"])[0] if item.get("domains") else "general",
+                question_domain=(item.get("domains") or ["general"])[0] if item.get("domains") else "general",
                 content=content,
                 source=str(item.get("source") or "cases"),
                 rating=int(item.get("rating") or 5),
@@ -55,7 +55,7 @@ def _read_db_cases() -> list[CaseRecord]:
             records.append(CaseRecord(
                 id=str(item.get("id") or ""),
                 title=str(item.get("title") or ""),
-                question_domain=str(item.get("domains") or ["general"])[0] if item.get("domains") else "general",
+                question_domain=(item.get("domains") or ["general"])[0] if item.get("domains") else "general",
                 content=content,
                 source=str(item.get("source") or "chart_cases"),
                 rating=int(item.get("rating") or 4),

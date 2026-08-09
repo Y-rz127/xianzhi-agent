@@ -106,32 +106,3 @@ class ToolCallAgent(ReActAgent):
             msgs.append(SystemMessage(content=self.system_prompt))
         msgs.extend(self.message_list)
         return msgs
-
-    def run_stream(self, user_prompt):
-        """流式执行，返回每一步的思考和结果。"""
-        self.reset()
-        self.message_list.append(HumanMessage(content=user_prompt))
-        yield "[思考] 收到用户请求: {}".format(user_prompt[:50])
-        
-        while self.state != AgentState.FINISHED and self._step_count < self.max_steps:
-            self._step_count += 1
-            yield "[思考] Step {}: 分析当前情况...".format(self._step_count)
-            
-            should_act = self.think()
-            if should_act:
-                last_msg = self.message_list[-1]
-                tool_calls = getattr(last_msg, "tool_calls", None) or []
-                for tc in tool_calls:
-                    yield "[行动] 调用工具: {} (参数: {})".format(
-                        tc.get("name"), tc.get("args")
-                    )
-                
-                act_result = self.act()
-                yield "[观察] 工具执行结果: {}".format(act_result[:100])
-                self.observe(act_result)
-            else:
-                yield "[回答] {}".format(self.final_answer)
-                break
-        
-        if self.state == AgentState.FINISHED:
-            yield "[结束] 任务完成"

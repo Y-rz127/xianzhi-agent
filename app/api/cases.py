@@ -17,9 +17,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Response
 
 from app.api.common import client_error
+from app.api.deps import require_admin
 from app.logger import log
 
 router = APIRouter(prefix="/cases", tags=["Cases"])
@@ -142,7 +143,7 @@ def _extract_bazi_brief(chart_data: Any) -> str | None:
     return None
 
 
-@router.get("")
+@router.get("", dependencies=[Depends(require_admin)])
 async def list_cases():
     """获取所有命例列表（cases 表，Bazi 结构）。"""
     if not ensure_table():
@@ -192,7 +193,7 @@ async def list_cases():
         raise HTTPException(status_code=500, detail=client_error(e))
 
 
-@router.post("")
+@router.post("", dependencies=[Depends(require_admin)])
 async def create_case(payload: dict):
     """保存新命例（写入 cases 表）。
 
@@ -237,7 +238,7 @@ async def create_case(payload: dict):
         raise HTTPException(status_code=500, detail=client_error(e))
 
 
-@router.get("/{case_id}")
+@router.get("/{case_id}", dependencies=[Depends(require_admin)])
 async def get_case(case_id: str):
     """获取单个命例详情（cases 表）。"""
     if not ensure_table():
@@ -275,7 +276,7 @@ async def get_case(case_id: str):
         raise HTTPException(status_code=500, detail=client_error(e))
 
 
-@router.put("/{case_id}")
+@router.put("/{case_id}", dependencies=[Depends(require_admin)])
 async def update_case(case_id: str, payload: dict):
     """更新命例（名称、标签、出生信息）。"""
     if not ensure_table():
@@ -342,7 +343,7 @@ async def update_case(case_id: str, payload: dict):
         raise HTTPException(status_code=500, detail=client_error(e))
 
 
-@router.delete("/{case_id}")
+@router.delete("/{case_id}", dependencies=[Depends(require_admin)])
 async def delete_case(case_id: str):
     """删除命例（cases 表）。"""
     if not ensure_table():
@@ -359,7 +360,7 @@ async def delete_case(case_id: str):
         raise HTTPException(status_code=500, detail=client_error(e))
 
 
-@router.get("/export/json")
+@router.get("/export/json", dependencies=[Depends(require_admin)])
 async def export_cases_json():
     """导出所有命例为 JSON 文件（cases 表，Bazi 结构）。"""
     if not ensure_table():
@@ -403,7 +404,7 @@ async def export_cases_json():
         raise HTTPException(status_code=500, detail=client_error(e))
 
 
-@router.post("/import/json")
+@router.post("/import/json", dependencies=[Depends(require_admin)])
 async def import_cases_json(payload: dict):
     """从 JSON 导入命例（写入 cases 表，Bazi 结构）。
 

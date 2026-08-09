@@ -10,8 +10,11 @@ class ReActAgent(BaseAgent):
     final_answer = ""
 
     def step(self):
-        """执行一轮 ReAct：think() 决策；无需工具则标记完成并返回最终答案，否则 act()+observe()。"""
+        """执行一轮 ReAct：think() 决策；无需工具则结束，否则 act()+observe()。"""
         should_act = self.think()
+        # think() 中若发生异常，子类会将 state 置为 ERROR，此处不覆盖
+        if self.state == AgentState.ERROR:
+            return self.final_answer or "(执行出错)"
         if not should_act:
             # 没有工具调用 = LLM 已给出最终答案，标记完成避免空转
             self.state = AgentState.FINISHED

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
@@ -36,19 +37,29 @@ def _hash_password(password: str) -> str:
 
 
 def _init_default_admin() -> None:
+    """首次启动时从环境变量初始化默认管理员。
+
+    通过 DEFAULT_ADMIN_USERNAME / DEFAULT_ADMIN_PASSWORD 环境变量配置；
+    未配置则不创建默认管理员（生产环境更安全）。
+    """
     accounts = _load_accounts()
-    if not accounts:
-        import datetime
-        accounts.append({
-            "id": "default",
-            "username": "Yrz666",
-            "password_hash": _hash_password("20040505"),
-            "nickname": "超级管理员",
-            "enabled": True,
-            "is_super": True,
-            "created_at": datetime.datetime.now().isoformat(),
-        })
-        _save_accounts(accounts)
+    if accounts:
+        return
+    username = os.environ.get("DEFAULT_ADMIN_USERNAME", "").strip()
+    password = os.environ.get("DEFAULT_ADMIN_PASSWORD", "").strip()
+    if not username or not password:
+        return
+    import datetime
+    accounts.append({
+        "id": "default",
+        "username": username,
+        "password_hash": _hash_password(password),
+        "nickname": "超级管理员",
+        "enabled": True,
+        "is_super": True,
+        "created_at": datetime.datetime.now().isoformat(),
+    })
+    _save_accounts(accounts)
 
 
 _init_default_admin()

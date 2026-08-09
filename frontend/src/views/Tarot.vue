@@ -85,7 +85,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from "vue"
+import { ref, computed, onBeforeUnmount } from "vue"
 import {
   drawTarotCardsWS,
   interpretTarotWS,
@@ -110,6 +110,27 @@ const drawing = ref(false)
 const interpreting = ref(false)
 const cards = ref<DrawnCard[]>([])
 const interpretation = ref("")
+
+// 保存当前 WebSocket 句柄，组件卸载时主动关闭，避免连接泄漏
+let drawWs: WebSocket | null = null
+let interpretWs: WebSocket | null = null
+
+function closeWs(ws: WebSocket | null): WebSocket | null {
+  if (!ws) return null
+  try {
+    if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+      ws.close()
+    }
+  } catch {
+    /* 忽略关闭异常 */
+  }
+  return null
+}
+
+onBeforeUnmount(() => {
+  drawWs = closeWs(drawWs)
+  interpretWs = closeWs(interpretWs)
+})
 
 // Toast
 const toastMsg = ref("")
@@ -140,8 +161,11 @@ function drawCards() {
   drawing.value = true
   cards.value = []
   interpretation.value = ""
+  // 重新抽牌前关闭旧的解读连接
+  interpretWs = closeWs(interpretWs)
 
-  drawTarotCardsWS(selectedSpread.value, {
+  drawWs = closeWs(drawWs)
+  drawWs = drawTarotCardsWS(selectedSpread.value, {
     onCards: (data: TarotDrawnCard[]) => {
       cards.value = data.map((c) => ({ ...c, revealed: false }))
       drawing.value = false
@@ -181,7 +205,8 @@ function onInterpret() {
     meaning: c.meaning,
   }))
 
-  interpretTarotWS(
+  interpretWs = closeWs(interpretWs)
+  interpretWs = interpretTarotWS(
     {
       spread: selectedSpread.value,
       cards: payload,
@@ -205,6 +230,8 @@ function onInterpret() {
 
 function reset() {
   if (interpreting.value) return
+  drawWs = closeWs(drawWs)
+  interpretWs = closeWs(interpretWs)
   drawn.value = false
   cards.value = []
   interpretation.value = ""

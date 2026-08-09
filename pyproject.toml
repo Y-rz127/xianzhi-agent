@@ -2,7 +2,8 @@
 name = "xianzhi-agent"
 version = "0.1.0"
 description = "先知 - 八字命理分析预测智能体"
-requires-python = ">=3.10"
+# 项目约束：仅支持 Python 3.11 / 3.12（3.10 部分依赖缺失，3.13/3.14 存在兼容性问题）
+requires-python = ">=3.11,<3.13"
 dependencies = [
     "langchain-core>=1.0.0,<2.0.0",
     "langchain-openai>=1.0.0,<2.0.0",
@@ -29,11 +30,13 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# 本地 embedding 回退（DashScope 不可用时使用 HuggingFace 模型）
+local-embedding = ["sentence-transformers>=2.7.0"]
 dev = ["pytest>=8.0.0", "pytest-asyncio>=0.24.0", "ruff>=0.7.0"]
 
 [tool.ruff]
 line-length = 110
-target-version = "py310"
+target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "W"]

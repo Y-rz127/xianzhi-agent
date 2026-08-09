@@ -4,9 +4,10 @@ from __future__ import annotations
 import json
 from datetime import datetime
 
-from fastapi import APIRouter, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from app.api.common import client_error
+from app.api.deps import require_admin
 from app.db import user_data, users as user_store
 from app.logger import log
 
@@ -135,7 +136,7 @@ def _extract_fact_to_profile(
     )
 
 
-@router.delete("/{fid}")
+@router.delete("/{fid}", dependencies=[Depends(require_admin)])
 async def delete_feedback(fid: str):
     """删除一条反馈；不存在返回 404。"""
     try:
@@ -148,7 +149,7 @@ async def delete_feedback(fid: str):
     except Exception as e:
         log.exception("删除反馈失败")
         raise HTTPException(status_code=500, detail=client_error(e))
-@router.get("")
+@router.get("", dependencies=[Depends(require_admin)])
 async def get_feedback_list(limit: int = Query(default=200, ge=1, le=1000)):
     """管理员查看反馈列表（按时间倒序）。"""
     try:
@@ -159,7 +160,7 @@ async def get_feedback_list(limit: int = Query(default=200, ge=1, le=1000)):
         raise HTTPException(status_code=500, detail=client_error(e))
 
 
-@router.get("/answers")
+@router.get("/answers", dependencies=[Depends(require_admin)])
 async def get_answer_feedback_list(
     limit: int = Query(default=200, ge=1, le=1000),
     rating: str | None = Query(default=None),
@@ -173,7 +174,7 @@ async def get_answer_feedback_list(
         raise HTTPException(status_code=500, detail=client_error(e))
 
 
-@router.get("/answers/export/sft")
+@router.get("/answers/export/sft", dependencies=[Depends(require_admin)])
 async def export_answer_feedback_sft(
     limit: int = Query(default=1000, ge=1, le=10000),
     rating: str = Query(default="up"),
@@ -195,7 +196,7 @@ async def export_answer_feedback_sft(
         raise HTTPException(status_code=500, detail=client_error(e))
 
 
-@router.post("/answers/{fid}/review")
+@router.post("/answers/{fid}/review", dependencies=[Depends(require_admin)])
 async def review_answer_feedback(fid: str, body: dict | None = None):
     """标记一条回答反馈为已审核。"""
     reviewer = (body or {}).get("reviewer", "admin")
@@ -211,7 +212,7 @@ async def review_answer_feedback(fid: str, body: dict | None = None):
         raise HTTPException(status_code=500, detail=client_error(e))
 
 
-@router.post("/answers/{fid}/promote")
+@router.post("/answers/{fid}/promote", dependencies=[Depends(require_admin)])
 async def promote_answer_to_case(fid: str, body: dict | None = None):
     """将一条已审核的回答反馈转为结构化案例（支持好评/差评）。"""
     reviewer = (body or {}).get("reviewer", "admin")
@@ -228,7 +229,7 @@ async def promote_answer_to_case(fid: str, body: dict | None = None):
         raise HTTPException(status_code=500, detail=client_error(e))
 
 
-@router.get("/answers/export/dpo")
+@router.get("/answers/export/dpo", dependencies=[Depends(require_admin)])
 async def export_dpo_samples(
     limit: int = Query(default=500, ge=1, le=5000),
 ):

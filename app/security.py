@@ -35,6 +35,12 @@ _ADMIN_PREFIXES = (
     "/api/ai/metrics",
     "/api/ai/rag/",
     "/api/ai/observability/",
+    # 命例库管理（增删改查、导入导出）属于管理类操作，需 API Key
+    "/api/ai/xianzhi/cases",
+    # 反馈管理类接口（回答反馈列表/导出/审核/转案例）需 API Key
+    # 注意：submit_feedback(POST /feedback)、submit_answer_feedback(POST /feedback/answer) 仍为用户接口
+    # GET /feedback（反馈列表）、DELETE /feedback/{fid} 通过 Depends(require_admin) 鉴权
+    "/api/ai/feedback/answers",
 )
 
 

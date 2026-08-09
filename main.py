@@ -45,6 +45,7 @@ async def lifespan(app: FastAPI):
         http_client=_http,
     )
     # 意图拆解模型（轻量快速，留空则复用主模型）
+    _decompose_http = httpx.Client(trust_env=False) if settings.decompose_model else None
     decompose_model = ChatOpenAI(
         model=settings.decompose_model or settings.dashscope_model,
         base_url=settings.dashscope_url,
@@ -52,9 +53,10 @@ async def lifespan(app: FastAPI):
         temperature=0.1,
         timeout=30.0,
         max_retries=settings.llm_max_retries,
-        http_client=httpx.Client(trust_env=False),
+        http_client=_decompose_http,
     ) if settings.decompose_model else chat_model
     # Reviewer 审核模型（独立实例，留空则复用主模型）
+    _reviewer_http = httpx.Client(trust_env=False) if settings.reviewer_model else None
     reviewer_model = ChatOpenAI(
         model=settings.reviewer_model or settings.dashscope_model,
         base_url=settings.dashscope_url,
@@ -62,7 +64,7 @@ async def lifespan(app: FastAPI):
         temperature=0.1,
         timeout=30.0,
         max_retries=settings.llm_max_retries,
-        http_client=httpx.Client(trust_env=False),
+        http_client=_reviewer_http,
     ) if settings.reviewer_model else chat_model
 
     # 2. 记忆（数据库不可达时降级，不阻断端口监听）
@@ -129,6 +131,25 @@ async def lifespan(app: FastAPI):
         close_global_conn()
     except Exception as e:
         log.warning("关闭 PG 连接池失败: {}", e)
+
+    # 关闭 RAG 指纹持久化连接池
+    try:
+        from app.rag.vector_store import close_fp_pool
+        close_fp_pool()
+    except Exception as e:
+        log.warning("关闭 RAG 指纹连接池失败: {}", e)
+
+    # 关闭 LLM 客户端 httpx 连接池（仅关闭独立实例，复用主模型的不再单独关闭）
+    for _client in (_decompose_http, _reviewer_http):
+        try:
+            if _client is not None:
+                _client.close()
+        except Exception:
+            pass
+    try:
+        _http.close()
+    except Exception:
+        pass
 
     try:
         await mcp_manager.stop()

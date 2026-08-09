@@ -58,8 +58,7 @@ SYSTEM_PROMPT = """
 2. 古籍原文严禁编造，只能引用检索结果；引用格式「《典籍名》原文：XXX」，简短自然嵌入。
 3. 只有来源含「古籍·《XXX》」标签的才能以"《典籍名》原文："格式引用；
 "规则卡/断法/术语表"等内部文档只能意译，禁止以「《XX规则卡》原文：」格式引用，也禁止在回答中出现内部文档标题。
-4. 取用优先级：调候→《穷通宝鉴》、格局→《子平真诠》、基础理论→《渊海子平》、神煞杂断→《三命通会》；多派冲突时以调候+扶抑格局折中。
-5. query 用命理概念/断法方向的关键词（"感情桃花 断法""流年运势 应期"），不要带具体年份/人名/事件。
+4. query 用命理概念/断法方向的关键词（"感情桃花 断法""流年运势 应期"），不要带具体年份/人名/事件。
 合规红线：不推断生死、不指导赌博投机、不宣扬符咒改运、不提供堕胎择时；涉及重病/牢狱等凶险信息，优先劝导就医/找律师，不放大恐慌。
 说话风格：真人聊天感，不表格/多层标题/emoji；该幽默幽默，该严肃严肃，懂得换位思考。闲聊无需围绕命理场景，可参杂人生哲理。
 用"你"不用"您"，可语气词；不确定直说"要看具体情况"，不绝对化。避免"总结一下""需要注意的是"等 AI 腔。
@@ -545,7 +544,10 @@ class Xianzhi(ToolCallAgent):
         # 闲聊短路：无命盘 + 闲聊意图 → 直接调一次 LLM，不走 ReAct 工具循环
         if not verbose and self._is_chitchat(user_prompt):
             def _chitchat_gen():
-                yield self._chitchat_reply(user_prompt)
+                try:
+                    yield self._chitchat_reply(user_prompt)
+                finally:
+                    self.cleanup()
             return _chitchat_gen()
         # 直接调用 BaseAgent.run_stream（绕开 ToolCallAgent.run_stream 的二次 reset，
         # 避免历史被清空；同时让 step 输出走 BaseAgent 的日志逻辑）
@@ -570,8 +572,11 @@ class Xianzhi(ToolCallAgent):
             return
         # 闲聊短路：无命盘 + 闲聊意图 → 直接调一次 LLM，不走 ReAct 工具循环
         if not verbose and self._is_chitchat(user_prompt):
-            reply = await asyncio.to_thread(self._chitchat_reply, user_prompt)
-            yield reply
+            try:
+                reply = await asyncio.to_thread(self._chitchat_reply, user_prompt)
+                yield reply
+            finally:
+                self.cleanup()
             return
         if verbose:
             async for chunk in super().arun_stream(user_prompt):
@@ -697,7 +702,11 @@ class Xianzhi(ToolCallAgent):
             log.warning("会话摘要触发失败: {}", e)
 
     def cleanup(self):
-        self._persist_history()
+        # 持久化失败不应阻断状态重置，否则实例永久卡死在 RUNNING
+        try:
+            self._persist_history()
+        except Exception as e:
+            log.warning("[xianzhi] cleanup 持久化历史失败: {}", e)
         # 命盘上下文持久化到会话：不清空，下一轮同会话仍可用
         # 仅在切换会话（set_conversation_id）时才主动清空
         super().cleanup()

@@ -575,6 +575,7 @@ class ReviewerWorker:
         second_chart: Any = None,
         user_prompt: str = "",
         ctx: Any = None,
+        skip_llm: bool = False,
     ) -> FactCheckResult:
         """两层审核：正则快筛 → LLM 深审。
 
@@ -592,6 +593,11 @@ class ReviewerWorker:
         if regex_issues:
             log.info("[Reviewer] 正则快筛发现问题，跳过 LLM 审核（省 1 次调用）: {} 条 issue", len(regex_issues))
             return FactCheckResult(ok=False, issues=regex_issues, source="regex")
+
+        # === 短路：调用方声明跳过 LLM 深审（闲聊/题外话等无 LLM 深审价值的场景）===
+        if skip_llm:
+            log.info("[Reviewer] 调用方指定 skip_llm，跳过 LLM 深审，仅依赖正则快筛 ✓")
+            return FactCheckResult(ok=True, source="regex")
 
         # === 第2层：LLM 深审 ===
         if self._chat_model is None:
@@ -848,11 +854,14 @@ class XianzhiWorkflow:
         log.info("[Worker] {} 生成回答 {}字", worker.label, len(raw_answer))
 
         # ===== Reviewer 审核阶段（两层：正则快筛 + LLM 深审） =====
-        log.info("[Reviewer] 开始审核 {} Worker 产出 ({}字)...", worker.label, len(raw_answer))
+        is_chitchat = intent.domain == "chitchat"
+        log.info("[Reviewer] 开始审核 {} Worker 产出 ({}字){}...", worker.label, len(raw_answer),
+                 " [闲聊短路: 跳过LLM深审]" if is_chitchat else "")
         second_chart = getattr(intent, "second_chart", None).chart if getattr(intent, "second_chart", None) else None
         review = self._reviewer.review(
             raw_answer, chart_context.chart, knowledge, self.check_facts,
             second_chart, user_prompt=user_prompt, ctx=chart_context,
+            skip_llm=is_chitchat,
         )
         if review.ok:
             log.info("[Reviewer] {} Worker 产出通过审核 ✓ (source={})", worker.label, review.source)
@@ -899,7 +908,7 @@ class XianzhiWorkflow:
             liunian_start_year=start,
             liunian_years=max(1, end - start + 1),
         )
-        return WorkflowChartContext(ctx.birth_time, ctx.gender, ctx.sect, ctx.yun_sect, chart)
+        return WorkflowChartContext(ctx.birth_time, ctx.gender, ctx.sect, ctx.yun_sect, chart, user_id=ctx.user_id)
 
     def _parse_other_birth(self, text: str) -> tuple[str, str]:
         """从用户问题中正则抽取「对方」出生信息（合婚兜底）。
@@ -1130,8 +1139,7 @@ class XianzhiWorkflow:
             "知识库规则：\n"
             "1. 解释命理术语（神煞、十神、格局、五行等）时，必须参考【命理规则检索】中的内容，不得自行编造\n"
             "2. 引用古籍原文必须来自检索结果，格式：「《典籍名》原文：XXX」，简短自然嵌入，不单独大段摘抄\n"
-            "3. 知识库取用优先级：调候参考《穷通宝鉴》、格局以《子平真诠》为准、基础理论取自《渊海子平》、神煞杂断参考《三命通会》；多流派冲突时以调候+扶抑格局折中\n"
-            "4. 检索无匹配古籍时，如实说明暂无古法论断，不杜撰古文\n"
+            "3. 检索无匹配古籍时，如实说明暂无古法论断，不杜撰古文\n"
             "合规红线：不推断生死、不指导赌博投机、不宣扬符咒改运、不提供堕胎择时；涉及重病/牢狱等凶险信息，优先劝导就医/找律师，不放大恐慌。\n"
             "说话风格：真人聊天感，不用表格、多层标题、emoji。不同问题回答重点不同，不重复论述，详略得当，一针见血。"
             "该幽默幽默，该严肃严肃，该调侃调侃，懂得换位思考。用'你'不用'您'，口语化，可适当用语气词。不确定直说'这个要看具体情况'，不绝对化。\n"

@@ -73,12 +73,18 @@ def create_xianzhi_graph(workflow):
         return {"raw_answer": raw}
 
     def check_node(state: XianzhiGraphState) -> XianzhiGraphState:
-        """校验节点：两层审核（正则快筛 + LLM 深审），通过则定稿，否则记录 issues。"""
+        """校验节点：两层审核（正则快筛 + LLM 深审），通过则定稿，否则记录 issues。
+
+        闲聊/题外话（intent.domain=chitchat）跳过 LLM 深审，仅依赖正则快筛，节省 1 次 LLM 调用。
+        """
         raw = state.get("raw_answer", "")
         worker = state.get("worker")
-        log.info("[Reviewer] 开始审核 {} Worker 产出 ({}字)...",
-                 getattr(worker, "label", "?"), len(raw))
-        second_chart = getattr(state.get("intent"), "second_chart", None)
+        intent = state.get("intent")
+        is_chitchat = bool(intent and getattr(intent, "domain", "") == "chitchat")
+        log.info("[Reviewer] 开始审核 {} Worker 产出 ({}字){}...",
+                 getattr(worker, "label", "?"), len(raw),
+                 " [闲聊短路: 跳过LLM深审]" if is_chitchat else "")
+        second_chart = getattr(intent, "second_chart", None)
         review = workflow._reviewer.review(
             raw,
             state["chart_context"].chart,
@@ -87,6 +93,7 @@ def create_xianzhi_graph(workflow):
             second_chart.chart if second_chart else None,
             user_prompt=state["user_prompt"],
             ctx=state["chart_context"],
+            skip_llm=is_chitchat,
         )
         if review.ok:
             log.info("[Reviewer] {} Worker 产出通过审核 ✓ (source={})", getattr(worker, "label", "?"), review.source)
@@ -97,8 +104,18 @@ def create_xianzhi_graph(workflow):
         return {"issues": review.issues, "final_answer": raw if review.ok else ""}
 
     def repair_node(state: XianzhiGraphState) -> XianzhiGraphState:
-        """修复节点：基于 issues 重构消息让 LLM 反思修复，并二次校验；仍不过则附口径说明。"""
+        """修复节点：基于 issues 重构消息让 LLM 反思修复，并二次校验；仍不过则附口径说明。
+
+        闲聊场景无 issues 可修（check_node 已跳过 LLM 深审），无意义再走 repair。
+        """
         from app.agent.xianzhi_workflow import FactCheckResult
+
+        intent = state.get("intent")
+        is_chitchat = bool(intent and getattr(intent, "domain", "") == "chitchat")
+        # 闲聊短路：check_node 已通过正则，repair 不会带来改善，直接返回原答案
+        if is_chitchat:
+            log.info("[Reflextion] 闲聊场景，跳过修复节点，直接返回原答案")
+            return {"final_answer": state.get("raw_answer", ""), "issues": []}
 
         worker = state.get("worker")
         log.info("[Reflextion] {} Worker 开始修复...", getattr(worker, "label", "?"))

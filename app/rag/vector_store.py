@@ -205,6 +205,19 @@ def _fp_pool_get():
     return _fp_pool
 
 
+def close_fp_pool() -> None:
+    """应用关闭时显式关闭指纹连接池，避免连接泄漏。"""
+    global _fp_pool
+    with _fp_lock:
+        if _fp_pool is not None:
+            try:
+                _fp_pool.close()
+            except Exception as e:
+                log.warning("关闭 RAG 指纹连接池失败: {}", e)
+            finally:
+                _fp_pool = None
+
+
 def _fp_ensure_table(conn) -> None:
     conn.execute(
         "CREATE TABLE IF NOT EXISTS rag_fingerprint ("
@@ -465,6 +478,9 @@ class KnowledgeBase:
         self._store_type = ""
         self._search_cache: OrderedDict[str, tuple[float, list[Document]]] = OrderedDict()
         self._cache_lock = threading.Lock()
+        # 初始化锁：防止并发 init 导致 collection 被互相覆盖删除
+        self._init_lock = threading.Lock()
+        self._initializing = False
 
     def init(self, force: bool = False) -> bool:
         """初始化向量库（失败不阻断主流程）。
@@ -475,6 +491,19 @@ class KnowledgeBase:
         Args:
             force: True 时无视指纹强制全量重建（管理接口"重建索引"使用）。
         """
+        # 并发保护：另一个线程正在重建时，直接返回当前就绪状态
+        with self._init_lock:
+            if self._initializing:
+                log.warning("RAG init 已在另一线程进行，跳过本次调用")
+                return self._ready
+            self._initializing = True
+        try:
+            return self._do_init(force)
+        finally:
+            with self._init_lock:
+                self._initializing = False
+
+    def _do_init(self, force: bool = False) -> bool:
         try:
             embeddings, embedding_id = _select_embeddings()
             self._embedding_id = embedding_id
