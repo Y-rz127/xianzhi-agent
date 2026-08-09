@@ -20,6 +20,26 @@
               <option value="女">女</option>
             </select>
           </div>
+          <div class="form-row">
+            <label>出生地（用于真太阳时）</label>
+            <div class="hh-region">
+              <select v-model="male.province" aria-label="男方省份">
+                <option value="">省份</option>
+                <option v-for="p in regionData" :key="'m-p-' + p.name" :value="p.name">{{ p.name }}</option>
+              </select>
+              <select v-model="male.city" :disabled="!male.province" aria-label="男方城市">
+                <option value="">城市</option>
+                <option v-for="c in maleCities" :key="'m-c-' + c.name" :value="c.name">{{ c.name }}</option>
+              </select>
+              <select v-model="male.district" :disabled="!male.city" aria-label="男区县">
+                <option value="">区县</option>
+                <option v-for="d in maleDistricts" :key="'m-d-' + d.name" :value="d.name">{{ d.name }}</option>
+              </select>
+            </div>
+            <div v-if="male.longitude !== null" class="hh-region-hint">
+              经度 {{ male.longitude.toFixed(2) }}°E · 时差 {{ longitudeDeltaLabel(male.longitude) }}
+            </div>
+          </div>
         </div>
         <div class="hh-vs">VS</div>
         <div class="hh-person">
@@ -34,6 +54,26 @@
               <option value="男">男</option>
               <option value="女">女</option>
             </select>
+          </div>
+          <div class="form-row">
+            <label>出生地（用于真太阳时）</label>
+            <div class="hh-region">
+              <select v-model="female.province" aria-label="女方省份">
+                <option value="">省份</option>
+                <option v-for="p in regionData" :key="'f-p-' + p.name" :value="p.name">{{ p.name }}</option>
+              </select>
+              <select v-model="female.city" :disabled="!female.province" aria-label="女方城市">
+                <option value="">城市</option>
+                <option v-for="c in femaleCities" :key="'f-c-' + c.name" :value="c.name">{{ c.name }}</option>
+              </select>
+              <select v-model="female.district" :disabled="!female.city" aria-label="女区县">
+                <option value="">区县</option>
+                <option v-for="d in femaleDistricts" :key="'f-d-' + d.name" :value="d.name">{{ d.name }}</option>
+              </select>
+            </div>
+            <div v-if="female.longitude !== null" class="hh-region-hint">
+              经度 {{ female.longitude.toFixed(2) }}°E · 时差 {{ longitudeDeltaLabel(female.longitude) }}
+            </div>
           </div>
         </div>
       </div>
@@ -85,14 +125,25 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from "vue"
+import { ref, computed, watch } from "vue"
 import MarkdownRender from "../components/MarkdownRender.vue"
 import BaziCard from "../components/BaziCard.vue"
 import { getChart, apiFetch, type ChartData } from "../api"
+import { regionData } from "../utils/region-data"
 
 const API_BASE = import.meta.env.DEV ? "http://localhost:8123/api" : "/api"
-const male = ref({ birth: "", gender: "男" })
-const female = ref({ birth: "", gender: "女" })
+
+interface PersonForm {
+  birth: string
+  gender: string
+  province: string
+  city: string
+  district: string
+  longitude: number | null
+}
+
+const male = ref<PersonForm>({ birth: "", gender: "男", province: "", city: "", district: "", longitude: null })
+const female = ref<PersonForm>({ birth: "", gender: "女", province: "", city: "", district: "", longitude: null })
 const loading = ref(false)
 const result = ref("")
 
@@ -104,6 +155,58 @@ const femaleChart = ref<ChartData | null>(null)
 const normalizeBirth = (s: string) => s.trim().replace("T", " ")
 const birthRegex = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/
 const isValidBirth = (s: string) => birthRegex.test(normalizeBirth(s))
+
+// 真太阳时时差标签：相对 120°E（北京时间基准），每度 4 分钟
+const longitudeDeltaLabel = (lon: number) => {
+  const minutes = Math.round((lon - 120) * 4)
+  if (minutes === 0) return "0 分钟"
+  const sign = minutes > 0 ? "+" : "-"
+  const abs = Math.abs(minutes)
+  if (abs < 60) return `${sign}${abs} 分钟`
+  const h = Math.floor(abs / 60)
+  const m = abs % 60
+  return `${sign}${h} 小时${m ? " " + m + " 分钟" : ""}`
+}
+
+// 联动数据：当前选中省/市
+const maleCities = computed(() => {
+  const p = regionData.find(x => x.name === male.value.province)
+  return p?.cities || []
+})
+const maleDistricts = computed(() => {
+  const c = maleCities.value.find(x => x.name === male.value.city)
+  return c?.districts || []
+})
+const femaleCities = computed(() => {
+  const p = regionData.find(x => x.name === female.value.province)
+  return p?.cities || []
+})
+const femaleDistricts = computed(() => {
+  const c = femaleCities.value.find(x => x.name === female.value.city)
+  return c?.districts || []
+})
+
+// 省份变化时清空下级；城市变化时取该城市经度（区县级同市经度）
+watch(() => male.value.province, () => {
+  male.value.city = ""
+  male.value.district = ""
+  male.value.longitude = null
+})
+watch(() => male.value.city, () => {
+  male.value.district = ""
+  const c = maleCities.value.find(x => x.name === male.value.city)
+  male.value.longitude = c ? c.longitude : null
+})
+watch(() => female.value.province, () => {
+  female.value.city = ""
+  female.value.district = ""
+  female.value.longitude = null
+})
+watch(() => female.value.city, () => {
+  female.value.district = ""
+  const c = femaleCities.value.find(x => x.name === female.value.city)
+  female.value.longitude = c ? c.longitude : null
+})
 
 let debounceTimer: ReturnType<typeof setTimeout> | null = null
 const updatePreview = async () => {
@@ -120,8 +223,8 @@ const updatePreview = async () => {
     previewLoading.value = true
     try {
       const [mChart, fChart] = await Promise.all([
-        getChart(normalizeBirth(male.value.birth), male.value.gender),
-        getChart(normalizeBirth(female.value.birth), female.value.gender),
+        getChart(normalizeBirth(male.value.birth), male.value.gender, undefined, undefined, male.value.longitude ?? undefined),
+        getChart(normalizeBirth(female.value.birth), female.value.gender, undefined, undefined, female.value.longitude ?? undefined),
       ])
       maleChart.value = mChart
       femaleChart.value = fChart
@@ -147,6 +250,8 @@ const analyze = async () => {
       birth_time_b: normalizeBirth(female.value.birth),
       gender_b: female.value.gender,
     })
+    if (male.value.longitude !== null) params.set("longitude_a", String(male.value.longitude))
+    if (female.value.longitude !== null) params.set("longitude_b", String(female.value.longitude))
     const res = await apiFetch(`${API_BASE}/ai/xianzhi/hehun?${params}`)
     const data = await res.json()
     if (data.error) result.value = "分析失败：" + data.error
@@ -185,6 +290,9 @@ const analyze = async () => {
 .form-row input:focus,
 .form-row select:focus { border-color: var(--love); }
 .form-row select option { background: var(--bg-3); color: var(--text); }
+.form-row select:disabled { opacity: 0.5; cursor: not-allowed; }
+.hh-region { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; }
+.hh-region-hint { font-size: 11px; color: var(--text-dim); margin-top: 4px; }
 .hh-preview-area { margin-bottom: 20px; }
 .hh-preview { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 .hh-preview-card { animation: fadeInUp 0.5s ease-out forwards; }
@@ -210,5 +318,6 @@ const analyze = async () => {
   .hh-form { flex-direction: column; }
   .hh-vs { padding-top: 0; text-align: center; }
   .hh-preview, .hh-preview-skeleton { grid-template-columns: 1fr; }
+  .hh-region { grid-template-columns: 1fr; }
 }
 </style>

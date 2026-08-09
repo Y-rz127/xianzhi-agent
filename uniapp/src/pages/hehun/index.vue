@@ -118,16 +118,9 @@
         </view>
       </view>
 
-      <!-- 子时流派 -->
-      <view class="sect-card">
-        <view class="sect-head">
-          <text class="sect-label">子时流派</text>
-          <text class="sect-desc">影响子时出生者的日柱归属</text>
-        </view>
-        <view class="seg-group sect-seg">
-          <text :class="['seg', sect === 2 && 'active']" @tap="sect = 2">晚子时</text>
-          <text :class="['seg', sect === 1 && 'active']" @tap="sect = 1">早子时</text>
-        </view>
+      <!-- 子时流派：排盘引擎默认晚子时（子正换日），不再提供手动切换 -->
+      <view class="sect-hint">
+        排盘引擎默认为晚子时（子正换日，23:00~24:00 算次日）
       </view>
 
       <!-- 开始分析按钮 -->
@@ -221,8 +214,8 @@ const b = reactive({ date: '', time: '', gender: '女' as '男' | '女', place: 
 const loading = ref(false)
 const result = ref('')
 
-// 子时流派：2=晚子时（默认，子正换日），1=早子时（子时换日）
-const sect = ref(2)
+// 排盘引擎默认晚子时（子正换日，sect=2），不再提供用户手动切换
+const sect = 2 as const
 
 /** 真太阳时修正量（分钟）。基准经度 120°E（北京时间），每度差 4 分钟 */
 const solarOffsetA = computed(() => (a.longitude ? Math.round((120 - a.longitude) * 4) : 0))
@@ -375,7 +368,7 @@ async function onAnalyze() {
       genderA: a.gender,
       birthTimeB: `${b.date} ${b.time}`,
       genderB: b.gender,
-      sect: sect.value,
+      sect,
       longitudeA: a.longitude || undefined,
       longitudeB: b.longitude || undefined,
     })
@@ -654,31 +647,14 @@ async function onAnalyze() {
   flex-shrink: 0;
 }
 
-/* === 子时流派 === */
-.sect-card {
-  margin: 32rpx 32rpx 0;
-  background: $color-bg-card;
-  border: 1rpx solid $color-border;
-  border-radius: 24rpx;
-  padding: 28rpx 32rpx;
+/* === 子时流派提示 === */
+.sect-hint {
+  margin: 28rpx 32rpx 0;
+  font-size: 24rpx;
+  color: $color-ink-light;
+  text-align: center;
+  line-height: 1.5;
 }
-.sect-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  margin-bottom: 20rpx;
-}
-.sect-label {
-  font-size: 26rpx;
-  font-weight: 600;
-  color: $color-ink;
-  letter-spacing: 0.06em;
-}
-.sect-desc {
-  font-size: 22rpx;
-  color: $color-ink-lighter;
-}
-.sect-seg { height: 72rpx; }
 
 /* === 省市区选择器弹窗 === */
 .region-picker-mask {

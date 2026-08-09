@@ -205,7 +205,7 @@ async def list_my_sessions(token: str = Query(None)):
     return get_session_info(prefix="mp-xianzhi", user_id=user["id"])
 
 
-@router.delete("/sessions/{session_id}", dependencies=[Depends(require_admin)])
+@router.delete("/sessions/{session_id}")
 async def delete_xianzhi_session(session_id: str):
     """删除先知会话（含消息记录）。"""
     from app.memory.postgres_memory import delete_session
@@ -213,14 +213,14 @@ async def delete_xianzhi_session(session_id: str):
     return {"status": "ok"}
 
 
-@router.get("/sessions/{session_id}/messages", dependencies=[Depends(require_admin)])
+@router.get("/sessions/{session_id}/messages")
 async def get_xianzhi_session_messages(session_id: str):
     """获取会话的完整消息记录。"""
     from app.memory.postgres_memory import get_messages
     return get_messages(session_id)
 
 
-@router.get("/sessions/{session_id}/birth-info", dependencies=[Depends(require_admin)])
+@router.get("/sessions/{session_id}/birth-info")
 async def get_xianzhi_session_birth_info(session_id: str):
     """从会话历史中的排盘工具调用提取出生信息，供前端恢复命盘上下文。"""
     from app.memory.postgres_memory import get_birth_info_from_session

@@ -73,12 +73,8 @@
             真太阳时{{ solarTimeOffset > 0 ? '+' : '' }}{{ solarTimeOffset }}分
           </text>
         </view>
-        <view class="form-row">
-          <text class="label">子时派</text>
-          <view class="seg-group">
-            <text :class="['seg', sect === 2 && 'active']" @tap="sect = 2">晚子时</text>
-            <text :class="['seg', sect === 1 && 'active']" @tap="sect = 1">早子时</text>
-          </view>
+        <view class="sect-hint">
+          排盘引擎默认为晚子时（子正换日，23:00~24:00 算次日）
         </view>
         <view class="legal-link" @tap="goDisclaimer">查看免责声明 ›</view>
       </view>
@@ -335,7 +331,8 @@ const showBirth = ref(false)
 const birthDate = ref('')
 const birthTime = ref('')
 const gender = ref<'男' | '女'>('男')
-const sect = ref<number>(2)
+// 排盘引擎默认晚子时（子正换日，sect=2），不再提供用户手动切换
+const sect = 2 as const
 // 真太阳时：出生地与经度
 const birthPlace = ref('')
 const birthLongitude = ref(0)
@@ -444,7 +441,7 @@ function confirmRegionPicker() {
       const time = `${birthDate.value} ${birthTime.value}`
       lastBirthInfo.value = { time, gender: gender.value }
       _skipNextChartWatch = true
-      getChart(time, gender.value, sect.value, 1, birthLongitude.value).then(d => { chartData.value = d }).catch(() => { chartData.value = null })
+      getChart(time, gender.value, sect, 1, birthLongitude.value).then(d => { chartData.value = d }).catch(() => { chartData.value = null })
     }
   }
   showRegionPicker.value = false
@@ -941,7 +938,7 @@ function onSend() {
     birthTime: birthTimeFull.value || undefined,
     gender: gender.value,
     birthPlace: birthPlace.value || undefined,
-    sect: sect.value,
+    sect,
     token: getToken(),
     onMessage, onDone, onError, onChartContext,
   })
@@ -1249,6 +1246,13 @@ messages.value.push({
   font-size: 26rpx;
   color: $color-ink-light;
   margin-top: 8rpx;
+}
+.sect-hint {
+  font-size: 24rpx;
+  color: $color-ink-light;
+  text-align: center;
+  padding: 8rpx 0 4rpx;
+  line-height: 1.5;
 }
 .place-picker { cursor: pointer; }
 .solar-hint {
