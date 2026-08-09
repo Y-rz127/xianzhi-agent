@@ -19,6 +19,8 @@ from app.logger import log
 
 _tarot_app = None
 _chat_model = None
+_decompose_model = None
+_reviewer_model = None
 _local_tools = None
 _memory = None
 
@@ -29,10 +31,12 @@ _agents: "OrderedDict[str, tuple]" = OrderedDict()
 _pool_lock = threading.Lock()
 
 
-def set_instances(chat_model, local_tools, memory, tarot_app=None):
+def set_instances(chat_model, local_tools, memory, tarot_app=None, decompose_model=None, reviewer_model=None):
     """保存 Agent 工厂所需的共享依赖（启动时调用一次）。"""
-    global _chat_model, _local_tools, _memory, _tarot_app
+    global _chat_model, _decompose_model, _reviewer_model, _local_tools, _memory, _tarot_app
     _chat_model = chat_model
+    _decompose_model = decompose_model or chat_model
+    _reviewer_model = reviewer_model or chat_model
     _local_tools = local_tools
     _memory = memory
     _tarot_app = tarot_app
@@ -64,6 +68,8 @@ def get_xianzhi(conversation_id: str):
             local_tools=_local_tools,
             memory=_memory,
             conversation_id=cid,
+            decompose_model=_decompose_model,
+            reviewer_model=_reviewer_model,
         )
         entry = (agent, agent.lock)
         _agents[cid] = entry

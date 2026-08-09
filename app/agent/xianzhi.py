@@ -61,7 +61,7 @@ SYSTEM_PROMPT = """
 4. 取用优先级：调候→《穷通宝鉴》、格局→《子平真诠》、基础理论→《渊海子平》、神煞杂断→《三命通会》；多派冲突时以调候+扶抑格局折中。
 5. query 用命理概念/断法方向的关键词（"感情桃花 断法""流年运势 应期"），不要带具体年份/人名/事件。
 合规红线：不推断生死、不指导赌博投机、不宣扬符咒改运、不提供堕胎择时；涉及重病/牢狱等凶险信息，优先劝导就医/找律师，不放大恐慌。
-说话风格：真人聊天感，不表格/多层标题/emoji；该幽默幽默，该严肃严肃，懂得换位思考。闲聊不围绕命盘，可参杂人生哲理。
+说话风格：真人聊天感，不表格/多层标题/emoji；该幽默幽默，该严肃严肃，懂得换位思考。闲聊无需围绕命理场景，可参杂人生哲理。
 用"你"不用"您"，可语气词；不确定直说"要看具体情况"，不绝对化。避免"总结一下""需要注意的是"等 AI 腔。
 篇幅：闲聊≤150字、简单问题≤200字、常规分析≤350字、用户主动要详批可放宽。
 核心原则：命由天定、运由己造，不制造焦虑。排盘必须确认出生时间（年月日时）+ 性别；只给八字四柱时调 bazi_infer_dates 反推候选让用户确认再排盘，不要自行猜测。
@@ -76,7 +76,7 @@ NEXT_STEP_PROMPT = """
 - bazi_infer_dates：只给八字四柱时反推候选日期，确认后再用对应 birth_time 排盘
 - bazi_hehun：合婚分析
 - lunar_to_solar：农历/节日/时辰转公历，仅展示对照或校验时调
-- search_knowledge：命理知识库，query 用泛化词
+- search_knowledge：命理知识库，query 抽象为命理概念+断法方向（如"流年桃花 感情运势"、"恋爱 断法"、"伤官见官"），禁止带具体年份/人名/事件
 - search_web：联网查询（非命理问题）
 - do_terminate：任务完成"""
 
@@ -96,7 +96,8 @@ class Xianzhi(ToolCallAgent):
     # 排盘工具名集合：调用这些工具时，从参数中提取 birth_time/gender
     _BAZI_TOOLS = {"bazi_chart", "bazi_full", "bazi_analysis", "bazi_dayun", "bazi_liunian", "bazi_liuyue", "bazi_liuri"}
 
-    def __init__(self, chat_model, local_tools, memory=None, conversation_id="xianzhi-default", max_steps=None):
+    def __init__(self, chat_model, local_tools, memory=None, conversation_id="xianzhi-default", max_steps=None,
+                 decompose_model=None, reviewer_model=None):
         super().__init__(
             name="Xianzhi",
             chat_model=chat_model,
@@ -110,7 +111,7 @@ class Xianzhi(ToolCallAgent):
         # 记忆实例由会话池共享注入（避免每 Agent 各持一个 PG 连接）；未注入时自建（测试场景）
         self._memory = memory if memory is not None else create_chat_memory()
         self.chart_context = ""
-        self._workflow = XianzhiWorkflow(chat_model)
+        self._workflow = XianzhiWorkflow(chat_model, decompose_model, reviewer_model)
         self._workflow_context: WorkflowChartContext | None = None
         self._last_birth_info: Optional[dict] = None
         self._last_user_text: str = ""
@@ -581,7 +582,7 @@ class Xianzhi(ToolCallAgent):
                 if summary and "年柱" in summary:
                     yield "\n[回答] 命盘四柱关键信息（用于可视化展示）：\n【四柱】\n{}".format(summary)
             return
-        # 正常模式：仅返回 LLM 的最终回答
+        # 正常模式：直接走 ReAct 工具循环，LLM 自行决定是否调 search_knowledge
         async for _ in super().arun_stream(user_prompt):
             pass
         final = (self.final_answer or "").strip()

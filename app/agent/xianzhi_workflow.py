@@ -53,7 +53,6 @@ def _parse_json(text: str) -> Any:
 
 def _dedupe_content(content: str) -> str:
     """检测并移除完全重复的内容（推理模型 think 块泄漏的兜底）。
-    
     委托给 app.utils.text_clean.dedupe_content 统一实现。
     """
     return _dedupe_content_impl(content)
@@ -161,6 +160,40 @@ class FactCheckResult:
     """事实校验结果：ok 表示通过全部校验，issues 为发现的问题列表。"""
     ok: bool
     issues: list[str] = field(default_factory=list)
+    source: str = ""  # "regex" | "llm" | "both" | "regex_fallback"
+
+
+# Reviewer LLM 深审系统提示词
+_REVIEWER_SYSTEM = """你是资深命理审核员，负责审核命理师回答的专业质量。
+
+审核维度（逐条检查，发现问题记入 issues）：
+
+1. 逻辑自洽：身强/身弱判断与后续推断是否一致？用神选取与格局分析是否矛盾？
+   例：说"身弱"却又说"能担大财"——矛盾
+
+2. 断法准确性：十神含义、大运流年影响解读是否符合命理常识？
+   例：把"偏印"说成"正印"的含义、流年影响方向判断错误
+
+3. 知识一致性：回答内容是否与【命理规则检索】矛盾？
+   例：检索规则说"伤官见官主口舌是非"，回答却说"伤官见官主升职"
+
+4. 表达质量：
+   - 是否有 AI 腔（"总结一下""需要注意的是""好消息是"）
+   - 是否过于绝对化（"一定会""绝对不可能"）
+   - 是否有恐吓性表述
+
+5. 事实复查：四柱干支、流年干支是否有隐式错误表述？
+   （正则已校验显式干支，此处查隐式表述，如"你的日主是甲木"但实际是乙木）
+
+判定标准：
+- 明确的错误或矛盾 → 不通过
+- 轻微表述瑕疵（如偶尔口语化）→ 通过
+- 不确定的 → 通过（宁可不误杀）
+
+输出 JSON：
+{"pass": true/false, "issues": ["问题1", "问题2"]}
+
+只输出 JSON，不要解释。"""
 
 
 # ============================================================
@@ -510,17 +543,14 @@ def build_chart_context(birth_time: str, gender: str, sect: int = 2, yun_sect: i
 
 
 class ReviewerWorker:
-    """Reviewer 独立审核员：对 Worker 产出做三重交叉校验。
+    """Reviewer 独立审核 Agent：正则快筛 + LLM 深审。
 
-    参考 学习资料/16_多Agent协作/SupervisorWorker协作说明.md 的 Review Worker 角色。
-    独立于 Worker，用不同视角审视，避免 Worker 自己的盲区。
+    两层审核架构：
+    1. 正则快筛（<5ms，零 token）：事实校验 + 古籍真实性 + 合规红线
+    2. LLM 深审（3-5s，1 次调用）：逻辑自洽 + 断法准确性 + 知识一致性 + 表达质量
 
-    三重校验：
-    1. 事实校验：四柱/大运/流年/起运是否与系统排盘一致（复用 check_facts）
-    2. 古籍真实性：回答中「《XXX》原文：」标注的古籍是否真的在检索结果中出现（防杜撰）
-    3. 合规校验：扫描生死/赌博/符咒/堕胎等红线关键词
-
-    不通过 → 触发 Reflextion 回退修复。
+    正则发现问题直接返回（省 LLM 调用），正则全通过才调 LLM 做深度审核。
+    LLM 不可用时自动降级为纯正则（不影响主流程）。
     """
 
     # 合规红线关键词（命中即需人工提示，不直接拒答）
@@ -533,39 +563,63 @@ class ReviewerWorker:
     # 古籍真实性校验：抽取回答中「《XXX》原文：...」标注
     ANCIENT_CITATION_RE = re.compile(r"《[^》]{1,12}》[^。；;\n]{0,6}原文[：:]")
 
-    def review(self, answer: str, chart: BaziChart, knowledge: str, fact_checker, second_chart: Any = None) -> FactCheckResult:
-        """对 Worker 产出做三重校验。
+    def __init__(self, chat_model: BaseChatModel | None = None):
+        self._chat_model = chat_model
+
+    def review(
+        self,
+        answer: str,
+        chart: BaziChart,
+        knowledge: str,
+        fact_checker,
+        second_chart: Any = None,
+        user_prompt: str = "",
+        ctx: Any = None,
+    ) -> FactCheckResult:
+        """两层审核：正则快筛 → LLM 深审。
 
         Args:
             answer: Worker 生成的回答
             chart: 系统排盘事实
-            knowledge: Worker 检索到的知识片段（用于古籍真实性比对）
+            knowledge: Worker 检索到的知识片段
             fact_checker: 复用 XianzhiWorkflow.check_facts 方法
-            second_chart: 合婚双盘时的对方命盘（可选，同样做事实校验）
+            second_chart: 合婚双盘时的对方命盘
+            user_prompt: 原始用户问题（LLM 审核判断是否答非所问）
+            ctx: WorkflowChartContext（LLM 审核构建事实上下文用）
         """
+        # === 第1层：正则快筛 ===
+        regex_issues = self._regex_review(answer, chart, knowledge, fact_checker, second_chart)
+        if regex_issues:
+            log.info("[Reviewer] 正则快筛发现问题，跳过 LLM 审核（省 1 次调用）: {} 条 issue", len(regex_issues))
+            return FactCheckResult(ok=False, issues=regex_issues, source="regex")
+
+        # === 第2层：LLM 深审 ===
+        if self._chat_model is None:
+            return FactCheckResult(ok=True, source="regex")
+
+        return self._llm_review(answer, chart, knowledge, user_prompt, ctx, second_chart)
+
+    def _regex_review(self, answer, chart, knowledge, fact_checker, second_chart) -> list[str]:
+        """第1层：正则快筛（原有三重校验，零 LLM 调用）。"""
         issues: list[str] = []
 
         # 1) 事实校验（四柱/大运/流年）
-        # 双盘场景：两张盘的合法干支互为「容错集」，避免把对方盘的正确陈述误判为本盘错误
         fact_result = fact_checker(answer, chart, second_chart)
         issues.extend(fact_result.issues)
         if second_chart is not None:
             fact_result2 = fact_checker(answer, second_chart, chart)
             issues.extend(fact_result2.issues)
 
-        # 2) 古籍真实性校验：标注了「《XXX》原文」的引用必须在检索知识中出现
+        # 2) 古籍真实性校验
         citations = self.ANCIENT_CITATION_RE.findall(answer)
         if citations and knowledge and "未检索到相关知识" not in knowledge and "闲聊场景" not in knowledge:
-            # 提取检索知识里的书名（粗粒度比对）
             cited_books = set()
             for m in re.finditer(r"《([^》]{1,12})》", knowledge):
                 cited_books.add(m.group(1))
-            # 比对回答中标注的书是否在检索结果里
             for citation in citations:
                 book_match = re.match(r"《([^》]{1,12})》", citation)
                 if book_match:
                     book = book_match.group(1)
-                    # 允许常见经典古籍直接通过（知识库已收录，检索可能未命中但属合理引用）
                     classic_books = {"渊海子平", "子平真诠", "滴天髓", "穷通宝鉴", "三命通会", "神峰通考", "千里命稿"}
                     if book not in cited_books and book not in classic_books:
                         issues.append(f"引用《{book}》原文未在检索结果中出现，疑似杜撰古籍")
@@ -575,7 +629,45 @@ class ReviewerWorker:
         if risks_found:
             issues.append("回答中出现了不合规的风险断言，请移除相关内容并改为劝导寻求专业帮助")
 
-        return FactCheckResult(ok=not issues, issues=issues)
+        return issues
+
+    def _llm_review(self, answer, chart, knowledge, user_prompt, ctx, second_chart) -> FactCheckResult:
+        """第2层：LLM 深度审核。"""
+        facts = format_fact_context(chart)
+        if second_chart is not None:
+            facts += "\n\n【对方命盘事实】\n" + format_fact_context(second_chart)
+
+        human_content = (
+            f"【系统排盘事实】\n{facts}\n\n"
+            f"【命理规则检索】\n{knowledge}\n\n"
+            f"【用户问题】\n{user_prompt}\n\n"
+            f"【待审核回答】\n{answer}"
+        )
+        messages = [
+            SystemMessage(content=_REVIEWER_SYSTEM),
+            HumanMessage(content=human_content),
+        ]
+        try:
+            resp = self._chat_model.invoke(messages)
+            raw = (getattr(resp, "content", "") or "").strip()
+            raw = re.sub(r"^```(?:json)?\s*", "", raw)
+            raw = re.sub(r"\s*```$", "", raw)
+            data = _parse_json(raw)
+            if not data or not isinstance(data, dict):
+                log.warning("[Reviewer] LLM 审核返回非 JSON，降级为通过: {}", raw[:200])
+                return FactCheckResult(ok=True, source="regex_fallback")
+            passed = bool(data.get("pass", True))
+            issues_raw = data.get("issues", [])
+            issues = [str(i) for i in issues_raw if str(i).strip()] if isinstance(issues_raw, list) else []
+            source = "llm" if not passed else "llm"
+            if not passed:
+                log.info("[Reviewer] LLM 深审发现问题: {} 条 issue", len(issues))
+            else:
+                log.info("[Reviewer] LLM 深审通过 ✓")
+            return FactCheckResult(ok=passed, issues=issues, source=source)
+        except Exception as e:
+            log.warning("[Reviewer] LLM 审核失败，降级为纯正则通过: {}", e)
+            return FactCheckResult(ok=True, source="regex_fallback")
 
 
 class XianzhiWorkflow:
@@ -587,9 +679,10 @@ class XianzhiWorkflow:
     - Reviewer（ReviewerWorker）：独立交叉校验
     """
 
-    def __init__(self, chat_model: BaseChatModel):
+    def __init__(self, chat_model: BaseChatModel, decompose_model: BaseChatModel | None = None, reviewer_model: BaseChatModel | None = None):
         self.chat_model = chat_model
-        self._reviewer = ReviewerWorker()
+        self._decompose_model = decompose_model or chat_model
+        self._reviewer = ReviewerWorker(reviewer_model or chat_model)
         self._graph = None
         self._graph_error: str | None = None
         try:
@@ -633,17 +726,17 @@ class XianzhiWorkflow:
         """用 LLM 拆解用户问题 → 意图分类 + 精准检索词。
 
         失败时返回 None，调用方 fallback 到 classify_question。
+        使用独立的拆解模型（轻量快速），而非主模型。
         """
-        if not self.chat_model:
+        if not self._decompose_model:
             return None
         try:
             messages = [
                 SystemMessage(content=self._DECOMPOSE_SYSTEM),
                 HumanMessage(content=user_prompt),
             ]
-            resp = self.chat_model.invoke(messages)
+            resp = self._decompose_model.invoke(messages)
             raw = (getattr(resp, "content", "") or "").strip()
-            # 去除可能存在的 markdown 代码块包裹
             raw = re.sub(r"^```(?:json)?\s*", "", raw)
             raw = re.sub(r"\s*```$", "", raw)
             data = _parse_json(raw)
@@ -754,14 +847,17 @@ class XianzhiWorkflow:
         raw_answer = self._invoke(messages)
         log.info("[Worker] {} 生成回答 {}字", worker.label, len(raw_answer))
 
-        # ===== Reviewer 审核阶段（三重校验：事实+古籍真实性+合规） =====
+        # ===== Reviewer 审核阶段（两层：正则快筛 + LLM 深审） =====
         log.info("[Reviewer] 开始审核 {} Worker 产出 ({}字)...", worker.label, len(raw_answer))
-        review = self._reviewer.review(raw_answer, chart_context.chart, knowledge, self.check_facts,
-                                       getattr(intent, "second_chart", None).chart if getattr(intent, "second_chart", None) else None)
+        second_chart = getattr(intent, "second_chart", None).chart if getattr(intent, "second_chart", None) else None
+        review = self._reviewer.review(
+            raw_answer, chart_context.chart, knowledge, self.check_facts,
+            second_chart, user_prompt=user_prompt, ctx=chart_context,
+        )
         if review.ok:
-            log.info("[Reviewer] {} Worker 产出通过三重校验 ✓", worker.label)
+            log.info("[Reviewer] {} Worker 产出通过审核 ✓ (source={})", worker.label, review.source)
             return raw_answer
-        log.warning("[Reviewer] {} Worker 产出未通过校验 ✗，触发 Reflextion 修复", worker.label)
+        log.warning("[Reviewer] {} Worker 产出未通过审核 ✗ (source={})，触发 Reflextion 修复", worker.label, review.source)
         for i, issue in enumerate(review.issues, 1):
             log.warning("[Reviewer]   issue[{}]: {}", i, issue)
 
@@ -770,8 +866,10 @@ class XianzhiWorkflow:
             raw_answer, review, user_prompt, intent, chart_context, knowledge, worker
         )
         repaired = self._invoke(repair_messages)
-        repaired_review = self._reviewer.review(repaired, chart_context.chart, knowledge, self.check_facts,
-                                                getattr(intent, "second_chart", None).chart if getattr(intent, "second_chart", None) else None)
+        repaired_review = self._reviewer.review(
+            repaired, chart_context.chart, knowledge, self.check_facts,
+            second_chart, user_prompt=user_prompt, ctx=chart_context,
+        )
         if repaired_review.ok:
             log.info("[Reflextion] {} Worker 修复后通过校验 ✓", worker.label)
             return repaired
@@ -1036,8 +1134,8 @@ class XianzhiWorkflow:
             "4. 检索无匹配古籍时，如实说明暂无古法论断，不杜撰古文\n"
             "合规红线：不推断生死、不指导赌博投机、不宣扬符咒改运、不提供堕胎择时；涉及重病/牢狱等凶险信息，优先劝导就医/找律师，不放大恐慌。\n"
             "说话风格：真人聊天感，不用表格、多层标题、emoji。不同问题回答重点不同，不重复论述，详略得当，一针见血。"
-            "该幽默幽默，该严肃严肃，懂得换位思考。用'你'不用'您'，口语化，可适当用语气词。不确定直说'这个要看具体情况'，不绝对化。\n"
-            "闲聊场景：用户不问命理问题时，回复无需围绕命盘，根据心境适当回应，可参杂人生哲理、处世良言，引发情感共鸣。\n"
+            "该幽默幽默，该严肃严肃，该调侃调侃，懂得换位思考。用'你'不用'您'，口语化，可适当用语气词。不确定直说'这个要看具体情况'，不绝对化。\n"
+            "闲聊场景：用户不问命理问题时，回复无需围绕命理场景，根据心境适当回应，可参杂人生哲理、处世良言，引发情感共鸣。\n"
             "篇幅规范：闲聊≤120字；简单问题≤200字；常规分析≤350字；用户主动要求完整详批可放宽。\n"
             "避免AI腔：不要'总结一下''需要注意的是''好消息/需要注意'这种模板。不要输出ReAct过程，不要机械倾倒完整报告，不要恐吓。"
         )
@@ -1107,7 +1205,16 @@ class XianzhiWorkflow:
             worker = WORKERS.get(intent.domain, WORKERS["general"])
         facts = "" if worker.skip_facts else self._compact_facts(ctx.chart, intent)
         # Reflextion 改写器：带上 Worker 专属断法，确保修复后仍符合领域规范
-        sys_content = "你是事实校验后的改写器。只修正事实错误，保持自然命理师口吻，不要解释校验过程。"
+        sys_content = (
+            "你是命理审核后的改写器。根据审核反馈修正回答，"
+            "保持自然命理师口吻，不要解释校验过程。\n"
+            "修正原则：\n"
+            "1. 只改有问题的部分，不要重写整篇\n"
+            "2. 事实错误 → 以【正确排盘事实】为准修正\n"
+            "3. 逻辑矛盾 → 统一判断基准后修正推断\n"
+            "4. 断法错误 → 以【可用规则】为准修正\n"
+            "5. AI腔 → 改为自然口语\n"
+        )
         if worker.expertise_prompt:
             sys_content += "\n" + worker.expertise_prompt
         return [

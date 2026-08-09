@@ -20,6 +20,10 @@ class Settings(BaseSettings):
     )
     dashscope_api_key: str = Field(default="", alias="DASHSCOPE_API_KEY")
     dashscope_model: str = Field(default="qwen-plus", alias="DASHSCOPE_MODEL")
+    # 意图拆解模型（轻量快速，默认留空则复用主模型）
+    decompose_model: str = Field(default="", alias="DECOMPOSE_MODEL")
+    # Reviewer 审核模型（独立实例，默认留空则复用主模型）
+    reviewer_model: str = Field(default="", alias="REVIEWER_MODEL")
     # LLM 生成参数
     llm_temperature: float = Field(default=0.7, alias="LLM_TEMPERATURE")
     # Qwen3 推理模型 thinking 模式开关（默认关闭，避免 <think> 标签泄漏）

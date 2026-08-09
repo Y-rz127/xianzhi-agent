@@ -73,24 +73,25 @@ def create_xianzhi_graph(workflow):
         return {"raw_answer": raw}
 
     def check_node(state: XianzhiGraphState) -> XianzhiGraphState:
-        """校验节点：用 Reviewer 做事实+古籍+合规三重校验，通过则定稿，否则记录 issues。"""
-        # 新架构：用 ReviewerWorker 做三重校验（事实+古籍真实性+合规），替代旧的 check_facts
+        """校验节点：两层审核（正则快筛 + LLM 深审），通过则定稿，否则记录 issues。"""
         raw = state.get("raw_answer", "")
         worker = state.get("worker")
         log.info("[Reviewer] 开始审核 {} Worker 产出 ({}字)...",
                  getattr(worker, "label", "?"), len(raw))
+        second_chart = getattr(state.get("intent"), "second_chart", None)
         review = workflow._reviewer.review(
             raw,
             state["chart_context"].chart,
             state.get("knowledge", ""),
             workflow.check_facts,
-            getattr(state.get("intent"), "second_chart", None).chart
-            if getattr(state.get("intent"), "second_chart", None) else None,
+            second_chart.chart if second_chart else None,
+            user_prompt=state["user_prompt"],
+            ctx=state["chart_context"],
         )
         if review.ok:
-            log.info("[Reviewer] {} Worker 产出通过三重校验 ✓", getattr(worker, "label", "?"))
+            log.info("[Reviewer] {} Worker 产出通过审核 ✓ (source={})", getattr(worker, "label", "?"), review.source)
         else:
-            log.warning("[Reviewer] {} Worker 产出未通过校验 ✗", getattr(worker, "label", "?"))
+            log.warning("[Reviewer] {} Worker 产出未通过审核 ✗ (source={})", getattr(worker, "label", "?"), review.source)
             for i, issue in enumerate(review.issues, 1):
                 log.warning("[Reviewer]   issue[{}]: {}", i, issue)
         return {"issues": review.issues, "final_answer": raw if review.ok else ""}
@@ -114,13 +115,15 @@ def create_xianzhi_graph(workflow):
         repaired = workflow._invoke(messages)
         log.info("[Reflextion] {} Worker 修复完成 ({}字)，二次审核中...",
                  getattr(worker, "label", "?"), len(repaired))
+        second_chart = getattr(state.get("intent"), "second_chart", None)
         repaired_review = workflow._reviewer.review(
             repaired,
             state["chart_context"].chart,
             state.get("knowledge", ""),
             workflow.check_facts,
-            getattr(state.get("intent"), "second_chart", None).chart
-            if getattr(state.get("intent"), "second_chart", None) else None,
+            second_chart.chart if second_chart else None,
+            user_prompt=state["user_prompt"],
+            ctx=state["chart_context"],
         )
         if repaired_review.ok:
             log.info("[Reflextion] {} Worker 修复后通过校验 ✓", getattr(worker, "label", "?"))

@@ -17,7 +17,11 @@ from app.logger import log
 from app.rag.vector_store import knowledge_base
 from app.tarot_app import TarotApp
 from app.tools.mcp_client import mcp_manager
-
+import os
+import uvicorn
+from app.security import ApiKeyAuthMiddleware, RateLimitMiddleware
+from app.tools.bazi import bazi_tools
+from app.tools.bazi import bazi_chart, bazi_analysis, bazi_dayun
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -29,6 +33,7 @@ async def lifespan(app: FastAPI):
 
     # 1. LLM（直连 DashScope，不经系统代理）
     import httpx
+    _http = httpx.Client(trust_env=False)
     chat_model = ChatOpenAI(
         model=settings.dashscope_model,
         base_url=settings.dashscope_url,
@@ -37,14 +42,33 @@ async def lifespan(app: FastAPI):
         timeout=settings.llm_timeout,
         max_retries=settings.llm_max_retries,
         extra_body={"enable_thinking": settings.llm_enable_thinking},
-        http_client=httpx.Client(trust_env=False),
+        http_client=_http,
     )
+    # 意图拆解模型（轻量快速，留空则复用主模型）
+    decompose_model = ChatOpenAI(
+        model=settings.decompose_model or settings.dashscope_model,
+        base_url=settings.dashscope_url,
+        api_key=settings.dashscope_api_key,
+        temperature=0.1,
+        timeout=30.0,
+        max_retries=settings.llm_max_retries,
+        http_client=httpx.Client(trust_env=False),
+    ) if settings.decompose_model else chat_model
+    # Reviewer 审核模型（独立实例，留空则复用主模型）
+    reviewer_model = ChatOpenAI(
+        model=settings.reviewer_model or settings.dashscope_model,
+        base_url=settings.dashscope_url,
+        api_key=settings.dashscope_api_key,
+        temperature=0.1,
+        timeout=30.0,
+        max_retries=settings.llm_max_retries,
+        http_client=httpx.Client(trust_env=False),
+    ) if settings.reviewer_model else chat_model
 
     # 2. 记忆（数据库不可达时降级，不阻断端口监听）
     memory = create_chat_memory()
 
     # 3. 本地工具（含 RAG 检索）
-    from app.tools.bazi import bazi_tools
     from app.tools.web_search import search_tools
     from app.tools.terminate import terminate_tools
     from app.tools.rag_search import rag_tools
@@ -54,7 +78,7 @@ async def lifespan(app: FastAPI):
     tarot_app = TarotApp(chat_model=chat_model)
 
     # 5. 注册共享依赖：Xianzhi 按会话池化，首次请求时按需创建实例
-    set_instances(chat_model, local_tools, memory, tarot_app)
+    set_instances(chat_model, local_tools, memory, tarot_app, decompose_model, reviewer_model)
 
     # 6. 后台完成重/可失败初始化，避免阻塞端口监听导致存活探针失败
     async def _bg_init():
@@ -69,7 +93,6 @@ async def lifespan(app: FastAPI):
             log.warning("MCP 启动失败: {}", e)
 
         def _warm_cache():
-            from app.tools.bazi import bazi_chart, bazi_analysis, bazi_dayun
             warm_dates = ["1990-01-01 12:00", "2000-01-01 12:00", "1985-01-01 12:00", "1995-01-01 12:00"]
             warm_genders = ["男", "女"]
             warm_count = 0
@@ -131,7 +154,6 @@ app.add_middleware(
 )
 
 # 安全中间件（后添加的先执行：限流在最外层，鉴权其次）
-from app.security import ApiKeyAuthMiddleware, RateLimitMiddleware
 app.add_middleware(ApiKeyAuthMiddleware)
 app.add_middleware(RateLimitMiddleware)
 
@@ -181,8 +203,6 @@ async def health():
 
 
 if __name__ == "__main__":
-    import os
-    import uvicorn
     # 端口对齐：CloudBase 云托管「服务端口设置」固定为 80，平台不自动注入 PORT 环境变量。
     # 容器内若未显式设置 PORT（推荐在控制台设为 80），强制监听 80，否则存活探针会因端口不匹配失败。
     # 本地开发（非容器）沿用 APP_PORT 习惯值，也可用 PORT 环境变量覆盖。
