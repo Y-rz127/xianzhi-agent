@@ -39,6 +39,8 @@ _SEARCH_CACHE_MAX = 200
 # 切分参数（纳入文档指纹，变更后自动重建索引，避免新旧 chunk 混用）
 CHUNK_SIZE = 600
 CHUNK_OVERLAP = 120
+# 元数据版本：chunk metadata 结构变更时递增，触发向量库重建（如新增 doc_type 字段）
+_META_VERSION = 1
 
 
 class BatchEmbeddings(Embeddings):
@@ -122,7 +124,9 @@ def _infer_doc_type(source: str) -> str:
     name = source.lower()
     if name.startswith("古籍"):
         return "classic"
-    if "断法" in name or "规则卡" in name:
+    # 断法/规则卡类：文件名含断法关键词，或序号 ≥10 的实战断事文档
+    _RULE_KEYWORDS = ("断法", "规则卡", "格局", "官非", "性格", "贫富", "男女命", "流月流日")
+    if any(kw in name for kw in _RULE_KEYWORDS):
         return "rule"
     if "模板库" in name:
         return "template"
@@ -317,13 +321,14 @@ def _load_fingerprint() -> dict | None:
 
 
 def _save_fingerprint(docs_hash: str, embedding_id: str, store_type: str,
-                      chunk_size: int, chunk_overlap: int) -> None:
+                      chunk_size: int, chunk_overlap: int, meta_version: int = 0) -> None:
     data = {
         "docs_hash": docs_hash,
         "embedding_id": embedding_id,
         "store_type": store_type,
         "chunk_size": chunk_size,
         "chunk_overlap": chunk_overlap,
+        "meta_version": meta_version,
         "updated_at": time.time(),
     }
     # 本地文件兜底
@@ -335,7 +340,7 @@ def _save_fingerprint(docs_hash: str, embedding_id: str, store_type: str,
 
 
 def _is_up_to_date(docs_hash: str, embedding_id: str, store_type: str,
-                   chunk_size: int, chunk_overlap: int) -> bool:
+                   chunk_size: int, chunk_overlap: int, meta_version: int = 0) -> bool:
     fp = _load_fingerprint()
     if not fp:
         return False
@@ -345,6 +350,7 @@ def _is_up_to_date(docs_hash: str, embedding_id: str, store_type: str,
         and fp.get("store_type") == store_type
         and fp.get("chunk_size") == chunk_size
         and fp.get("chunk_overlap") == chunk_overlap
+        and fp.get("meta_version", 0) == meta_version
     )
 
 
@@ -495,7 +501,7 @@ def _build_vector_store(embeddings: Embeddings, embedding_id: str, force: bool =
 
     # 指纹未变且未触发后端恢复 → 直接加载已有索引，零 embedding API 调用
     if not force and not backend_recovered and _is_up_to_date(docs_hash, embedding_id, effective_type,
-                                    CHUNK_SIZE, CHUNK_OVERLAP):
+                                    CHUNK_SIZE, CHUNK_OVERLAP, _META_VERSION):
         log.info("RAG 文档指纹未变，复用已有向量索引 (store_type={})", effective_type)
         try:
             if effective_type == "postgres":
@@ -509,7 +515,7 @@ def _build_vector_store(embeddings: Embeddings, embedding_id: str, force: bool =
     log.info("RAG 文档指纹变更或首次构建，开始全量重建向量库 (configured_type={})", configured_type)
     chunks = _split_chunks(docs)
     store, actual_type = _rebuild_store(chunks, embeddings, configured_type)
-    _save_fingerprint(docs_hash, embedding_id, actual_type, CHUNK_SIZE, CHUNK_OVERLAP)
+    _save_fingerprint(docs_hash, embedding_id, actual_type, CHUNK_SIZE, CHUNK_OVERLAP, _META_VERSION)
     return store, actual_type
 
 
