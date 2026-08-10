@@ -243,7 +243,7 @@ WORKERS: dict[str, DomainWorker] = {
             "- 官杀混杂、伤官见官、劫财夺财，多主事业动荡、口舌是非\n"
             "- 判断事业层次看格局清浊：清格主贵，浊格主劳碌"
         ),
-        extra_queries=("事业 升职 换工作 跳槽 伤官见官 官杀混杂 断法",),
+        extra_queries=("事业工作 升职 跳槽 伤官见官 官杀混杂",),
     ),
     "wealth": DomainWorker(
         domain="wealth",
@@ -257,7 +257,7 @@ WORKERS: dict[str, DomainWorker] = {
             "- 身旺财旺为富格，身弱财旺则富屋贫人，反主求财辛苦\n"
             "- 大运流年走财旺之乡、食伤生扶之地，主进财；走比劫、印星夺食之地主破财"
         ),
-        extra_queries=("财运 正财 偏财 食伤生财 财库 比劫夺财 破财 断法",),
+        extra_queries=("财运收入 正财 偏财 食伤生财 财库 比劫夺财",),
     ),
     "love": DomainWorker(
         domain="love",
@@ -271,7 +271,7 @@ WORKERS: dict[str, DomainWorker] = {
             "- 大运流年遇配偶星、桃花、合入日支，多为动婚恋之期\n"
             "- 配偶星被冲合化、坐比劫，多主感情波折、第三者"
         ),
-        extra_queries=("感情 桃花 配偶星 红艳 孤辰寡宿 恋爱 断法",),
+        extra_queries=("婚恋关系 桃花 配偶星 红艳 孤辰寡宿",),
     ),
     "marriage": DomainWorker(
         domain="marriage",
@@ -285,7 +285,7 @@ WORKERS: dict[str, DomainWorker] = {
             "- 比劫成群夺财（男）、伤官见官（女）多主克配偶、离婚\n"
             "- 古籍依据：《滴天髓》论婚姻、《三命通会》论夫妻宫"
         ),
-        extra_queries=("婚姻 配偶宫 夫妻星 离婚 晚婚 合冲刑害 断法",),
+        extra_queries=("婚恋关系 配偶宫 夫妻星 离婚 晚婚",),
     ),
     "health": DomainWorker(
         domain="health",
@@ -299,7 +299,7 @@ WORKERS: dict[str, DomainWorker] = {
             "- 刑冲入本命盘的宫位，对应脏腑易病\n"
             "合规提示：命理健康参考仅供参考，涉及重病必须劝导就医，不替代医疗诊断。"
         ),
-        extra_queries=("健康 五行失衡 疾病 七杀攻身 羊刃 外伤 手术 断法",),
+        extra_queries=("健康伤病 五行失衡 疾病 七杀攻身 羊刃",),
     ),
     "study": DomainWorker(
         domain="study",
@@ -313,7 +313,7 @@ WORKERS: dict[str, DomainWorker] = {
             "- 大运流年走印星、官星、食伤生扶之地，主考试升学之机\n"
             "- 印星受克、官杀混杂，多主学业分心、考试不利"
         ),
-        extra_queries=("学习 考试 印星 食伤 官星 文昌 升学 断法",),
+        extra_queries=("学业功名 考试 印星 食伤 官星 文昌",),
     ),
     "social": DomainWorker(
         domain="social",
@@ -328,7 +328,7 @@ WORKERS: dict[str, DomainWorker] = {
             "- 大运流年走比劫旺地，主社交活跃、人脉变动；走官杀旺地，主遇贵人或受压制\n"
             "- 社交层次看格局清浊：清格主贵人层次高、交往圈子优质；浊格主交际复杂、是非多"
         ),
-        extra_queries=("人际 朋友 贵人 小人 比肩 劫财 社交 合伙 断法",),
+        extra_queries=("社交人际 朋友 贵人 小人 比肩 劫财 合伙",),
     ),
     "family": DomainWorker(
         domain="family",
@@ -344,7 +344,7 @@ WORKERS: dict[str, DomainWorker] = {
             "- 宫位受冲刑害：对应宫位逢冲刑害，主该六亲关系动荡、缘分浅薄\n"
             "- 大运流年引动六亲宫位或星位，多主该六亲当年有重大变化（婚丧嫁娶、升迁变动）"
         ),
-        extra_queries=("六亲 父母 子女 印星 财星 比劫 宫位 断法",),
+        extra_queries=("六亲完整 父母 子女 印星 财星 比劫 宫位",),
     ),
     "liunian": DomainWorker(
         domain="liunian",
@@ -359,7 +359,7 @@ WORKERS: dict[str, DomainWorker] = {
             "- 流年走比劫、伤官、七杀攻身，主破财、口舌、疾病\n"
             "- 立春换年口径：流年以立春为界，不以正月初一"
         ),
-        extra_queries=("流年 大运 太岁 岁运并临 应期 流年断法",),
+        extra_queries=("大运流年 太岁 岁运并临 应期 作用关系",),
     ),
     "theory": DomainWorker(
         domain="theory",
@@ -1053,8 +1053,8 @@ class XianzhiWorkflow:
             return queries, f"topic={topic}"
         # fallback 也注入用户原句，保持与匹配路径/断事路径一致
         if user_text and user_text.strip():
-            return [user_text, "命理 术语 概念 解释"], "fallback"
-        return ["命理 术语 概念 解释"], "fallback"
+            return [user_text, "术语白话 对照表 十神 用神 含义"], "fallback"
+        return ["术语白话 对照表 十神 用神 含义"], "fallback"
 
     def _build_duxing_queries(
         self,
@@ -1081,17 +1081,17 @@ class XianzhiWorkflow:
             queries.append(worker.extra_queries[0])
         # 2) 按领域补古籍检索
         ancient_query_map = {
-            "career": "渊海子平 论官杀 事业 官星",
-            "wealth": "渊海子平 论财 财星 食伤生财",
-            "marriage": "滴天髓 论婚姻 配偶宫 古籍",
-            "health": "三命通会 论疾病 五行 健康古籍",
-            "love": "子平真诠 论桃花 感情 古籍",
-            "personality": "滴天髓 论性情 日主 十神 性格 古籍",
-            "migration": "滴天髓 论迁移 驿马 方位 古籍",
-            "naming": "渊海子平 论命名 用神 起名 古籍",
-            "auspicious": "星命 择日 择吉 用事 古籍",
-            "match": "三命通会 论合婚 夫妻宫 合婚 古籍",
-            "children": "三命通会 论子息 子女 食伤 古籍",
+            "career": "渊海子平 官杀 事业 官星",
+            "wealth": "渊海子平 财星 食伤生财",
+            "marriage": "滴天髓 婚姻 配偶宫",
+            "health": "三命通会 疾病 五行 健康",
+            "love": "渊海子平 桃花 感情",
+            "personality": "滴天髓 性情 日主 十神",
+            "migration": "三命通会 驿马 方位 迁移",
+            "naming": "渊海子平 起名 用神",
+            "auspicious": "三命通会 择日 择吉",
+            "match": "三命通会 合婚 夫妻宫",
+            "children": "三命通会 子息 子女 食伤",
         }
         ancient_q = ancient_query_map.get(intent.domain)
         if ancient_q:
@@ -1099,16 +1099,16 @@ class XianzhiWorkflow:
         # 4) 断法体系 query
         duanfa_query_map = {
             "health": "健康伤病 断法 五行失衡 疾病",
-            "wealth": "贫富层次 财星 断法 命理",
-            "career": "事业财运 官星 印星 断法",
-            "marriage": "婚恋关系 配偶宫 断法 命理",
-            "love": "婚恋关系 桃花 断法 命理",
-            "personality": "性格心性 十神 日主 为人 断法",
-            "migration": "方位迁移 用神方位 驿马 断法",
-            "naming": "起名改名 喜用神 五行 断法",
-            "auspicious": "择吉择日 用事 黄道 断法",
-            "match": "合婚 夫妻宫 刑冲合害 断法",
-            "children": "子女生育 食伤 子女宫 时机 断法",
+            "wealth": "贫富层次 财星 判断",
+            "career": "事业工作 官星 印星 断法",
+            "marriage": "婚恋关系 规则卡 配偶宫",
+            "love": "婚恋关系 规则卡 桃花",
+            "personality": "性格心性 详断 十神 日主",
+            "migration": "方位迁移 断法 驿马 用神",
+            "naming": "起名改名 规则 喜用神 五行",
+            "auspicious": "择吉择日 断法 黄道 用事",
+            "match": "合婚配对 断法 夫妻宫 刑冲",
+            "children": "子女子嗣 断法 食伤 子女宫",
         }
         duanfa_q = duanfa_query_map.get(intent.domain)
         if duanfa_q:
