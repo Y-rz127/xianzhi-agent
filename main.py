@@ -62,8 +62,9 @@ async def lifespan(app: FastAPI):
         base_url=settings.dashscope_url,
         api_key=settings.dashscope_api_key,
         temperature=0.1,
-        timeout=30.0,
+        timeout=60.0,
         max_retries=settings.llm_max_retries,
+        extra_body={"enable_thinking": False},
         http_client=_reviewer_http,
     ) if settings.reviewer_model else chat_model
 

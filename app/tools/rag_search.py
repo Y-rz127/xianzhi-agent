@@ -110,7 +110,7 @@ def search_knowledge(query: str) -> str:
     """
     if not knowledge_base.ready:
         return "知识库未就绪"
-    docs = search_deduped(expand_knowledge_queries(query), max_docs=6)
+    docs = search_deduped(expand_knowledge_queries(query), max_docs=4)
     if not docs:
         return "（未检索到相关知识）"
     parts = []

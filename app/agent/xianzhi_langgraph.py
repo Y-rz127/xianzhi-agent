@@ -133,6 +133,19 @@ def create_xianzhi_graph(workflow):
         log.info("[Reflextion] {} Worker 修复完成 ({}字)，二次审核中...",
                  getattr(worker, "label", "?"), len(repaired))
         second_chart = getattr(state.get("intent"), "second_chart", None)
+        # 修复后先走 regex 快筛（零 LLM 调用），通过则信任修复，不再全量 LLM 重审
+        regex_issues = workflow._reviewer._regex_review(
+            repaired, state["chart_context"].chart,
+            state.get("knowledge", ""), workflow.check_facts,
+            second_chart.chart if second_chart else None,
+        )
+        if not regex_issues:
+            log.info("[Reflextion] {} Worker 修复后 regex 快筛通过 ✓（跳过 LLM 重审）",
+                     getattr(worker, "label", "?"))
+            return {"final_answer": repaired, "issues": []}
+        # regex 仍发现问题 → 才触发 LLM 深审
+        log.info("[Reflextion] {} Worker 修复后 regex 发现 {} 条问题，触发 LLM 深审",
+                 getattr(worker, "label", "?"), len(regex_issues))
         repaired_review = workflow._reviewer.review(
             repaired,
             state["chart_context"].chart,

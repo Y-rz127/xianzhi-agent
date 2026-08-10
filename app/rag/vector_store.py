@@ -105,6 +105,36 @@ def _select_embeddings() -> tuple[Embeddings, str]:
         return local, "local:{}".format(settings.embedding_local_model)
 
 
+# 文档类型 → rerank 权重：断法/规则卡优先，模板库降权（密集术语清单易虚高命中）
+_DOC_TYPE_WEIGHT = {
+    "rule": 1.15,       # 断法类（XX断法.md / 规则卡.md），领域知识核心
+    "theory": 1.0,      # 基础理论类（01~08 前缀）
+    "classic": 1.0,     # 古籍类
+    "case": 0.95,       # 命例案例库
+    "ref": 0.9,         # 术语白话对照表
+    "process": 0.8,     # 标准分析流程
+    "template": 0.7,    # 问答模板库（全局前置约束密集术语清单，易虚高命中）
+}
+
+
+def _infer_doc_type(source: str) -> str:
+    """根据知识库文件名推断文档类型，用于 rerank 加权。"""
+    name = source.lower()
+    if name.startswith("古籍"):
+        return "classic"
+    if "断法" in name or "规则卡" in name:
+        return "rule"
+    if "模板库" in name:
+        return "template"
+    if "术语" in name:
+        return "ref"
+    if "命例" in name or "案例" in name:
+        return "case"
+    if "流程" in name:
+        return "process"
+    return "theory"
+
+
 def _load_knowledge_docs() -> list[Document]:
     """加载 knowledge_docs 目录下全部 markdown 文档。"""
     docs: list[Document] = []
@@ -113,7 +143,10 @@ def _load_knowledge_docs() -> list[Document]:
         return docs
     for md in sorted(KNOWLEDGE_DIR.glob("*.md")):
         text = md.read_text(encoding="utf-8")
-        docs.append(Document(page_content=text, metadata={"source": md.name}))
+        doc_type = _infer_doc_type(md.name)
+        docs.append(Document(page_content=text, metadata={
+            "source": md.name, "doc_type": doc_type,
+        }))
     log.info("加载命理知识文档 {} 篇", len(docs))
     return docs
 
@@ -590,7 +623,7 @@ class KnowledgeBase:
         精排与后端 score 语义无关，避免不同向量库（Chroma L2 距离 vs
         pgvector/milvus 余弦相似度）的 score 方向不一致导致排序反向。
         """
-        fetch_k = 5
+        fetch_k = 3
         k = settings.rag_k
         try:
             scored = self._store.similarity_search_with_score(query, k=fetch_k)
@@ -602,11 +635,13 @@ class KnowledgeBase:
             scored = [(d, s) for d, s in scored if s <= settings.rag_distance_threshold]
         if not scored:
             return []
-        # rerank：关键词覆盖率降序（后端无关）；预计算重叠分避免排序时重复计算
-        scored = [(d, s, _keyword_overlap(query, d.page_content)) for d, s in scored]
+        # rerank：关键词覆盖率 × 文档类型权重（断法优先、模板库降权），避免密集术语清单虚高命中
+        scored = [(d, s, _keyword_overlap(query, d.page_content) * _DOC_TYPE_WEIGHT.get(
+            d.metadata.get("doc_type", ""), 1.0)) for d, s in scored]
         scored.sort(key=lambda x: -x[2])
-        # 最低相关性阈值：覆盖率 < 0.1 的视为不相关，直接丢弃
-        _MIN_OVERLAP = 0.1
+        # 最低相关性阈值：覆盖率 < 0.25 的视为不相关，直接丢弃
+        # （短 query 约 5 个 2-gram，0.25 要求至少命中 1-2 个核心词组，过滤擦边命中模板库的噪音 chunk）
+        _MIN_OVERLAP = 0.25
         scored = [item for item in scored if item[2] >= _MIN_OVERLAP]
         top = scored[:k]
         log.info("[rerank] query={} 候选数={} 选取前{}条={}",

@@ -74,7 +74,7 @@ class Settings(BaseSettings):
     milvus_uri: str = Field(default="", alias="MILVUS_URI")
     # 向量数据库目录（VECTOR_STORE_TYPE=chroma 时使用）
     vector_db_dir: Path = Field(default=Path("./data/vector_db"), alias="VECTOR_DB_DIR")
-    rag_k: int = Field(default=2, alias="RAG_K")
+    rag_k: int = Field(default=1, alias="RAG_K")
     # 检索排序相关度权重（0~1）：越高越重视相关性、越低越重视多样性。
     # 主路径（KnowledgeBase._search_reranked）按关键词重叠重排，不依赖本值；
     # 本值仅在后端不支持 score 检索、回退 MMR retriever 时生效。

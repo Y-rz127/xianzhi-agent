@@ -298,33 +298,32 @@ def expand_knowledge_queries(query: str, limit: int = 4) -> list[str]:
 
 def search_deduped(
     queries: list[str],
-    max_docs: int = 6,
-    max_chars_per_query: int = 900,
-    max_chars_total: int = 2500,
+    max_docs: int = 4,
+    max_chars_per_query: int = 600,
 ):
     """对多条 query 逐一检索并跨 query 去重，返回 [(query, doc), ...]。
 
-    去重键：(来源文件, 内容前120字)，与 ReAct 工具原有行为一致。
-    控量：单 query 检索结果累计 ≤ max_chars_per_query，总 ≤ max_chars_total。
+    与 workflow 路径策略一致：每条 query 取 top-1 最相关 chunk，去重合并。
+    去重键：(来源文件, 内容前120字)。
+    控量：单 chunk 截断 ≤ max_chars_per_query，最多 max_docs 条。
     """
     docs = []
     seen = set()
-    total_chars = 0
     for q in queries:
-        query_chars = 0
-        for doc in knowledge_base.search(q):
-            key = (doc.metadata.get("source", ""), doc.page_content[:120])
-            if key in seen:
-                continue
-            text_len = len(doc.page_content)
-            if query_chars + text_len > max_chars_per_query:
-                continue
-            if total_chars + text_len > max_chars_total:
-                return docs
-            seen.add(key)
-            docs.append((q, doc))
-            query_chars += text_len
-            total_chars += text_len
-            if len(docs) >= max_docs:
-                return docs
+        results = knowledge_base.search(q)
+        if not results:
+            continue
+        doc = results[0]  # top-1
+        key = (doc.metadata.get("source", ""), doc.page_content[:120])
+        if key in seen:
+            continue
+        seen.add(key)
+        # 单 chunk 截断兜底
+        if len(doc.page_content) > max_chars_per_query:
+            from langchain_core.documents import Document as _Doc
+            doc = _Doc(page_content=doc.page_content[:max_chars_per_query] + "…",
+                       metadata=doc.metadata)
+        docs.append((q, doc))
+        if len(docs) >= max_docs:
+            break
     return docs

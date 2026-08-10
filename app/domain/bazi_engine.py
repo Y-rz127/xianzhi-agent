@@ -1797,7 +1797,7 @@ def format_dayun_text(chart: BaziChart) -> str:
         f"【大运列表】(共 {len(chart.dayun)} 柱)",
     ]
     for item in chart.dayun:
-        lines.append(f"  {item.ganzhi} | {item.start_year}-{item.end_year} | {item.start_age}-{item.end_age}岁")
+        lines.append(f"  {item.ganzhi}({item.shishen_gan}) | {item.start_year}-{item.end_year} | {item.start_age}-{item.end_age}岁")
     lines += ["", "注: 大运由 lunar-python 起运算法生成，顺逆与起运时间已结构化保存。"]
     return "\n".join(lines)
 

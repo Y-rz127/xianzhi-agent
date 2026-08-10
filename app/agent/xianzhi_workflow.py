@@ -174,6 +174,8 @@ _REVIEWER_SYSTEM = """你是资深命理审核员，负责审核命理师回答�
 1. 逻辑自洽：身强/身弱判断与后续推断是否一致？用神选取与格局分析是否矛盾？
    例：说"身弱"却又说"能担大财"——矛盾
 2. 断法准确性：十神含义、大运流年影响解读是否符合命理常识？
+   注意：天干十神（主星/透干）与地支藏干十神（副星）不同，"透出"仅指天干，
+   地支藏干不可称"透出"。如"癸酉大运"中癸为天干十神、酉为地支藏干十神，二者不可混淆。
    例：把"偏印"说成"正印"的含义、流年影响方向判断错误
 3. 知识一致性：回答内容是否与【命理规则检索】矛盾？
    例：检索规则说"伤官见官主口舌是非"，回答却说"伤官见官主升职"
@@ -873,6 +875,16 @@ class XianzhiWorkflow:
             raw_answer, review, user_prompt, intent, chart_context, knowledge, worker
         )
         repaired = self._invoke(repair_messages)
+        # 修复后先走 regex 快筛（零 LLM 调用），通过则信任修复，不再全量 LLM 重审
+        regex_issues = self._reviewer._regex_review(
+            repaired, chart_context.chart, knowledge, self.check_facts, second_chart,
+        )
+        if not regex_issues:
+            log.info("[Reflextion] {} Worker 修复后 regex 快筛通过 ✓（跳过 LLM 重审）", worker.label)
+            return repaired
+        # regex 仍发现问题 → 才触发 LLM 深审
+        log.info("[Reflextion] {} Worker 修复后 regex 发现 {} 条问题，触发 LLM 深审",
+                 worker.label, len(regex_issues))
         repaired_review = self._reviewer.review(
             repaired, chart_context.chart, knowledge, self.check_facts,
             second_chart, user_prompt=user_prompt, ctx=chart_context,
@@ -941,10 +953,8 @@ class XianzhiWorkflow:
             log.warning("[match] 规则合婚基础数据生成失败: {}", e)
         return ""
 
-    # 单 query 检索结果最大字符数（避免单次拉爆 token；≈ 2-3 个 chunk）
-    _MAX_TEXT_PER_QUERY = 850
-    # 累计送入 prompt 的总检索字符上限（截断兜底）
-    _MAX_KNOWLEDGE_TOTAL = 3000
+    # 单 query 检索结果最大字符数（与 chunk_size 对齐，top-1 chunk 截断兜底）
+    _MAX_TEXT_PER_QUERY = 600
 
     def _retrieve_rules(
         self,
@@ -964,7 +974,13 @@ class XianzhiWorkflow:
 
         # ===== LLM 拆解的 queries 优先（精准、自适应） =====
         if intent.queries:
-            queries = list(intent.queries)
+            # LLM 拆解的 query 可能过短（如"学业 命盘分析"），2-gram 区分度低，
+            # 拼接领域核心术语前缀增强检索相关性
+            domain_kw = DOMAIN_RULE_QUERIES.get(intent.domain, ("",))[0].split()[0] if intent.domain else ""
+            queries = [
+                f"{domain_kw} {q}" if domain_kw and len(q) < 8 else q
+                for q in intent.queries
+            ]
             # 追加领域专属 query 补充（LLM 拆解可能太泛，领域 query 含核心术语）
             if worker and worker.extra_queries:
                 queries.append(worker.extra_queries[0])
@@ -985,47 +1001,32 @@ class XianzhiWorkflow:
                  intent.domain, day_master, strength, len(queries))
 
         parts: list[str] = []
-        total_chars = 0
         seen_chunks: set[tuple[str, str]] = set()
         dedup_count = 0
+        total_chars = 0
         for idx, query in enumerate(queries, 1):
             docs = knowledge_base.search(query)
             if not docs:
                 log.info("[workflow检索] [{}/{}] query={} 无匹配", idx, len(queries), query)
                 continue
-            query_parts: list[str] = []
-            query_chars = 0
-            for di, doc in enumerate(docs, 1):
-                chunk_key = (doc.metadata.get("source", ""), doc.page_content[:120])
-                if chunk_key in seen_chunks:
-                    dedup_count += 1
-                    continue
-                seen_chunks.add(chunk_key)
-                chunk_text = "[片段{}] (来源:{}):\n{}".format(
-                    di, doc.metadata.get("source", "未知"), doc.page_content)
-                if query_chars + len(chunk_text) > self._MAX_TEXT_PER_QUERY:
-                    chunk_text = chunk_text[:self._MAX_TEXT_PER_QUERY - query_chars] + "…"
-                    query_parts.append(chunk_text)
-                    query_chars += len(chunk_text)
-                    break
-                query_parts.append(chunk_text)
-                query_chars += len(chunk_text)
-            if not query_parts:
-                log.info("[workflow检索] [{}/{}] query={} 全部chunk重复，跳过", idx, len(queries), query)
+            # top-1：取最相关的 1 条 chunk（rag_k=1 已在检索层保证）
+            doc = docs[0]
+            chunk_key = (doc.metadata.get("source", ""), doc.page_content[:120])
+            if chunk_key in seen_chunks:
+                dedup_count += 1
+                log.info("[workflow检索] [{}/{}] query={} top-1 chunk 重复，跳过", idx, len(queries), query)
                 continue
-            text = "\n\n".join(query_parts)
-            preview = text.replace("\n", " ")[:200]
-            log.info("[workflow检索] [{}/{}] query={} 命中={}字", idx, len(queries), query, len(text))
+            seen_chunks.add(chunk_key)
+            chunk_text = "[片段{}] (来源:{}):\n{}".format(
+                len(parts) + 1, doc.metadata.get("source", "未知"), doc.page_content)
+            # 单 chunk 截断兜底
+            if len(chunk_text) > self._MAX_TEXT_PER_QUERY:
+                chunk_text = chunk_text[:self._MAX_TEXT_PER_QUERY] + "…"
+            parts.append(chunk_text)
+            total_chars += len(chunk_text)
+            preview = chunk_text.replace("\n", " ")[:200]
+            log.info("[workflow检索] [{}/{}] query={} 命中={}字", idx, len(queries), query, len(chunk_text))
             log.info("[workflow检索] [{}/{}] 内容预览: {}", idx, len(queries), preview)
-            if total_chars + len(text) > self._MAX_KNOWLEDGE_TOTAL:
-                remain = self._MAX_KNOWLEDGE_TOTAL - total_chars
-                if remain > 200:
-                    parts.append(text[:remain] + "…")
-                    total_chars += remain
-                log.info("[workflow检索] 累计字符已达上限，截断后续结果")
-                break
-            parts.append(text)
-            total_chars += len(text)
         if not parts:
             log.info("[workflow检索] 全部query无匹配结果")
         else:
