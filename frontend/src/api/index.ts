@@ -278,8 +278,20 @@ export function parseWuxing(text: string): WuxingItem[] {
   return result
 }
 
-export interface DayunItem { year: string; ganzhi: string; startAge: number; startYear: number; endAge?: number; endYear?: number; liunian?: LiuNianItem[] }
-export interface LiuNianItem { year: string; ganzhi: string; age?: number; dayun?: string; dayunStartYear?: number; dayunEndYear?: number; xunkong?: string }
+export interface DayunItem {
+  year: string; ganzhi: string; startAge: number; startYear: number; endAge?: number; endYear?: number;
+  xunkong?: string; shishenGan?: string; gan?: string; zhi?: string;
+  hiddenStems?: string[]; shishenZhi?: string[]; changsheng?: string;
+  shensha?: { name: string; description: string }[];
+  liunian?: LiuNianItem[]
+}
+export interface LiuNianItem {
+  year: string; ganzhi: string; age?: number; dayun?: string;
+  dayunStartYear?: number; dayunEndYear?: number; xunkong?: string;
+  shishenGan?: string; gan?: string; zhi?: string;
+  hiddenStems?: string[]; shishenZhi?: string[]; changsheng?: string;
+  shensha?: { name: string; description: string }[]
+}
 export function parseDayun(text: string): DayunItem[] {
   if (!text) return []
   const result: DayunItem[] = []

@@ -7,7 +7,7 @@ Agent 上下文共用。公共工具函数仍返回可读文本，但结构化�
 from __future__ import annotations
 
 import datetime as _dt
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from typing import Any
 
 from lunar_python import Lunar, Solar
@@ -478,7 +478,7 @@ class Pillar:
 
 @dataclass(frozen=True)
 class DayunItem:
-    """大运单项：干支、起止年份/年龄、空亡。"""
+    """大运单项：干支、起止年份/年龄、空亡、详情（主星/藏干/副星/星运/神煞）。"""
     index: int
     ganzhi: str
     start_year: int
@@ -486,11 +486,18 @@ class DayunItem:
     start_age: int
     end_age: int
     xunkong: str
+    shishen_gan: str = ""
+    gan: str = ""
+    zhi: str = ""
+    hidden_stems: list[str] = field(default_factory=list)
+    shishen_zhi: list[str] = field(default_factory=list)
+    changsheng: str = ""
+    shensha: list[dict[str, str]] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
 class LiunianItem:
-    """流年单项：年份、干支、虚岁、所在大运区间。"""
+    """流年单项：年份、干支、虚岁、所在大运区间、详情（主星/藏干/副星/星运/神煞）。"""
     year: int
     ganzhi: str
     age: int
@@ -498,6 +505,13 @@ class LiunianItem:
     dayun_start_year: int | None
     dayun_end_year: int | None
     xunkong: str
+    shishen_gan: str = ""
+    gan: str = ""
+    zhi: str = ""
+    hidden_stems: list[str] = field(default_factory=list)
+    shishen_zhi: list[str] = field(default_factory=list)
+    changsheng: str = ""
+    shensha: list[dict[str, str]] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -1306,6 +1320,74 @@ def _zizuo(gan: str, zhi: str) -> str:
     return CHANG_SHENG[offset]
 
 
+def _ten_god(day_master: str, target_gan: str) -> str:
+    """计算 target_gan 相对于 day_master 的十神（主星）。"""
+    if not day_master or not target_gan:
+        return ""
+    dm_wx = GAN_WUXING.get(day_master, "")
+    tg_wx = GAN_WUXING.get(target_gan, "")
+    if not dm_wx or not tg_wx:
+        return ""
+    same_polarity = (day_master in _YANG_GAN) == (target_gan in _YANG_GAN)
+    if dm_wx == tg_wx:
+        return "比肩" if same_polarity else "劫财"
+    if GENERATES[dm_wx] == tg_wx:
+        return "食神" if same_polarity else "伤官"
+    if CONTROLS[dm_wx] == tg_wx:
+        return "偏财" if same_polarity else "正财"
+    if GENERATES[tg_wx] == dm_wx:
+        return "偏印" if same_polarity else "正印"
+    if CONTROLS[tg_wx] == dm_wx:
+        return "七杀" if same_polarity else "正官"
+    return ""
+
+
+def _ganzhi_detail(ganzhi: str, day_master_gan: str, pillars: list[Pillar], gender_int: int) -> dict[str, Any]:
+    """为大运/流年干支计算详细字段：主星、天干、地支、藏干、副星、星运、神煞。
+
+    Args:
+        ganzhi: 大运/流年干支（如 "辛未"）
+        day_master_gan: 日主天干（如 "丙"）
+        pillars: 原局四柱（用于神煞查表）
+        gender_int: 性别（1=男 0=女）
+    Returns:
+        dict 含 shishen_gan/gan/zhi/hidden_stems/shishen_zhi/changsheng/shensha
+    """
+    if not ganzhi or len(ganzhi) < 2:
+        return {}
+    gan = ganzhi[0]
+    zhi = ganzhi[1]
+    # 主星：大运/流年天干相对日主的十神
+    shishen_gan = _ten_god(day_master_gan, gan)
+    # 藏干
+    hidden = [s for s, _ in HIDDEN_STEMS.get(zhi, ())]
+    # 副星：藏干天干相对日主的十神
+    shishen_zhi = [_ten_god(day_master_gan, s) for s in hidden]
+    # 星运：日主在大运/流年地支的十二长生
+    changsheng = _zizuo(day_master_gan, zhi)
+    # 神煞：创建临时 Pillar 加入四柱列表，调用 _compute_shensha 后筛出该柱神煞
+    temp_name = "运柱"
+    temp_pillar = Pillar(
+        name=temp_name, ganzhi=ganzhi, gan=gan, zhi=zhi,
+        gan_wuxing=GAN_WUXING.get(gan, ""), zhi_wuxing=ZHI_WUXING.get(zhi, ""),
+        nayin="", xunkong="", hidden_stems=hidden,
+        shishen_gan=shishen_gan, shishen_zhi=shishen_zhi,
+        changsheng=changsheng, zizuo="",
+    )
+    all_pillars = pillars + [temp_pillar]
+    all_shensha = _compute_shensha(all_pillars, gender_int)
+    shensha = [{"name": s["name"], "description": s["description"]} for s in all_shensha if s.get("pillar") == temp_name]
+    return {
+        "shishen_gan": shishen_gan,
+        "gan": gan,
+        "zhi": zhi,
+        "hidden_stems": hidden,
+        "shishen_zhi": shishen_zhi,
+        "changsheng": changsheng,
+        "shensha": shensha,
+    }
+
+
 def _pillar(name: str, ganzhi: str, nayin: str, xunkong: str, hidden: str, shishen_gan: str, shishen_zhi: Any,
             changsheng: str = "", zizuo: str = "") -> Pillar:
     gan = ganzhi[0] if ganzhi else ""
@@ -1331,12 +1413,13 @@ def _pillar(name: str, ganzhi: str, nayin: str, xunkong: str, hidden: str, shish
     )
 
 
-def _build_dayun(yun, count: int) -> list[DayunItem]:
+def _build_dayun(yun, count: int, day_master_gan: str = "", pillars: list[Pillar] | None = None, gender_int: int = 1) -> list[DayunItem]:
     items: list[DayunItem] = []
     for d_yun in yun.getDaYun(count + 1):
         gz = d_yun.getGanZhi()
         if not gz:
             continue
+        detail = _ganzhi_detail(gz, day_master_gan, pillars or [], gender_int) if day_master_gan else {}
         items.append(DayunItem(
             index=d_yun.getIndex(),
             ganzhi=gz,
@@ -1345,6 +1428,13 @@ def _build_dayun(yun, count: int) -> list[DayunItem]:
             start_age=d_yun.getStartAge(),
             end_age=d_yun.getEndAge(),
             xunkong=d_yun.getXunKong(),
+            shishen_gan=detail.get("shishen_gan", ""),
+            gan=detail.get("gan", ""),
+            zhi=detail.get("zhi", ""),
+            hidden_stems=detail.get("hidden_stems", []),
+            shishen_zhi=detail.get("shishen_zhi", []),
+            changsheng=detail.get("changsheng", ""),
+            shensha=detail.get("shensha", []),
         ))
         if len(items) >= count:
             break
@@ -1358,7 +1448,8 @@ def _find_dayun_for_year(dayun: list[DayunItem], year: int) -> DayunItem | None:
     return None
 
 
-def _build_liunian(yun, dayun: list[DayunItem], start_year: int, years: int) -> list[LiunianItem]:
+def _build_liunian(yun, dayun: list[DayunItem], start_year: int, years: int,
+                   day_master_gan: str = "", pillars: list[Pillar] | None = None, gender_int: int = 1) -> list[LiunianItem]:
     lookup: dict[int, Any] = {}
     for d_yun in yun.getDaYun(14):
         for liu_nian in d_yun.getLiuNian(10):
@@ -1379,6 +1470,7 @@ def _build_liunian(yun, dayun: list[DayunItem], start_year: int, years: int) -> 
             birth_year = yun.getLunar().getSolar().getYear()
             age = year - birth_year + 1
             xunkong = lunar.getYearXunKongByLiChun()
+        detail = _ganzhi_detail(ganzhi, day_master_gan, pillars or [], gender_int) if day_master_gan else {}
         result.append(LiunianItem(
             year=year,
             ganzhi=ganzhi,
@@ -1387,6 +1479,13 @@ def _build_liunian(yun, dayun: list[DayunItem], start_year: int, years: int) -> 
             dayun_start_year=active_dayun.start_year if active_dayun else None,
             dayun_end_year=active_dayun.end_year if active_dayun else None,
             xunkong=xunkong,
+            shishen_gan=detail.get("shishen_gan", ""),
+            gan=detail.get("gan", ""),
+            zhi=detail.get("zhi", ""),
+            hidden_stems=detail.get("hidden_stems", []),
+            shishen_zhi=detail.get("shishen_zhi", []),
+            changsheng=detail.get("changsheng", ""),
+            shensha=detail.get("shensha", []),
         ))
     return result
 
@@ -1459,9 +1558,10 @@ def build_bazi_chart(
     ]
     wuxing = _build_wuxing_analysis(ec)
     analysis = _build_domain_analysis(pillars, wuxing)
-    dayun = _build_dayun(yun, dayun_count)
+    day_master_gan = ec.getDayGan()
+    dayun = _build_dayun(yun, dayun_count, day_master_gan, pillars, gender_int)
     start_year = liunian_start_year or _dt.date.today().year
-    liunian = _build_liunian(yun, dayun, start_year, liunian_years)
+    liunian = _build_liunian(yun, dayun, start_year, liunian_years, day_master_gan, pillars, gender_int)
 
     warnings = [
         "流年干支采用立春口径；具体到立春前后的事件判断，应结合准确日期时刻。",
@@ -1554,6 +1654,13 @@ def chart_to_api_dict(chart: BaziChart) -> dict[str, Any]:
                 "startAge": item.start_age,
                 "endAge": item.end_age,
                 "xunkong": item.xunkong,
+                "shishenGan": item.shishen_gan,
+                "gan": item.gan,
+                "zhi": item.zhi,
+                "hiddenStems": item.hidden_stems,
+                "shishenZhi": item.shishen_zhi,
+                "changsheng": item.changsheng,
+                "shensha": item.shensha,
             }
             for item in chart.dayun
         ],
@@ -1566,6 +1673,13 @@ def chart_to_api_dict(chart: BaziChart) -> dict[str, Any]:
                 "dayunStartYear": item.dayun_start_year,
                 "dayunEndYear": item.dayun_end_year,
                 "xunkong": item.xunkong,
+                "shishenGan": item.shishen_gan,
+                "gan": item.gan,
+                "zhi": item.zhi,
+                "hiddenStems": item.hidden_stems,
+                "shishenZhi": item.shishen_zhi,
+                "changsheng": item.changsheng,
+                "shensha": item.shensha,
             }
             for item in chart.liunian
         ],

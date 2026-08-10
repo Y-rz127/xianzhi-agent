@@ -19,6 +19,10 @@ from app.domain.bazi_engine import (
     format_fact_context,
     _compute_shensha,
     parse_gender,
+    GAN_HE,
+    GAN_CHONG,
+    CONTROLS,
+    GAN_WUXING,
 )
 from app.agent.base_agent import _wrap_user_input
 from app.logger import log
@@ -167,21 +171,16 @@ class FactCheckResult:
 _REVIEWER_SYSTEM = """你是资深命理审核员，负责审核命理师回答的专业质量。
 
 审核维度（逐条检查，发现问题记入 issues）：
-
 1. 逻辑自洽：身强/身弱判断与后续推断是否一致？用神选取与格局分析是否矛盾？
    例：说"身弱"却又说"能担大财"——矛盾
-
 2. 断法准确性：十神含义、大运流年影响解读是否符合命理常识？
    例：把"偏印"说成"正印"的含义、流年影响方向判断错误
-
 3. 知识一致性：回答内容是否与【命理规则检索】矛盾？
    例：检索规则说"伤官见官主口舌是非"，回答却说"伤官见官主升职"
-
 4. 表达质量：
-   - 是否有 AI 腔（"总结一下""需要注意的是""好消息是"）
+   - 是否有 AI 腔（"总结一下"、"好消息是"）
    - 是否过于绝对化（"一定会""绝对不可能"）
    - 是否有恐吓性表述
-
 5. 事实复查：四柱干支、流年干支是否有隐式错误表述？
    （正则已校验显式干支，此处查隐式表述，如"你的日主是甲木"但实际是乙木）
 
@@ -192,7 +191,6 @@ _REVIEWER_SYSTEM = """你是资深命理审核员，负责审核命理师回答�
 
 输出 JSON：
 {"pass": true/false, "issues": ["问题1", "问题2"]}
-
 只输出 JSON，不要解释。"""
 
 
@@ -225,7 +223,7 @@ class DomainWorker:
     label: str
     expertise_prompt: str  # 追加到通用 system prompt 末尾的领域断法规则
     extra_queries: tuple[str, ...] = ()  # 叠加到 DOMAIN_RULE_QUERIES 之外的领域专属检索
-    length_rule: str = "默认控制在3-6段，先结论后依据。"
+    length_rule: str = "默认控制在2-4段，先结论后依据,不要堆砌术语。"
     skip_facts: bool = False  # theory/chitchat 跳过命盘事实注入
 
 
@@ -1274,6 +1272,7 @@ class XianzhiWorkflow:
         # 四柱详述：藏干/副星/星运/自坐/空亡（表格新增字段，必须随排盘事实进 LLM 才能正确推理）
         pillar_detail = "\n".join(
             f"  {p.name}{'（日主）' if p.name == '日柱' else ''} {p.ganzhi}: "
+            f"主星[{p.shishen_gan or '—'}] "
             f"藏干[{'、'.join(p.hidden_stems) or '—'}] "
             f"副星[{'、'.join(p.shishen_zhi) or '—'}] "
             f"星运[{p.changsheng or '—'}] "
@@ -1281,6 +1280,45 @@ class XianzhiWorkflow:
             f"空亡[{p.xunkong or '—'}]"
             for p in chart.pillars
         )
+        # 天干关系：干合、干冲、干克、三奇
+        visible_gans = [p.gan for p in chart.pillars if p.gan]
+        gan_he: list[str] = []
+        gan_chong: list[str] = []
+        gan_ke: list[str] = []
+        for i in range(len(visible_gans)):
+            for j in range(i + 1, len(visible_gans)):
+                pair = frozenset((visible_gans[i], visible_gans[j]))
+                if pair in GAN_HE:
+                    gan_he.append(GAN_HE[pair])
+                if pair in GAN_CHONG:
+                    gan_chong.append(GAN_CHONG[pair])
+                # 天干相克（木克土、土克水、水克火、火克金、金克木）
+                wx_i = GAN_WUXING.get(visible_gans[i], "")
+                wx_j = GAN_WUXING.get(visible_gans[j], "")
+                if wx_i and wx_j:
+                    if CONTROLS.get(wx_i) == wx_j:
+                        gan_ke.append(f"{visible_gans[i]}克{visible_gans[j]}")
+                    elif CONTROLS.get(wx_j) == wx_i:
+                        gan_ke.append(f"{visible_gans[j]}克{visible_gans[i]}")
+        # 三奇贵人：四柱天干中同时出现甲戊庚/乙丙丁/壬癸辛
+        gan_set = set(visible_gans)
+        sanqi: list[str] = []
+        if {"甲", "戊", "庚"} <= gan_set:
+            sanqi.append("甲戊庚（三奇贵人）")
+        if {"乙", "丙", "丁"} <= gan_set:
+            sanqi.append("乙丙丁（三奇贵人）")
+        if {"壬", "癸", "辛"} <= gan_set:
+            sanqi.append("壬癸辛（三奇贵人）")
+        gan_rel_parts = []
+        if gan_he:
+            gan_rel_parts.append(f"合={'、'.join(gan_he)}")
+        if gan_chong:
+            gan_rel_parts.append(f"冲={'、'.join(gan_chong)}")
+        if gan_ke:
+            gan_rel_parts.append(f"克={'、'.join(gan_ke)}")
+        if sanqi:
+            gan_rel_parts.append(f"三奇={'、'.join(sanqi)}")
+        gan_relation_line = "；".join(gan_rel_parts) if gan_rel_parts else "—"
         # 神煞：按柱分组注入，确保与前端表格展示一致（此前完全缺失，LLM 看不到神煞）
         shensha_all = _compute_shensha(chart.pillars, parse_gender(chart.birth.gender))
         shensha_by_pillar: dict[str, list[str]] = {}
@@ -1291,7 +1329,9 @@ class XianzhiWorkflow:
             for p in chart.pillars
         )
         dayun_lines = [
-            f"{item.ganzhi} {item.start_year}-{item.end_year} {item.start_age}-{item.end_age}岁"
+            f"{item.ganzhi}({item.shishen_gan}) {item.start_year}-{item.end_year} {item.start_age}-{item.end_age}岁 "
+            f"藏干[{'、'.join(item.hidden_stems) or '—'}] 副星[{'、'.join(item.shishen_zhi) or '—'}] "
+            f"星运[{item.changsheng or '—'}] 神煞[{'、'.join(s['name'] for s in item.shensha) or '—'}]"
             for item in chart.dayun
         ]
         if intent.target_years:
@@ -1302,7 +1342,9 @@ class XianzhiWorkflow:
             if not liunian_items:
                 liunian_items = chart.liunian[:4]
         liunian_lines = [
-            f"{item.year}年:{item.ganzhi} {item.age}虚岁 所在大运:{item.dayun_ganzhi or '-'}"
+            f"{item.year}年:{item.ganzhi}({item.shishen_gan}) {item.age}虚岁 所在大运:{item.dayun_ganzhi or '-'} "
+            f"藏干[{'、'.join(item.hidden_stems) or '—'}] 副星[{'、'.join(item.shishen_zhi) or '—'}] "
+            f"星运[{item.changsheng or '—'}] 神煞[{'、'.join(s['name'] for s in item.shensha) or '—'}]"
             for item in liunian_items
         ]
         # 计算用户当前周岁，避免 LLM 自行推算出错
@@ -1327,6 +1369,7 @@ class XianzhiWorkflow:
             f"五行权重: {chart.wuxing.counts}; 最旺: {chart.wuxing.strongest}; 最弱: {chart.wuxing.weakest}",
             f"用神提示: {chart.wuxing.useful_hint}",
             f"十神结构: {chart.analysis.ten_gods}; 透干: {chart.analysis.exposed_stems or '-'}; 通根: {chart.analysis.rooted_stems or '-'}",
+            f"天干关系: {gan_relation_line}",
             f"地支关系: 合={chart.analysis.combinations or '-'}; 冲={chart.analysis.clashes or '-'}; 害={chart.analysis.harms or '-'}; 刑={chart.analysis.punishments or '-'}",
             f"调候: 月令{chart.analysis.season}; {chart.analysis.adjustment}",
             f"格局提示: {chart.analysis.pattern_hint}; 判断置信度: {chart.analysis.confidence}",

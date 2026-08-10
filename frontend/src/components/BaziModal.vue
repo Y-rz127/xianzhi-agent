@@ -144,9 +144,9 @@
 
           <div v-if="activeTab === 'dayun'" class="tab-panel" role="tabpanel">
             <div v-if="dayun.length" class="dayun-section">
-              <div class="section-title">大运</div>
+              <div class="section-title">大运 <span class="section-hint">点击查看详情</span></div>
               <div class="dayun-grid">
-                <div v-for="(d, i) in dayun" :key="i" class="dayun-card">
+                <div v-for="(d, i) in dayun" :key="i" class="dayun-card clickable" @click="selectedDetail = d">
                   <div class="dayun-year">{{ d.year }}</div>
                   <div class="dayun-range">{{ d.startYear }}-{{ d.startYear + 9 }}</div>
                   <div class="dayun-age">{{ d.startAge }}-{{ d.startAge + 9 }}岁</div>
@@ -185,9 +185,9 @@
           </div>
 
           <div v-if="activeTab === 'liunian'" class="tab-panel" role="tabpanel">
-            <div class="section-title">流年</div>
+            <div class="section-title">流年 <span class="section-hint">点击查看详情</span></div>
             <div v-if="liunian.length" class="liunian-strip">
-              <div v-for="l in liunian" :key="l.year" class="liunian-pill">
+              <div v-for="l in liunian" :key="l.year" class="liunian-pill clickable" @click="selectedDetail = l">
                 <span>{{ l.year }}</span><b>{{ l.ganzhi }}</b><em>{{ l.dayun || '-' }}</em>
               </div>
             </div>
@@ -233,6 +233,28 @@
             <div class="ps-popover-title" :class="'ps-' + activeShensha._cat">{{ activeShensha.name }}</div>
             <div class="ps-popover-desc">{{ activeShensha.description }}</div>
             <button class="ps-popover-close" @click="activeShensha = null" aria-label="关闭">关闭</button>
+          </div>
+        </div>
+        <!-- 大运/流年详情弹窗（点击 dayun-card / liunian-pill 触发） -->
+        <div v-if="selectedDetail" class="ps-popover" @click="selectedDetail = null">
+          <div class="detail-popover-card" @click.stop>
+            <div class="detail-popover-title">{{ selectedDetail.ganzhi }}</div>
+            <div class="detail-popover-sub">{{ detailSubtitle }}</div>
+            <div class="detail-grid">
+              <div class="detail-row"><span class="detail-label">主星</span><span class="detail-value">{{ selectedDetail.shishenGan || '—' }}</span></div>
+              <div class="detail-row"><span class="detail-label">天干</span><span class="detail-value">{{ selectedDetail.gan || '—' }}</span></div>
+              <div class="detail-row"><span class="detail-label">地支</span><span class="detail-value">{{ selectedDetail.zhi || '—' }}</span></div>
+              <div class="detail-row"><span class="detail-label">藏干</span><span class="detail-value">{{ selectedDetail.hiddenStems?.join('、') || '—' }}</span></div>
+              <div class="detail-row"><span class="detail-label">副星</span><span class="detail-value">{{ selectedDetail.shishenZhi?.join('、') || '—' }}</span></div>
+              <div class="detail-row"><span class="detail-label">星运</span><span class="detail-value">{{ selectedDetail.changsheng || '—' }}</span></div>
+            </div>
+            <div v-if="selectedDetail.shensha?.length" class="detail-shensha-section">
+              <div class="detail-label">神煞</div>
+              <div class="detail-shensha-tags">
+                <span v-for="(s, i) in selectedDetail.shensha" :key="i" class="detail-shensha-tag" :title="s.description">{{ s.name }}</span>
+              </div>
+            </div>
+            <button class="ps-popover-close" @click="selectedDetail = null" aria-label="关闭">关闭</button>
           </div>
         </div>
       </div>
@@ -301,6 +323,20 @@ const toggleShensha = (s: TaggedShensha) => {
   activeShensha.value = activeShensha.value === s ? null : s
 }
 
+// 大运/流年详情弹窗状态
+const selectedDetail = ref<DayunItem | LiuNianItem | null>(null)
+const detailSubtitle = computed(() => {
+  const d = selectedDetail.value
+  if (!d) return ''
+  if ('startYear' in d && d.startYear) {
+    return `${d.startYear}-${d.endYear || d.startYear + 9} · ${d.startAge}-${d.endAge || d.startAge + 9}岁`
+  }
+  if ('age' in d && d.age) {
+    return `${d.year}年 · ${d.age}虚岁${d.dayun ? ' · 所在大运 ' + d.dayun : ''}`
+  }
+  return ''
+})
+
 const maxWuxing = computed(() => Math.max(...props.wuxing.map(w => w.count), 1))
 const liunian = computed(() => props.liunian || [])
 const warnings = computed(() => props.warnings || [])
@@ -333,6 +369,7 @@ watch(() => props.visible, (v) => {
     activeTab.value = 'pillars'
   } else {
     activeShensha.value = null
+    selectedDetail.value = null
     // 关闭弹窗时清空报告状态，避免下次打开不同八字时显示上一次的报告
     reportContent.value = ""
     reportLoading.value = false
@@ -640,6 +677,22 @@ const downloadFullPDF = () => {
   border: 1px solid var(--border); border-radius: 6px; color: var(--text-dim); font-size: 12px;
   cursor: pointer; transition: all 0.2s; }
 .ps-popover-close:hover { border-color: var(--accent); color: var(--accent); }
+/* === 大运/流年详情弹窗 === */
+.section-hint { font-size: 11px; color: var(--text-muted); letter-spacing: normal; font-weight: normal; }
+.clickable { cursor: pointer; transition: all 0.2s; }
+.clickable:hover { border-color: var(--accent) !important; box-shadow: 0 4px 16px rgba(212,175,55,0.15); transform: translateY(-2px); }
+.detail-popover-card { background: linear-gradient(135deg, rgba(28,36,56,0.98), rgba(18,24,40,0.98));
+  border: 1px solid var(--border-bright); border-radius: 12px; padding: 20px 24px; max-width: 360px; width: 90%;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.5); cursor: default; animation: slideUp 0.2s ease-out; }
+.detail-popover-title { font-size: 22px; font-weight: bold; color: var(--accent-light); text-align: center; letter-spacing: 4px; margin-bottom: 4px; }
+.detail-popover-sub { font-size: 12px; color: var(--text-dim); text-align: center; margin-bottom: 16px; }
+.detail-grid { display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; }
+.detail-row { display: flex; align-items: center; gap: 12px; padding: 6px 10px; border-radius: 8px; background: rgba(255,255,255,0.03); }
+.detail-label { font-size: 12px; color: var(--text-muted); min-width: 40px; text-align: right; }
+.detail-value { font-size: 14px; color: var(--text); font-weight: 500; }
+.detail-shensha-section { margin-bottom: 14px; }
+.detail-shensha-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.detail-shensha-tag { font-size: 11px; padding: 3px 10px; border-radius: 4px; background: rgba(212,175,55,0.1); border: 1px solid rgba(212,175,55,0.2); color: var(--accent-light); cursor: default; }
 .report-section { }
 .report-loading { display: flex; align-items: center; gap: 10px; color: var(--accent); font-size: 13px; padding: 20px; }
 .report-placeholder { color: var(--text-dim); font-size: 13px; text-align: center; padding: 20px; }
