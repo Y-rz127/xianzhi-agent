@@ -1797,7 +1797,11 @@ def format_dayun_text(chart: BaziChart) -> str:
         f"【大运列表】(共 {len(chart.dayun)} 柱)",
     ]
     for item in chart.dayun:
-        lines.append(f"  {item.ganzhi}({item.shishen_gan}) | {item.start_year}-{item.end_year} | {item.start_age}-{item.end_age}岁")
+        lines.append(
+            f"  {item.ganzhi}({item.shishen_gan}) | {item.start_year}-{item.end_year} | {item.start_age}-{item.end_age}岁 "
+            f"藏干[{'、'.join(item.hidden_stems) or '—'}] 副星[{'、'.join(item.shishen_zhi) or '—'}] "
+            f"星运[{item.changsheng or '—'}] 神煞[{'、'.join(s['name'] for s in item.shensha) or '—'}]"
+        )
     lines += ["", "注: 大运由 lunar-python 起运算法生成，顺逆与起运时间已结构化保存。"]
     return "\n".join(lines)
 
@@ -1811,7 +1815,11 @@ def format_liunian_text(chart: BaziChart) -> str:
     lines = [f"【流年推算】从 {start_year} 年起往后 {len(chart.liunian)} 年", ""]
     for item in chart.liunian:
         dy = f" | 所在大运: {item.dayun_ganzhi}" if item.dayun_ganzhi else ""
-        lines.append(f"  {item.year}年: {item.ganzhi} | {item.age}虚岁{dy}")
+        lines.append(
+            f"  {item.year}年: {item.ganzhi}({item.shishen_gan}) | {item.age}虚岁{dy} "
+            f"藏干[{'、'.join(item.hidden_stems) or '—'}] 副星[{'、'.join(item.shishen_zhi) or '—'}] "
+            f"星运[{item.changsheng or '—'}] 神煞[{'、'.join(s['name'] for s in item.shensha) or '—'}]"
+        )
     lines += ["", "注: 流年干支采用立春口径，并逐年绑定所在大运。"]
     return "\n".join(lines)
 
