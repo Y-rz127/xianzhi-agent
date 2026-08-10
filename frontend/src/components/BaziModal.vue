@@ -249,9 +249,19 @@
               <div class="detail-row"><span class="detail-label">星运</span><span class="detail-value">{{ selectedDetail.changsheng || '—' }}</span></div>
             </div>
             <div v-if="selectedDetail.shensha?.length" class="detail-shensha-section">
-              <div class="detail-label">神煞</div>
+              <div class="detail-label">神煞 <span class="section-hint">点击查看详情</span></div>
               <div class="detail-shensha-tags">
-                <span v-for="(s, i) in selectedDetail.shensha" :key="i" class="detail-shensha-tag" :title="s.description">{{ s.name }}</span>
+                <span
+                  v-for="(s, i) in selectedDetail.shensha"
+                  :key="i"
+                  class="detail-shensha-tag"
+                  :class="{ active: activeDetailShenshaName === s.name }"
+                  @click="toggleDetailShensha(s.name, s.description)"
+                >{{ s.name }}</span>
+              </div>
+              <div v-if="activeDetailShenshaName" class="detail-shensha-desc">
+                <div class="detail-shensha-desc-name">{{ activeDetailShenshaName }}</div>
+                <div class="detail-shensha-desc-text">{{ activeDetailShenshaDesc }}</div>
               </div>
             </div>
             <button class="ps-popover-close" @click="selectedDetail = null" aria-label="关闭">关闭</button>
@@ -325,6 +335,17 @@ const toggleShensha = (s: TaggedShensha) => {
 
 // 大运/流年详情弹窗状态
 const selectedDetail = ref<DayunItem | LiuNianItem | null>(null)
+const activeDetailShenshaName = ref('')
+const activeDetailShenshaDesc = ref('')
+const toggleDetailShensha = (name: string, desc: string) => {
+  if (activeDetailShenshaName.value === name) {
+    activeDetailShenshaName.value = ''
+    activeDetailShenshaDesc.value = ''
+  } else {
+    activeDetailShenshaName.value = name
+    activeDetailShenshaDesc.value = desc
+  }
+}
 const detailSubtitle = computed(() => {
   const d = selectedDetail.value
   if (!d) return ''
@@ -370,6 +391,8 @@ watch(() => props.visible, (v) => {
   } else {
     activeShensha.value = null
     selectedDetail.value = null
+    activeDetailShenshaName.value = ''
+    activeDetailShenshaDesc.value = ''
     // 关闭弹窗时清空报告状态，避免下次打开不同八字时显示上一次的报告
     reportContent.value = ""
     reportLoading.value = false
@@ -692,7 +715,12 @@ const downloadFullPDF = () => {
 .detail-value { font-size: 14px; color: var(--text); font-weight: 500; }
 .detail-shensha-section { margin-bottom: 14px; }
 .detail-shensha-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-.detail-shensha-tag { font-size: 11px; padding: 3px 10px; border-radius: 4px; background: rgba(212,175,55,0.1); border: 1px solid rgba(212,175,55,0.2); color: var(--accent-light); cursor: default; }
+.detail-shensha-tag { font-size: 11px; padding: 3px 10px; border-radius: 4px; background: rgba(212,175,55,0.1); border: 1px solid rgba(212,175,55,0.2); color: var(--accent-light); cursor: pointer; transition: all 0.2s; }
+.detail-shensha-tag:hover { background: rgba(212,175,55,0.2); border-color: var(--accent); }
+.detail-shensha-tag.active { background: rgba(212,175,55,0.3); border-color: var(--accent); color: var(--accent-light); font-weight: 600; }
+.detail-shensha-desc { margin-top: 10px; padding: 10px 14px; background: rgba(212,175,55,0.05); border: 1px solid rgba(212,175,55,0.2); border-left: 3px solid var(--accent); border-radius: 6px; }
+.detail-shensha-desc-name { font-size: 12px; color: var(--accent-light); font-weight: 600; margin-bottom: 4px; letter-spacing: 1px; }
+.detail-shensha-desc-text { font-size: 12px; color: var(--text); line-height: 1.6; }
 .report-section { }
 .report-loading { display: flex; align-items: center; gap: 10px; color: var(--accent); font-size: 13px; padding: 20px; }
 .report-placeholder { color: var(--text-dim); font-size: 13px; text-align: center; padding: 20px; }

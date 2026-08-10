@@ -114,9 +114,9 @@
 
         <!-- 大运 -->
         <view class="section" v-if="dayun.length">
-          <text class="section-title">大运</text>
+          <text class="section-title">大运 <text class="section-hint">点击查看详情</text></text>
           <view class="dayun-grid">
-            <view v-for="(d, i) in dayun" :key="i" class="dayun-card">
+            <view v-for="(d, i) in dayun" :key="i" class="dayun-card dayun-card-clickable" @tap="openDetail(d)">
               <text class="dayun-year">{{ d.year }}</text>
               <text class="dayun-range">{{ d.startYear }}-{{ d.startYear + 9 }}</text>
               <text class="dayun-age">{{ d.startAge }}-{{ d.startAge + 9 }}岁</text>
@@ -153,7 +153,7 @@
             <text>{{ relationText }}</text>
           </view>
           <view v-if="liunian.length" class="liunian-strip">
-            <view v-for="l in liunian.slice(0, 6)" :key="l.year" class="liunian-pill">
+            <view v-for="l in liunian.slice(0, 6)" :key="l.year" class="liunian-pill liunian-pill-clickable" @tap="openDetail(l)">
               <text class="ln-year">{{ l.year }}</text>
               <text class="ln-gz">{{ l.ganzhi }}</text>
               <text class="ln-dy">{{ l.dayun || '-' }}</text>
@@ -183,6 +183,65 @@
           >{{ reportContent ? '重新生成报告' : '生成完整报告' }}</text>
         </view>
       </scroll-view>
+
+      <!-- 大运/流年详情弹窗（小程序端：单独一个全屏浮层，避免嵌套在 scroll-view 内） -->
+      <view v-if="selectedDetail" class="detail-mask" @tap="closeDetail">
+        <view class="detail-card" @tap.stop>
+          <view class="detail-header">
+            <text class="detail-title">{{ selectedDetail.ganzhi }}</text>
+            <text class="detail-close" @tap="closeDetail">✕</text>
+          </view>
+          <text class="detail-sub">{{ detailSubtitle }}</text>
+          <view class="detail-grid">
+            <view class="detail-row">
+              <text class="detail-label">主星</text>
+              <text class="detail-value">{{ selectedDetail.shishenGan || '—' }}</text>
+            </view>
+            <view class="detail-row">
+              <text class="detail-label">天干</text>
+              <text class="detail-value">{{ selectedDetail.gan || '—' }}</text>
+            </view>
+            <view class="detail-row">
+              <text class="detail-label">地支</text>
+              <text class="detail-value">{{ selectedDetail.zhi || '—' }}</text>
+            </view>
+            <view class="detail-row">
+              <text class="detail-label">藏干</text>
+              <text class="detail-value">{{ (selectedDetail.hiddenStems || []).join('、') || '—' }}</text>
+            </view>
+            <view class="detail-row">
+              <text class="detail-label">副星</text>
+              <text class="detail-value">{{ (selectedDetail.shishenZhi || []).join('、') || '—' }}</text>
+            </view>
+            <view class="detail-row">
+              <text class="detail-label">星运</text>
+              <text class="detail-value">{{ selectedDetail.changsheng || '—' }}</text>
+            </view>
+          </view>
+          <view v-if="selectedDetail.shensha && selectedDetail.shensha.length" class="detail-shensha-block">
+            <text class="detail-shensha-title">神煞 <text class="detail-shensha-hint">点击查看详情</text></text>
+            <view class="detail-shensha-tags">
+              <view
+                v-for="(s, i) in selectedDetail.shensha"
+                :key="i"
+                class="detail-shensha-tag"
+                :class="{ active: activeShenshaName === s.name }"
+                hover-class="detail-shensha-tag-hover"
+                @tap="toggleShenshaDesc(s.name, s.description)"
+              >
+                <text>{{ s.name }}</text>
+              </view>
+            </view>
+            <view v-if="activeShenshaName" class="detail-shensha-desc">
+              <text class="detail-shensha-desc-name">{{ activeShenshaName }}</text>
+              <text class="detail-shensha-desc-text">{{ activeShenshaDesc }}</text>
+            </view>
+          </view>
+          <view class="detail-actions">
+            <text class="detail-action-btn" @tap="closeDetail">关闭</text>
+          </view>
+        </view>
+      </view>
 
       <!-- 底部操作栏 -->
       <view class="modal-footer">
@@ -237,16 +296,11 @@ const zhiColor = (c: string) => zhiWx[c] || '#e5e7eb'
 const reportContent = ref('')
 const reportLoading = ref(false)
 
-// 弹窗关闭/出生时间变化时清空报告，避免不同八字之间互相串台
-watch(() => props.visible, (v) => {
-  if (!v) {
-    reportContent.value = ''
-    reportLoading.value = false
-  }
-})
+// 出生时间变化时清空报告，避免不同八字之间互相串台
 watch(() => props.birthTime, () => {
   reportContent.value = ''
   reportLoading.value = false
+  selectedDetail.value = null
 })
 
 const maxWuxing = computed(() => Math.max(...props.wuxing.map((w) => w.count), 1))
@@ -256,6 +310,53 @@ const currentYear = new Date().getFullYear()
 const currentDayun = computed(() =>
   props.dayun.find((d) => d.startYear <= currentYear && (d.endYear || d.startYear + 9) >= currentYear) || props.dayun[0]
 )
+
+// === 大运/流年详情弹窗 ===
+const selectedDetail = ref<DayunItem | LiuNianItem | null>(null)
+const openDetail = (d: DayunItem | LiuNianItem) => {
+  selectedDetail.value = d
+  activeShenshaName.value = ''
+  activeShenshaDesc.value = ''
+}
+const closeDetail = () => {
+  selectedDetail.value = null
+  activeShenshaName.value = ''
+  activeShenshaDesc.value = ''
+}
+// 详情弹窗内神煞标签点击：切换展开对应神煞的 description
+const activeShenshaName = ref('')
+const activeShenshaDesc = ref('')
+const toggleShenshaDesc = (name: string, desc: string) => {
+  if (activeShenshaName.value === name) {
+    activeShenshaName.value = ''
+    activeShenshaDesc.value = ''
+  } else {
+    activeShenshaName.value = name
+    activeShenshaDesc.value = desc
+  }
+}
+const detailSubtitle = computed(() => {
+  const d = selectedDetail.value
+  if (!d) return ''
+  // 大运：有 startYear
+  if ('startYear' in d && d.startYear) {
+    return `${d.startYear}-${d.endYear || d.startYear + 9} · ${d.startAge}-${d.endAge || d.startAge + 9}岁`
+  }
+  // 流年：有 age
+  if ('age' in d && (d as any).age) {
+    const l = d as LiuNianItem
+    return `${l.year}年 · ${l.age}虚岁${l.dayun ? ' · 所在大运 ' + l.dayun : ''}`
+  }
+  return ''
+})
+// 关闭主弹窗时清空详情状态，避免下次打开不同八字时显示上一次的详情
+watch(() => props.visible, (v) => {
+  if (!v) {
+    reportContent.value = ''
+    reportLoading.value = false
+    selectedDetail.value = null
+  }
+})
 const relationText = computed(() => {
   const a = props.analysis
   if (!a) return ''
@@ -505,11 +606,18 @@ async function generateReport() {
 .dayun-grid {
   display: flex;
   flex-wrap: wrap;
+  // 关键：让最后一行不满足 3 个时整体居中
+  // flex-pack-justify 不能直接做"末行居中"，这里用 justify-content: center 配合固定列宽，
+  // 每行 3 个会自动居中对齐，最后一行 1 个 / 2 个也会居中
+  justify-content: center;
   gap: 12rpx;
   box-sizing: border-box;
 }
 .dayun-card {
-  width: calc(25% - 9rpx);
+  // 固定 3 列（小程序按屏幕宽度自动换行）
+  // 列宽 = (父容器 - 2*gap) / 3 = calc((100% - 24rpx) / 3)
+  flex: 0 0 calc((100% - 24rpx) / 3);
+  width: calc((100% - 24rpx) / 3);
   background: $color-bg-card;
   border-radius: 12rpx;
   padding: 12rpx 6rpx;
@@ -518,6 +626,9 @@ async function generateReport() {
   box-sizing: border-box;
   min-width: 0;
 }
+.dayun-card-clickable { transition: transform 0.2s, border-color 0.2s, box-shadow 0.2s; }
+.dayun-card-clickable:active { transform: scale(0.97); border-color: $color-primary; box-shadow: 0 4rpx 16rpx rgba(212, 175, 55, 0.2); }
+.section-hint { font-size: 20rpx; color: $color-ink-light; font-weight: normal; margin-left: 8rpx; letter-spacing: 1rpx; }
 .dayun-year {
   display: block;
   font-size: 32rpx;
@@ -599,6 +710,8 @@ async function generateReport() {
   box-sizing: border-box;
   min-width: 0;
 }
+.liunian-pill-clickable { transition: transform 0.2s, border-color 0.2s, box-shadow 0.2s; }
+.liunian-pill-clickable:active { transform: scale(0.97); border-color: $color-primary; box-shadow: 0 4rpx 16rpx rgba(212, 175, 55, 0.2); }
 .ln-year,
 .ln-gz,
 .ln-dy {
@@ -715,4 +828,162 @@ async function generateReport() {
   border-color: $color-vermilion;
 }
 .btn.disabled { opacity: 0.4; }
+
+/* === 大运/流年详情弹窗（小程序端样式） === */
+.detail-mask {
+  position: fixed;
+  left: 0;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.6);
+  z-index: 999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40rpx;
+  box-sizing: border-box;
+}
+.detail-card {
+  width: 100%;
+  max-width: 640rpx;
+  max-height: 80vh;
+  background: linear-gradient(135deg, $color-paper, $color-bg-card);
+  border: 1rpx solid $color-border;
+  border-radius: 20rpx;
+  padding: 28rpx 28rpx 24rpx;
+  box-shadow: 0 10rpx 40rpx rgba(0, 0, 0, 0.4);
+  box-sizing: border-box;
+  overflow-y: auto;
+}
+.detail-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6rpx;
+}
+.detail-title {
+  font-size: 44rpx;
+  font-weight: 700;
+  color: $color-primary;
+  letter-spacing: 6rpx;
+  font-family: $font-family-display;
+}
+.detail-close {
+  font-size: 32rpx;
+  color: $color-ink-light;
+  padding: 8rpx 16rpx;
+}
+.detail-sub {
+  display: block;
+  font-size: 22rpx;
+  color: $color-ink-light;
+  text-align: center;
+  letter-spacing: 2rpx;
+  margin-bottom: 20rpx;
+}
+.detail-grid {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1rpx solid $color-border;
+  border-radius: 12rpx;
+  padding: 4rpx 16rpx;
+  margin-bottom: 20rpx;
+}
+.detail-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16rpx 0;
+  border-bottom: 1rpx solid rgba(255, 255, 255, 0.05);
+}
+.detail-row:last-child { border-bottom: none; }
+.detail-label {
+  font-size: 24rpx;
+  color: $color-ink-light;
+  letter-spacing: 2rpx;
+}
+.detail-value {
+  font-size: 26rpx;
+  color: $color-ink;
+  font-weight: 600;
+  font-family: $font-family-display;
+  max-width: 60%;
+  text-align: right;
+}
+.detail-shensha-block {
+  margin-bottom: 20rpx;
+}
+.detail-shensha-title {
+  display: block;
+  font-size: 24rpx;
+  color: $color-ink-light;
+  letter-spacing: 2rpx;
+  margin-bottom: 12rpx;
+}
+.detail-shensha-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10rpx;
+}
+.detail-shensha-tag {
+  display: inline-block;
+  font-size: 22rpx;
+  padding: 6rpx 16rpx;
+  background: rgba(212, 175, 55, 0.1);
+  border: 1rpx solid rgba(212, 175, 55, 0.3);
+  border-radius: 8rpx;
+  color: $color-primary;
+  letter-spacing: 1rpx;
+}
+.detail-shensha-tag.active {
+  background: rgba(212, 175, 55, 0.25);
+  border-color: $color-primary;
+  font-weight: 600;
+}
+.detail-shensha-tag-hover {
+  background: rgba(212, 175, 55, 0.2);
+}
+.detail-shensha-hint {
+  font-size: 20rpx;
+  color: $color-ink-light;
+  font-weight: normal;
+  margin-left: 8rpx;
+  letter-spacing: 1rpx;
+}
+.detail-shensha-desc {
+  margin-top: 14rpx;
+  padding: 14rpx 18rpx;
+  background: rgba(212, 175, 55, 0.06);
+  border: 1rpx solid rgba(212, 175, 55, 0.2);
+  border-left: 6rpx solid $color-primary;
+  border-radius: 10rpx;
+  display: flex;
+  flex-direction: column;
+  gap: 6rpx;
+}
+.detail-shensha-desc-name {
+  font-size: 24rpx;
+  color: $color-primary;
+  font-weight: 600;
+  letter-spacing: 2rpx;
+}
+.detail-shensha-desc-text {
+  font-size: 24rpx;
+  color: $color-ink;
+  line-height: 1.6;
+  letter-spacing: 1rpx;
+}
+.detail-actions {
+  display: flex;
+  justify-content: center;
+  padding-top: 8rpx;
+}
+.detail-action-btn {
+  padding: 14rpx 60rpx;
+  font-size: 26rpx;
+  color: $color-paper;
+  background: $color-primary;
+  border-radius: 30rpx;
+  letter-spacing: 4rpx;
+}
 </style>
