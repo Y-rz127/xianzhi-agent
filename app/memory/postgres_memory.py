@@ -437,8 +437,10 @@ def get_messages(session_id: str) -> list:
             # 过滤：工具调用结果、推理片段、系统消息
             if raw_role in ("tool", "system"):
                 continue
-            # 过滤 next_step_prompt 占位消息（tool_call_agent 注入的 HumanMessage）
-            if raw_role == "human" and "根据用户需求选择最合适的工具" in content:
+            # 过滤 next_step_prompt 占位消息（tool_call_agent 注入的 HumanMessage，
+            # 关键词须与 app.agent.xianzhi.NEXT_STEP_PROMPT 实际文本一致，避免历史恢复时把
+            # 工具调度模板当作用户消息显示）
+            if raw_role == "human" and "根据用户需求选最合适的工具，复杂任务分解多步" in content:
                 continue
             # 过滤无内容的空消息
             if not content.strip():

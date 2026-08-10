@@ -632,7 +632,7 @@ class Xianzhi(ToolCallAgent):
                 m for m in new_messages
                 if not (m.__class__.__name__ == "HumanMessage"
                         and isinstance(getattr(m, "content", ""), str)
-                        and "根据用户需求，主动选择最合适的工具" in m.content)
+                        and "根据用户需求选最合适的工具，复杂任务分解多步" in m.content)
             ]
             if filtered:
                 self._memory.add(self._conversation_id, filtered)
