@@ -37,8 +37,8 @@ _FINGERPRINT_FILE = "knowledge_fingerprint.json"
 _SEARCH_CACHE_MAX = 200
 
 # 切分参数（纳入文档指纹，变更后自动重建索引，避免新旧 chunk 混用）
-CHUNK_SIZE = 350
-CHUNK_OVERLAP = 70
+CHUNK_SIZE = 600
+CHUNK_OVERLAP = 120
 
 
 class BatchEmbeddings(Embeddings):
@@ -123,7 +123,8 @@ def _split_chunks(docs: list[Document]) -> list[Document]:
 
     用 RecursiveCharacterTextSplitter 多级递归切分，针对中文命理文档优化：
     - separators 依次按 段落(\\n\\n) → 换行(\\n) → 句号(。) → 分号(；) → 逗号(，) → 空格 → 兜底硬切 降级切分，保证语义完整
-    - chunk_size=350、chunk_overlap=70（由 CHUNK_SIZE/CHUNK_OVERLAP 常量控制）：超长段落（古籍原文、调候表）仍会被切到 350 字以内，无法整体保留
+    - chunk_size=600、chunk_overlap=120（由 CHUNK_SIZE/CHUNK_OVERLAP 常量控制）：保证断法体系/规则卡完整段落不被切碎
+    - 每个 chunk 前注入文档标题上下文（从文件名提取），让向量检索和 rerank 都能匹配到文档主题
     """
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=CHUNK_SIZE,
@@ -131,6 +132,13 @@ def _split_chunks(docs: list[Document]) -> list[Document]:
         separators=["\n\n", "\n", "。", "；", "，", " ", ""],
     )
     chunks = splitter.split_documents(docs)
+    # 为每个 chunk 注入文档标题上下文（提升检索相关性）
+    for chunk in chunks:
+        source = chunk.metadata.get("source", "")
+        title = source.replace(".md", "")
+        if "_" in title:
+            title = title.split("_", 1)[-1]  # 去掉序号前缀，如 "11_婚恋关系规则卡" → "婚恋关系规则卡"
+        chunk.page_content = f"[{title}]\n{chunk.page_content}"
     log.info("切分为 {} 个知识片段", len(chunks))
     return chunks
 
@@ -142,11 +150,16 @@ def _bigrams(s: str) -> set[str]:
 
 
 def _keyword_overlap(query: str, text: str) -> float:
-    """query 与文档的字符 2-gram 重叠度（Jaccard），作为 rerank 相关性分。"""
+    """query 对 text 的 2-gram 覆盖率：query 中有多少比例的 2-gram 出现在 text 中。
+
+    相比 Jaccard（len(bq & bt) / len(bq | bt)），覆盖率不受 text 长度惩罚：
+    350 字 chunk 有 ~349 个 2-gram，query 只有 4 个，Jaccard 全命中也仅 0.01；
+    覆盖率全命中则为 1.0，能真实反映 query 与 chunk 的相关性。
+    """
     bq, bt = _bigrams(query), _bigrams(text)
     if not bq or not bt:
         return 0.0
-    return len(bq & bt) / len(bq | bt)
+    return len(bq & bt) / len(bq)
 
 
 # ============================================================
@@ -577,7 +590,7 @@ class KnowledgeBase:
         精排与后端 score 语义无关，避免不同向量库（Chroma L2 距离 vs
         pgvector/milvus 余弦相似度）的 score 方向不一致导致排序反向。
         """
-        fetch_k = max(settings.rag_k * 3, settings.rag_k)
+        fetch_k = 5
         k = settings.rag_k
         try:
             scored = self._store.similarity_search_with_score(query, k=fetch_k)
@@ -589,9 +602,12 @@ class KnowledgeBase:
             scored = [(d, s) for d, s in scored if s <= settings.rag_distance_threshold]
         if not scored:
             return []
-        # rerank：关键词重叠度降序（后端无关）；预计算重叠分避免排序时重复计算
+        # rerank：关键词覆盖率降序（后端无关）；预计算重叠分避免排序时重复计算
         scored = [(d, s, _keyword_overlap(query, d.page_content)) for d, s in scored]
         scored.sort(key=lambda x: -x[2])
+        # 最低相关性阈值：覆盖率 < 0.1 的视为不相关，直接丢弃
+        _MIN_OVERLAP = 0.1
+        scored = [item for item in scored if item[2] >= _MIN_OVERLAP]
         top = scored[:k]
         log.info("[rerank] query={} 候选数={} 选取前{}条={}",
                   query[:30], len(scored), k,

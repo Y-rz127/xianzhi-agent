@@ -718,7 +718,7 @@ class XianzhiWorkflow:
         "match 合婚, children 子女生育, chitchat 闲聊, general 综合分析。\n"
         "判断规则：1、与命理/运势/人生问题无关（诗歌/故事/闲聊/发牢骚/流水账/长文）→ chitchat 且 queries=[]；"
         "2、沾边但无法归入具体领域 → general；3、其余按 domain 取值匹配。\n"
-        "queries：1-3 条精准检索词，每条 ≤30 字。知识库为通用命理文档（古籍原文/断法体系/基础理论/规则卡/术语表/命例库），不按年份/人名/事件索引，"
+        "queries：1-2 条精准检索词，每条 ≤30 字。知识库为通用命理文档（古籍原文/断法体系/基础理论/规则卡/术语表/命例库），不按年份/人名/事件索引，"
         "query 用命理概念和断法方向，不要带具体年份/人名/事件。\n"
         "示例：'2017年有人追我感情如何' → queries: ['流年桃花 感情运势', '恋爱 断法']。\n"
         "needs_chart：用户是否在问自己命盘的具体判断（如「我是不是XX」「我命盘XX」「我今年XXX」），true/false。\n"
@@ -944,7 +944,7 @@ class XianzhiWorkflow:
     # 单 query 检索结果最大字符数（避免单次拉爆 token；≈ 2-3 个 chunk）
     _MAX_TEXT_PER_QUERY = 850
     # 累计送入 prompt 的总检索字符上限（截断兜底）
-    _MAX_KNOWLEDGE_TOTAL = 2500
+    _MAX_KNOWLEDGE_TOTAL = 3000
 
     def _retrieve_rules(
         self,
@@ -965,8 +965,15 @@ class XianzhiWorkflow:
         # ===== LLM 拆解的 queries 优先（精准、自适应） =====
         if intent.queries:
             queries = list(intent.queries)
+            # 追加领域专属 query 补充（LLM 拆解可能太泛，领域 query 含核心术语）
+            if worker and worker.extra_queries:
+                queries.append(worker.extra_queries[0])
+            domain_rules = DOMAIN_RULE_QUERIES.get(intent.domain)
+            if domain_rules:
+                queries.append(domain_rules[0])
+            queries = queries[:4]
             log.info("[workflow检索] LLM拆解路径 queries={} (共{}条)",
-                     queries, len(intent.queries))
+                     queries, len(queries))
         elif intent.domain == "theory":
             queries, log_meta = self._build_theory_queries(user_text)
             log.info("[workflow检索] 理论路径 meta={} 构造query数={}", log_meta, len(queries))
@@ -1142,7 +1149,7 @@ class XianzhiWorkflow:
             "说话风格：真人聊天感，不用表格、多层标题、emoji。不同问题回答重点不同，不重复论述，详略得当，一针见血。"
             "该幽默幽默，该严肃严肃，该调侃调侃，懂得换位思考。用'你'不用'您'，口语化，可适当用语气词。不确定直说'这个要看具体情况'，不绝对化。\n"
             "闲聊场景：用户不问命理问题时，回复无需围绕命理场景，根据心境适当回应，可参杂人生哲理、处世良言，引发情感共鸣。\n"
-            "篇幅规范：闲聊≤120字；简单问题≤200字；常规分析≤350字；用户主动要求完整详批可放宽。\n"
+            "篇幅规范：闲聊≤120字；简单问题≤250字；常规分析≤400字；用户主动要求完整详批可放宽。\n"
             "避免AI腔：不要'总结一下''需要注意的是''好消息/需要注意'这种模板。不要输出ReAct过程，不要机械倾倒完整报告，不要恐吓。"
         )
         # 追加 Worker 专属断法规则（专业 Worker 的领域知识）
@@ -1398,12 +1405,25 @@ class XianzhiWorkflow:
         if other_chart is not None:
             for item in other_chart.liunian:
                 year_to_gz.setdefault(item.year, item.ganzhi)
+        # 大运干支白名单：匹配到的干支如果是某步大运干支，且上下文有大运关键词，则跳过流年校验
+        dayun_gz_set: set[str] = {item.ganzhi for item in chart.dayun}
+        if other_chart is not None:
+            dayun_gz_set.update(item.ganzhi for item in other_chart.dayun)
+        _DAYUN_KEYWORDS = ("大运", "交运", "交", "步入", "起运", "运柱", "走", "行运")
         for match in YEAR_GANZHI_RE.finditer(answer):
             year = int(match.group("year"))
             stated = match.group("ganzhi")
             expected = year_to_gz.get(year)
-            if expected and stated != expected:
-                issues.append(f"{year}年流年应为{expected}，回答写成了{stated}")
+            if not expected or stated == expected:
+                continue
+            # 大运语境排除：匹配到的干支是某步大运干支，且上下文附近有大运关键词 → 跳过
+            if stated in dayun_gz_set:
+                start = max(0, match.start() - 15)
+                end = min(len(answer), match.end() + 15)
+                context = answer[start:end]
+                if any(kw in context for kw in _DAYUN_KEYWORDS):
+                    continue
+            issues.append(f"{year}年流年应为{expected}，回答写成了{stated}")
 
         # 每个柱名下，两张盘各自合法的干支都算正确
         valid: dict[str, set[str]] = {}
