@@ -905,6 +905,16 @@ function onSend() {
   const onDone = () => { thinking.value = false }
   const onError = (err: string) => {
     thinking.value = false
+    // 纯连接类异常（WS 断开/超时/域名未配置）走 toast 提示，不污染对话历史
+    const isConnErr = /连接|超时|域名|网络|WebSocket|WS|Socket/i.test(err)
+    if (isConnErr) {
+      uni.showToast({ title: err, icon: 'none', duration: 2500 })
+      // 移除刚压入的占位 assistant 消息，保留用户问题以便重发
+      targetList.splice(idx, 1)
+      nextTick(scrollToBottom)
+      return
+    }
+    // 业务错误（如 LLM 限流、解析失败等）保留在消息流，便于用户回看
     targetList[idx].content = targetList[idx].content || `[出错] ${err}`
   }
   // 后端从 LLM 工具调用中提取到出生信息时回调（覆盖自然语言输入场景）

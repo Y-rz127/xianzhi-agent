@@ -53,8 +53,10 @@ function extractErrMsg(err: any, fallback: string): string {
   if (typeof err === 'string') return err
   const msg = err.errMsg || err.message || err.msg || ''
   if (msg.includes('url not in domain list')) return 'WS域名未配置，请勾选"不校验合法域名"'
-  if (msg.includes('timeout')) return '连接超时'
-  if (msg.includes('fail')) return '连接失败'
+  if (msg.includes('timeout')) return '连接超时，请检查网络'
+  if (msg.includes('fail socket') || msg.includes('fail to connect')) return '连接失败，请检查网络后重试'
+  if (msg.includes('fail')) return '连接失败，请稍后重试'
+  if (msg.includes('closed') || msg.includes('断开')) return '连接已断开，正在重试…'
   return fallback
 }
 

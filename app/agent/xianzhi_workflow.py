@@ -1051,10 +1051,11 @@ class XianzhiWorkflow:
             # 用户原句放首条：语义最自然，对 embedding 检索最友好
             queries = [user_text, query] if user_text and user_text.strip() else [query]
             return queries, f"topic={topic}"
-        # fallback 也注入用户原句，保持与匹配路径/断事路径一致
+        # fallback 仅保留用户原句，不再追加"术语白话 对照表..."这类泛化 query
+        # （该 query 总会命中术语白话对照表 chunk，对综合性理论回答引入噪音）
         if user_text and user_text.strip():
-            return [user_text, "术语白话 对照表 十神 用神 含义"], "fallback"
-        return ["术语白话 对照表 十神 用神 含义"], "fallback"
+            return [user_text.strip()], "fallback"
+        return [], "fallback"
 
     def _build_duxing_queries(
         self,
