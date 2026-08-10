@@ -505,6 +505,10 @@ def classify_question(text: str, today: _dt.date | None = None) -> QuestionInten
     if any(w in text for w in CHITCHAT_STRONG) and not years:
         best_domain = "chitchat"
 
+    # 零命理信号 + 无年份 → 闲聊（如"为什么这么多人执着西藏"）
+    if best_score == 0 and not years and best_domain == "general":
+        best_domain = "chitchat"
+
     if years and best_domain == "general":
         best_domain = "liunian"
 
@@ -718,8 +722,8 @@ class XianzhiWorkflow:
         "health 健康, liunian 大运流年, study 学业, social 社交人际, family 六亲关系, "
         "personality 性格心性, migration 方位迁移, naming 起名改名, auspicious 择吉, "
         "match 合婚, children 子女生育, chitchat 闲聊, general 综合分析。\n"
-        "判断规则：1、与命理/运势/人生问题无关（诗歌/故事/闲聊/发牢骚/流水账/长文）→ chitchat 且 queries=[]；"
-        "2、沾边但无法归入具体领域 → general；3、其余按 domain 取值匹配。\n"
+        "判断规则：1、与命理/运势/人生问题无关（诗歌/故事/闲聊/发牢骚/流水账/长文/社会现象/非命理疑问）→ chitchat 且 queries=[]；"
+        "2、沾边但无法归入具体领域 → chitchat 且 queries=[]；3、其余按 domain 取值匹配。\n"
         "queries：1-2 条精准检索词，每条 ≤30 字。知识库为通用命理文档（古籍原文/断法体系/基础理论/规则卡/术语表/命例库），不按年份/人名/事件索引，"
         "query 用命理概念和断法方向，不要带具体年份/人名/事件。\n"
         "示例：'2017年有人追我感情如何' → queries: ['流年桃花 感情运势', '恋爱 断法']。\n"
