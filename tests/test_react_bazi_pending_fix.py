@@ -101,9 +101,68 @@ def test_conversation_switch_clears_pending():
         print("  ✓ 切换会话后 _bazi_pending 被清空")
 
 
+def test_fuzzy_birth_signals():
+    """场景5：农历/节日/时辰/公历+时辰等模糊生辰输入应触发 _birth_signal，不走闲聊短路。"""
+    print("=== 测试 5: 模糊生辰信号检测 ===")
+
+    test_cases = [
+        ("2004年端午节 辰时 男，帮我看看盘", "节日+时辰"),
+        ("农历1990年四月廿六 14:30 男", "农历+时分"),
+        ("农历2004年五月初五 辰时 男", "农历+时辰"),
+        ("1990-05-20 辰时 男", "公历+时辰"),
+        ("1990年5月20日 辰时 男", "公历年月日+时辰"),
+        ("2004年端午 辰时 男命", "节日简写+时辰"),
+        ("阴历2000年八月十五 20:30 女", "阴历+时分"),
+    ]
+
+    with patch("app.agent.xianzhi.create_chat_memory") as m1, \
+         patch("app.agent.xianzhi.XianzhiWorkflow") as m2:
+        m1.return_value = MagicMock()
+        m2.return_value = MagicMock()
+
+        for text, label in test_cases:
+            agent = Xianzhi(chat_model=MagicMock(), local_tools=[])
+            # 模拟 run_stream 调用链：reset → mount_chart_context → _is_chitchat
+            agent.reset()
+            agent.mount_chart_context(text)
+            result = agent._is_chitchat(text)
+            assert result is False, f"[{label}] 期望 _is_chitchat=False，实际 {result}"
+            assert agent._birth_signal is True, f"[{label}] 期望 _birth_signal=True"
+            print(f"  ✓ [{label}] '{text[:30]}...' → 不走闲聊短路")
+
+
+def test_pure_chitchat_no_false_positive():
+    """场景6：纯闲聊（无年份/性别/时辰）不应误触发 _birth_signal。"""
+    print("=== 测试 6: 纯闲聊不误触发生辰信号 ===")
+
+    test_cases = [
+        "你好",
+        "哈哈，今天天气不错",
+        "谢谢师傅",
+        "在吗",
+        "早上好",
+    ]
+
+    with patch("app.agent.xianzhi.create_chat_memory") as m1, \
+         patch("app.agent.xianzhi.XianzhiWorkflow") as m2:
+        m1.return_value = MagicMock()
+        m2.return_value = MagicMock()
+
+        for text in test_cases:
+            agent = Xianzhi(chat_model=MagicMock(), local_tools=[])
+            agent.reset()
+            agent.mount_chart_context(text)
+            assert agent._birth_signal is False, f"'{text}' 不应触发 _birth_signal"
+            result = agent._is_chitchat(text)
+            assert result is True, f"'{text}' 应走闲聊短路，实际 _is_chitchat={result}"
+            print(f"  ✓ '{text}' → 走闲聊短路（未误触发生辰信号）")
+
+
 if __name__ == "__main__":
     test_bazi_pending_blocks_chitchat()
     test_bazi_pending_survives_reset()
     test_normal_chitchat_still_works()
     test_conversation_switch_clears_pending()
+    test_fuzzy_birth_signals()
+    test_pure_chitchat_no_false_positive()
     print("\n✅ 全部测试通过")

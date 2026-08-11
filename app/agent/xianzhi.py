@@ -47,6 +47,14 @@ _BIRTH_PLACE_RE = re.compile(
     re.UNICODE,
 )
 
+# 模糊生辰信号词：精确正则抓不到但用户确实在提供生辰信息时，用这些词做兜底检测
+_SHICHEN_WORDS = ("子时", "丑时", "寅时", "卯时", "辰时", "巳时",
+                  "午时", "未时", "申时", "酉时", "戌时", "亥时")
+_LUNAR_WORDS = ("农历", "阴历")
+_FESTIVAL_WORDS = ("春节", "元旦", "端午", "中秋", "重阳", "元宵",
+                   "七夕", "中元", "腊八", "冬至")
+_YEAR_RE = re.compile(r"(?:19|20)\d{2}")
+
 
 SYSTEM_PROMPT = """
 你是先知，数十年经验的八字命理师傅，气质通透沉稳，像阅历丰富的老友。
@@ -117,6 +125,7 @@ class Xianzhi(ToolCallAgent):
         self._sect = 2
         self._yun_sect = 1
         self._bazi_pending: Optional[dict] = None  # 八字待确认候选: {"pillars","gender","candidates"}
+        self._birth_signal: bool = False  # 模糊生辰信号：精确正则没抓到但疑似在提供生辰
         self._lock = asyncio.Lock()
 
     @property
@@ -222,12 +231,15 @@ class Xianzhi(ToolCallAgent):
     def mount_chart_context(self, text: str, sect: int = 2, yun_sect: int = 1):
         """如果用户输入包含出生信息，自动挂载命盘上下文。
 
-        支持两类输入：
+        支持三类输入：
         1. 完整出生时间（年-月-日 时:分）+ 性别 -> 直接排盘；
         2. 仅八字四柱（如"甲申庚午壬申甲辰"）+ 性别 -> 反推候选出生日期，
            交由用户确认其一后，再用选定日期排盘（见 _resolve_bazi_selection）。
+        3. 农历/节日/时辰/公历+时辰等模糊生辰 -> 设 _birth_signal 标志，
+           不走闲聊短路，让 ReAct 路径的 LLM 调 bazi_full（内部 _normalize_birth_time 自动转公历）。
         """
         self._last_user_text = text or ""
+        self._birth_signal = False  # 每轮重置
         birth_time, gender = self._extract_birth_info(text)
         if birth_time and gender:
             self.set_chart_context(birth_time, gender, sect, yun_sect, birth_place=self._extract_birth_place(text) or "")
@@ -248,7 +260,38 @@ class Xianzhi(ToolCallAgent):
                 cands = []
             self._bazi_pending = {"pillars": pillars, "gender": gender, "candidates": cands}
             return True
+        # 模糊生辰检测：精确正则没抓到但用户确实在提供生辰信息
+        if self._detect_birth_signal(text):
+            self._birth_signal = True
+            log.info("[xianzhi] 检测到疑似生辰信号，不走闲聊短路: {}", (text or "")[:80])
         return False
+
+    def _detect_birth_signal(self, text: str) -> bool:
+        """检测文本是否含疑似生辰信号（年份 + 性别 + 时辰/农历/节日）。
+
+        用于 _is_chitchat 放行：当精确正则（_BIRTH_INFO_RE）无法抓取但用户确实
+        在提供生辰信息时（如"2004年端午节 辰时 男"），不走闲聊短路，
+        让 ReAct 路径的 LLM 调 bazi_full 排盘（工具内部 _normalize_birth_time
+        支持农历/节日/时辰自动转公历）。
+
+        判定条件（全部满足）：
+        1. 含年份（19xx/20xx）
+        2. 含性别（男/女/乾造/坤造等）
+        3. 含时间信号（传统时辰 / 农历 / 阴历 / 节日 / HH:MM）
+        """
+        if not text:
+            return False
+        has_gender = bool(_GENDER_RE.search(text))
+        has_year = bool(_YEAR_RE.search(text))
+        if not (has_gender and has_year):
+            return False
+        has_time_signal = (
+            any(w in text for w in _SHICHEN_WORDS)
+            or any(w in text for w in _LUNAR_WORDS)
+            or any(w in text for w in _FESTIVAL_WORDS)
+            or bool(re.search(r"\d{1,2}[:：]\d{1,2}", text))
+        )
+        return has_time_signal
 
     def _extract_pillars(self, text: str):
         """从文本中提取八字四柱与性别，返回 (pillars8字, gender) 或 (None, None)。"""
@@ -490,15 +533,17 @@ class Xianzhi(ToolCallAgent):
     def _is_chitchat(self, user_prompt: str) -> bool:
         """判断是否为闲聊场景（无命盘时短路 ReAct，避免无谓工具调用）。
 
-        注意：用户只给了八字+性别时，_bazi_pending 会被 mount_chart_context 提前填好候选，
-        此时必须走 ReAct 让 LLM 调 bazi_infer_dates 把候选展示出来；否则会因
-        DOMAIN_KEYWORDS 不含"八字/排盘"等纯八字信号词而被误判为闲聊，
-        导致 LLM 看不到任何工具、只能瞎编日期/命理（参见 2026-08-11 小程序截图问题）。
+        放行条件（任一命中即不走闲聊短路）：
+        - _workflow_context：有完整命盘，走 workflow
+        - _bazi_pending：八字待确认候选，走 ReAct 调 bazi_infer_dates
+        - _birth_signal：模糊生辰信号（农历/节日/时辰/公历+时辰），走 ReAct 调 bazi_full
         """
         if self._workflow_context:
             return False  # 有命盘走 workflow，chitchat 由 workflow 内部处理
         if self._bazi_pending:
             return False  # 八字待确认候选：必须走 ReAct，让 LLM 调 bazi_infer_dates 展示候选
+        if self._birth_signal:
+            return False  # 模糊生辰：走 ReAct，让 LLM 调 bazi_full（内部自动转公历）
         intent = classify_question(user_prompt)
         return intent.domain == "chitchat"
 
