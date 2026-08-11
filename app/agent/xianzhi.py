@@ -138,7 +138,14 @@ class Xianzhi(ToolCallAgent):
         self._conversation_id = new_id
 
     def reset(self):
-        """重置 Agent 运行状态（父类 run_stream 会调用，需补齐）。"""
+        """重置 Agent 运行状态（父类 run_stream 会调用，需补齐）。
+
+        注意：_bazi_pending 必须跨 turn 保留，否则下一轮用户回复"第一个/1992年"时，
+        mount_chart_context 里 if self._bazi_pending 这个分支永远进不去，
+        _resolve_bazi_selection 拿不到候选，只能依赖 LLM 盲排（参见 2026-08-11 小程序截图问题）。
+        与 _workflow_context / _last_birth_info 同级别，只在切换会话（set_conversation_id）
+        时才清空。
+        """
         self.state = AgentState.IDLE
         self.current_step = 0
         self._current_step = 0
@@ -149,7 +156,7 @@ class Xianzhi(ToolCallAgent):
         self._sect = 2
         self._yun_sect = 1
         self._history_len = 0
-        self._bazi_pending = None
+        # _bazi_pending 不再重置：交给 mount_chart_context / set_conversation_id 管理生命周期
 
     def set_chart_context(self, birth_time: str, gender: str, sect: int = 2, yun_sect: int = 1, user_id: str = "", birth_place: str = ""):
         """由外部直接设置当前命盘上下文，AI 回答将基于该盘面。
@@ -481,9 +488,17 @@ class Xianzhi(ToolCallAgent):
             self.cleanup()
 
     def _is_chitchat(self, user_prompt: str) -> bool:
-        """判断是否为闲聊场景（无命盘时短路 ReAct，避免无谓工具调用）。"""
+        """判断是否为闲聊场景（无命盘时短路 ReAct，避免无谓工具调用）。
+
+        注意：用户只给了八字+性别时，_bazi_pending 会被 mount_chart_context 提前填好候选，
+        此时必须走 ReAct 让 LLM 调 bazi_infer_dates 把候选展示出来；否则会因
+        DOMAIN_KEYWORDS 不含"八字/排盘"等纯八字信号词而被误判为闲聊，
+        导致 LLM 看不到任何工具、只能瞎编日期/命理（参见 2026-08-11 小程序截图问题）。
+        """
         if self._workflow_context:
             return False  # 有命盘走 workflow，chitchat 由 workflow 内部处理
+        if self._bazi_pending:
+            return False  # 八字待确认候选：必须走 ReAct，让 LLM 调 bazi_infer_dates 展示候选
         intent = classify_question(user_prompt)
         return intent.domain == "chitchat"
 
