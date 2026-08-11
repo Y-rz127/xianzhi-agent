@@ -305,7 +305,7 @@ import {
   type ChartData, type ChatSession,
 } from '@/api'
 import { getLocalDateString } from '@/utils/datetimePicker'
-import { currentUserId, isLoggedIn, getToken, getUser, getBirthPlaceLocal, setBirthPlaceLocal } from '@/utils/storage'
+import { currentUserId, isLoggedIn, getToken, getUser, getBirthPlaceLocal, setBirthPlaceLocal, clearBirthPlaceLocal } from '@/utils/storage'
 import { regionData, matchCityByName, type City } from '@/utils/region-data'
 
 interface Message { role: 'user' | 'assistant'; content: string }
@@ -522,6 +522,10 @@ async function switchToSession(session: ChatSession) {
     birthDate.value = ''
     birthTime.value = ''
     gender.value = '男' as '男' | '女'
+    // 先清空出生地/经度，避免上一个会话/命盘的值跨会话挂载到本会话
+    // （下面只在本地有存档时才恢复，无档必须显式清空，否则会沿用陈旧值）
+    birthPlace.value = ''
+    birthLongitude.value = 0
     const bi = await getSessionBirthInfo(session.id)
     if (bi.time && bi.gender) {
       lastBirthInfo.value = { time: bi.time, gender: bi.gender }
@@ -667,6 +671,9 @@ watch([birthDate, birthTime, gender, birthLongitude], async ([d, t, g]) => {
 
 /** 预填出生信息并自动发起排盘（来自命例/档案带入） */
 async function applyBirth(bt: string, g: '男' | '女', name?: string) {
+  // 外部带入的是一张新命盘，先清空出生地/经度，避免沿用上一个命盘的地点
+  birthPlace.value = ''
+  birthLongitude.value = 0
   const [d, t] = bt.split(' ')
   birthDate.value = d || ''
   birthTime.value = zhiHourToHHMM(t)
@@ -920,19 +927,34 @@ function onSend() {
   // 后端从 LLM 工具调用中提取到出生信息时回调（覆盖自然语言输入场景）
   const onChartContext = async (bt: string, g: string, bp?: string) => {
     if (!bt || !g) return
+    // 记录切换前的八字，用于区分"同一命盘的追问"与"换了一张新命盘"
+    const prevTime = birthTimeFull.value
     const [d, t] = bt.split(' ')
     birthDate.value = d || ''
     birthTime.value = zhiHourToHHMM(t)
     gender.value = g as '男' | '女'
     lastBirthInfo.value = { time: bt, gender: g as '男' | '女' }
-    // 后端从对话中提取到出生地 → 模糊匹配城市经度，填充信息面板 + 持久化
-    if (bp && !birthPlace.value) {
-      const matched = matchCityByName(bp)
-      if (matched) {
-        birthPlace.value = `${matched.province} ${matched.city}`
-        birthLongitude.value = matched.longitude
+    // 出生地必须跟随"当前这张命盘"走，否则会跨命盘串值：
+    //  - 本次后端提取到出生地 → 采用（覆盖上一张命盘遗留的值；库未收录也用原文替换，经度置 0 为安全默认）；
+    //  - 本次未提到出生地且八字已变（新命盘 / 换人）→ 清空，不让上一个地点的真太阳时挂到这张命盘；
+    //  - 八字未变（同一命盘的追问）且已有手动选择的地点 → 保留手动精度，不覆盖。
+    const isNewChart = bt !== prevTime
+    if (bp) {
+      if (isNewChart || !birthPlace.value) {
+        const matched = matchCityByName(bp)
+        if (matched) {
+          birthPlace.value = `${matched.province} ${matched.city}`
+          birthLongitude.value = matched.longitude
+        } else {
+          birthPlace.value = bp
+          birthLongitude.value = 0
+        }
         if (conversationId.value) setBirthPlaceLocal(conversationId.value, birthPlace.value, birthLongitude.value)
       }
+    } else if (isNewChart) {
+      birthPlace.value = ''
+      birthLongitude.value = 0
+      if (conversationId.value) clearBirthPlaceLocal(conversationId.value)
     }
     // 主动拉取结构化命盘数据（命盘详情弹窗内容）
     _skipNextChartWatch = true

@@ -259,6 +259,26 @@
         <text class="btn" @tap="close">关闭</text>
       </view>
     </view>
+
+    <!-- 十神特性弹窗（自建浮层，绕开 uni.showModal 在小程序端不渲染 \n 的问题） -->
+    <view v-if="shishenModal" class="shishen-mask" @tap="closeShishenModal">
+      <view class="shishen-card" @tap.stop>
+        <view class="shishen-header">
+          <text class="shishen-title display-font">{{ shishenModal.name }}</text>
+          <text class="shishen-close" @tap="closeShishenModal">✕</text>
+        </view>
+        <view class="shishen-body">
+          <view class="shishen-section">
+            <text class="shishen-label">【正面特性】</text>
+            <text class="shishen-text">{{ shishenModal.positive }}</text>
+          </view>
+          <view class="shishen-section">
+            <text class="shishen-label">【反面特性】</text>
+            <text class="shishen-text">{{ shishenModal.negative }}</text>
+          </view>
+        </view>
+      </view>
+    </view>
   </view>
 </template>
 
@@ -335,6 +355,9 @@ const closeDetail = () => {
 // 详情弹窗内神煞标签点击：切换展开对应神煞的 description
 const activeShenshaName = ref('')
 const activeShenshaDesc = ref('')
+
+// 主四柱十神标签点击：自建小浮层（uni.showModal 在某些端不渲染 \n，做不到正反面段落分隔）
+const shishenModal = ref<{ name: string; positive: string; negative: string } | null>(null)
 const toggleShenshaDesc = (name: string, desc: string) => {
   if (activeShenshaName.value === name) {
     activeShenshaName.value = ''
@@ -475,17 +498,19 @@ function isShishen(name?: string): boolean {
   return !!name && name !== '—' && Object.prototype.hasOwnProperty.call(SHISHEN_INFO, name)
 }
 
-/** 点击十神查看其正面/反面特性（uni 原生弹窗，交互同神煞） */
+/** 点击十神查看其正面/反面特性（自建浮层，确保正反面段落换行生效） */
 function showShishenInfo(name?: string) {
   if (!isShishen(name)) return
   const info = SHISHEN_INFO[name as string]
   const alias = info.alias ? `（又称${info.alias}）` : ''
-  uni.showModal({
-    title: `${name}${alias} · 十神`,
-    content: `【正面特性】\n${info.positive}\n\n【反面特性】\n${info.negative}`,
-    showCancel: false,
-    confirmText: '知道了',
-  })
+  shishenModal.value = {
+    name: `${name}${alias}`,
+    positive: info.positive,
+    negative: info.negative,
+  }
+}
+function closeShishenModal() {
+  shishenModal.value = null
 }
 
 function handleDownloadPdf() {
@@ -643,29 +668,92 @@ async function generateReport() {
 .bt-fu { font-size: 21rpx; color: $color-ink-light; line-height: 1.5; }
 /* 十神可点击（交互同神煞标签） */
 .bt-shishen {
-  font-size: 30rpx;
+  font-size: 26rpx;
   color: $color-ink;
-  font-family: $font-family-display;
 }
 .bt-shishen-tag {
-  font-size: 30rpx;
-  font-weight: 600;
-  color: #B8860B;
-  padding: 2rpx 12rpx;
-  border-radius: 8rpx;
-  background: rgba(184, 134, 11, 0.1);
+  font-size: 26rpx;
+  color: $color-ink;
+  padding: 2rpx 0;
   line-height: 1.5;
-  transition: transform 0.15s, background 0.15s;
+  transition: transform 0.15s, opacity 0.15s;
 }
 .bt-shishen-tag:active {
   transform: scale(0.95);
-  background: rgba(184, 134, 11, 0.22);
+  opacity: 0.6;
 }
-.bt-fu-click {
-  color: #B8860B;
+
+/* === 十神自建浮层（绕开 uni.showModal 不渲染换行的限制） === */
+.shishen-mask {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 60;
+}
+.shishen-card {
+  width: 78%;
+  max-width: 620rpx;
+  max-height: 78%;
+  background: $color-paper;
+  border-radius: 20rpx;
+  box-shadow: 0 12rpx 40rpx rgba(0, 0, 0, 0.25);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.shishen-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 28rpx 32rpx 16rpx;
+  border-bottom: 1rpx solid rgba(184, 134, 11, 0.15);
+}
+.shishen-title {
+  font-size: 40rpx;
   font-weight: 600;
-  text-decoration: underline;
-  text-underline-offset: 4rpx;
+  color: $color-ink;
+  flex: 1;
+  text-align: center;
+}
+.shishen-close {
+  font-size: 36rpx;
+  color: $color-ink-light;
+  padding: 0 8rpx;
+}
+.shishen-body {
+  padding: 24rpx 32rpx 32rpx;
+  overflow-y: auto;
+}
+.shishen-section {
+  margin-bottom: 20rpx;
+}
+.shishen-section:last-child {
+  margin-bottom: 0;
+}
+.shishen-label {
+  display: block;
+  font-size: 32rpx;
+  font-weight: 600;
+  color: $color-ink;
+  font-family: $font-family-display;
+  margin-bottom: 12rpx;
+  letter-spacing: 2rpx;
+  text-align: center;
+}
+.shishen-text {
+  display: block;
+  font-size: 27rpx;
+  color: $color-ink;
+  line-height: 1.85;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.bt-fu-click {
+  color: $color-ink;
   transition: opacity 0.15s;
 }
 .bt-fu-click:active { opacity: 0.6; }

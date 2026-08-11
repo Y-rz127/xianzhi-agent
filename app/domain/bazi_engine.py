@@ -787,13 +787,13 @@ def _compute_shensha(pillars: list[Pillar], gender_int: int | None = None) -> li
                 if is_branch_target:
                     # 天德是地支（2月申、5月亥、8月寅），查地支
                     if p.zhi == c:
-                        add("天德贵人", f"月支{month_zhi}月，地支见{c}，逢凶化吉", p.name)
+                        add("天德贵人", "逢凶化吉", p.name)
                 else:
                     # 天德是天干，查天干（透出，力显）和藏干（暗藏，力弱需引动）
                     if p.gan == c:
-                        add("天德贵人", f"月支{month_zhi}月，天干透{c}，逢凶化吉（透出，力显）", p.name)
+                        add("天德贵人", "逢凶化吉", p.name)
                     elif any(hs == c for hs in p.hidden_stems):
-                        add("天德贵人", f"月支{month_zhi}月，地支藏{c}，逢凶化吉（藏干，力弱待引）", p.name)
+                        add("天德贵人", "逢凶化吉", p.name)
 
     yuede_chars = YUE_DE_MONTH.get(month_idx)
     if yuede_chars:
@@ -803,19 +803,19 @@ def _compute_shensha(pillars: list[Pillar], gender_int: int | None = None) -> li
         for c in yuede_chars:
             for p in pillars:
                 if p.gan == c:
-                    add("月德贵人", f"月支{month_zhi}月，天干见{c}，化煞解厄", p.name)
+                    add("月德贵人", "化煞解厄", p.name)
 
     # 天德合 / 月德合（月支查天干，四柱天干见之）
     tian_de_he = TIAN_DE_HE.get(month_zhi)
     if tian_de_he:
         for p in pillars:
             if p.gan == tian_de_he:
-                add("天德合", f"月支{month_zhi}月，天干见{tian_de_he}，与天德相配、逢凶化吉", p.name)
+                add("天德合", "与天德相配、逢凶化吉", p.name)
     yue_de_he = YUE_DE_HE.get(month_zhi)
     if yue_de_he:
         for p in pillars:
             if p.gan == yue_de_he:
-                add("月德合", f"月支{month_zhi}月，天干见{yue_de_he}，化解灾难、福禄双全", p.name)
+                add("月德合", "化解灾难、福禄双全", p.name)
 
     # 德秀贵人（月令查天干：德干 / 秀干）
     de_xiu = DE_XIU.get(month_zhi)
@@ -823,12 +823,12 @@ def _compute_shensha(pillars: list[Pillar], gender_int: int | None = None) -> li
         de_set, xiu_set = de_xiu
         for p in pillars:
             if p.gan in de_set:
-                add("德秀贵人", f"月支{month_zhi}月，天干见{p.gan}（德），温厚聪慧、才华横溢", p.name)
+                add("德秀贵人", "温厚聪慧、才华横溢", p.name)
                 break
         else:
             for p in pillars:
                 if p.gan in xiu_set:
-                    add("德秀贵人", f"月支{month_zhi}月，天干见{p.gan}（秀），清秀之气、多才多艺", p.name)
+                    add("德秀贵人", "清秀之气、多才多艺", p.name)
                     break
 
     # 天医（月支查，对齐 07_神煞初探.md）
@@ -851,7 +851,7 @@ def _compute_shensha(pillars: list[Pillar], gender_int: int | None = None) -> li
                 if i == skip_idx:
                     continue
                 if p.zhi == huagai:
-                    add("华盖", f"聪明孤僻，近艺术宗教（{label}支起）", p.name)
+                    add("华盖", "聪明孤僻，近艺术宗教", p.name)
 
         taohua = TAO_HUA.get(key_zhi)
         if taohua:
@@ -859,7 +859,7 @@ def _compute_shensha(pillars: list[Pillar], gender_int: int | None = None) -> li
                 if i == skip_idx:
                     continue
                 if p.zhi == taohua:
-                    add("桃花", f"人缘感情，异性缘佳（{label}支起）", p.name)
+                    add("桃花", "人缘感情，异性缘佳", p.name)
 
         yima = YI_MA.get(key_zhi)
         if yima:
@@ -867,7 +867,7 @@ def _compute_shensha(pillars: list[Pillar], gender_int: int | None = None) -> li
                 if i == skip_idx:
                     continue
                 if p.zhi == yima:
-                    add("驿马", f"迁动出行，奔波变化（{label}支起）", p.name)
+                    add("驿马", "迁动出行，奔波变化", p.name)
 
         jiang = JIANG_XING.get(key_zhi)
         if jiang:
@@ -875,7 +875,7 @@ def _compute_shensha(pillars: list[Pillar], gender_int: int | None = None) -> li
                 if i == skip_idx:
                     continue
                 if p.zhi == jiang:
-                    add("将星", f"掌权威望，领导力强（{label}支起）", p.name)
+                    add("将星", "掌权威望，领导力强", p.name)
 
         # 劫煞
         jiesha = JIE_SHA.get(key_zhi)
@@ -884,7 +884,7 @@ def _compute_shensha(pillars: list[Pillar], gender_int: int | None = None) -> li
                 if i == skip_idx:
                     continue
                 if p.zhi == jiesha:
-                    add("劫煞", f"破财伤身之兆（{label}支起）", p.name)
+                    add("劫煞", "破财伤身之兆", p.name)
 
         # 亡神
         wangshen = WANG_SHEN.get(key_zhi)
@@ -893,7 +893,7 @@ def _compute_shensha(pillars: list[Pillar], gender_int: int | None = None) -> li
                 if i == skip_idx:
                     continue
                 if p.zhi == wangshen:
-                    add("亡神", f"心思深沉，暗耗多端（{label}支起）", p.name)
+                    add("亡神", "心思深沉，暗耗多端", p.name)
 
     # ================================================================
     # 四、以年支查的专属神煞（灾煞、红鸾、天喜、孤辰寡宿、吊客、病符、天医）
@@ -905,8 +905,8 @@ def _compute_shensha(pillars: list[Pillar], gender_int: int | None = None) -> li
         for i, p in enumerate(pillars):
             if i == 0:
                 continue
-            if p.zhi == zaisha:
-                add("灾煞", f"灾厄不顺，需防意外（年支{year_zhi}→{zaisha}）", p.name)
+                if p.zhi == zaisha:
+                    add("灾煞", "灾厄不顺，需防意外", p.name)
 
     # 吊客（岁后二辰，以年支查余三支）
     diaoke = DIAO_KE.get(year_zhi)
@@ -914,8 +914,8 @@ def _compute_shensha(pillars: list[Pillar], gender_int: int | None = None) -> li
         for i, p in enumerate(pillars):
             if i == 0:
                 continue
-            if p.zhi == diaoke:
-                add("吊客", "孝服丧事之兆（年支起）", p.name)
+                if p.zhi == diaoke:
+                    add("吊客", "孝服丧事之兆", p.name)
 
     # 病符（岁后一辰，以年支查余三支）
     bingfu = BING_FU.get(year_zhi)
@@ -923,8 +923,8 @@ def _compute_shensha(pillars: list[Pillar], gender_int: int | None = None) -> li
         for i, p in enumerate(pillars):
             if i == 0:
                 continue
-            if p.zhi == bingfu:
-                add("病符", "身体小恙，注意健康（年支起）", p.name)
+                if p.zhi == bingfu:
+                    add("病符", "身体小恙，注意健康", p.name)
 
     hongluan = HONG_LUAN.get(year_zhi)
     if hongluan:
@@ -983,49 +983,49 @@ def _compute_shensha(pillars: list[Pillar], gender_int: int | None = None) -> li
     if xr:
         for p in pillars:
             if p.zhi == xr:
-                add("血刃", f"月支{month_zhi}月，地支见{xr}（血光之灾、外伤手术，岁运冲激尤忌）", p.name)
+                add("血刃", "血光之灾、外伤手术，岁运冲激尤忌", p.name)
 
     # 勾绞煞（年支查余三支，依年干阴阳+性别：阳男阴女勾前绞后，阴男阳女勾后绞前）
     yang_gan = {"甲", "丙", "戊", "庚", "壬"}
     is_yang = year_gan in yang_gan
     is_male = gender_int == 1
     if (is_yang and is_male) or (not is_yang and not is_male):
-        gou = _adv(year_zhi, 3); jiao = _adv(year_zhi, -3); gtype = "阳男/阴女"
+        gou = _adv(year_zhi, 3); jiao = _adv(year_zhi, -3)
     else:
-        gou = _adv(year_zhi, -3); jiao = _adv(year_zhi, 3); gtype = "阴男/阳女"
+        gou = _adv(year_zhi, -3); jiao = _adv(year_zhi, 3)
     for i, p in enumerate(pillars):
         if i == 0:
             continue
         if p.zhi == gou:
-            add("勾绞煞", f"牵连羁绊、易有官非纠纷（勾煞 {gtype} {year_zhi}→{gou}）", p.name)
+            add("勾绞煞", "牵连羁绊、易有官非纠纷", p.name)
     for i, p in enumerate(pillars):
         if i == 0:
             continue
         if p.zhi == jiao:
-            add("勾绞煞", f"牵连羁绊、易有官非纠纷（绞煞 {gtype} {year_zhi}→{jiao}）", p.name)
+            add("勾绞煞", "牵连羁绊、易有官非纠纷", p.name)
 
     # 元辰（年支查对冲前/后一位，依年干阴阳+性别）
     chong = CHONG_ZHI.get(year_zhi)
     if chong:
         if (is_yang and is_male) or (not is_yang and not is_male):
-            yuan = _adv(chong, 1); ylabel = "冲前一位（阳男/阴女）"
+            yuan = _adv(chong, 1)
         else:
-            yuan = _adv(chong, -1); ylabel = "冲后一位（阴男/阳女）"
+            yuan = _adv(chong, -1)
         for i, p in enumerate(pillars):
             if i == 0:
                 continue
             if p.zhi == yuan:
-                add("元辰", f"别而不合、诸事不顺（{ylabel} {year_zhi}冲{chong}→{yuan}）", p.name)
+                add("元辰", "别而不合、诸事不顺", p.name)
 
     # 天罗地网（戌亥为天罗、辰巳为地网；需戌亥互见 / 辰巳互见）
     # 标注到具体柱：天罗标含"戌"的柱，地网标含"辰"的柱
     all_zhi = [p.zhi for p in pillars]
     if "戌" in all_zhi and "亥" in all_zhi:
         p_xu = next((p for p in pillars if p.zhi == "戌"), None)
-        add("天罗", "困顿羁绊、难挣脱（戌亥互见）", p_xu.name if p_xu else "")
+        add("天罗", "困顿羁绊、难挣脱", p_xu.name if p_xu else "")
     if "辰" in all_zhi and "巳" in all_zhi:
         p_chen = next((p for p in pillars if p.zhi == "辰"), None)
-        add("地网", "困顿羁绊、事业受阻（辰巳互见）", p_chen.name if p_chen else "")
+        add("地网", "困顿羁绊、事业受阻", p_chen.name if p_chen else "")
 
     # ================================================================
     # 五、特殊组合类神煞（日柱特定组合 / 日柱纳音等）
