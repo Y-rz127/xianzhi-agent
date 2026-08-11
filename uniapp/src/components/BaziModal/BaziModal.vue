@@ -26,10 +26,17 @@
               <text class="bt-cell bt-label"></text>
               <text v-for="p in pillars" :key="p.name" :class="['bt-cell bt-col-head', p.name === '日柱' && 'bt-day']">{{ p.name }}</text>
             </view>
-            <!-- 主星 -->
+            <!-- 主星（点击查看十神正反特性） -->
             <view class="bt-row">
               <text class="bt-cell bt-label">主星</text>
-              <text v-for="p in pillars" :key="p.name" :class="['bt-cell', p.name === '日柱' && 'bt-day']">{{ p.shishenGan || '—' }}</text>
+              <view v-for="p in pillars" :key="p.name" :class="['bt-cell', p.name === '日柱' && 'bt-day']">
+                <text
+                  v-if="p.shishenGan && isShishen(p.shishenGan)"
+                  class="bt-shishen-tag"
+                  @tap="showShishenInfo(p.shishenGan)"
+                >{{ p.shishenGan }}</text>
+                <text v-else class="bt-shishen">{{ p.shishenGan || '—' }}</text>
+              </view>
             </view>
             <!-- 天干 -->
             <view class="bt-row">
@@ -52,11 +59,16 @@
                 <text v-for="(g, i) in (p.hiddenStems || [])" :key="i" class="bt-cang" :style="{ color: ganColor(g) }">{{ g }}</text>
               </view>
             </view>
-            <!-- 副星 -->
+            <!-- 副星（点击查看十神正反特性） -->
             <view class="bt-row">
               <text class="bt-cell bt-label">副星</text>
               <view v-for="p in pillars" :key="p.name" :class="['bt-cell bt-multi', p.name === '日柱' && 'bt-day']">
-                <text v-for="(s, i) in (p.shishenZhi || [])" :key="i" class="bt-fu">{{ s }}</text>
+                <text
+                  v-for="(s, i) in (p.shishenZhi || [])"
+                  :key="i"
+                  :class="['bt-fu', isShishen(s) && 'bt-fu-click']"
+                  @tap="showShishenInfo(s)"
+                >{{ s }}</text>
               </view>
             </view>
             <!-- 星运 -->
@@ -145,9 +157,6 @@
           </view>
           <view v-if="analysis?.adjustment" class="consult-note">
             <text>{{ analysis.adjustment }}</text>
-          </view>
-          <view v-if="analysis?.patternHint" class="consult-note">
-            <text>{{ analysis.patternHint }}</text>
           </view>
           <view v-if="relationText" class="consult-note">
             <text>{{ relationText }}</text>
@@ -411,6 +420,74 @@ function showShenshaDesc(s: ShenshaItem & { _cat: string }) {
   })
 }
 
+/**
+ * 十神正反特性字典（标准命理口径）。
+ * 键名严格对应引擎 bazi_engine.py 输出的十神：比肩/劫财/食神/伤官/偏财/正财/偏印/正印/七杀/正官。
+ * alias 仅用于展示（如偏印又称枭神），不影响命中判断。
+ */
+const SHISHEN_INFO: Record<string, { alias?: string; positive: string; negative: string }> = {
+  正官: {
+    positive: '代表名誉、地位、规矩与责任感。利事业官运，为人正直守法、重视名誉、善于自我约束。',
+    negative: '过旺无制则拘谨压抑、胆小怕事、依赖心重；太弱则缺乏担当、难担重任、易受人欺压。',
+  },
+  七杀: {
+    alias: '偏官',
+    positive: '代表权威、魄力、执行力与开拓精神。能掌权、闯劲足，逆境中爆发力强，宜武职、竞争与开创。',
+    negative: '性烈易暴躁冲动、招惹是非官非；无制化则刑伤不断、压力过重、身心俱疲（"七杀无制祸来侵"）。',
+  },
+  正印: {
+    positive: '代表学识、慈悲、庇护与贵人。利读书文凭、名誉声望，心地仁厚，多得长辈与母亲助力。',
+    negative: '过旺则依赖惰性、行动力弱、易钻牛角尖；印重反克食伤，思想保守、不善变通表达。',
+  },
+  偏印: {
+    alias: '枭神',
+    positive: '代表领悟力、专长与冷门技艺。善钻研、有特殊才能与第六感，适技术、玄学、小众领域。',
+    negative: '"枭神夺食"，易孤僻多疑、冷漠偏激；不善交际，遇食神则才华受抑、健康福泽受损。',
+  },
+  正财: {
+    positive: '代表稳定收入、勤劳致富与务实节俭。利正业工薪、理财持家，为人踏实、重视家庭与积累。',
+    negative: '太弱则财来财去、守财费力；太旺则斤斤计较、吝啬小气，反被财物所累、匮乏感强。',
+  },
+  偏财: {
+    positive: '代表横财、机遇、社交与慷慨。利投资生意、意外之财，为人圆融、人缘佳、出手大方。',
+    negative: '易投机好赌、挥霍无度；感情上多露水桃花，财来财去不稳定，重利轻义、因财生是非。',
+  },
+  食神: {
+    positive: '代表才华、享受、口福与创造力。性温和、有艺术天赋，善表达、乐观随和，利技艺才艺。',
+    negative: '过旺则贪图安逸、懒散纵欲、缺乏进取；遇枭神则"枭神夺食"，才华受抑、健康有损。',
+  },
+  伤官: {
+    positive: '代表聪明、叛逆、创新与表达。才华外露、善辩敢突破，利艺术演艺、技术革新与自由职业。',
+    negative: '"伤官见官"易傲气不服管、口舌是非；叛逆过激、轻视礼法，女命多不利夫星、感情波折。',
+  },
+  比肩: {
+    positive: '代表同辈、朋友、合作与自立。重情义、有担当、能互助，利合伙团队，独立自主不依附。',
+    negative: '"比劫夺财"易破财被分利；固执己见、争强好胜，朋友同辈反成拖累、合作生嫌隙。',
+  },
+  劫财: {
+    positive: '代表行动力、义气与人际拓展。热情主动、善交际、乐于助人，利开拓人脉、江湖义气。',
+    negative: '"劫财夺财"最甚，易破财被借被坑；冲动挥霍、争风吃醋，男命多不利财运与感情。',
+  },
+}
+
+/** 判断一个字符串是否为引擎输出的十神（用于决定能否点击查看） */
+function isShishen(name?: string): boolean {
+  return !!name && name !== '—' && Object.prototype.hasOwnProperty.call(SHISHEN_INFO, name)
+}
+
+/** 点击十神查看其正面/反面特性（uni 原生弹窗，交互同神煞） */
+function showShishenInfo(name?: string) {
+  if (!isShishen(name)) return
+  const info = SHISHEN_INFO[name as string]
+  const alias = info.alias ? `（又称${info.alias}）` : ''
+  uni.showModal({
+    title: `${name}${alias} · 十神`,
+    content: `【正面特性】\n${info.positive}\n\n【反面特性】\n${info.negative}`,
+    showCancel: false,
+    confirmText: '知道了',
+  })
+}
+
 function handleDownloadPdf() {
   if (!props.birthTime || !props.gender) {
     uni.showToast({ title: '缺少出生信息', icon: 'none' })
@@ -564,6 +641,34 @@ async function generateReport() {
 .bt-multi { flex-direction: column; gap: 2rpx; padding: 8rpx 4rpx; }
 .bt-cang { font-size: 24rpx; font-weight: 600; line-height: 1.5; }
 .bt-fu { font-size: 21rpx; color: $color-ink-light; line-height: 1.5; }
+/* 十神可点击（交互同神煞标签） */
+.bt-shishen {
+  font-size: 30rpx;
+  color: $color-ink;
+  font-family: $font-family-display;
+}
+.bt-shishen-tag {
+  font-size: 30rpx;
+  font-weight: 600;
+  color: #B8860B;
+  padding: 2rpx 12rpx;
+  border-radius: 8rpx;
+  background: rgba(184, 134, 11, 0.1);
+  line-height: 1.5;
+  transition: transform 0.15s, background 0.15s;
+}
+.bt-shishen-tag:active {
+  transform: scale(0.95);
+  background: rgba(184, 134, 11, 0.22);
+}
+.bt-fu-click {
+  color: #B8860B;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 4rpx;
+  transition: opacity 0.15s;
+}
+.bt-fu-click:active { opacity: 0.6; }
 
 /* 五行 */
 .wuxing-grid {

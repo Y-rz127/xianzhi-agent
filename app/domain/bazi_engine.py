@@ -1480,25 +1480,15 @@ def _build_domain_analysis(pillars: list[Pillar], wuxing: WuxingAnalysis) -> Dom
     adjustment = SEASON_NOTES.get(month_zhi, "调候需结合月令、寒暖燥湿与全局五行再定。")
 
     ten_gods = _count_ten_gods(pillars)
-    top_gods = list(ten_gods.keys())[:3]
-    relation_bits = []
-    if combinations:
-        relation_bits.append("有合，关系与资源容易被牵动")
-    if clashes:
-        relation_bits.append("有冲，变化、迁移、关系波动信号较明显")
-    if harms:
-        relation_bits.append("有害，暗耗、人际误解或隐性压力需留意")
-    if punishments:
-        relation_bits.append("有刑，自我压力、规则冲突或反复感更强")
-    if not relation_bits:
-        relation_bits.append("原局地支冲合刑害不重，更多看大运流年触发")
-    root_hint = "日主有根" if rooted else "日主根气不显"
-    pattern_hint = f"{wuxing.day_master}日主{wuxing.strength}，{root_hint}；十神以{('、'.join(top_gods) if top_gods else '不显')}较突出；" + "；".join(relation_bits)
+    # 原 root_hint / top_gods / relation_bits / pattern_hint 拼接被移除——
+    # "癸日主偏强，日主根气不显；十神以…"这类拼接句观感太笼统，
+    # 且"根气不显"措辞生硬。根气、关系等结构化信息已由 analysis 其它
+    # 字段分别承载（rooted_stems / combinations / clashes / harms / punishments），
+    # 这里不再拼成一句；pattern_hint 字段保留空串以保持 dataclass 契约。
+    pattern_hint = ""
     confidence = 0.72
     if month_zhi:
         confidence += 0.08
-    if top_gods:
-        confidence += 0.05
     if combinations or clashes or harms or punishments:
         confidence += 0.05
 
@@ -1977,7 +1967,6 @@ def format_analysis_text(chart: BaziChart, question: str = "整体运势") -> st
         f"  害: {', '.join(chart.analysis.harms) or '-'}",
         f"  刑: {', '.join(chart.analysis.punishments) or '-'}",
         f"  调候: {chart.analysis.adjustment}",
-        f"  格局提示: {chart.analysis.pattern_hint}",
         f"  判断置信度: {chart.analysis.confidence}",
         "",
         f"【分析方向】 {question}",

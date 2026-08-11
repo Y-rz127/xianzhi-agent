@@ -1390,7 +1390,7 @@ class XianzhiWorkflow:
             f"天干关系: {gan_relation_line}",
             f"地支关系: 合={chart.analysis.combinations or '-'}; 冲={chart.analysis.clashes or '-'}; 害={chart.analysis.harms or '-'}; 刑={chart.analysis.punishments or '-'}",
             f"调候: 月令{chart.analysis.season}; {chart.analysis.adjustment}",
-            f"格局提示: {chart.analysis.pattern_hint}; 判断置信度: {chart.analysis.confidence}",
+            f"判断置信度: {chart.analysis.confidence}",
             f"起运: {chart.start_yun['startDate']} 起; {chart.start_yun['direction']}; 起运年龄 {chart.start_yun['startYear']}年{chart.start_yun['startMonth']}月{chart.start_yun['startDay']}日",
             "大运: " + "；".join(dayun_lines),
             "相关流年: " + ("；".join(liunian_lines) if liunian_lines else "未指定"),
