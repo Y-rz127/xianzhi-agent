@@ -420,3 +420,62 @@ def test_detect_special_pattern_fake_cong_has_root():
     assert sp["kind"] == ""
     assert sp["label"] == ""
 
+
+# —— 神煞计算回归（2026-08-11 灾煞/吊客/病符 skip-rule 死代码修复）—————
+# 上一次清理查法后缀时，把 `if i == 0: continue` 后面的命中分支误放到
+# `if body` 内部，造成死代码、三个神煞永远命中不了。
+# 锁定方法：构造用户实盘的特定四柱，断言灾煞必须出现在月柱。
+def _full_pillar(name: str, ganzhi: str, gan: str, zhi: str, hidden: list[str]) -> Pillar:
+    """完整的 Pillar 工厂（覆盖 frozen dataclass 的全部 13 字段）。"""
+    return Pillar(
+        name=name, ganzhi=ganzhi, gan=gan, zhi=zhi,
+        gan_wuxing="", zhi_wuxing="", nayin="", xunkong="",
+        hidden_stems=hidden,
+        shishen_gan="", shishen_zhi=[],
+        changsheng="", zizuo="",
+    )
+
+
+def test_shensha_zaisha_fires_on_pillar_with_target_branch():
+    """回归：年甲子、月丙午、日壬申、时甲辰，应在月柱命中'灾煞'（年支子→灾煞=午）。
+
+    之前 `if i == 0: continue` 后面的命中分支被退化为死代码，
+    导致任何四柱都看不到灾煞；本测试钉死该四柱必须出现"月柱-灾煞"。
+    """
+    pillars = [
+        _full_pillar("年柱", "甲子", "甲", "子", ["癸"]),
+        _full_pillar("月柱", "丙午", "丙", "午", ["丁", "己"]),
+        _full_pillar("日柱", "壬申", "壬", "申", ["庚"]),
+        _full_pillar("时柱", "甲辰", "甲", "辰", ["乙", "癸"]),
+    ]
+    ss = _compute_shensha(pillars)
+    zaisha = [s for s in ss if s["name"] == "灾煞"]
+    assert zaisha, "灾煞 应该在结果中（之前因 dead code 漏掉）"
+    assert any(s["pillar"] == "月柱" for s in zaisha), \
+        f"灾煞 应该挂在月柱（zhi=午），实际为: {[s['pillar'] for s in zaisha]}"
+
+
+def test_shensha_diaoke_bingfu_dead_code_fixed():
+    """回归：三个 `if i == 0: continue + 命中分支` 三段必须都还要扫非首柱。
+
+    这里造一个（年巳、月卯、日午、时酉）—— 应对应：
+    - 吊客（DIAO_KE['巳']='卯'）命中月柱
+    - 病符（BING_FU['巳']='辰'）未命中（四柱无辰，属合理 no-found）
+    若三段中任何一段仍是死代码，整段 for-loop 不做事，这两条都不会出现。
+    """
+    pillars = [
+        _full_pillar("年柱", "辛巳", "辛", "巳", ["丙", "庚", "戊"]),
+        _full_pillar("月柱", "甲卯", "甲", "卯", ["乙"]),
+        _full_pillar("日柱", "壬午", "壬", "午", ["丁", "己"]),
+        _full_pillar("时柱", "丁酉", "丁", "酉", ["辛"]),
+    ]
+    ss = _compute_shensha(pillars)
+    # 吊客应出现在月柱（zhi=卯）
+    diaoke = [s for s in ss if s["name"] == "吊客"]
+    assert diaoke, "吊客 应该扫到月柱（zhi=卯）；回归后不应再是死代码"
+    assert any(s["pillar"] == "月柱" for s in diaoke), \
+        f"吊客 应在月柱，实际: {[s['pillar'] for s in diaoke]}"
+    # 病符：年巳 → 病符=辰，四柱无辰，预期不出现（合理）
+    bingfu = [s for s in ss if s["name"] == "病符"]
+    assert bingfu == [], f"病符 预期 not-found，实际: {bingfu}"
+

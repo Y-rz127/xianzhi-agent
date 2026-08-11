@@ -905,8 +905,8 @@ def _compute_shensha(pillars: list[Pillar], gender_int: int | None = None) -> li
         for i, p in enumerate(pillars):
             if i == 0:
                 continue
-                if p.zhi == zaisha:
-                    add("灾煞", "灾厄不顺，需防意外", p.name)
+            if p.zhi == zaisha:
+                add("灾煞", "灾厄不顺，需防意外", p.name)
 
     # 吊客（岁后二辰，以年支查余三支）
     diaoke = DIAO_KE.get(year_zhi)
@@ -914,8 +914,8 @@ def _compute_shensha(pillars: list[Pillar], gender_int: int | None = None) -> li
         for i, p in enumerate(pillars):
             if i == 0:
                 continue
-                if p.zhi == diaoke:
-                    add("吊客", "孝服丧事之兆", p.name)
+            if p.zhi == diaoke:
+                add("吊客", "孝服丧事之兆", p.name)
 
     # 病符（岁后一辰，以年支查余三支）
     bingfu = BING_FU.get(year_zhi)
@@ -923,8 +923,8 @@ def _compute_shensha(pillars: list[Pillar], gender_int: int | None = None) -> li
         for i, p in enumerate(pillars):
             if i == 0:
                 continue
-                if p.zhi == bingfu:
-                    add("病符", "身体小恙，注意健康", p.name)
+            if p.zhi == bingfu:
+                add("病符", "身体小恙，注意健康", p.name)
 
     hongluan = HONG_LUAN.get(year_zhi)
     if hongluan:
