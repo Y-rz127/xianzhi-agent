@@ -168,3 +168,21 @@ def test_xianzhi_prefers_workflow_when_chart_context_exists():
 
     assert "不建议裸辞" in result
     assert "丙午" in result
+
+
+def test_fact_block_exposes_special_pattern_and_useful_hint():
+    """命盘事实须显式携带：用神提示（取用神参考）+ 特殊格局分类（专旺/从格），
+    供 LLM 在其上叠加合化/调候/大运破格推理。"""
+    workflow = XianzhiWorkflow(chat_model=None)
+    ctx = build_chart_context("1990-05-20 14:30", MALE)
+    intent = classify_question("我的命局用神是什么", today=dt.date(2026, 7, 5))
+
+    facts = workflow._fact_block(ctx.chart, intent)
+
+    # 取用神参考：必须进事实
+    assert "用神提示:" in facts
+    # 方案B：特殊格局分类显式成行，取值须为 {无, 专旺, 从格}
+    sp_lines = [ln for ln in facts.splitlines() if ln.startswith("特殊格局:")]
+    assert sp_lines, "事实块缺少「特殊格局:」行"
+    sp_val = sp_lines[0].split("特殊格局:", 1)[1].strip()
+    assert sp_val in ("无", "专旺", "从格")

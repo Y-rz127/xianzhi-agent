@@ -1383,6 +1383,7 @@ class XianzhiWorkflow:
             f"四柱详述:\n{pillar_detail}",
             f"神煞（按柱）: {shensha_line}",
             f"日主: {chart.wuxing.day_master}({chart.wuxing.day_master_wuxing}); 强弱: {chart.wuxing.strength}; 分数: {chart.wuxing.strength_score}",
+            f"特殊格局: {chart.wuxing.special_pattern or '无'}",
             f"五行权重: {chart.wuxing.counts}; 最旺: {chart.wuxing.strongest}; 最弱: {chart.wuxing.weakest}",
             f"用神提示: {chart.wuxing.useful_hint}",
             f"十神结构: {chart.analysis.ten_gods}; 透干: {chart.analysis.exposed_stems or '-'}; 通根: {chart.analysis.rooted_stems or '-'}",

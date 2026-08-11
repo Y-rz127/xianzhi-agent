@@ -527,6 +527,7 @@ class WuxingAnalysis:
     strength_score: float
     useful_hint: str
     notes: list[str]
+    special_pattern: str = ""   # 方案B：特殊格局类型，"专旺" / "从格" / 空串
 
 
 @dataclass(frozen=True)
@@ -696,27 +697,37 @@ def _compute_shensha(pillars: list[Pillar], gender_int: int | None = None) -> li
 
     # 学堂 / 词馆（年柱纳音五行查月日时支的长生/临官位；禄命法）
     # 注意：只查月日时三柱（pillars[1:]），不包含年柱自身（古诀"见其他三支"）
+    # 正学堂 / 正词馆 是 学堂 / 词馆 的精确位（干支完全匹配 ⊃ 仅地支匹配）。
+    # 同柱同时命中"正X"和"X"时仅保留"正X"，避免重复标记。
     _other_three = pillars[1:]
     xt = XUE_TANG.get(year_nayin_wx)
-    if xt:
-        for p in _other_three:
-            if p.zhi == xt:
-                add("学堂", "纳音长生，聪明好学、文才出众、功名显达", p.name)
-    cg = CI_GUAN.get(year_nayin_wx)
-    if cg:
-        for p in _other_three:
-            if p.zhi == cg:
-                add("词馆", "纳音临官，文章出类、学业精专", p.name)
     zxt = ZHENG_XUE_TANG.get(year_nayin_wx)
+    cg = CI_GUAN.get(year_nayin_wx)
+    zcg = ZHENG_CI_GUAN.get(year_nayin_wx)
+
+    # 先标"正X"：记录命中柱，避免同一柱重复报"X"
+    zheng_xt_pillars: set[str] = set()
     if zxt:
         for p in _other_three:
             if p.ganzhi == zxt:
+                zheng_xt_pillars.add(p.name)
                 add("正学堂", "纳音长生正位，学问正统、贵气十足", p.name)
-    zcg = ZHENG_CI_GUAN.get(year_nayin_wx)
+    zheng_cg_pillars: set[str] = set()
     if zcg:
         for p in _other_three:
             if p.ganzhi == zcg:
+                zheng_cg_pillars.add(p.name)
                 add("正词馆", "纳音临官正位，文章锦绣、文采斐然", p.name)
+
+    # 再标"X"：跳过已被"正X"标记的柱
+    if xt:
+        for p in _other_three:
+            if p.zhi == xt and p.name not in zheng_xt_pillars:
+                add("学堂", "纳音长生，聪明好学、文才出众、功名显达", p.name)
+    if cg:
+        for p in _other_three:
+            if p.zhi == cg and p.name not in zheng_cg_pillars:
+                add("词馆", "纳音临官，文章出类、学业精专", p.name)
 
     # 金舆（日干或年干）
     for g in (day_gan, year_gan):
@@ -786,10 +797,13 @@ def _compute_shensha(pillars: list[Pillar], gender_int: int | None = None) -> li
 
     yuede_chars = YUE_DE_MONTH.get(month_idx)
     if yuede_chars:
+        # 月德贵人查四柱天干（口诀"亥卯未月甲干栖"中的"干"即天干），
+        # 不查藏干——否则亥/卯/未三合木局的藏干甲会被全部误报。
+        # 对齐 07_神煞初探.md §3 月德贵人。
         for c in yuede_chars:
             for p in pillars:
-                if p.gan == c or any(hs == c for hs in p.hidden_stems):
-                    add("月德贵人", f"月支{month_zhi}月，见{c}，化煞解厄", p.name)
+                if p.gan == c:
+                    add("月德贵人", f"月支{month_zhi}月，天干见{c}，化煞解厄", p.name)
 
     # 天德合 / 月德合（月支查天干，四柱天干见之）
     tian_de_he = TIAN_DE_HE.get(month_zhi)
@@ -961,14 +975,15 @@ def _compute_shensha(pillars: list[Pillar], gender_int: int | None = None) -> li
             if p.zhi == z:
                 add("披麻", "孝服六亲有损，大运流年遇之主意外伤病", p.name)
 
-    # 血刃（月支查余三支，排除月柱自身）
+    # 血刃（以月支查四柱地支，含月柱自身）
+    # 口径对齐 07_神煞初探.md §38 ——「以月支查四柱干支」。
+    # 注：XUE_REN 表中"亥月→亥"是自映射，月柱本身就是命中点，
+    #     不能像"将星冲位/年支前后辰"那种余三支模式一样 skip 月柱。
     xr = XUE_REN.get(month_zhi)
     if xr:
-        for i, p in enumerate(pillars):
-            if i == 1:
-                continue
+        for p in pillars:
             if p.zhi == xr:
-                add("血刃", "血光之灾、外伤手术，岁运冲激尤忌", p.name)
+                add("血刃", f"月支{month_zhi}月，地支见{xr}（血光之灾、外伤手术，岁运冲激尤忌）", p.name)
 
     # 勾绞煞（年支查余三支，依年干阴阳+性别：阳男阴女勾前绞后，阴男阳女勾后绞前）
     yang_gan = {"甲", "丙", "戊", "庚", "壬"}
@@ -1138,6 +1153,195 @@ def _zhi_to_month_index(zhi: str) -> int:
     return m.get(zhi, 0)
 
 
+# —— 特殊格局（方案B）：专旺格 / 从格 检测 ——————————————————————
+# 阈值（可调，后续用典型八字回测校准）：
+_ZHUANWANG_DOM_RATIO = 0.60       # 主导五行占全局加权比例下限
+_ZHUANWANG_PRESSURE_MAX = 2.0     # 克泄耗三行合计加权上限（超过则视为有破局，不算真专旺）
+_CONG_ROOT_MIN_HIDDEN = 0.30      # 藏干中日主五行达此权重视为有"根"
+_CONG_RESOURCE_MIN_HIDDEN = 0.30  # 藏干中印星五行达此权重视为有"印根"
+_CONG_SELF_WX_MAX = 0.50          # 日主自身五行加权超过此值，不从（仍有本气根气）
+_CONG_SECOND_RATIO = 0.60         # 从势判定：次旺/最旺 ≥ 此比例视为两行相当 → 从势
+
+# 禄 / 羊刃 / 库（日主 → 其根气地支）
+_LU = {"甲": "寅", "乙": "卯", "丙": "巳", "丁": "午", "戊": "巳", "己": "午",
+       "庚": "申", "辛": "酉", "壬": "亥", "癸": "子"}
+_REN = {"甲": "卯", "乙": "辰", "丙": "午", "丁": "未", "戊": "午", "己": "未",
+        "庚": "酉", "辛": "戌", "壬": "子", "癸": "丑"}
+_KU = {"木": "未", "火": "戌", "金": "丑", "水": "辰"}  # 土库寄四季，单独处理
+
+
+def _root_branches_for_master(day_master: str) -> set[str]:
+    wx = GAN_WUXING.get(day_master, "")
+    s = {_LU.get(day_master, ""), _REN.get(day_master, "")}
+    s.discard("")
+    if wx == "土":
+        s.update(["辰", "戌", "丑", "未"])
+    else:
+        ku = _KU.get(wx)
+        if ku:
+            s.add(ku)
+    return s
+
+
+# 专旺五格命名（按主导五行）
+_ZHUANWANG_NAME = {"水": "润下格", "火": "炎上格", "木": "曲直格", "金": "从革格", "土": "稼穑格"}
+
+
+def _has_root(pillars, day_master: str, day_wx: str, resource: str) -> bool:
+    """真假从根气判定：日主在地支有禄/刃/库根，或藏干有中气以上本气根，
+    或印星透干/有印根，或（除日干外）有比劫透干 → 视为有依，不从。
+    注：日干本身即日主，不计入"比劫透干"，否则任何八字都会被判有比劫。
+    """
+    roots = _root_branches_for_master(day_master)
+    hidden_day = 0.0
+    hidden_resource = 0.0
+    same_stem = False
+    resource_stem = False
+    for i, p in enumerate(pillars):
+        zhi = p[1]
+        if zhi in roots:
+            return True
+        for h, ratio in HIDDEN_STEMS.get(zhi, ()):
+            hw = GAN_WUXING.get(h)
+            if hw == day_wx:
+                hidden_day += ratio
+            elif hw == resource:
+                hidden_resource += ratio
+        if i == 2:  # 日柱天干就是日主，跳过比劫/印透干判定
+            continue
+        gw = GAN_WUXING.get(p[0])
+        if gw == day_wx:
+            same_stem = True
+        elif gw == resource:
+            resource_stem = True
+    if same_stem:
+        return True
+    if hidden_day >= _CONG_ROOT_MIN_HIDDEN:
+        return True
+    if resource_stem or hidden_resource >= _CONG_RESOURCE_MIN_HIDDEN:
+        return True
+    return False
+
+
+def _detect_zhuanwang(weighted, day_wx, resource, officer, wealth, output):
+    """极旺候选 → 专旺格判定。返回 (label, hint) 或 None。
+    要求主导五行就是日主自身五行（比劫一行得局），且一行独旺、克泄耗无破局。
+    """
+    total = sum(weighted.values())
+    if total <= 0:
+        return None
+    strongest = max(weighted, key=weighted.get)
+    if strongest != day_wx:
+        return None
+    dom_ratio = weighted[strongest] / total
+    pressure = weighted.get(officer, 0.0) + weighted.get(wealth, 0.0) + weighted.get(output, 0.0)
+    if dom_ratio < _ZHUANWANG_DOM_RATIO:
+        return None
+    if pressure > _ZHUANWANG_PRESSURE_MAX:
+        return None
+    name = _ZHUANWANG_NAME.get(strongest)
+    if not name:
+        return None
+    hint = (
+        f"日主入{name}（一行独旺，候选专旺），宜顺其旺势，喜{resource or '印星'}、{day_wx}比劫相扶；"
+        f"切忌{wealth or '财星'}、{officer or '官杀'}逆克激怒旺神。"
+    )
+    return name, hint
+
+
+def _detect_conging(weighted, pillars, day_wx, day_master, resource, officer, wealth, output):
+    """极弱候选 → 从格判定（真假从 + 从杀/从财/从儿/从势）。返回 (label, hint) 或 None。"""
+    if _has_root(pillars, day_master, day_wx, resource):
+        return None  # 有根/有印/有比劫 → 假从或不从，不判从格
+    if weighted.get(day_wx, 0.0) > _CONG_SELF_WX_MAX:
+        return None  # 日主自身五行仍有可观权重（藏干本气），不从
+    # 比较 官杀(克我) / 财(我克) / 食伤(我生) 三行权重
+    contenders = {
+        "官杀": weighted.get(officer, 0.0),
+        "财": weighted.get(wealth, 0.0),
+        "食伤": weighted.get(output, 0.0),
+    }
+    best_name = max(contenders, key=contenders.get)
+    if contenders[best_name] < 0.5:
+        return None  # 没有一行明显独旺，不从
+    # 从势：次旺行与最旺行相当（差距不大）→ 从势格
+    vals = sorted(contenders.values(), reverse=True)
+    if vals[1] >= vals[0] * _CONG_SECOND_RATIO and vals[1] > 0:
+        hint = (
+            f"日主极弱无依，官杀/财/食伤两三相混、势均力敌，入从势格；"
+            f"宜顺势相从，随旺气流转，喜多而从者、忌{resource or '印星'}{day_wx}比劫扶身。"
+        )
+        return "从势格", hint
+    name_map = {
+        "官杀": ("从杀格", f"日主极弱从杀，喜{wealth or '财星'}生{officer or '官杀'}、顺势御杀；切忌{resource or '印星'}、{day_wx}比劫抗杀。"),
+        "财": ("从财格", f"日主极弱从财，喜{output or '食伤'}生{wealth or '财星'}、{officer or '官杀'}护财；切忌{resource or '印星'}、{day_wx}比劫分财。"),
+        "食伤": ("从儿格", f"日主极弱从儿（食伤），喜{wealth or '财星'}流通秀气；切忌{resource or '印星'}制儿、{officer or '官杀'}犯怒。"),
+    }
+    return name_map[best_name]
+
+
+def _detect_special_pattern(pillars, weighted, day_wx, day_master, score,
+                            resource, output, wealth, officer):
+    """方案B 编排：在 A 的 ±7 极端候选区上做结构化特殊格局识别。
+    返回 dict: {is_special, kind, label, useful_hint}。
+    - score ≥ 7：尝试判专旺五格（润下/炎上/曲直/从革/稼穑）。
+    - score ≤ -7：尝试判从格（真假从 + 从杀/从财/从儿/从势）。
+    - 不落入极端区或判定不自信时返回 is_special=False，沿用 A 的基础档。
+    """
+    if score >= 7:
+        zw = _detect_zhuanwang(weighted, day_wx, resource, officer, wealth, output)
+        if zw:
+            label, hint = zw
+            return {"is_special": True, "kind": "专旺", "label": label, "useful_hint": hint}
+    elif score <= -7:
+        cg = _detect_conging(weighted, pillars, day_wx, day_master, resource, officer, wealth, output)
+        if cg:
+            label, hint = cg
+            return {"is_special": True, "kind": "从格", "label": label, "useful_hint": hint}
+    return {"is_special": False, "kind": "", "label": "", "useful_hint": ""}
+
+
+def _classify_strength(
+    score: float,
+    day_wx: str,
+    resource: str,
+    same: str,
+    output: str,
+    wealth: str,
+    officer: str,
+) -> tuple[str, str]:
+    """日主强弱五档分档（方案A）。返回 (strength, useful_hint)。
+
+    阈值约定（与 07_神煞初探.md / 滴天髓「中和」注解对齐思路）：
+      - |score| ≥ 7 视为极端，候选特殊格局：极旺（专旺）/ 极弱（从格）；
+      - score ≥ 2.2 为偏旺；score ≤ -1.2 为偏弱；中间为中和。
+    极旺/极弱 的用神方向走「顺势」，与偏旺/偏弱 的制衡/扶助方向相反，
+    避免 癸亥×4 这类极端局被笼统标成偏强却给出泄耗用神（方向折损）。
+    """
+    if score >= 7:
+        strength = "极旺"
+        useful_hint = (
+            f"日主极旺（候选专旺格），宜顺其旺势，喜{resource or '印星'}、{same or '比劫'}相扶；"
+            f"若有{output or '食伤'}亦可泄秀，切忌{wealth or '财星'}、{officer or '官杀'}逆克激怒旺神。"
+        )
+    elif score >= 2.2:
+        strength = "偏旺"
+        useful_hint = f"日主偏旺，宜取泄耗制衡之气，优先关注{output or '食伤'}、{wealth or '财星'}、{officer or '官杀'}的配合。"
+    elif score <= -7:
+        strength = "极弱"
+        useful_hint = (
+            f"日主极弱（候选从格），宜顺势相从，不喜{resource or '印星'}、{same or '比劫'}扶身反成羁绊；"
+            f"具体用神需结合所从五行（从{wealth or '财'} / 从{officer or '官'} / 从{output or '儿'} 等）判定。"
+        )
+    elif score <= -1.2:
+        strength = "偏弱"
+        useful_hint = f"日主偏弱，宜先扶助日主，重点看{resource or '印星'}与{same or '比劫'}是否得地。"
+    else:
+        strength = "中和"
+        useful_hint = "格局接近平衡，喜忌需要结合大运流年触发点细看。"
+    return strength, useful_hint
+
+
 def _build_wuxing_analysis(ec) -> WuxingAnalysis:
     pillars = [ec.getYear(), ec.getMonth(), ec.getDay(), ec.getTime()]
     visible_counts = {k: 0 for k in WUXING_ORDER}
@@ -1175,15 +1379,20 @@ def _build_wuxing_analysis(ec) -> WuxingAnalysis:
         + weighted.get(officer, 0.0) * 0.8
     )
     strength_score = round(support - pressure, 2)
-    if strength_score >= 2.2:
-        strength = "偏强"
-        useful_hint = f"宜取泄耗制衡之气，优先关注{output or '食伤'}、{wealth or '财星'}、{officer or '官杀'}的配合。"
-    elif strength_score <= -1.2:
-        strength = "偏弱"
-        useful_hint = f"宜先扶助日主，重点看{resource or '印星'}与{same or '比劫'}是否得地。"
-    else:
-        strength = "中和"
-        useful_hint = "格局接近平衡，喜忌需要结合大运流年触发点细看。"
+    strength, useful_hint = _classify_strength(
+        strength_score, day_wx, resource, same, output, wealth, officer
+    )
+    # 方案B：仅在 A 的 ±7 极端候选区上做结构化特殊格局识别（专旺/从格）。
+    special_pattern = ""
+    if abs(strength_score) >= 7:
+        sp = _detect_special_pattern(
+            pillars, weighted, day_wx, day_master, strength_score,
+            resource, output, wealth, officer,
+        )
+        if sp["is_special"]:
+            strength = sp["label"]
+            useful_hint = sp["useful_hint"]
+            special_pattern = sp["kind"]
 
     strongest = max(weighted, key=weighted.get)
     weakest = min(weighted, key=weighted.get)
@@ -1201,6 +1410,7 @@ def _build_wuxing_analysis(ec) -> WuxingAnalysis:
         strength=strength,
         strength_score=strength_score,
         useful_hint=useful_hint,
+        special_pattern=special_pattern,
         notes=notes,
     )
 
@@ -1746,6 +1956,7 @@ def format_analysis_text(chart: BaziChart, question: str = "整体运势") -> st
         f"【显性五行】 {wx.visible_counts}",
         f"【最旺/最弱】 {wx.strongest}({wx.counts[wx.strongest]}) / {wx.weakest}({wx.counts[wx.weakest]})",
         f"【日主强弱】 {wx.strength} (score={wx.strength_score})",
+        f"【特殊格局】 {wx.special_pattern or '无（普通正格/未达极端候选）'}",
         f"【用神提示】 {wx.useful_hint}",
         "",
         "【十神（天干对日主）】",
