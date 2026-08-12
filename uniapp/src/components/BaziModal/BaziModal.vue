@@ -669,15 +669,15 @@ async function generateReport() {
   border-right: 1rpx solid $color-border; box-sizing: border-box; min-height: 0;
 }
 .bt-cell:last-child { border-right: none; }
-.bt-label { flex: 0 0 80rpx; font-size: 22rpx; color: $color-ink-light; background: rgba(0,0,0,0.03); font-weight: 500; }
+.bt-label { flex: 0 0 80rpx; font-size: 26rpx; color: $color-ink-light; background: rgba(0,0,0,0.03); font-weight: 500; }
 .bt-col-head { font-size: 26rpx; font-weight: 600; color: $color-ink; letter-spacing: 2px; }
 .bt-day { background: rgba(184, 72, 60, 0.06); }
 .bt-head .bt-day { background: rgba(184, 72, 60, 0.1); }
-.bt-gan { font-size: 50rpx; font-weight: bold; font-family: $font-family-display; }
-.bt-zhi { font-size: 50rpx; font-family: $font-family-display; }
+.bt-gan { font-size: 46rpx; font-weight: bold; font-family: $font-family-display; }
+.bt-zhi { font-size: 46rpx; font-family: $font-family-display; }
 .bt-multi { flex-direction: column; gap: 2rpx; padding: 8rpx 4rpx; }
-.bt-cang { font-size: 24rpx; font-weight: 600; line-height: 1.5; }
-.bt-fu { font-size: 21rpx; color: $color-ink-light; line-height: 1.5; }
+.bt-cang { font-size: 28rpx; font-weight: 600; line-height: 1.5; }
+.bt-fu { font-size: 26rpx; color: $color-ink-light; line-height: 1.5; }
 /* 十神可点击（交互同神煞标签） */
 .bt-shishen {
   font-size: 26rpx;
