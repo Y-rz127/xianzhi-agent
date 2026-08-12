@@ -351,6 +351,7 @@ export interface ChartAnalysis {
   clashes?: string[]
   harms?: string[]
   punishments?: string[]
+  threeAssemblies?: string[]
   season?: string
   adjustment?: string
   patternHint?: string

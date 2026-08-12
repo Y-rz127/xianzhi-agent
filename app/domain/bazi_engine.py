@@ -106,6 +106,29 @@ SAN_XING = {
     frozenset(("子","卯")):"子卯无礼刑"
 }
 SELF_XING = {"辰": "辰辰自刑", "午": "午午自刑", "酉": "酉酉自刑", "亥": "亥亥自刑"}
+# 地支三合局（长生-帝旺-墓库，三支全会则成局）
+SAN_HE = {
+    frozenset(("申", "子", "辰")): "申子辰合水局",
+    frozenset(("亥", "卯", "未")): "亥卯未合木局",
+    frozenset(("寅", "午", "戌")): "寅午戌合火局",
+    frozenset(("巳", "酉", "丑")): "巳酉丑合金局",
+}
+# 地支三会（三方会聚一方旺气）
+SAN_HUI = {
+    frozenset(("寅", "卯", "辰")): "寅卯辰会东方木",
+    frozenset(("巳", "午", "未")): "巳午未会南方火",
+    frozenset(("申", "酉", "戌")): "申酉戌会西方金",
+    frozenset(("亥", "子", "丑")): "亥子丑会北方水",
+}
+# 地支六破（相破，破中取损）
+LIU_PO = {
+    frozenset(("子", "酉")): "子酉破",
+    frozenset(("卯", "午")): "卯午破",
+    frozenset(("辰", "丑")): "辰丑破",
+    frozenset(("巳", "申")): "巳申破",
+    frozenset(("寅", "亥")): "寅亥破",
+    frozenset(("未", "戌")): "未戌破",
+}
 
 # ===== 神煞查表 =====
 # 天乙贵人（以日干查）
@@ -124,7 +147,7 @@ TAI_JI = {
     "庚": ("寅", "亥"), "辛": ("寅", "亥"),
     "壬": ("巳", "申"), "癸": ("巳", "申"),
 }
-# 文昌（以日干查）
+# 文昌贵人（以日干查）
 WEN_CHANG = {
     "甲": "巳", "乙": "午", "丙": "申", "丁": "酉",
     "戊": "申", "己": "酉", "庚": "亥", "辛": "子",
@@ -368,10 +391,11 @@ SAN_QI = (("甲", "戊", "庚"), ("乙", "丙", "丁"), ("壬", "癸", "辛"))
 TIAN_SHE = {"春": "戊寅", "夏": "甲午", "秋": "戊申", "冬": "甲子"}
 # 六秀日（专查日柱）
 LIU_XIU = {"丙午", "丁未", "戊子", "戊午", "己丑", "己未"}
-# 天厨贵人（以年/日干查四支）
+# 天厨贵人（以年/日干查四支；= 食神建禄：X 干食神是 Y，则 Y 禄地支即 X 之天厨）
+# 古诀"甲巳乙午丙巳丁午，戊申己酉庚亥辛子，壬寅癸卯"
 TIAN_CHU = {
-    "甲": "巳", "乙": "午", "丙": "申", "戊": "申",
-    "丁": "酉", "己": "酉", "庚": "亥", "辛": "子",
+    "甲": "巳", "乙": "午", "丙": "巳", "丁": "午",
+    "戊": "申", "己": "酉", "庚": "亥", "辛": "子",
     "壬": "寅", "癸": "卯",
 }
 # 拱禄（日时柱配合：日支、时支拱夹日干禄位）
@@ -470,10 +494,10 @@ class Pillar:
     nayin: str
     xunkong: str
     hidden_stems: list[str]
-    shishen_gan: str
-    shishen_zhi: list[str]
-    changsheng: str          # 星运：日干在四柱地支的十二长生
-    zizuo: str               # 自坐：本柱天干在本柱地支的十二长生
+    shishen_gan: str = ""
+    shishen_zhi: list[str] = field(default_factory=list)
+    changsheng: str = ""          # 星运：日干在四柱地支的十二长生
+    zizuo: str = ""               # 自坐：本柱天干在本柱地支的十二长生
 
 
 @dataclass(frozen=True)
@@ -540,6 +564,7 @@ class DomainAnalysis:
     clashes: list[str]
     harms: list[str]
     punishments: list[str]
+    three_assemblies: list[str]
     season: str
     adjustment: str
     pattern_hint: str
@@ -637,7 +662,6 @@ def _compute_shensha(pillars: list[Pillar], gender_int: int | None = None) -> li
     year_zhi = pillars[0].zhi  # 年支
     month_zhi = pillars[1].zhi  # 月支
     day_zhi = pillars[2].zhi  # 日支
-    all_gan = [p.gan for p in pillars]  # 四柱天干集合
 
     result: list[dict[str, str]] = []
     seen: set[str] = set()
@@ -673,13 +697,13 @@ def _compute_shensha(pillars: list[Pillar], gender_int: int | None = None) -> li
                 if p.zhi == z:
                     add("太极贵人", "聪明好学，喜文史哲宗教，做事有始有终", p.name)
 
-    # 文昌（日干或年干）
+    # 文昌贵人（日干或年干）
     for g in (day_gan, year_gan):
         w = WEN_CHANG.get(g)
         if w:
             for p in pillars:
                 if p.zhi == w:
-                    add("文昌", "聪明雅秀、有上进心，利考试功名", p.name)
+                    add("文昌贵人", "聪明雅秀、有上进心，利考试功名", p.name)
 
     # 禄神（日干）
     lu = LU_SHEN.get(day_gan)
@@ -805,12 +829,19 @@ def _compute_shensha(pillars: list[Pillar], gender_int: int | None = None) -> li
                 if p.gan == c:
                     add("月德贵人", "化煞解厄", p.name)
 
-    # 天德合 / 月德合（月支查天干，四柱天干见之）
+    # 天德合（按月支查。卯/午/酉/子四个月支对应的天德是地支，
+    # 其天德合也走"地支六合"——对应值本身是地支，须查 p.zhi；
+    # 其余八个月支天德是天干，其天德合是"天干五合"——对应值是天干，查 p.gan）。
     tian_de_he = TIAN_DE_HE.get(month_zhi)
     if tian_de_he:
+        is_branch_target = month_idx in TIAN_DE_IS_BRANCH
         for p in pillars:
-            if p.gan == tian_de_he:
-                add("天德合", "与天德相配、逢凶化吉", p.name)
+            if is_branch_target:
+                if p.zhi == tian_de_he:
+                    add("天德合", "与天德相配、逢凶化吉", p.name)
+            else:
+                if p.gan == tian_de_he:
+                    add("天德合", "与天德相配、逢凶化吉", p.name)
     yue_de_he = YUE_DE_HE.get(month_zhi)
     if yue_de_he:
         for p in pillars:
@@ -1093,13 +1124,33 @@ def _compute_shensha(pillars: list[Pillar], gender_int: int | None = None) -> li
             if pillars[2].zhi == d and pillars[3].zhi == t:
                 add("拱禄", f"日时拱夹禄位{lu_zhi}，财禄拱护、富贵双全", "日柱")
 
-    # 三奇贵人（天干相连且须含日干）
+    # 三奇贵人（对齐 07_神煞初探.md §10 + 《渊海子平》卷一·论三奇贵人）：
+    #   硬性基础条件「天干顺次连续，不可颠倒、不可间隔其它天干」：
+    #   - 天上三奇 甲→戊→庚：仅 年甲·月戊·日庚  或  月甲·日戊·时庚
+    #   - 地下三奇 乙→丙→丁：仅 年乙·月丙·日丁  或  月乙·日丙·时丁
+    #   - 人中三奇 壬→癸→辛：仅 年壬·月癸·日辛  或  月壬·日癸·时辛
+    #   逆序、乱序、或在三干之间插入别的天干 → 直接不成立。
+    #   两个连续窗口（年-月-日 / 月-日-时）任一「精确顺序」匹配即命中（均天然含日柱）。
+    _SAN_QI_KIND = {
+        ("甲", "戊", "庚"): "天上三奇",
+        ("乙", "丙", "丁"): "地下三奇",
+        ("壬", "癸", "辛"): "人中三奇",
+    }
+    _sanqi_windows: list[tuple[str, str, str]] = []
+    if len(pillars) > 2:  # 年-月-日
+        _sanqi_windows.append((pillars[0].gan, pillars[1].gan, pillars[2].gan))
+    if len(pillars) > 3:  # 月-日-时
+        _sanqi_windows.append((pillars[1].gan, pillars[2].gan, pillars[3].gan))
+    _sanqi_hit = False
     for triple in SAN_QI:
-        if day_gan in triple:
-            idxs = [all_gan.index(g) for g in triple if g in all_gan]
-            if len(idxs) == 3 and idxs == sorted(idxs):
-                add("三奇贵人", f"天干相连见{' '.join(triple)}，襟怀卓越、博学多能", "日柱")
+        for window in _sanqi_windows:
+            if window == triple:  # 精确顺序 + 连续窗口，逆序/乱序/隔柱一律不中
+                kind = _SAN_QI_KIND[triple]
+                add("三奇贵人", f"{kind}（{' '.join(triple)}），襟怀卓越、博学多能", "日柱")
+                _sanqi_hit = True
                 break
+        if _sanqi_hit:
+            break
 
     # 童子煞（月令 + 年柱纳音 + 日/时支分别判断，对齐 07_神煞初探.md）
     # 「春秋寅子贵，冬夏卯未辰；金木马卯合，水火鸡犬多；土命逢辰巳」
@@ -1450,6 +1501,29 @@ def _branch_relations(zhis: list[str]) -> tuple[list[str], list[str], list[str],
     return combinations, clashes, harms, punishments
 
 
+def _branch_combinations(zhis: list[str]) -> list[str]:
+    """识别地支三合局、三会方、六破（与六合/六冲/六害并列的宏观合会关系）。
+
+    只报「三支全会」的完整三合局/三会方；缺支的半合、拱合等暂不识别。
+    三会方与三合局可能同时成立（如 申酉戌 既会西方金、又含 申子辰? 不会同局），
+    各自独立判断，命中即报。六破与六合可同支并存（如 巳申 既六合又相破），均报。
+    """
+    result: list[str] = []
+    zhi_set = set(zhis)
+    for group, label in SAN_HE.items():
+        if group.issubset(zhi_set):
+            result.append(label)
+    for group, label in SAN_HUI.items():
+        if group.issubset(zhi_set):
+            result.append(label)
+    for i in range(len(zhis)):
+        for j in range(i + 1, len(zhis)):
+            pair = frozenset((zhis[i], zhis[j]))
+            if pair in LIU_PO:
+                result.append(LIU_PO[pair])
+    return result
+
+
 def _stem_relations(gans: list[str]) -> tuple[list[str], list[str]]:
     """天干五合与相冲。返回 (合, 冲)。"""
     combos: list[str] = []
@@ -1472,6 +1546,7 @@ def _build_domain_analysis(pillars: list[Pillar], wuxing: WuxingAnalysis) -> Dom
     rooted = sorted({day_master for stem in hidden_stems if stem == day_master})
     zhis = [p.zhi for p in pillars if p.zhi]
     combinations, clashes, harms, punishments = _branch_relations(zhis)
+    three_assemblies = _branch_combinations(zhis)
     # 天干五合与相冲，合并到合/冲列表（前缀标注“干”以便区分）
     gan_he, gan_chong = _stem_relations(visible_gans)
     combinations = [f"{g}(干合)" for g in gan_he] + combinations
@@ -1500,6 +1575,7 @@ def _build_domain_analysis(pillars: list[Pillar], wuxing: WuxingAnalysis) -> Dom
         clashes=clashes,
         harms=harms,
         punishments=punishments,
+        three_assemblies=three_assemblies,
         season=month_zhi,
         adjustment=adjustment,
         pattern_hint=pattern_hint,
@@ -1840,6 +1916,7 @@ def chart_to_api_dict(chart: BaziChart) -> dict[str, Any]:
             "clashes": chart.analysis.clashes,
             "harms": chart.analysis.harms,
             "punishments": chart.analysis.punishments,
+            "threeAssemblies": chart.analysis.three_assemblies,
             "season": chart.analysis.season,
             "adjustment": chart.analysis.adjustment,
             "patternHint": chart.analysis.pattern_hint,

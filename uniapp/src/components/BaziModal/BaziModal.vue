@@ -352,6 +352,13 @@ const closeDetail = () => {
   activeShenshaName.value = ''
   activeShenshaDesc.value = ''
 }
+// 兜底：selectedDetail 任意方式被替换（比如父组件重置 liunian 流年数据）时清空展开中的神煞详情
+watch(selectedDetail, (curr, prev) => {
+  if (prev && curr !== prev) {
+    activeShenshaName.value = ''
+    activeShenshaDesc.value = ''
+  }
+})
 // 详情弹窗内神煞标签点击：切换展开对应神煞的 description
 const activeShenshaName = ref('')
 const activeShenshaDesc = ref('')
@@ -397,6 +404,11 @@ const relationText = computed(() => {
     ...(a.clashes || []).map((v) => `冲：${v}`),
     ...(a.harms || []).map((v) => `害：${v}`),
     ...(a.punishments || []).map((v) => `刑：${v}`),
+    ...(a.threeAssemblies || []).map((v) => {
+      if (v.endsWith('破')) return `破：${v}`
+      if (v.includes('会')) return `会：${v}`
+      return `合：${v}`
+    }),
   ]
   return parts.join('；')
 })

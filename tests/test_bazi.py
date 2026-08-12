@@ -5,6 +5,7 @@ import pytest
 
 from app.domain.bazi_engine import (
     Pillar,
+    _branch_combinations,
     _classify_strength,
     _compute_shensha,
     _detect_special_pattern,
@@ -293,6 +294,260 @@ def test_xueren_includes_month_pillar_when_self_mapping():
     )
 
 
+def test_tianchu_guiren_dict_fixed_bing_ding_not_chen_you():
+    """回归：天厨贵人字典里「丙」「丁」两个值修正。
+
+    原理：天厨 = 食神建禄 —— X 的食神 Y，Y 禄地支即 X 之天厨。
+    丙的食神=戊，戊禄在巳 → 丙人天厨=巳
+    丁的食神=己，己禄在午 → 丁人天厨=午
+
+    Bug 现场：用户反馈「丙日柱不应该出现天厨贵人」。
+    命盘：壬子·壬子·丙申·壬辰。丙日干按口径查巳，盘中无巳，应不命中。
+    引擎原字典「丙: 申」是误把古诀"甲巳乙午丙戊申"断句为"丙戊共申"，
+    实际上"丙"独占巳，对齐 bazitai/bazipai/bazitang/iwzbz 等主流口径。
+
+    同时验证：丁天厨应为午（原字典错写"酉"），丁人见午才命中。
+    """
+    # --- 用户报告的盘：丙日干，盘中无巳 → 应 0 个 ---
+    pillars_user = [
+        _make_pillar("年柱", "壬子", "壬", "子", ["癸"]),
+        _make_pillar("月柱", "壬子", "壬", "子", ["癸"]),
+        _make_pillar("日柱", "丙申", "丙", "申", ["庚", "壬", "戊"]),
+        _make_pillar("时柱", "壬辰", "壬", "辰", ["戊", "乙", "癸"]),
+    ]
+    ss_user = _compute_shensha(pillars_user)
+    tc_user = [s for s in ss_user if s["name"] == "天厨贵人"]
+    # 修复前：会在日柱命中（丙: 申 = 日支申）
+    # 修复后：0 个（丙: 巳 = 四支子子申辰无巳）
+    assert tc_user == [], (
+        f"丙日干·盘中无巳→天厨贵人应 0 个；实际命中: "
+        f"{[(s['pillar'], s['description'][:50]) for s in tc_user]}"
+    )
+
+    # --- 丙见巳：应命中日柱 ---
+    pillars_bing_si = [
+        _make_pillar("年柱", "甲辰", "甲", "辰", ["戊", "乙", "癸"]),
+        _make_pillar("月柱", "丙寅", "丙", "寅", ["甲", "丙", "戊"]),
+        _make_pillar("日柱", "丙巳", "丙", "巳", ["庚", "丙", "戊"]),
+        _make_pillar("时柱", "壬子", "壬", "子", ["癸"]),
+    ]
+    ss_bing = _compute_shensha(pillars_bing_si)
+    tc_bing = sorted([s["pillar"] for s in ss_bing if s["name"] == "天厨贵人"])
+    # 日柱地支=巳 → 丙人见巳命中（年干甲也配巳，去重后只标日柱 1 次）
+    assert tc_bing == ["日柱"], (
+        f"丙巳日柱·丙人见巳→应在日柱命中；实际: {tc_bing}"
+    )
+
+    # --- 丁见午：原字典"丁: 酉"会让丁日柱见午不命中，必须改为午 ---
+    pillars_ding_wu = [
+        _make_pillar("年柱", "丁丑", "丁", "丑", ["己", "癸", "辛"]),
+        _make_pillar("月柱", "甲辰", "甲", "辰", ["戊", "乙", "癸"]),
+        _make_pillar("日柱", "丁未", "丁", "未", ["己", "丁", "乙"]),
+        _make_pillar("时柱", "丙午", "丙", "午", ["丁", "己"]),
+    ]
+    ss_ding = _compute_shensha(pillars_ding_wu)
+    tc_ding = sorted([s["pillar"] for s in ss_ding if s["name"] == "天厨贵人"])
+    # 年干丁 + 日干丁 都配午，时支=午→时柱命中；丙时干配巳，不命中任何柱（时支=午 ≠ 巳）
+    # 因 key 去重，命中只标时柱 1 次
+    assert tc_ding == ["时柱"], (
+        f"丁人见午 + 丙时干（支午非巳）→ 应仅时柱命中；实际: {tc_ding}"
+    )
+
+
+def test_sanqi_guiren_renzhong_hits_on_mdh_match():
+    """三奇贵人：人中三奇 壬-癸-辛，月/日/时三柱天干依次匹配时命中。
+
+    实例引自 07_神煞初探.md §10：2025/06/13 18:00（乙巳·壬午·癸丑·辛酉），
+    月柱壬、日柱癸、时柱辛 → 人中三奇，日柱命中。
+    """
+    pillars = [
+        _make_pillar("年柱", "乙巳", "乙", "巳", ["丙", "庚", "戊"]),
+        _make_pillar("月柱", "壬午", "壬", "午", ["丁", "己"]),
+        _make_pillar("日柱", "癸丑", "癸", "丑", ["己", "癸", "辛"]),
+        _make_pillar("时柱", "辛酉", "辛", "酉", ["辛"]),
+    ]
+    ss = _compute_shensha(pillars)
+    sanqi = [s for s in ss if s["name"] == "三奇贵人"]
+    assert len(sanqi) == 1 and sanqi[0]["pillar"] == "日柱", (
+        f"月/日/时天干依次 壬-癸-辛 → 应日柱命中 1 次；实际: "
+        f"{[(s['pillar'], s['description'][:80]) for s in sanqi]}"
+    )
+    assert "人中三奇" in sanqi[0]["description"], (
+        f"人中三奇（壬癸辛）的描述文案应注明「人中三奇」；实际: {sanqi[0]['description']}"
+    )
+
+
+def test_sanqi_guiren_tianshang_dingxi_hits():
+    """天上三奇 甲-戊-庚：月甲/日戊/时庚 时命中。"""
+    pillars = [
+        _make_pillar("年柱", "丙寅", "丙", "寅", ["甲", "丙", "戊"]),
+        _make_pillar("月柱", "甲辰", "甲", "辰", ["戊", "乙", "癸"]),
+        _make_pillar("日柱", "戊申", "戊", "申", ["庚", "壬", "戊"]),
+        _make_pillar("时柱", "庚子", "庚", "子", ["癸"]),
+    ]
+    ss = _compute_shensha(pillars)
+    sanqi = [s for s in ss if s["name"] == "三奇贵人"]
+    assert len(sanqi) == 1 and sanqi[0]["pillar"] == "日柱", (
+        f"月/日/时天干依次 甲-戊-庚 → 应日柱命中；实际: "
+        f"{[(s['pillar'], s['description'][:80]) for s in sanqi]}"
+    )
+    assert "天上三奇" in sanqi[0]["description"]
+
+
+def test_sanqi_guiren_dixia_bingding_hits():
+    """地下三奇 乙-丙-丁：月乙/日丙/时丁 时命中。"""
+    pillars = [
+        _make_pillar("年柱", "甲寅", "甲", "寅", ["甲", "丙", "戊"]),
+        _make_pillar("月柱", "乙卯", "乙", "卯", ["乙"]),
+        _make_pillar("日柱", "丙辰", "丙", "辰", ["戊", "乙", "癸"]),
+        _make_pillar("时柱", "丁巳", "丁", "巳", ["庚", "丙", "戊"]),
+    ]
+    ss = _compute_shensha(pillars)
+    sanqi = [s for s in ss if s["name"] == "三奇贵人"]
+    assert len(sanqi) == 1 and sanqi[0]["pillar"] == "日柱", (
+        f"月/日/时天干依次 乙-丙-丁 → 应日柱命中；实际: {[(s['pillar'], s['description'][:80]) for s in sanqi]}"
+    )
+    assert "地下三奇" in sanqi[0]["description"]
+
+
+def test_sanqi_guiren_requires_adjacent_pillars():
+    """回归：三奇必须落在「相连」三柱内——年甲·月壬·日戊·时庚 不命中。
+
+    用户口径：只认 年-月-日 或 月-日-时 两个连续窗口。此盘甲戊庚虽在四柱中齐备，
+    但分布为年·日·时（月柱夹壬，隔断），不相连 → 不算三奇。
+    """
+    pillars = [
+        _make_pillar("年柱", "甲午", "甲", "午", ["丁", "己"]),
+        _make_pillar("月柱", "壬申", "壬", "申", ["庚", "壬", "戊"]),
+        _make_pillar("日柱", "戊子", "戊", "子", ["癸"]),
+        _make_pillar("时柱", "庚辰", "庚", "辰", ["戊", "乙", "癸"]),
+    ]
+    ss = _compute_shensha(pillars)
+    sanqi = [s for s in ss if s["name"] == "三奇贵人"]
+    assert sanqi == [], (
+        f"甲戊庚分布在 年·日·时（月柱夹壬隔断）→ 不相连，应不命中；实际: "
+        f"{[(s['pillar'], s['description'][:80]) for s in sanqi]}"
+    )
+
+
+def test_sanqi_guiren_permutation_does_not_hit():
+    """回归：逆序/乱序不算三奇。《渊海子平》要求天干顺次连续、不可颠倒。
+
+    年戊·月庚·日甲（年-月-日 窗口为 戊-庚-甲，非 甲-戊-庚 顺次）→ 不命中。
+    """
+    pillars = [
+        _make_pillar("年柱", "戊子", "戊", "子", ["癸"]),
+        _make_pillar("月柱", "庚寅", "庚", "寅", ["甲", "丙", "戊"]),
+        _make_pillar("日柱", "甲辰", "甲", "辰", ["戊", "乙", "癸"]),
+        _make_pillar("时柱", "丙午", "丙", "午", ["丁", "己"]),
+    ]
+    ss = _compute_shensha(pillars)
+    sanqi = [s for s in ss if s["name"] == "三奇贵人"]
+    assert sanqi == [], (
+        f"戊-庚-甲 逆序排列 → 按《渊海子平》不顺次连续，应不命中；实际: "
+        f"{[(s['pillar'], s['description'][:80]) for s in sanqi]}"
+    )
+
+
+def test_sanqi_guiren_tianshang_nian_yue_ri_in_order_hits():
+    """天上三奇 甲→戊→庚，顺次落 年甲·月戊·日庚（年-月-日窗口精确匹配）→ 命中。"""
+    pillars = [
+        _make_pillar("年柱", "甲子", "甲", "子", ["癸"]),
+        _make_pillar("月柱", "戊辰", "戊", "辰", ["戊", "乙", "癸"]),
+        _make_pillar("日柱", "庚申", "庚", "申", ["庚", "壬", "戊"]),
+        _make_pillar("时柱", "丙子", "丙", "子", ["癸"]),
+    ]
+    ss = _compute_shensha(pillars)
+    sanqi = [s for s in ss if s["name"] == "三奇贵人"]
+    assert len(sanqi) == 1 and sanqi[0]["pillar"] == "日柱", (
+        f"年甲·月戊·日庚 顺次天上三奇 → 应日柱命中；实际: "
+        f"{[(s['pillar'], s['description'][:80]) for s in sanqi]}"
+    )
+    assert "天上三奇" in sanqi[0]["description"]
+
+
+def test_sanqi_guiren_requires_day_gan_to_belong_to_triple():
+    """回归：日柱天干不在 triple 内时不应命中（两个窗口都含日柱，故日干不合即全灭）。
+
+    年甲·月戊·日癸·时庚：年月日={甲,戊,癸}、月日时={戊,癸,庚}，均不成三奇 → 不命中。
+    """
+    pillars = [
+        _make_pillar("年柱", "甲申", "甲", "申", ["庚", "壬", "戊"]),
+        _make_pillar("月柱", "戊子", "戊", "子", ["癸"]),
+        _make_pillar("日柱", "癸酉", "癸", "酉", ["辛"]),
+        _make_pillar("时柱", "庚寅", "庚", "寅", ["甲", "丙", "戊"]),
+    ]
+    # 日柱天干=癸 ∉ triple；月日时顺序 [戊, 癸, 庚] 也不是 (甲,戊,庚) → 应不命中
+    ss = _compute_shensha(pillars)
+    sanqi = [s for s in ss if s["name"] == "三奇贵人"]
+    assert sanqi == [], (
+        f"日柱天干=癸 不在任何 triple 内 → 三奇贵人不命中；实际: {[(s['pillar'], s['description'][:80]) for s in sanqi]}"
+    )
+
+
+def test_branch_combinations_three_he_full_board():
+    """三合局识别：四组三合局都能被识别。"""
+    cases = [
+        # 用户盘：壬子·壬子·丙申·壬辰 → 申子辰合水局
+        (["子", "子", "申", "辰"], ["申子辰合水局"]),
+        # 亥卯未合木局
+        (["亥", "卯", "未", "子"], ["亥卯未合木局"]),
+        # 寅午戌合火局
+        (["寅", "午", "戌", "申"], ["寅午戌合火局"]),
+        # 巳酉丑合金局
+        (["巳", "酉", "丑", "辰"], ["巳酉丑合金局"]),
+    ]
+    for zhis, expected in cases:
+        got = _branch_combinations(zhis)
+        for label in expected:
+            assert label in got, f"zhis={zhis} 应含 {label}，实际: {got}"
+
+
+def test_branch_combinations_three_hui_full_board():
+    """三会方识别：四组三会都能被识别。"""
+    cases = [
+        (["寅", "卯", "辰", "子"], ["寅卯辰会东方木"]),
+        (["巳", "午", "未", "子"], ["巳午未会南方火"]),
+        (["申", "酉", "戌", "子"], ["申酉戌会西方金"]),
+        (["亥", "子", "丑", "午"], ["亥子丑会北方水"]),
+    ]
+    for zhis, expected in cases:
+        got = _branch_combinations(zhis)
+        for label in expected:
+            assert label in got, f"zhis={zhis} 应含 {label}，实际: {got}"
+
+
+def test_branch_combinations_liu_po():
+    """六破识别：六对相破都能被命中。"""
+    pairs = [
+        (["子", "酉", "寅", "卯"], "子酉破"),
+        (["卯", "午", "寅", "子"], "卯午破"),
+        (["辰", "丑", "寅", "子"], "辰丑破"),
+        (["巳", "申", "寅", "子"], "巳申破"),
+        (["寅", "亥", "卯", "子"], "寅亥破"),
+        (["未", "戌", "寅", "子"], "未戌破"),
+    ]
+    for zhis, label in pairs:
+        got = _branch_combinations(zhis)
+        assert label in got, f"zhis={zhis} 应含 {label}，实际: {got}"
+
+
+def test_branch_combinations_empty_when_no_assembly():
+    """无关地支不应误报三合/三会/破。"""
+    # 子寅辰午：无三合局、无三会方、无相破（注意 子酉才是破，此组不含酉）
+    got = _branch_combinations(["子", "寅", "辰", "午"])
+    assert got == [], f"无三合/三会/破时应为空，实际: {got}"
+
+
+def test_branch_combinations_he_and_po_coexist_on_sishen():
+    """巳申既六合又相破：三合/三会/破识别层只负责破，
+    六合由 _branch_relations 负责；这里验证破层能识别巳申破。"""
+    got = _branch_combinations(["巳", "申", "子", "辰"])
+    assert "巳申破" in got, f"巳申应识别为相破，实际: {got}"
+    # 同时验证三合水局也在（申子辰）
+    assert "申子辰合水局" in got, f"申子辰应合水局，实际: {got}"
+
+
 def test_xueren_other_months_unaffected():
     """正向回归：非自映射的 11 个月份里"月柱地支 ≠ 目标"，移除 skip 不应产生任何变化。"""
     # 取寅月构造一次：寅月 → 血刃=丑；
@@ -478,4 +733,63 @@ def test_shensha_diaoke_bingfu_dead_code_fixed():
     # 病符：年巳 → 病符=辰，四柱无辰，预期不出现（合理）
     bingfu = [s for s in ss if s["name"] == "病符"]
     assert bingfu == [], f"病符 预期 not-found，实际: {bingfu}"
+
+
+# —— 神煞查法分支（2026-08-12 天德合地支情形补全）—————
+# TIAN_DE_HE["卯"]="巳" / ["午"]="寅" / ["酉"]="亥" / ["子"]="申" ——
+# 这四个月支的天德本身是地支（参 TIAN_DE_IS_BRANCH={2,5,8,11}），
+# 其天德合走"地支六合"，对应值也是地支，必须查 p.zhi 而非 p.gan。
+# 此前只看 p.gan 导致卯/午/酉/子月永远命中不了天德合。
+def test_tiande_he_zhi_target_fires_when_month_zhi_is_branch_mao_wu_you_zi():
+    """卯/午/酉/子 月支查天德合，字典值是地支（巳/寅/亥/申），应按地支匹配。"""
+    # 卯月查巳：时柱地支=巳 → 命中
+    pillars = [
+        _full_pillar("年柱", "丙辰", "丙", "辰", ["癸", "戊", "乙"]),
+        _full_pillar("月柱", "丁卯", "丁", "卯", ["乙"]),
+        _full_pillar("日柱", "戊子", "戊", "子", ["癸"]),
+        _full_pillar("时柱", "己巳", "己", "巳", ["丙", "庚", "戊"]),
+    ]
+    ss = _compute_shensha(pillars)
+    tdh = [s for s in ss if s["name"] == "天德合"]
+    assert any(s["pillar"] == "时柱" for s in tdh), \
+        f"卯月→天德合=巳，应在时柱命中；实际: {[s['pillar'] for s in tdh]}"
+
+    # 子月查申：时柱地支=申 → 命中
+    pillars = [
+        _full_pillar("年柱", "戊辰", "戊", "辰", ["癸", "戊", "乙"]),
+        _full_pillar("月柱", "庚子", "庚", "子", ["癸"]),
+        _full_pillar("日柱", "壬寅", "壬", "寅", ["甲", "丙", "戊"]),
+        _full_pillar("时柱", "甲申", "甲", "申", ["庚", "壬", "戊"]),
+    ]
+    ss = _compute_shensha(pillars)
+    tdh = [s for s in ss if s["name"] == "天德合"]
+    assert any(s["pillar"] == "时柱" for s in tdh), \
+        f"子月→天德合=申，应在时柱命中；实际: {[s['pillar'] for s in tdh]}"
+
+    # 酉月查亥：时柱地支=亥 → 命中
+    pillars = [
+        _full_pillar("年柱", "甲辰", "甲", "辰", ["癸", "戊", "乙"]),
+        _full_pillar("月柱", "癸酉", "癸", "酉", ["辛"]),
+        _full_pillar("日柱", "丙子", "丙", "子", ["癸"]),
+        _full_pillar("时柱", "丁亥", "丁", "亥", ["壬", "甲"]),
+    ]
+    ss = _compute_shensha(pillars)
+    tdh = [s for s in ss if s["name"] == "天德合"]
+    assert any(s["pillar"] == "时柱" for s in tdh), \
+        f"酉月→天德合=亥，应在时柱命中；实际: {[s['pillar'] for s in tdh]}"
+
+
+def test_tiande_he_gan_target_fires_when_month_zhi_is_other_branches():
+    """寅/辰/巳/未/申/戌/亥/丑 月支查天德合，字典值是天干，应按天干匹配（回归）。"""
+    # 寅月查壬：月柱天干=壬 → 命中
+    pillars = [
+        _full_pillar("年柱", "甲子", "甲", "子", ["癸"]),
+        _full_pillar("月柱", "壬寅", "壬", "寅", ["甲", "丙", "戊"]),
+        _full_pillar("日柱", "庚午", "庚", "午", ["丁", "己"]),
+        _full_pillar("时柱", "丁酉", "丁", "酉", ["辛"]),
+    ]
+    ss = _compute_shensha(pillars)
+    tdh = [s for s in ss if s["name"] == "天德合"]
+    assert any(s["pillar"] == "月柱" for s in tdh), \
+        f"寅月→天德合=壬，应在月柱命中；实际: {[s['pillar'] for s in tdh]}"
 

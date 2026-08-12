@@ -146,7 +146,7 @@
             <div v-if="dayun.length" class="dayun-section">
               <div class="section-title">大运 <span class="section-hint">点击查看详情</span></div>
               <div class="dayun-grid">
-                <div v-for="(d, i) in dayun" :key="i" class="dayun-card clickable" @click="selectedDetail = d">
+                <div v-for="(d, i) in dayun" :key="i" class="dayun-card clickable" @click="openDetail(d)">
                   <div class="dayun-year">{{ d.year }}</div>
                   <div class="dayun-range">{{ d.startYear }}-{{ d.startYear + 9 }}</div>
                   <div class="dayun-age">{{ d.startAge }}-{{ d.startAge + 9 }}岁</div>
@@ -187,7 +187,7 @@
           <div v-if="activeTab === 'liunian'" class="tab-panel" role="tabpanel">
             <div class="section-title">流年 <span class="section-hint">点击查看详情</span></div>
             <div v-if="liunian.length" class="liunian-strip">
-              <div v-for="l in liunian" :key="l.year" class="liunian-pill clickable" @click="selectedDetail = l">
+              <div v-for="l in liunian" :key="l.year" class="liunian-pill clickable" @click="openDetail(l)">
                 <span>{{ l.year }}</span><b>{{ l.ganzhi }}</b><em>{{ l.dayun || '-' }}</em>
               </div>
             </div>
@@ -236,7 +236,7 @@
           </div>
         </div>
         <!-- 大运/流年详情弹窗（点击 dayun-card / liunian-pill 触发） -->
-        <div v-if="selectedDetail" class="ps-popover" @click="selectedDetail = null">
+        <div v-if="selectedDetail" class="ps-popover" @click="closeDetail">
           <div class="detail-popover-card" @click.stop>
             <div class="detail-popover-title">{{ selectedDetail.ganzhi }}</div>
             <div class="detail-popover-sub">{{ detailSubtitle }}</div>
@@ -264,7 +264,7 @@
                 <div class="detail-shensha-desc-text">{{ activeDetailShenshaDesc }}</div>
               </div>
             </div>
-            <button class="ps-popover-close" @click="selectedDetail = null" aria-label="关闭">关闭</button>
+            <button class="ps-popover-close" @click="closeDetail" aria-label="关闭">关闭</button>
           </div>
         </div>
       </div>
@@ -346,6 +346,24 @@ const toggleDetailShensha = (name: string, desc: string) => {
     activeDetailShenshaDesc.value = desc
   }
 }
+// 切换/关闭详情弹窗时清空展开中的神煞详情；直接接管 @click 避免漏
+const openDetail = (d: DayunItem | LiuNianItem) => {
+  selectedDetail.value = d
+  activeDetailShenshaName.value = ''
+  activeDetailShenshaDesc.value = ''
+}
+const closeDetail = () => {
+  selectedDetail.value = null
+  activeDetailShenshaName.value = ''
+  activeDetailShenshaDesc.value = ''
+}
+// 兜底：selectedDetail 任意方式被替换时清空展开中的神煞详情
+watch(selectedDetail, (curr, prev) => {
+  if (prev && curr !== prev) {
+    activeDetailShenshaName.value = ''
+    activeDetailShenshaDesc.value = ''
+  }
+})
 const detailSubtitle = computed(() => {
   const d = selectedDetail.value
   if (!d) return ''

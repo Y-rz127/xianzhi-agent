@@ -1388,7 +1388,7 @@ class XianzhiWorkflow:
             f"用神提示: {chart.wuxing.useful_hint}",
             f"十神结构: {chart.analysis.ten_gods}; 透干: {chart.analysis.exposed_stems or '-'}; 通根: {chart.analysis.rooted_stems or '-'}",
             f"天干关系: {gan_relation_line}",
-            f"地支关系: 合={chart.analysis.combinations or '-'}; 冲={chart.analysis.clashes or '-'}; 害={chart.analysis.harms or '-'}; 刑={chart.analysis.punishments or '-'}",
+            f"地支关系: 合={chart.analysis.combinations or '-'}; 冲={chart.analysis.clashes or '-'}; 害={chart.analysis.harms or '-'}; 刑={chart.analysis.punishments or '-'}; 三合/三会/破={chart.analysis.three_assemblies or '-'}",
             f"调候: 月令{chart.analysis.season}; {chart.analysis.adjustment}",
             f"判断置信度: {chart.analysis.confidence}",
             f"起运: {chart.start_yun['startDate']} 起; {chart.start_yun['direction']}; 起运年龄 {chart.start_yun['startYear']}年{chart.start_yun['startMonth']}月{chart.start_yun['startDay']}日",
