@@ -673,8 +673,8 @@ async function generateReport() {
 .bt-col-head { font-size: 26rpx; font-weight: 600; color: $color-ink; letter-spacing: 2px; }
 .bt-day { background: rgba(184, 72, 60, 0.06); }
 .bt-head .bt-day { background: rgba(184, 72, 60, 0.1); }
-.bt-gan { font-size: 38rpx; font-weight: bold; font-family: $font-family-display; }
-.bt-zhi { font-size: 38rpx; font-family: $font-family-display; }
+.bt-gan { font-size: 50rpx; font-weight: bold; font-family: $font-family-display; }
+.bt-zhi { font-size: 50rpx; font-family: $font-family-display; }
 .bt-multi { flex-direction: column; gap: 2rpx; padding: 8rpx 4rpx; }
 .bt-cang { font-size: 24rpx; font-weight: 600; line-height: 1.5; }
 .bt-fu { font-size: 21rpx; color: $color-ink-light; line-height: 1.5; }

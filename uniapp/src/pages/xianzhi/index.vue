@@ -1593,6 +1593,7 @@ messages.value.push({
   background: $color-bg-warm;
   display: flex;
   flex-direction: column;
+  overflow: hidden; /* 关键：约束子元素，否则 scroll-view 拿不到确定高度、无法滚动 */
   z-index: 1001;
   box-shadow: 4rpx 0 24rpx rgba(0, 0, 0, 0.15);
 }
@@ -1622,6 +1623,7 @@ messages.value.push({
 }
 .drawer-list {
   flex: 1;
+  min-height: 0; /* 关键：flex 子项默认 min-height:auto 会撑满父容器、让 scroll-view 拿不到剩余高度；改为 0 让 flex:1 真正生效 */
   padding: 12rpx 0;
 }
 .drawer-item {

@@ -650,8 +650,8 @@ const downloadFullPDF = () => {
 .cg-head .cg-cell { font-size: 12px; color: var(--accent-light); letter-spacing: 1px; padding: 8px 4px; }
 .cg-cell.day-master { background: linear-gradient(135deg, rgba(212,175,55,0.1), rgba(139,92,246,0.06)); }
 .cg-head .cg-cell.day-master { background: linear-gradient(135deg, rgba(212,175,55,0.16), rgba(139,92,246,0.08)); }
-.big-gan { font-size: 22px; font-weight: bold; }
-.big-zhi { font-size: 22px; }
+.big-gan { font-size: 30px; font-weight: bold; line-height: 1.1; }
+.big-zhi { font-size: 30px; line-height: 1.1; }
 /* 多标签列：横向 flex-wrap 排布 */
 .cg-multi { flex-direction: row; flex-wrap: wrap; gap: 2px 5px; justify-content: center; align-items: center; padding: 4px 2px; }
 .cang-item { font-size: 11px; font-weight: 600; padding: 1px 2px; }
