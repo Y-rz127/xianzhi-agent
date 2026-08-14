@@ -17,6 +17,9 @@ from app.rag.vector_store import KNOWLEDGE_DIR, knowledge_base
 # 知识库管理接口
 mgmt_router = APIRouter(prefix="/rag", tags=["RAG"])
 
+# 单个知识库文档大小上限（防止超大上传写满磁盘）
+MAX_DOC_BYTES = 10 * 1024 * 1024
+
 
 def _resolve_doc_path(filename: str) -> Path:
     """安全解析知识库文件路径，禁止目录遍历。"""
@@ -65,6 +68,8 @@ async def upload_rag_doc(file: UploadFile = File(...)):
     try:
         KNOWLEDGE_DIR.mkdir(parents=True, exist_ok=True)
         content = await file.read()
+        if len(content) > MAX_DOC_BYTES:
+            raise HTTPException(status_code=413, detail=f"文件过大，上限 {MAX_DOC_BYTES // (1024 * 1024)}MB")
         path.write_bytes(content)
         log.info("上传知识库文档: {}", path.name)
         return {"filename": path.name, "size": path.stat().st_size}

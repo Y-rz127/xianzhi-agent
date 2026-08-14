@@ -2,13 +2,19 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import os
+import secrets
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Header, HTTPException, Query, Request
+
+from app.api.admin_auth import issue_admin_token, revoke_admin_token
 
 router = APIRouter(prefix="/admin/accounts", tags=["Admin Accounts"])
+
+_PBKDF2_ITERATIONS = 200_000
 
 ADMIN_DATA_FILE = Path("./data/admin_accounts.json")
 
@@ -32,8 +38,30 @@ def _save_accounts(accounts: list[dict]) -> None:
         json.dump(accounts, f, ensure_ascii=False, indent=2)
 
 
-def _hash_password(password: str) -> str:
-    return hashlib.sha256(password.encode()).hexdigest()
+def _hash_password(password: str, salt: str | None = None) -> str:
+    """PBKDF2-HMAC-SHA256 加盐哈希，格式 pbkdf2$<iterations>$<salt>$<hash>。"""
+    salt = salt or secrets.token_hex(16)
+    digest = hashlib.pbkdf2_hmac(
+        "sha256", password.encode("utf-8"), bytes.fromhex(salt), _PBKDF2_ITERATIONS
+    ).hex()
+    return f"pbkdf2${_PBKDF2_ITERATIONS}${salt}${digest}"
+
+
+def _verify_password(password: str, stored: str) -> bool:
+    """校验密码，兼容历史无盐 SHA-256 哈希。"""
+    if not stored:
+        return False
+    if stored.startswith("pbkdf2$"):
+        try:
+            _, iterations, salt, digest = stored.split("$", 3)
+            expected = hashlib.pbkdf2_hmac(
+                "sha256", password.encode("utf-8"), bytes.fromhex(salt), int(iterations)
+            ).hex()
+        except (ValueError, TypeError):
+            return False
+        return hmac.compare_digest(expected, digest)
+    legacy = hashlib.sha256(password.encode()).hexdigest()
+    return hmac.compare_digest(legacy, stored)
 
 
 def _init_default_admin() -> None:
@@ -67,22 +95,38 @@ _init_default_admin()
 
 @router.post("/login")
 async def admin_login(req: Request) -> dict:
+    """管理员登录，成功后签发管理端会话 token（有效期见 ADMIN_TOKEN_TTL）。"""
     body = await req.json()
     username = body.get("username", "").strip()
     password = body.get("password", "")
     if not username or not password:
         raise HTTPException(status_code=400, detail="用户名和密码不能为空")
     accounts = _load_accounts()
-    for acc in accounts:
-        if acc.get("username") == username and acc.get("password_hash") == _hash_password(password):
-            if not acc.get("enabled", True):
-                raise HTTPException(status_code=403, detail="账号已被禁用")
-            return {
-                "id": acc["id"],
-                "username": acc["username"],
-                "nickname": acc.get("nickname", ""),
-            }
+    for i, acc in enumerate(accounts):
+        if acc.get("username") != username or not _verify_password(password, acc.get("password_hash", "")):
+            continue
+        if not acc.get("enabled", True):
+            raise HTTPException(status_code=403, detail="账号已被禁用")
+        # 历史无盐哈希在登录成功时透明升级为 PBKDF2
+        if not acc.get("password_hash", "").startswith("pbkdf2$"):
+            accounts[i]["password_hash"] = _hash_password(password)
+            _save_accounts(accounts)
+        return {
+            "id": acc["id"],
+            "username": acc["username"],
+            "nickname": acc.get("nickname", ""),
+            "token": issue_admin_token(acc["username"]),
+        }
     raise HTTPException(status_code=401, detail="用户名或密码错误")
+
+
+@router.post("/logout")
+async def admin_logout(
+    admin_token: str = Query(None, alias="admin_token"),
+    x_admin_token: str = Header(None, alias="X-Admin-Token"),
+) -> dict:
+    revoke_admin_token((admin_token or x_admin_token or "").strip())
+    return {"message": "已退出登录"}
 
 
 @router.get("")

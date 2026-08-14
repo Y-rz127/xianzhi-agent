@@ -163,14 +163,23 @@ app = FastAPI(
     title="先知 - 八字命理分析预测智能体",
     version="0.1.0",
     lifespan=lifespan,
+    # API 文档仅在 DEBUG=true 时开启，避免生产环境向公网暴露完整接口结构
+    docs_url="/docs" if settings.debug else None,
+    redoc_url="/redoc" if settings.debug else None,
+    openapi_url="/openapi.json" if settings.debug else None,
 )
 # CORS 跨域配置（通过环境变量 CORS_ORIGINS 配置，逗号分隔；支持通配符 *）
 # 生产环境应配置实际域名，如 https://your-domain.com
 _cors_origins = [o.strip() for o in settings.cors_origins.split(",") if o.strip()]
+# 通配符不能与携带凭据共存（浏览器会拒绝，且等同于向任意站点开放带凭请求），
+# 故配置为 * 时强制关闭 allow_credentials。
+_allow_credentials = "*" not in _cors_origins
+if not _allow_credentials:
+    log.warning("CORS_ORIGINS 为通配符 *，已强制关闭 allow_credentials；生产环境请配置具体域名")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins,
-    allow_credentials=True,
+    allow_credentials=_allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )

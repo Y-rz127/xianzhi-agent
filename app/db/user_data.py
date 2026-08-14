@@ -1115,11 +1115,18 @@ def get_chart_facts(
     chart_profile_id: str,
     confidence: str | None = "verified",
     limit: int = 20,
+    user_id: str | None = None,
 ) -> list:
-    """获取命盘的断事知识，默认只取已验证的。"""
+    """获取命盘的断事知识，默认只取已验证的。
+
+    传入 user_id 时只返回该用户的记录（用户态接口必须传，防止越权读取他人断事）。
+    """
     _ensure_tables()
     where = "WHERE chart_profile_id = %s"
     params: list = [chart_profile_id]
+    if user_id:
+        where += " AND user_id = %s"
+        params.append(user_id)
     if confidence:
         where += " AND confidence = %s"
         params.append(confidence)

@@ -36,7 +36,6 @@
 <script setup lang="ts">
 import { ref } from "vue"
 import { useRouter } from "vue-router"
-import { setAdminLoggedIn } from "../utils/adminAuth"
 import { adminLogin } from "../api"
 
 const router = useRouter()
@@ -59,8 +58,8 @@ async function handleLogin() {
   loading.value = true
 
   try {
-    const result = await adminLogin(username.value, password.value)
-    setAdminLoggedIn()
+    // adminLogin 内部保存后端签发的会话 token
+    await adminLogin(username.value, password.value)
     const redirect = (router.currentRoute.value.query.redirect as string) || "/user-admin"
     router.push(redirect)
   } catch (e: any) {
