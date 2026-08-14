@@ -281,7 +281,7 @@ async def get_profile_facts(
     if not u:
         raise HTTPException(status_code=401, detail="登录已过期")
     try:
-        facts = user_data.get_chart_facts(profile_id, confidence, limit)
+        facts = user_data.get_chart_facts(profile_id, confidence, limit, user_id=u["id"])
         return {"facts": facts}
     except Exception as e:
         log.exception("获取断事知识失败")

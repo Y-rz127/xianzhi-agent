@@ -18,6 +18,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.api import state as app_state
+from app.api.admin_auth import issue_admin_token
 from main import app
 
 
@@ -35,7 +36,8 @@ def client():
     测试会被整体跳过，避免产生硬失败。
     """
     try:
-        with TestClient(app) as c:
+        # 管理类端点（sessions/observability/rag）需管理员凭据，测试用会话 token
+        with TestClient(app, headers={"X-Admin-Token": issue_admin_token("pytest")}) as c:
             yield c
     except Exception as exc:
         pytest.skip(f"完整应用栈不可用，跳过集成测试: {exc}")

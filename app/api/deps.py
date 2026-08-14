@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from fastapi import Header, HTTPException, Query
 
-from app.config import settings
+from app.api.admin_auth import is_admin_authorized
 from app.db import users as user_store
 
 
@@ -29,17 +29,46 @@ def get_current_user(
 
 
 def require_admin(api_key: str = Query(None, alias="api_key"),
-                  x_api_key: str = Header(None, alias="X-API-Key")) -> None:
-    """管理类接口依赖：校验 API Key。
+                  x_api_key: str = Header(None, alias="X-API-Key"),
+                  admin_token: str = Query(None, alias="admin_token"),
+                  x_admin_token: str = Header(None, alias="X-Admin-Token")) -> None:
+    """管理类接口依赖：校验 API Key 或管理员会话 token。
 
-    生产环境（API_KEYS 非空）必须提供有效 API Key；
-    本地开发（API_KEYS 为空）放行，便于调试。
-    用于命例库管理、反馈审核/导出等管理类接口。
+    默认拒绝：未配置 API_KEYS 且无有效管理员会话 token 时返回 401
+    （仅 DEBUG=true 且未配置 API_KEYS 的本地开发场景放行）。
+    用于命例库管理、反馈审核/导出、用户与账号管理等接口。
     """
-    keys = {k.strip() for k in settings.api_keys.split(",") if k.strip()}
-    if not keys:
-        # 本地开发模式：未配置 API_KEYS 时放行
+    if is_admin_authorized((api_key or x_api_key or "").strip(),
+                           (admin_token or x_admin_token or "").strip()):
         return
-    provided = (api_key or x_api_key or "").strip()
-    if provided not in keys:
-        raise HTTPException(status_code=401, detail="无效或缺失的管理员 API Key")
+    raise HTTPException(status_code=401, detail="无效或缺失的管理员凭据")
+
+
+def require_session_access(
+    session_id: str,
+    authorization: str = Header(None),
+    token: str = Query(None),
+    api_key: str = Query(None, alias="api_key"),
+    x_api_key: str = Header(None, alias="X-API-Key"),
+    admin_token: str = Query(None, alias="admin_token"),
+    x_admin_token: str = Header(None, alias="X-Admin-Token"),
+) -> None:
+    """会话粒度授权：管理员凭据，或会话归属人本人。
+
+    防止越权访问/删除他人会话（包含出生时间、对话内容等敏感信息）。
+    无归属的会话（如未登录的 PC 端会话）仅管理员可访问。
+    """
+    if is_admin_authorized((api_key or x_api_key or "").strip(),
+                           (admin_token or x_admin_token or "").strip()):
+        return
+    t = None
+    if authorization and authorization.lower().startswith("bearer "):
+        t = authorization[7:].strip()
+    t = t or token
+    user = user_store.get_by_token(t) if t else None
+    if not user:
+        raise HTTPException(status_code=401, detail="未登录或登录已失效")
+    from app.memory.postgres_memory import get_session_owner
+    owner = get_session_owner(session_id)
+    if not owner or owner != user["id"]:
+        raise HTTPException(status_code=403, detail="无权访问该会话")

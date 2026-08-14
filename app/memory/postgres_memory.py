@@ -13,6 +13,7 @@ psycopg.Connection 本身非线程安全，全局单连接在并发请求下会�
 """
 from __future__ import annotations
 
+import re
 import threading
 import uuid as uuid_module
 from typing import List
@@ -29,6 +30,20 @@ from app.logger import log
 _pg_pool = None           # 全局单例，None 表示还没创建
 _pool_lock = threading.Lock()  # 互斥锁，防止并发创建多个池
 _schema_ready = False
+
+_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def safe_table_name(name: str) -> str:
+    """校验表名标识符。
+
+    表名无法用参数绑定，只能拼接到 SQL；而它来自配置（MEMORY_TABLE_NAME），
+    故先用白名单字符集校验，阻止配置注入恶意 SQL。
+    """
+    if not _IDENTIFIER_RE.match(name or ""):
+        raise ValueError(f"非法表名: {name!r}")
+    return name
+
 
 def _check_connection(conn) -> bool:
     """借出连接前的健康检查：探活失败则丢弃重建。"""
@@ -92,7 +107,7 @@ def _ensure_schema():
                 conn.execute("""
                     CREATE INDEX IF NOT EXISTS idx_message_store_session_created
                     ON {} (session_id, created_at DESC)
-                """.format(settings.memory_table_name))
+                """.format(safe_table_name(settings.memory_table_name)))
                 log.info("PG 记忆表已就绪: {}", settings.memory_table_name)
             _schema_ready = True
         except Exception as e:
@@ -127,7 +142,7 @@ class PostgresChatMemory:
     def __init__(self, connection_string: str = None, table_name: str = "message_store"):
         # connection_string 保留用于接口兼容；实际连接统一走模块级连接池
         self.connection_string = connection_string or settings.postgres_connection_string
-        self.table_name = table_name
+        self.table_name = safe_table_name(table_name)
         _ensure_schema()
 
     @staticmethod
@@ -400,6 +415,27 @@ def _resolve_session_uuid(session_id: str) -> str:
     except Exception:
         pass
     return PostgresChatMemory._to_uuid(session_id)
+
+
+def get_session_owner(session_id: str) -> str:
+    """返回会话所属用户 id；无归属或查询失败返回空串。
+
+    优先取 conversation_id 中编码的 user_id（`module__<userId>__<rand>`），
+    回退查询 session_metadata。
+    """
+    owner = _extract_user_id(session_id)
+    if owner:
+        return owner
+    try:
+        with _get_pool().connection() as conn:
+            row = conn.execute(
+                "SELECT user_id FROM session_metadata WHERE conversation_id = %s",
+                (session_id,),
+            ).fetchone()
+        return str(row[0]) if row and row[0] else ""
+    except Exception:
+        log.exception("查询会话归属失败: {}", session_id)
+        return ""
 
 
 def delete_session(session_id: str):

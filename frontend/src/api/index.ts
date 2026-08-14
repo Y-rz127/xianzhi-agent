@@ -1,18 +1,25 @@
+import { getAdminToken, setAdminToken } from "../utils/adminAuth"
+
 const API_BASE = import.meta.env.VITE_API_BASE
   || (import.meta.env.DEV ? "http://localhost:8123/api" : "/api")
-const API_KEY = "xianzhi-yrz-admin"
 
+// 管理端凭据一律使用登录后由后端签发的会话 token（不在前端内置静态密钥）
 function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const headers = new Headers(init?.headers)
-  headers.set("X-API-Key", API_KEY)
+  const token = getAdminToken()
+  if (token) headers.set("X-Admin-Token", token)
   return fetch(input, { ...init, headers })
 }
 
 export { apiFetch }
 
-function withApiKey(url: string): string {
+// 下载链接无法自定义请求头，只能用 query 传递会话 token；仅用于管理类接口，
+// 避免把管理凭据写进普通用户接口的 URL（会进入访问日志）
+function withAdminToken(url: string): string {
+  const token = getAdminToken()
+  if (!token) return url
   const sep = url.includes("?") ? "&" : "?"
-  return `${url}${sep}api_key=${encodeURIComponent(API_KEY)}`
+  return `${url}${sep}admin_token=${encodeURIComponent(token)}`
 }
 
 export interface SSECallbacks {
@@ -35,8 +42,7 @@ export function connectSSE(path: string, params: Record<string, string | undefin
     .filter((k) => params[k] !== undefined && params[k] !== "")
     .map((k) => `${encodeURIComponent(k)}=${encodeURIComponent(params[k] as string)}`)
     .join("&")
-  const url = withApiKey(`${API_BASE}${path}?${qs}`)
-  const es = new EventSource(url)
+  const es = new EventSource(`${API_BASE}${path}?${qs}`)
   es.onmessage = (e) => {
     if (e.data === "[DONE]") { cb.onDone?.(); es.close() }
     else cb.onMessage?.(e.data)
@@ -462,8 +468,7 @@ export function drawTarotCardsWS(
   cb: { onCards?: (cards: TarotDrawnCard[]) => void; onError?: (err: string) => void }
 ): WebSocket {
   const wsBase = API_BASE.replace(/^http/, "ws")
-  const url = withApiKey(`${wsBase}/ai/tarot/ws`)
-  const ws = new WebSocket(url)
+  const ws = new WebSocket(`${wsBase}/ai/tarot/ws`)
 
   ws.onopen = () => {
     ws.send(JSON.stringify({ action: "draw", spread }))
@@ -487,8 +492,7 @@ export function interpretTarotWS(
   cb: TarotInterpretCallbacks
 ): WebSocket {
   const wsBase = API_BASE.replace(/^http/, "ws")
-  const url = withApiKey(`${wsBase}/ai/tarot/ws`)
-  const ws = new WebSocket(url)
+  const ws = new WebSocket(`${wsBase}/ai/tarot/ws`)
 
   ws.onopen = () => {
     ws.send(JSON.stringify({
@@ -622,12 +626,12 @@ export async function fetchAnswerFeedbacks(limit = 200, rating?: "up" | "down"):
 
 export function answerFeedbackSftExportUrl(rating: "up" | "down" = "up", limit = 1000): string {
   const params = new URLSearchParams({ rating, limit: String(limit) })
-  return withApiKey(`${API_BASE}/ai/feedback/answers/export/sft?${params.toString()}`)
+  return withAdminToken(`${API_BASE}/ai/feedback/answers/export/sft?${params.toString()}`)
 }
 
 export function answerFeedbackDpoExportUrl(limit = 500): string {
   const params = new URLSearchParams({ limit: String(limit) })
-  return withApiKey(`${API_BASE}/ai/feedback/answers/export/dpo?${params.toString()}`)
+  return withAdminToken(`${API_BASE}/ai/feedback/answers/export/dpo?${params.toString()}`)
 }
 
 export async function reviewAnswerFeedback(fid: string): Promise<{ ok: boolean }> {
@@ -727,7 +731,7 @@ export async function deleteAdminAccount(account_id: string): Promise<void> {
   }
 }
 
-/** 管理员登录 */
+/** 管理员登录（成功后保存后端签发的会话 token） */
 export async function adminLogin(username: string, password: string): Promise<{ id: string; username: string; nickname: string }> {
   const res = await fetch(`${API_BASE}/ai/admin/accounts/login`, {
     method: "POST",
@@ -738,5 +742,8 @@ export async function adminLogin(username: string, password: string): Promise<{ 
     const err = await res.json().catch(() => ({}))
     throw new Error(err.detail || "登录失败")
   }
-  return await res.json()
+  const data = await res.json()
+  if (!data?.token) throw new Error("登录异常：未获取到会话凭据")
+  setAdminToken(data.token)
+  return data
 }
