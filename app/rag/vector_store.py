@@ -240,7 +240,8 @@ def _fp_pool_get():
                     try:
                         c.execute("SELECT 1")
                         return True
-                    except Exception:
+                    except Exception as e:
+                        log.warning("RAG 指纹连接健康检查失败，连接将被丢弃: {}", e)
                         return False
 
                 _fp_pool = ConnectionPool(
@@ -316,7 +317,9 @@ def _load_fingerprint() -> dict | None:
         return None
     try:
         return json.loads(p.read_text(encoding="utf-8"))
-    except Exception:
+    except Exception as e:
+        # 指纹丢失会触发全量重建 embedding（真金白银），不能静默
+        log.warning("本地 RAG 指纹文件解析失败，将重建向量库 {}: {}", p, e)
         return None
 
 
@@ -383,8 +386,8 @@ def _load_chroma(embeddings: Embeddings):
     try:
         if store._collection.count() == 0:
             raise RuntimeError("Chroma 集合为空")
-    except AttributeError:
-        pass  # 老版本无 _collection，跳过空检查
+    except AttributeError as e:
+        log.debug("Chroma 无 _collection 属性，跳过空集合检查: {}", e)
     log.info("Chroma 向量库复用已有索引（文档未变更，跳过 embedding）")
     return store
 

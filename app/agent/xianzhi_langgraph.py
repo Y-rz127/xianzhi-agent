@@ -28,7 +28,8 @@ def create_xianzhi_graph(workflow):
     """Create a compiled LangGraph app if langgraph is installed."""
     try:
         from langgraph.graph import END, StateGraph
-    except Exception:
+    except Exception as e:
+        log.warning("langgraph 不可用，回退到普通工作流: {}", e)
         return None
 
     def classify_node(state: XianzhiGraphState) -> XianzhiGraphState:

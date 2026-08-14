@@ -53,6 +53,8 @@ async def update_profile(pid: str, body: dict, current_user: dict = Depends(get_
         if not ok:
             raise HTTPException(status_code=404, detail="档案不存在")
         return {"status": "ok"}
+    except HTTPException:
+        raise
     except Exception as e:
         log.exception("更新档案失败")
         raise HTTPException(status_code=500, detail=client_error(e))

@@ -256,7 +256,8 @@ class Xianzhi(ToolCallAgent):
         if pillars and gender:
             try:
                 cands = find_birth_dates_from_pillars(pillars, gender, top_n=3)
-            except Exception:
+            except Exception as e:
+                log.warning("[xianzhi] 八字反推候选日期失败 pillars={} gender={}: {}", pillars, gender, e)
                 cands = []
             self._bazi_pending = {"pillars": pillars, "gender": gender, "candidates": cands}
             return True
@@ -424,7 +425,8 @@ class Xianzhi(ToolCallAgent):
                     if p and g:
                         try:
                             cands = find_birth_dates_from_pillars(p, g, top_n=int(args.get("top_n") or 3))
-                        except Exception:
+                        except Exception as e:
+                            log.warning("[xianzhi] 八字反推候选日期失败 pillars={} gender={}: {}", p, g, e)
                             cands = []
                         self._bazi_pending = {"pillars": p, "gender": g, "candidates": cands}
                         return
@@ -454,6 +456,10 @@ class Xianzhi(ToolCallAgent):
         """包装原 stream，在末尾追加命盘摘要段（若已挂载 chart_context）。"""
         for chunk in src_stream:
             yield chunk
+        # 执行循环内部的异常只会写 _last_error（内部标记不外发），这里必须显式推给调用方
+        if self._last_error:
+            log.warning("[xianzhi] 终止于错误: {}", self._last_error)
+            yield "分析过程中遇到错误：{}。请稍后重试。".format(self._last_error[:200])
         if not self.chart_context:
             return
         summary = self._extract_chart_summary()
@@ -641,6 +647,9 @@ class Xianzhi(ToolCallAgent):
         if verbose:
             async for chunk in super().arun_stream(user_prompt):
                 yield chunk
+            if self._last_error:
+                log.warning("[xianzhi] 终止于错误: {}", self._last_error)
+                yield "分析过程中遇到错误：{}。请稍后重试。".format(self._last_error[:200])
             # verbose 模式下仍追加 chart 兜底（保持原有行为）
             if self.chart_context:
                 summary = self._extract_chart_summary()

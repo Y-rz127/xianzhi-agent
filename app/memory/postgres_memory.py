@@ -107,8 +107,8 @@ def close_global_conn():
         if _pg_pool is not None:
             try:
                 _pg_pool.close()
-            except Exception:
-                pass
+            except Exception as e:
+                log.warning("关闭 PG 记忆连接池失败: {}", e)
             finally:
                 _pg_pool = None
                 _schema_ready = False
@@ -371,7 +371,8 @@ def get_session_info(prefix: str = "", user_id: str = None) -> list:
                             or msg_obj.get("data", {}).get("content")
                             or ""
                         )
-                except Exception:
+                except Exception as e:
+                    log.debug("会话最后一条消息解析失败，降级为原文截取: {}", e)
                     last_msg_text = str(last_msg_raw)[:50]
             sessions.append({
                 "id": conversation_id,
@@ -397,8 +398,10 @@ def _resolve_session_uuid(session_id: str) -> str:
             ).fetchone()
         if row:
             return str(row[0])
-    except Exception:
-        pass
+    except Exception as e:
+        # 查不到或库不可达时回退到计算 UUID，但不能静默：
+        # 它会让后续删除/查询落到错的 session_uuid 上
+        log.warning("解析会话 UUID 失败，回退到计算值 {}: {}", session_id, e)
     return PostgresChatMemory._to_uuid(session_id)
 
 
@@ -498,8 +501,8 @@ def get_birth_info_from_session(session_id: str) -> dict | None:
                         try:
                             from app.tools.bazi import _normalize_birth_time
                             bt = _normalize_birth_time(bt)
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            log.warning("出生时间标准化失败，使用原值 {}: {}", bt, e)
                         return {"time": bt, "gender": gd}
         return None
     except Exception as e:

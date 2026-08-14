@@ -62,6 +62,7 @@ class BaseAgent(ABC):
             return "\n".join(results)
         except Exception as e:
             self.state = AgentState.ERROR
+            self._last_error = str(e)
             log.exception("error executing agent")
             return "执行错误: {}".format(e)
         finally:
@@ -77,7 +78,10 @@ class BaseAgent(ABC):
             try:
                 self._validate(user_prompt)
             except Exception as e:
-                q.put("错误: {}".format(e)); q.put(_SENTINEL); return
+                self.state = AgentState.ERROR
+                self._last_error = str(e)
+                log.exception("agent 运行前校验失败")
+                q.put("__ERROR__:" + str(e)); q.put(_SENTINEL); return
             self.state = AgentState.RUNNING
             self.message_list.append(HumanMessage(content=_wrap_user_input(user_prompt)))
             try:
@@ -96,8 +100,10 @@ class BaseAgent(ABC):
                     q.put("__MAX_STEPS__")
             except Exception as e:
                 self.state = AgentState.ERROR
+                # cleanup() 会把 state 复位成 IDLE，错误信息必须留在 _last_error 上，
+                # 否则调用方（Xianzhi._filter_steps）无法区分「执行失败」和「无文本回答」
+                self._last_error = str(e)
                 log.exception("error executing agent")
-                log.info("执行错误: {}".format(e))
                 q.put("__ERROR__:" + str(e))
             finally:
                 self.cleanup(); q.put(_SENTINEL)
@@ -123,7 +129,10 @@ class BaseAgent(ABC):
             try:
                 self._validate(user_prompt)
             except Exception as e:
-                loop.call_soon_threadsafe(q.put_nowait, "错误: {}".format(e))
+                self.state = AgentState.ERROR
+                self._last_error = str(e)
+                log.exception("agent 运行前校验失败")
+                loop.call_soon_threadsafe(q.put_nowait, "__ERROR__:" + str(e))
                 loop.call_soon_threadsafe(q.put_nowait, _SENTINEL)
                 return
             self.state = AgentState.RUNNING
@@ -144,8 +153,9 @@ class BaseAgent(ABC):
                     loop.call_soon_threadsafe(q.put_nowait, "__MAX_STEPS__")
             except Exception as e:
                 self.state = AgentState.ERROR
+                # 同 run_stream：cleanup() 复位 state，错误必须挂在 _last_error 上才不会被吞掉
+                self._last_error = str(e)
                 log.exception("error executing agent")
-                log.info("执行错误: {}".format(e))
                 loop.call_soon_threadsafe(q.put_nowait, "__ERROR__:" + str(e))
             finally:
                 self.cleanup()

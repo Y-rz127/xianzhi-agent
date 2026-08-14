@@ -150,9 +150,13 @@ def _validate_api_key(api_key: str) -> bool:
             return resp.status == 200
     except urllib.error.HTTPError as e:
         if e.code in (401, 403):
+            log.warning("LangSmith API Key 无效（HTTP {}），已禁用 tracing", e.code)
             return False
+        log.warning("LangSmith 校验返回 HTTP {}，暂当作有效: {}", e.code, e)
         return True
-    except Exception:
+    except Exception as e:
+        # 网络抖动不应该把 key 判成无效，但必须留下痕迹
+        log.warning("LangSmith API Key 校验异常，暂当作有效: {}", e)
         return True
 
 

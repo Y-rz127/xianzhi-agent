@@ -6,8 +6,10 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from langchain_openai import ChatOpenAI
 
+from app.api.common import client_error
 from app.api.routes import router
 from app.api.state import set_instances
 from app.config import settings
@@ -99,6 +101,7 @@ async def lifespan(app: FastAPI):
             warm_dates = ["1990-01-01 12:00", "2000-01-01 12:00", "1985-01-01 12:00", "1995-01-01 12:00"]
             warm_genders = ["男", "女"]
             warm_count = 0
+            failed = 0
             for dt in warm_dates:
                 for g in warm_genders:
                     try:
@@ -106,21 +109,32 @@ async def lifespan(app: FastAPI):
                         bazi_analysis.invoke({"birth_time": dt, "gender": g, "question": "整体命盘"})
                         bazi_dayun.invoke({"birth_time": dt, "gender": g, "count": 8})
                         warm_count += 1
-                    except Exception:
-                        pass
-            log.info("缓存预热完成: {} 条", warm_count)
+                    except Exception as e:
+                        # 预热失败不影响启动，但排盘引擎报错是真问题，必须可见
+                        failed += 1
+                        log.warning("缓存预热失败 {} {}: {}", dt, g, e)
+            log.info("缓存预热完成: 成功 {} 条，失败 {} 条", warm_count, failed)
 
         try:
             threading.Thread(target=_warm_cache, daemon=True, name="bazi-cache-warmup").start()
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning("缓存预热线程启动失败: {}", e)
         try:
             from app.api.cases import ensure_table
             ensure_table()
         except Exception as e:
             log.warning("命例表初始化失败（可能已存在）: {}", e)
 
-    asyncio.create_task(_bg_init())
+    def _log_bg_init_result(task: asyncio.Task) -> None:
+        # fire-and-forget 任务的异常不会冒泡到任何地方，必须手动回收
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is not None:
+            log.opt(exception=exc).error("后台初始化任务异常退出")
+
+    _bg_task = asyncio.create_task(_bg_init())
+    _bg_task.add_done_callback(_log_bg_init_result)
 
     log.info("先知智能体启动完成 | 端口 {} | 本地工具 {} 个", settings.app_port, len(local_tools))
 
@@ -145,17 +159,17 @@ async def lifespan(app: FastAPI):
         try:
             if _client is not None:
                 _client.close()
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning("关闭辅助 LLM httpx 客户端失败: {}", e)
     try:
         _http.close()
-    except Exception:
-        pass
+    except Exception as e:
+        log.warning("关闭主 LLM httpx 客户端失败: {}", e)
 
     try:
         await mcp_manager.stop()
-    except Exception:
-        pass
+    except Exception as e:
+        log.warning("关闭 MCP 失败: {}", e)
     log.info("先知智能体已关闭")
 
 
@@ -203,10 +217,22 @@ async def metrics_middleware(request: Request, call_next):
         return await call_next(request)
 
     start = time.perf_counter()
-    response = await call_next(request)
+    try:
+        response = await call_next(request)
+    except Exception:
+        # 未处理异常也要计入 500 指标，否则错误率看不到真实失败
+        record_request(request.method, path, 500, time.perf_counter() - start)
+        raise
     duration = time.perf_counter() - start
     record_request(request.method, path, response.status_code, duration)
     return response
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    """兜底异常处理：未被路由捕获的异常也要进应用日志，并返回结构化 500。"""
+    log.exception("未处理异常 {} {}", request.method, request.url.path)
+    return JSONResponse(status_code=500, content={"error": client_error(exc)})
 
 
 app.include_router(router, prefix="/api")

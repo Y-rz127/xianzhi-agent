@@ -36,6 +36,8 @@ class ToolCallAgent(ReActAgent):
             for tc in tool_calls:
                 log.info("  工具: {}, 参数: {}", tc.get("name"), tc.get("args"))
             self.message_list.append(ai_msg)
+            # 本步成功：清掉上一步残留的错误，避免调用方把已恢复的错误再推给前端
+            self._last_error = None
             return len(tool_calls) > 0
         except Exception as e:
             log.exception("{} 思考过程遇到问题", self.name)

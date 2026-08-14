@@ -8,6 +8,8 @@ from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
 
+from app.logger import log
+
 router = APIRouter(prefix="/admin/accounts", tags=["Admin Accounts"])
 
 ADMIN_DATA_FILE = Path("./data/admin_accounts.json")
@@ -21,8 +23,10 @@ def _load_accounts() -> list[dict]:
             data = json.load(f)
             if isinstance(data, list):
                 return data
-    except (json.JSONDecodeError, OSError):
-        pass
+        log.error("管理员账号文件格式异常（期望 list）: {}", ADMIN_DATA_FILE)
+    except (json.JSONDecodeError, OSError) as e:
+        # 文件损坏/不可读时会退化成「无管理员」，必须留日志否则无法排查
+        log.error("读取管理员账号文件失败 {}: {}", ADMIN_DATA_FILE, e)
     return []
 
 
