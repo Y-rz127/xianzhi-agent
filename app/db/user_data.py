@@ -343,7 +343,8 @@ def _row_to_profile(r) -> dict:
     if isinstance(chart, str):
         try:
             chart = json.loads(chart)
-        except Exception:
+        except Exception as e:
+            log.warning("档案 chart_data 解析失败 id={}: {}", r[0], e)
             chart = {}
     return {
         "id": str(r[0]),
@@ -686,7 +687,8 @@ def _safe_json(s: str):
     """安全解析 JSON 字符串，解析失败时返回空字典。"""
     try:
         return json.loads(s)
-    except Exception:
+    except Exception as e:
+        log.warning("JSON 解析失败，降级为空字典: {}", e)
         return {}
 
 
@@ -704,8 +706,8 @@ def _extract_bazi_brief(chart_data: Any) -> str | None:
                     parts.append(gz)
             if len(parts) >= 4:
                 return " ".join(parts[:4])
-    except Exception:
-        pass
+    except Exception as e:
+        log.warning("提取四柱摘要失败: {}", e)
     return None
 
 
@@ -1305,8 +1307,8 @@ def _extract_bazi_features(chart_data: dict | None) -> dict:
             m = re.search(r"【日主强弱】\s*(\S+)", analysis_text)
             if m:
                 feats["strength"] = m.group(1)
-    except Exception:
-        pass
+    except Exception as e:
+        log.warning("提取命盘特征失败，返回部分结果: {}", e)
     return feats
 
 

@@ -56,6 +56,7 @@ class MCPToolWrapper(BaseTool):
             finally:
                 local.close()
         except Exception as e:
+            log.exception("MCP 工具 {} 调用失败", self._tool_name)
             return "MCP 工具 {} 调用失败: {}".format(self._tool_name, e)
 
     async def _arun(self, args: dict | None = None, **kwargs):
@@ -181,8 +182,10 @@ class MCPManager:
         if self._task:
             try:
                 await asyncio.wait_for(self._task, timeout=5)
-            except Exception:
-                pass
+            except asyncio.TimeoutError:
+                log.warning("MCP 关闭超时（5s），强制放弃等待")
+            except Exception as e:
+                log.warning("MCP 关闭异常: {}", e)
 
     @property
     def available(self) -> bool:

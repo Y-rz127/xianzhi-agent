@@ -18,6 +18,7 @@ from app.domain.bazi_engine import (
     parse_birth,
     parse_gender,
 )
+from app.logger import log
 from app.tools.cache import bazi_cache
 
 
@@ -266,6 +267,7 @@ def lunar_to_solar(query: str) -> str:
 
         return f"无法识别的格式: {query}"
     except Exception as e:
+        log.exception("农历/公历转换失败")
         return f"转换失败: {e}"
 
 
@@ -296,6 +298,7 @@ def bazi_chart(birth_time: str, gender: str, sect: int = 2, yun_sect: int = 1) -
         bazi_cache.set(birth_time, gender, result, sect, yun_sect, "chart")
         return result
     except Exception as e:
+        log.exception("bazi_chart 排盘失败")
         return "排盘失败: {}".format(e)
 
 
@@ -323,6 +326,7 @@ def bazi_analysis(birth_time: str, gender: str, question: str = "整体运势", 
         bazi_cache.set(birth_time, gender, result, sect, 1, cache_tool)
         return result
     except Exception as e:
+        log.exception("bazi_analysis 分析失败")
         return "分析失败: {}".format(e)
 
 
@@ -349,6 +353,7 @@ def bazi_dayun(birth_time: str, gender: str, count: int = 8, yun_sect: int = 1) 
         bazi_cache.set(birth_time, gender, result, 2, yun_sect, "dayun")
         return result
     except Exception as e:
+        log.exception("bazi_dayun 大运推算失败")
         return "大运推算失败: {}".format(e)
 
 
@@ -386,6 +391,7 @@ def bazi_liunian(birth_time: str, gender: str, years: int = 10, yun_sect: int = 
         bazi_cache.set(birth_time, gender, result, 2, yun_sect, cache_tool)
         return result
     except Exception as e:
+        log.exception("bazi_liunian 流年推算失败")
         return "流年推算失败: {}".format(e)
 
 
@@ -429,6 +435,7 @@ def bazi_liuyue(birth_time: str, gender: str, year: int = None, sect: int = 2, y
         bazi_cache.set(birth_time, gender, result, sect, yun_sect, cache_tool)
         return result
     except Exception as e:
+        log.exception("bazi_liuyue 流月推算失败")
         return "流月推算失败: {}".format(e)
 
 
@@ -476,6 +483,7 @@ def bazi_liuri(birth_time: str, gender: str, year: int = None, month: int = None
         bazi_cache.set("calendar", "all", result, sect, yun_sect, cache_tool)
         return result
     except Exception as e:
+        log.exception("bazi_liuri 流日推算失败")
         return "流日推算失败: {}".format(e)
 
 
@@ -598,6 +606,7 @@ def bazi_hehun(birth_time_a: str, gender_a: str, birth_time_b: str, gender_b: st
         bazi_cache.set(cache_key_a, cache_key_b, result, sect, 1, "hehun")
         return result
     except Exception as e:
+        log.exception("bazi_hehun 合婚分析失败")
         return "合婚分析失败: {}".format(e)
 
 
@@ -621,6 +630,7 @@ def bazi_full(birth_time: str, gender: str, sect: int = 2, yun_sect: int = 1) ->
         chart = build_bazi_chart(birth_time, gender, sect=sect, yun_sect=yun_sect)
         return format_fact_context(chart)
     except Exception as e:
+        log.exception("bazi_full 完整排盘失败")
         return "完整排盘失败: {}".format(e)
 
 
@@ -646,6 +656,7 @@ def bazi_infer_dates(pillars: str, gender: str, top_n: int = 3) -> str:
     except ValueError as e:
         return "八字解析失败: {}".format(e)
     except Exception as e:
+        log.exception("bazi_infer_dates 反推出生日期失败")
         return "反推出生日期失败: {}".format(e)
     if not candidates:
         return "未能根据八字 {}（{}）反推出候选出生日期，请确认八字是否正确。".format(pillars, gender)

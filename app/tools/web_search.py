@@ -3,6 +3,7 @@ from __future__ import annotations
 import httpx
 from langchain_core.tools import tool
 from app.config import settings
+from app.logger import log
 
 
 @tool
@@ -30,6 +31,7 @@ def search_web(query: str) -> str:
             return "未搜索到相关结果: {}".format(query)
         return "搜索结果：\n\n" + "\n\n".join(results)
     except Exception as e:
+        log.exception("联网搜索失败 query={}", query)
         return "联网搜索失败: {}".format(e)
 
 
@@ -46,6 +48,7 @@ def scrape_web_page(url: str) -> str:
         text = soup.get_text(separator="\n", strip=True)
         return text[:3000]
     except Exception as e:
+        log.exception("网页抓取失败 url={}", url)
         return "网页抓取失败: {}".format(e)
 
 

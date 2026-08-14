@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi.responses import JSONResponse
 from sse_starlette.sse import EventSourceResponse
 
 from app.api import state
@@ -43,8 +44,9 @@ async def chat_with_xianzhi(
             uid = u["id"]
     try:
         agent, lock = state.get_xianzhi(conversation_id)
-    except RuntimeError:
-        return {"error": "Xianzhi not initialized"}
+    except RuntimeError as e:
+        log.error("Xianzhi 实例不可用（SSE）: {}", e)
+        return JSONResponse(status_code=503, content={"error": "Xianzhi not initialized"})
 
     async def event_stream():
         # 会话实例级锁：同一会话串行，不同会话并行；
@@ -80,7 +82,12 @@ async def _safe_ws_send(websocket: WebSocket, data: dict) -> bool:
     try:
         await websocket.send_json(data)
         return True
-    except (WebSocketDisconnect, RuntimeError, Exception):
+    except (WebSocketDisconnect, ConnectionError, RuntimeError) as e:
+        log.debug("WS 发送失败（客户端已断开）: {}", e)
+        return False
+    except Exception:
+        # 非断连类异常（序列化失败等）是真 bug，必须留下堆栈
+        log.exception("WS 发送异常")
         return False
 
 
@@ -111,7 +118,8 @@ async def ws_chat_with_xianzhi(websocket: WebSocket):
                 continue
             try:
                 agent, lock = state.get_xianzhi(conversation_id)
-            except RuntimeError:
+            except RuntimeError as e:
+                log.error("Xianzhi 实例不可用（WS）: {}", e)
                 if not await _safe_ws_send(websocket, {"type": "error", "data": "Xianzhi not initialized"}):
                     break
                 continue
@@ -170,8 +178,9 @@ async def chat_with_xianzhi_sync(
             uid = u["id"]
     try:
         agent, lock = state.get_xianzhi(conversation_id)
-    except RuntimeError:
-        return {"error": "Xianzhi not initialized"}
+    except RuntimeError as e:
+        log.error("Xianzhi 实例不可用（sync）: {}", e)
+        return JSONResponse(status_code=503, content={"error": "Xianzhi not initialized"})
     async with lock:
         agent._sect = sect
         agent._yun_sect = yun_sect
@@ -182,7 +191,7 @@ async def chat_with_xianzhi_sync(
             return {"result": await asyncio.to_thread(agent.run, message)}
         except Exception as e:
             log.exception("Sync chat error")
-            return {"error": client_error(e)}
+            return JSONResponse(status_code=500, content={"error": client_error(e)})
 
 
 @router.get("/sessions", dependencies=[Depends(require_admin)])
@@ -258,17 +267,22 @@ async def get_chart(birth_time: str, gender: str, sect: int = 2, yun_sect: int =
         birth_time = _normalize_birth_time(birth_time)
         parse_birth(birth_time)
         parse_gender(gender)
-    except Exception as e:
+    except (ValueError, TypeError) as e:
+        # 只有入参解析错误才是 400，其余异常往上抛给全局 handler记 500
         raise HTTPException(status_code=400, detail=str(e))
 
-    chart = build_bazi_chart(birth_time, gender, sect=sect, yun_sect=yun_sect, dayun_count=8, liunian_years=5, longitude=longitude)
-    payload = chart_to_api_dict(chart)
-    payload.update({
-        "chartText": format_chart_text(chart),
-        "analysisText": format_analysis_text(chart, "整体命盘"),
-        "dayunText": format_dayun_text(chart),
-        "liunianText": format_liunian_text(chart),
-    })
+    try:
+        chart = build_bazi_chart(birth_time, gender, sect=sect, yun_sect=yun_sect, dayun_count=8, liunian_years=5, longitude=longitude)
+        payload = chart_to_api_dict(chart)
+        payload.update({
+            "chartText": format_chart_text(chart),
+            "analysisText": format_analysis_text(chart, "整体命盘"),
+            "dayunText": format_dayun_text(chart),
+            "liunianText": format_liunian_text(chart),
+        })
+    except Exception as e:
+        log.exception("排盘失败 birth_time={} gender={}", birth_time, gender)
+        raise HTTPException(status_code=500, detail=client_error(e))
     return payload
 
 

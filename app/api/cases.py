@@ -138,8 +138,8 @@ def _extract_bazi_brief(chart_data: Any) -> str | None:
                     parts.append(gz)
             if len(parts) >= 4:
                 return " ".join(parts[:4])
-    except Exception:
-        pass
+    except Exception as e:
+        log.warning("提取四柱摘要失败: {}", e)
     return None
 
 

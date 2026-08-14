@@ -1374,8 +1374,8 @@ class XianzhiWorkflow:
                 by, bm, bd = int(m.group(1)), int(m.group(2)), int(m.group(3))
                 age = today.year - by - ((today.month, today.day) < (bm, bd))
                 current_age = f"; 当前周岁: {age}岁"
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning("计算当前周岁失败 birth={}: {}", birth_str, e)
         return "\n".join([
             f"当前日期: {today.year}年{today.month}月{today.day}日{current_age}",
             f"出生: {chart.birth.solar}; 性别: {chart.birth.gender}; 农历: {chart.birth.lunar}; 生肖: {chart.birth.shengxiao}",

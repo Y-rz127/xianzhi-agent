@@ -16,7 +16,11 @@ async def _safe_ws_send(websocket: WebSocket, data: dict) -> bool:
     try:
         await websocket.send_json(data)
         return True
-    except (WebSocketDisconnect, RuntimeError, Exception):
+    except (WebSocketDisconnect, ConnectionError, RuntimeError) as e:
+        log.debug("塔罗 WS 发送失败（客户端已断开）: {}", e)
+        return False
+    except Exception:
+        log.exception("塔罗 WS 发送异常")
         return False
 
 
