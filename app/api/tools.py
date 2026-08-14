@@ -5,7 +5,7 @@ import asyncio
 
 from fastapi import APIRouter
 
-from app.api.common import client_error
+from app.api.common import api_guard
 from app.logger import log
 from app.tools.text_clean import clean_think_tags
 
@@ -49,7 +49,7 @@ async def hehun(
     """合婚分析。先调规则工具拿基础数据，再调 LLM 做综合解读。"""
     from fastapi import HTTPException
     from app.tools.bazi import bazi_hehun
-    try:
+    with api_guard("合婚分析失败"):
         # 1. 规则层：排盘 + 五行互补评分（同步阻塞计算，放线程池避免卡住事件循环）
         base_result = await asyncio.to_thread(bazi_hehun.invoke, {
             "birth_time_a": birth_time_a, "gender_a": gender_a,
@@ -87,10 +87,5 @@ async def hehun(
         except Exception as e:
             log.warning("合婚 LLM 解读失败，返回规则结果: {}", e)
             return {"result": base_result}
-    except HTTPException:
-        raise
-    except Exception as e:
-        log.exception("合婚分析失败")
-        raise HTTPException(status_code=500, detail=client_error(e))
 
 

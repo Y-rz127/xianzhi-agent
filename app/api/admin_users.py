@@ -7,9 +7,8 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Query
 
-from app.api.common import client_error
+from app.api.common import api_guard
 from app.db import user_data, users as user_store
-from app.logger import log
 from app.memory.postgres_memory import get_session_info
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
@@ -21,28 +20,11 @@ async def list_users(
     offset: int = Query(0, ge=0),
 ):
     """列出用户（含各模块数据量统计）与总数。"""
-    try:
+    with api_guard("管理后台-用户列表失败"):
         rows = user_store.list_users(limit=limit, offset=offset)
         total = user_store.count_users()
-        users = []
-        for u in rows:
-            uid = u["id"]
-            sessions = get_session_info(prefix="mp-xianzhi", user_id=uid)
-            users.append(
-                {
-                    **u,
-                    "stats": {
-                        "profiles": len(user_data.list_profiles(uid)),
-                        "favorites": len(user_data.list_favorites(uid)),
-                        "tarotRecords": len(user_data.list_tarot_records(uid)),
-                        "sessions": len(sessions),
-                    },
-                }
-            )
+        users = [{**u, "stats": user_data.count_user_data(u["id"])} for u in rows]
         return {"total": total, "users": users}
-    except Exception as e:
-        log.exception("管理后台-用户列表失败")
-        raise HTTPException(status_code=500, detail=client_error(e))
 
 
 @router.get("/users/{user_id}")
@@ -51,15 +33,11 @@ async def get_user_detail(user_id: str):
     user = user_store.get_by_id(user_id)
     if not user:
         raise HTTPException(status_code=404, detail="用户不存在")
-    try:
-        sessions = get_session_info(prefix="mp-xianzhi", user_id=user_id)
+    with api_guard("管理后台-用户详情失败"):
         return {
             "user": user,
             "profiles": user_data.list_profiles(user_id),
             "favorites": user_data.list_favorites(user_id),
             "tarotRecords": user_data.list_tarot_records(user_id),
-            "sessions": sessions,
+            "sessions": get_session_info(prefix="mp-xianzhi", user_id=user_id),
         }
-    except Exception as e:
-        log.exception("管理后台-用户详情失败")
-        raise HTTPException(status_code=500, detail=client_error(e))

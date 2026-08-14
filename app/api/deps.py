@@ -28,6 +28,24 @@ def get_current_user(
     return user
 
 
+def user_id_from_token(token: str | None) -> str:
+    """token → user_id；未传 token 或 token 失效时返回空串（匿名可用的接口用）。"""
+    if not token:
+        return ""
+    user = user_store.get_by_token(token)
+    return user["id"] if user else ""
+
+
+def require_user_by_token(token: str | None) -> dict:
+    """?token= 形式的强制登录校验（无法使用 Depends 注入的查询参数接口用）。"""
+    if not token:
+        raise HTTPException(status_code=401, detail="请先登录")
+    user = user_store.get_by_token(token)
+    if not user:
+        raise HTTPException(status_code=401, detail="登录已过期")
+    return user
+
+
 def require_admin(api_key: str = Query(None, alias="api_key"),
                   x_api_key: str = Header(None, alias="X-API-Key")) -> None:
     """管理类接口依赖：校验 API Key。

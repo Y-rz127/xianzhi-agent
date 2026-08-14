@@ -10,7 +10,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
 
-from app.api.common import client_error
+from app.api.common import api_guard
 from app.logger import log
 from app.rag.vector_store import KNOWLEDGE_DIR, knowledge_base
 
@@ -62,17 +62,12 @@ async def upload_rag_doc(file: UploadFile = File(...)):
         raise HTTPException(status_code=400, detail="仅支持上传 .md 文件")
 
     path = _resolve_doc_path(filename)
-    try:
+    with api_guard("上传知识库文档失败"):
         KNOWLEDGE_DIR.mkdir(parents=True, exist_ok=True)
         content = await file.read()
         path.write_bytes(content)
         log.info("上传知识库文档: {}", path.name)
         return {"filename": path.name, "size": path.stat().st_size}
-    except HTTPException:
-        raise
-    except Exception as e:
-        log.exception("上传知识库文档失败")
-        raise HTTPException(status_code=500, detail=client_error(e))
 
 
 @mgmt_router.delete("/docs/{filename}")
@@ -81,13 +76,10 @@ async def delete_rag_doc(filename: str):
     path = _resolve_doc_path(filename)
     if not path.exists():
         raise HTTPException(status_code=404, detail="文件不存在")
-    try:
+    with api_guard("删除知识库文档失败"):
         path.unlink()
         log.info("删除知识库文档: {}", path.name)
         return {"status": "ok", "filename": path.name}
-    except Exception as e:
-        log.exception("删除知识库文档失败")
-        raise HTTPException(status_code=500, detail=client_error(e))
 
 
 @mgmt_router.post("/docs/rebuild")

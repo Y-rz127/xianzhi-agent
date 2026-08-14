@@ -13,10 +13,13 @@ import hashlib
 import json
 import re
 import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Optional
 
+from app.domain.chart_brief import extract_bazi_brief
 from app.logger import log
-from app.memory.postgres_memory import _get_pool
+from app.memory.postgres_memory import _get_pool, get_session_info
 
 _READY = False
 
@@ -32,6 +35,14 @@ def _ensure_tables():
         log.info("用户私有数据表已就绪")
     except Exception as e:
         log.warning("用户私有数据表创建失败: {}", e)
+
+
+@contextmanager
+def _connection() -> Iterator:
+    """取一条连接，并保证表已建好（惰性建表 + 连接池获取的统一入口）。"""
+    _ensure_tables()
+    with _get_pool().connection() as conn:
+        yield conn
 
 
 def _do_ensure_tables():
@@ -249,9 +260,8 @@ def _do_ensure_tables():
 
 def create_profile(user_id: str, data: dict) -> str:
     """创建一条八字档案，返回新记录 id。"""
-    _ensure_tables()
     pid = str(uuid.uuid4())
-    with _get_pool().connection() as conn:
+    with _connection() as conn:
         conn.execute(
             """
             INSERT INTO bazi_profiles
@@ -275,8 +285,7 @@ def create_profile(user_id: str, data: dict) -> str:
 
 def list_profiles(user_id: str) -> list:
     """列出某用户全部八字档案（按创建时间倒序）。"""
-    _ensure_tables()
-    with _get_pool().connection() as conn:
+    with _connection() as conn:
         rows = conn.execute(
             """
             SELECT id, name, relation, birth_time, gender, sect, yun_sect, chart_data, created_at
@@ -289,8 +298,7 @@ def list_profiles(user_id: str) -> list:
 
 def get_profile(user_id: str, pid: str) -> Optional[dict]:
     """查询单条八字档案；不属于该用户或不存在时返回 None。"""
-    _ensure_tables()
-    with _get_pool().connection() as conn:
+    with _connection() as conn:
         row = conn.execute(
             """
             SELECT id, name, relation, birth_time, gender, sect, yun_sect, chart_data, created_at
@@ -303,8 +311,7 @@ def get_profile(user_id: str, pid: str) -> Optional[dict]:
 
 def update_profile(user_id: str, pid: str, data: dict) -> bool:
     """更新八字档案字段；返回是否命中并修改了记录。"""
-    _ensure_tables()
-    with _get_pool().connection() as conn:
+    with _connection() as conn:
         cur = conn.execute(
             """
             UPDATE bazi_profiles SET
@@ -329,8 +336,7 @@ def update_profile(user_id: str, pid: str, data: dict) -> bool:
 
 def delete_profile(user_id: str, pid: str) -> bool:
     """删除八字档案；返回是否成功删除。"""
-    _ensure_tables()
-    with _get_pool().connection() as conn:
+    with _connection() as conn:
         cur = conn.execute(
             "DELETE FROM bazi_profiles WHERE user_id = %s AND id = %s", (user_id, pid)
         )
@@ -362,9 +368,8 @@ def _row_to_profile(r) -> dict:
 
 def add_favorite(user_id: str, case_id: str) -> str:
     """添加命例收藏（user_id+case_id 唯一，重复收藏不报错），返回收藏记录 id。"""
-    _ensure_tables()
     fid = str(uuid.uuid4())
-    with _get_pool().connection() as conn:
+    with _connection() as conn:
         conn.execute(
             """
             INSERT INTO chart_favorites (id, user_id, case_id)
@@ -383,9 +388,8 @@ def list_favorites(user_id: str) -> list:
     返回格式以 cases 字段为主（title/source/question/analysis/domains/features），
     chart_cases 的字段做兼容映射（name→title, chart_data→features 等）。
     """
-    _ensure_tables()
     result = []
-    with _get_pool().connection() as conn:
+    with _connection() as conn:
         # 主查询：联 cases 表（命理库八字 / Web 端新建命例，Bazi 结构）
         rows_cases = conn.execute(
             """
@@ -407,7 +411,7 @@ def list_favorites(user_id: str) -> list:
                 "gender": r[4] or "",
                 "tags": list(r[2] or []),
                 "chartData": chart_data,
-                "bazi": _extract_bazi_brief(chart_data),
+                "bazi": extract_bazi_brief(chart_data),
                 "createdAt": str(r[6]) if r[6] else "",
             })
 
@@ -442,8 +446,7 @@ def list_favorites(user_id: str) -> list:
 
 def remove_favorite(user_id: str, case_id: str) -> bool:
     """取消收藏；返回是否成功删除。"""
-    _ensure_tables()
-    with _get_pool().connection() as conn:
+    with _connection() as conn:
         cur = conn.execute(
             "DELETE FROM chart_favorites WHERE user_id = %s AND case_id = %s",
             (user_id, case_id),
@@ -453,8 +456,7 @@ def remove_favorite(user_id: str, case_id: str) -> bool:
 
 def is_favorite(user_id: str, case_id: str) -> bool:
     """判断某命例是否已被该用户收藏。"""
-    _ensure_tables()
-    with _get_pool().connection() as conn:
+    with _connection() as conn:
         row = conn.execute(
             "SELECT 1 FROM chart_favorites WHERE user_id = %s AND case_id = %s",
             (user_id, case_id),
@@ -466,9 +468,8 @@ def is_favorite(user_id: str, case_id: str) -> bool:
 
 def add_tarot_record(user_id: str, spread: str, question: str, cards: list, interpretation: str) -> str:
     """保存一次塔罗占卜记录，返回记录 id。"""
-    _ensure_tables()
     rid = str(uuid.uuid4())
-    with _get_pool().connection() as conn:
+    with _connection() as conn:
         conn.execute(
             """
             INSERT INTO tarot_records (id, user_id, spread, question, cards, interpretation)
@@ -488,8 +489,7 @@ def add_tarot_record(user_id: str, spread: str, question: str, cards: list, inte
 
 def list_tarot_records(user_id: str, limit: int = 50) -> list:
     """列出某用户的塔罗记录（默认最近 50 条，倒序）。"""
-    _ensure_tables()
-    with _get_pool().connection() as conn:
+    with _connection() as conn:
         rows = conn.execute(
             """
             SELECT id, spread, question, cards, interpretation, created_at
@@ -512,21 +512,31 @@ def list_tarot_records(user_id: str, limit: int = 50) -> list:
 
 def delete_tarot_record(user_id: str, rid: str) -> bool:
     """删除一条塔罗记录；返回是否成功删除。"""
-    _ensure_tables()
-    with _get_pool().connection() as conn:
+    with _connection() as conn:
         cur = conn.execute(
             "DELETE FROM tarot_records WHERE user_id = %s AND id = %s", (user_id, rid)
         )
         return cur.rowcount > 0
 
 
+# ---------------- 数据量统计 ----------------
+
+def count_user_data(user_id: str) -> dict[str, int]:
+    """统计某用户各模块数据量（档案/收藏/塔罗/会话），个人中心与管理后台共用。"""
+    return {
+        "profiles": len(list_profiles(user_id)),
+        "favorites": len(list_favorites(user_id)),
+        "tarotRecords": len(list_tarot_records(user_id)),
+        "sessions": len(get_session_info(prefix="mp-xianzhi", user_id=user_id)),
+    }
+
+
 # ---------------- 问题反馈 ----------------
 
 def add_feedback(user_id: str | None, content: str, contact: str = "") -> str:
     """保存用户问题反馈（user_id 可空，表示匿名），返回反馈 id。"""
-    _ensure_tables()
     fid = str(uuid.uuid4())
-    with _get_pool().connection() as conn:
+    with _connection() as conn:
         conn.execute(
             "INSERT INTO feedback (id, user_id, content, contact) VALUES (%s, %s, %s, %s)",
             (fid, user_id, content, contact or ""),
@@ -536,8 +546,7 @@ def add_feedback(user_id: str | None, content: str, contact: str = "") -> str:
 
 def list_feedback(limit: int = 200) -> list:
     """列出反馈（联表获取昵称），默认最近 200 条倒序。"""
-    _ensure_tables()
-    with _get_pool().connection() as conn:
+    with _connection() as conn:
         rows = conn.execute(
             """
             SELECT f.id, f.user_id, f.content, f.contact, f.created_at,
@@ -563,8 +572,7 @@ def list_feedback(limit: int = 200) -> list:
 
 def delete_feedback(fid: str) -> bool:
     """删除一条反馈；返回是否成功删除。"""
-    _ensure_tables()
-    with _get_pool().connection() as conn:
+    with _connection() as conn:
         result = conn.execute(
             "DELETE FROM feedback WHERE id = %s", (fid,)
         )
@@ -583,11 +591,10 @@ def add_answer_feedback(
     chart_snapshot: dict | None = None,
 ) -> str:
     """保存单次 AI 回答的点赞/点踩反馈，用于后续案例筛选、DPO 和评估集构建。"""
-    _ensure_tables()
     if rating not in {"up", "down"}:
         raise ValueError("rating 必须是 up 或 down")
     fid = str(uuid.uuid4())
-    with _get_pool().connection() as conn:
+    with _connection() as conn:
         conn.execute(
             """
             INSERT INTO answer_feedback
@@ -610,10 +617,9 @@ def add_answer_feedback(
 
 def list_answer_feedback(limit: int = 200, rating: str | None = None) -> list:
     """列出回答偏好反馈，供后台筛选高质量样本。"""
-    _ensure_tables()
     where = "WHERE af.rating = %s" if rating in {"up", "down"} else ""
     params = (rating, limit) if where else (limit,)
-    with _get_pool().connection() as conn:
+    with _connection() as conn:
         rows = conn.execute(
             f"""
             SELECT af.id, af.user_id, af.conversation_id, af.question, af.answer,
@@ -690,29 +696,9 @@ def _safe_json(s: str):
         return {}
 
 
-def _extract_bazi_brief(chart_data: Any) -> str | None:
-    """从 chart_data JSON 中提取四柱干支摘要，如 '辛卯 丁酉 庚午 丙子'。"""
-    try:
-        pillars = chart_data.get("pillars")
-        if isinstance(pillars, list) and len(pillars) >= 4:
-            parts = []
-            for p in pillars:
-                gz = p.get("ganzhi") if isinstance(p, dict) else None
-                if isinstance(gz, list) and len(gz) >= 2:
-                    parts.append(f"{gz[0]}{gz[1]}")
-                elif isinstance(gz, str):
-                    parts.append(gz)
-            if len(parts) >= 4:
-                return " ".join(parts[:4])
-    except Exception:
-        pass
-    return None
-
-
 def mark_answer_reviewed(fid: str, reviewer: str = "") -> bool:
     """标记回答反馈为已审核。"""
-    _ensure_tables()
-    with _get_pool().connection() as conn:
+    with _connection() as conn:
         cur = conn.execute(
             "UPDATE answer_feedback SET reviewed = TRUE, reviewed_by = %s WHERE id = %s",
             (reviewer, fid),
@@ -722,8 +708,7 @@ def mark_answer_reviewed(fid: str, reviewer: str = "") -> bool:
 
 def get_answer_feedback(fid: str) -> dict | None:
     """查询单条回答反馈。"""
-    _ensure_tables()
-    with _get_pool().connection() as conn:
+    with _connection() as conn:
         row = conn.execute(
             """
             SELECT id, user_id, conversation_id, question, answer,
@@ -891,8 +876,7 @@ def export_dpo_samples(limit: int = 500) -> list[dict]:
 
     用于 DPO 训练：chosen = up 回答, rejected = down 回答。
     """
-    _ensure_tables()
-    with _get_pool().connection() as conn:
+    with _connection() as conn:
         rows = conn.execute(
             f"""
             SELECT question, rating, answer, chart_snapshot
@@ -946,9 +930,8 @@ def upsert_chart_profile(
     interaction_count: int = 0,
 ) -> str:
     """创建或更新命盘画像，返回 profile id。"""
-    _ensure_tables()
     ch = _chart_hash(birth_time, gender)
-    with _get_pool().connection() as conn:
+    with _connection() as conn:
         row = conn.execute(
             "SELECT id, interaction_count FROM chart_profiles WHERE user_id = %s AND chart_hash = %s",
             (user_id, ch),
@@ -980,9 +963,8 @@ def upsert_chart_profile(
 
 def get_chart_profile(user_id: str, birth_time: str, gender: str) -> dict | None:
     """获取指定命盘的画像。"""
-    _ensure_tables()
     ch = _chart_hash(birth_time, gender)
-    with _get_pool().connection() as conn:
+    with _connection() as conn:
         row = conn.execute(
             """
             SELECT id, user_id, chart_hash, birth_time, gender, chart_data,
@@ -1013,8 +995,7 @@ def get_chart_profile(user_id: str, birth_time: str, gender: str) -> dict | None
 
 def list_chart_profiles_by_user(user_id: str) -> list:
     """列出某用户所有命盘的画像。"""
-    _ensure_tables()
-    with _get_pool().connection() as conn:
+    with _connection() as conn:
         rows = conn.execute(
             """
             SELECT id, user_id, chart_hash, birth_time, gender, chart_data,
@@ -1054,7 +1035,6 @@ def update_chart_profile_stats(
     feedback_stats: dict | None = None,
 ) -> bool:
     """更新画像的统计字段（话题偏好、风格偏好、反馈统计）。"""
-    _ensure_tables()
     ch = _chart_hash(birth_time, gender)
     sets: list[str] = []
     params: list = []
@@ -1071,7 +1051,7 @@ def update_chart_profile_stats(
         return False
     sets.append("updated_at = NOW()")
     params.extend([user_id, ch])
-    with _get_pool().connection() as conn:
+    with _connection() as conn:
         cur = conn.execute(
             f"UPDATE chart_profiles SET {', '.join(sets)} WHERE user_id = %s AND chart_hash = %s",
             tuple(params),
@@ -1094,9 +1074,8 @@ def add_chart_fact(
     reason: str = "",
 ) -> str:
     """添加一条断事知识记录。"""
-    _ensure_tables()
     fid = str(uuid.uuid4())
-    with _get_pool().connection() as conn:
+    with _connection() as conn:
         conn.execute(
             """
             INSERT INTO chart_facts
@@ -1117,13 +1096,12 @@ def get_chart_facts(
     limit: int = 20,
 ) -> list:
     """获取命盘的断事知识，默认只取已验证的。"""
-    _ensure_tables()
     where = "WHERE chart_profile_id = %s"
     params: list = [chart_profile_id]
     if confidence:
         where += " AND confidence = %s"
         params.append(confidence)
-    with _get_pool().connection() as conn:
+    with _connection() as conn:
         rows = conn.execute(
             f"""
             SELECT id, chart_profile_id, user_id, conversation_id, question,
@@ -1165,10 +1143,9 @@ def get_chart_facts_for_llm(
         (verified_lines, disputed_lines): 两个字符串列表，
         分别包含已验证断事和已否定断事的可读摘要。
     """
-    _ensure_tables()
     verified: list[str] = []
     disputed: list[str] = []
-    with _get_pool().connection() as conn:
+    with _connection() as conn:
         rows = conn.execute(
             """
             SELECT question, answer_snippet, fact_summary, confidence, reason
@@ -1209,9 +1186,8 @@ def get_chart_facts_for_llm(
 
 def add_chart_case(data: dict) -> str:
     """添加一条结构化案例到 chart_cases 表（用户反馈转换的案例）。"""
-    _ensure_tables()
     cid = str(uuid.uuid4())
-    with _get_pool().connection() as conn:
+    with _connection() as conn:
         conn.execute(
             """
             INSERT INTO chart_cases
@@ -1238,7 +1214,6 @@ def add_chart_case(data: dict) -> str:
 
 def search_chart_cases(domain: str = "", min_rating: int = 4, limit: int = 200) -> list[dict]:
     """按领域搜索 chart_cases 表中的高质量案例（种子命例）。"""
-    _ensure_tables()
     where = "WHERE verified = TRUE AND rating >= %s"
     params: list = [min_rating]
     if domain:
@@ -1246,7 +1221,7 @@ def search_chart_cases(domain: str = "", min_rating: int = 4, limit: int = 200) 
         params.append(domain)
     params.append(limit)
     try:
-        with _get_pool().connection() as conn:
+        with _connection() as conn:
             rows = conn.execute(
                 f"""
                 SELECT id, title, source, question, analysis, domains, features, rating, verified, keywords
@@ -1317,9 +1292,8 @@ def search_cases_for_rag(limit: int = 200) -> list[dict]:
     使历史命例（康熙、曾国藩等）无需手工补录即可参与检索。
     相似匹配特征（日主五行/旺衰）从 chart_data 实时抽取。
     """
-    _ensure_tables()
     try:
-        with _get_pool().connection() as conn:
+        with _connection() as conn:
             rows = conn.execute(
                 """
                 SELECT id, name, tags, bio, analysis, keypoints, domains, chart_data

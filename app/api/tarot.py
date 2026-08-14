@@ -5,19 +5,11 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from app.api import state
 from app.api.common import client_error, is_message_too_long, message_too_long_text
+from app.api.ws import safe_ws_send
 from app.logger import log
 from app.tarot_app import SPREADS
 
 router = APIRouter(prefix="/tarot", tags=["Tarot"])
-
-
-async def _safe_ws_send(websocket: WebSocket, data: dict) -> bool:
-    """安全发送 WS 消息，客户端已断开时返回 False 而非抛异常。"""
-    try:
-        await websocket.send_json(data)
-        return True
-    except (WebSocketDisconnect, RuntimeError, Exception):
-        return False
 
 
 @router.get("/spreads")
@@ -55,7 +47,7 @@ async def ws_tarot_divine(websocket: WebSocket):
                 spread = "daily"
 
             if state._tarot_app is None:
-                if not await _safe_ws_send(
+                if not await safe_ws_send(
                     websocket, {"type": "error", "data": "TarotApp not initialized"}
                 ):
                     break
@@ -67,15 +59,15 @@ async def ws_tarot_divine(websocket: WebSocket):
                     cards = state._tarot_app.draw_cards(spread)
                 except Exception as e:
                     log.exception("塔罗抽牌失败")
-                    if not await _safe_ws_send(
+                    if not await safe_ws_send(
                         websocket, {"type": "error", "data": client_error(e)}
                     ):
                         break
                     continue
-                if not await _safe_ws_send(websocket, {"type": "cards", "data": cards}):
+                if not await safe_ws_send(websocket, {"type": "cards", "data": cards}):
                     log.info("客户端已断开（draw 阶段）")
                     break
-                await _safe_ws_send(websocket, {"type": "done"})
+                await safe_ws_send(websocket, {"type": "done"})
                 continue
 
             # ===== 阶段二：LLM 解读 =====
@@ -83,11 +75,11 @@ async def ws_tarot_divine(websocket: WebSocket):
                 question = (data.get("question") or "").strip()
                 cards = data.get("cards") or []
                 if is_message_too_long(question):
-                    if not await _safe_ws_send(websocket, {"type": "error", "data": message_too_long_text(question)}):
+                    if not await safe_ws_send(websocket, {"type": "error", "data": message_too_long_text(question)}):
                         break
                     continue
                 if not cards:
-                    if not await _safe_ws_send(
+                    if not await safe_ws_send(
                         websocket, {"type": "error", "data": "解读需要 cards 字段"}
                     ):
                         break
@@ -96,22 +88,22 @@ async def ws_tarot_divine(websocket: WebSocket):
                 client_alive = True
                 try:
                     async for chunk in state._tarot_app.divine_stream(question, spread, cards):
-                        if not await _safe_ws_send(websocket, {"type": "message", "data": chunk}):
+                        if not await safe_ws_send(websocket, {"type": "message", "data": chunk}):
                             client_alive = False
                             log.info("客户端已断开，停止 LLM 解读")
                             break
                 except Exception as e:
                     log.exception("塔罗 LLM 解读异常")
                     if client_alive:
-                        await _safe_ws_send(websocket, {"type": "error", "data": client_error(e)})
+                        await safe_ws_send(websocket, {"type": "error", "data": client_error(e)})
                     client_alive = False
 
                 if client_alive:
-                    await _safe_ws_send(websocket, {"type": "done"})
+                    await safe_ws_send(websocket, {"type": "done"})
                 continue
 
             # 未知 action
-            if not await _safe_ws_send(
+            if not await safe_ws_send(
                 websocket, {"type": "error", "data": f"未知 action: {action}"}
             ):
                 break
@@ -119,4 +111,4 @@ async def ws_tarot_divine(websocket: WebSocket):
         log.info("塔罗 WebSocket disconnected")
     except Exception as e:
         log.exception("塔罗 WebSocket error")
-        await _safe_ws_send(websocket, {"type": "error", "data": client_error(e)})
+        await safe_ws_send(websocket, {"type": "error", "data": client_error(e)})
