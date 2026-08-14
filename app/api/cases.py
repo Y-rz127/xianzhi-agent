@@ -17,10 +17,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException
 
-from app.api.common import client_error
+from app.api.common import api_guard, attachment_response
 from app.api.deps import require_admin
+from app.domain.chart_brief import extract_bazi_brief
 from app.logger import log
 
 router = APIRouter(prefix="/cases", tags=["Cases"])
@@ -124,23 +125,44 @@ def _build_chart_data(birth_time: str, gender: str) -> dict[str, Any]:
     return payload
 
 
-def _extract_bazi_brief(chart_data: Any) -> str | None:
-    """从 chart_data JSON 中提取四柱干支摘要，如 '辛卯 丁酉 庚午 丙子'。"""
-    try:
-        pillars = chart_data.get("pillars")
-        if isinstance(pillars, list) and len(pillars) >= 4:
-            parts = []
-            for p in pillars:
-                gz = p.get("ganzhi") if isinstance(p, dict) else None
-                if isinstance(gz, list) and len(gz) >= 2:
-                    parts.append(f"{gz[0]}{gz[1]}")
-                elif isinstance(gz, str):
-                    parts.append(gz)
-            if len(parts) >= 4:
-                return " ".join(parts[:4])
-    except Exception:
-        pass
-    return None
+_CASE_COLUMNS = (
+    "id, name, tags, birth_time, gender, bio, analysis, keypoints, domains, "
+    "chart_data, created_at, updated_at"
+)
+
+
+def _case_from_row(row, *, brief: bool) -> dict[str, Any]:
+    """将 cases 表行（列序同 _CASE_COLUMNS）转为前端结构。
+
+    Args:
+        brief: True 只带四柱摘要（列表页），False 带完整 chartData（详情/导出）。
+    """
+    chart = row[9] if isinstance(row[9], dict) else (json.loads(row[9]) if row[9] else {})
+    case: dict[str, Any] = {
+        "id": str(row[0]),
+        "name": row[1],
+        "tags": row[2] or [],
+        "birthTime": row[3],
+        "gender": row[4],
+        "bio": row[5] or "",
+        "analysis": row[6] or "",
+        "keypoints": row[7] or "",
+        "domains": row[8] or [],
+        "createdAt": str(row[10]) if row[10] else "",
+        "updatedAt": str(row[11]) if row[11] else "",
+    }
+    case["bazi" if brief else "chartData"] = extract_bazi_brief(chart) if brief else chart
+    return case
+
+
+def _cases_json_response(cases: list[dict[str, Any]]):
+    """命例列表 → JSON 导出下载响应。"""
+    content = json.dumps(
+        {"version": 1, "exportedAt": datetime.now().isoformat(), "cases": cases},
+        ensure_ascii=False,
+        indent=2,
+    )
+    return attachment_response(content, "application/json", "xianzhi_cases.json")
 
 
 @router.get("", dependencies=[Depends(require_admin)])
@@ -157,40 +179,14 @@ async def list_cases():
                 "gender": c.get("gender", ""),
                 "createdAt": c.get("createdAt", ""),
                 "updatedAt": c.get("updatedAt", ""),
-                "bazi": _extract_bazi_brief(c.get("chartData") or c.get("chart_data")),
+                "bazi": extract_bazi_brief(c.get("chartData") or c.get("chart_data")),
             }
             for c in sorted(cases, key=lambda x: x.get("updatedAt", ""), reverse=True)
         ]
-    try:
+    with api_guard("获取命例列表失败"):
         with _get_pool().connection() as conn:
-            cur = conn.execute(
-                """
-                SELECT id, name, tags, birth_time, gender, bio, analysis, keypoints,
-                       domains, created_at, updated_at, chart_data
-                FROM cases ORDER BY updated_at DESC
-                """
-            )
-            result = []
-            for row in cur:
-                cd = row[11] if isinstance(row[11], dict) else json.loads(row[11]) if row[11] else {}
-                result.append({
-                    "id": str(row[0]),
-                    "name": row[1],
-                    "tags": row[2] or [],
-                    "birthTime": row[3],
-                    "gender": row[4],
-                    "bio": row[5] or "",
-                    "analysis": row[6] or "",
-                    "keypoints": row[7] or "",
-                    "domains": row[8] or [],
-                    "createdAt": str(row[9]) if row[9] else "",
-                    "updatedAt": str(row[10]) if row[10] else "",
-                    "bazi": _extract_bazi_brief(cd),
-                })
-        return result
-    except Exception as e:
-        log.exception("获取命例列表失败")
-        raise HTTPException(status_code=500, detail=client_error(e))
+            cur = conn.execute(f"SELECT {_CASE_COLUMNS} FROM cases ORDER BY updated_at DESC")
+            return [_case_from_row(row, brief=True) for row in cur]
 
 
 @router.post("", dependencies=[Depends(require_admin)])
@@ -220,7 +216,7 @@ async def create_case(payload: dict):
         _save_file_cases(cases)
         return {"id": case["id"], "status": "ok", "storage": "file"}
 
-    try:
+    with api_guard("保存命例失败"):
         with _get_pool().connection() as conn:
             cur = conn.execute(
                 """
@@ -233,9 +229,6 @@ async def create_case(payload: dict):
             )
             row = cur.fetchone()
         return {"id": str(row[0]), "status": "ok"}
-    except Exception as e:
-        log.exception("保存命例失败")
-        raise HTTPException(status_code=500, detail=client_error(e))
 
 
 @router.get("/{case_id}", dependencies=[Depends(require_admin)])
@@ -246,34 +239,16 @@ async def get_case(case_id: str):
             if c.get("id") == case_id:
                 return c
         raise HTTPException(status_code=404, detail="命例不存在")
-    try:
+    with api_guard("获取命例失败"):
         with _get_pool().connection() as conn:
             cur = conn.execute(
-                "SELECT id, name, tags, birth_time, gender, bio, analysis, keypoints, domains, chart_data, created_at, updated_at FROM cases WHERE id = %s",
+                f"SELECT {_CASE_COLUMNS} FROM cases WHERE id = %s",
                 (case_id,),
             )
             row = cur.fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="命例不存在")
-        return {
-            "id": str(row[0]),
-            "name": row[1],
-            "tags": row[2] or [],
-            "birthTime": row[3],
-            "gender": row[4],
-            "bio": row[5] or "",
-            "analysis": row[6] or "",
-            "keypoints": row[7] or "",
-            "domains": row[8] or [],
-            "chartData": row[9] if isinstance(row[9], dict) else json.loads(row[9]),
-            "createdAt": str(row[10]) if row[10] else "",
-            "updatedAt": str(row[11]) if row[11] else "",
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        log.exception("获取命例失败")
-        raise HTTPException(status_code=500, detail=client_error(e))
+        return _case_from_row(row, brief=False)
 
 
 @router.put("/{case_id}", dependencies=[Depends(require_admin)])
@@ -297,7 +272,7 @@ async def update_case(case_id: str, payload: dict):
             _save_file_cases(cases)
             return {"status": "ok", "storage": "file"}
         raise HTTPException(status_code=404, detail="命例不存在")
-    try:
+    with api_guard("更新命例失败"):
         with _get_pool().connection() as conn:
             updates = []
             params = []
@@ -336,11 +311,6 @@ async def update_case(case_id: str, payload: dict):
                 tuple(params),
             )
         return {"status": "ok"}
-    except HTTPException:
-        raise
-    except Exception as e:
-        log.exception("更新命例失败")
-        raise HTTPException(status_code=500, detail=client_error(e))
 
 
 @router.delete("/{case_id}", dependencies=[Depends(require_admin)])
@@ -351,57 +321,22 @@ async def delete_case(case_id: str):
         kept = [c for c in cases if c.get("id") != case_id]
         _save_file_cases(kept)
         return {"status": "ok", "storage": "file"}
-    try:
+    with api_guard("删除命例失败"):
         with _get_pool().connection() as conn:
             conn.execute("DELETE FROM cases WHERE id = %s", (case_id,))
         return {"status": "ok"}
-    except Exception as e:
-        log.exception("删除命例失败")
-        raise HTTPException(status_code=500, detail=client_error(e))
 
 
 @router.get("/export/json", dependencies=[Depends(require_admin)])
 async def export_cases_json():
     """导出所有命例为 JSON 文件（cases 表，Bazi 结构）。"""
     if not ensure_table():
-        cases = _load_file_cases()
-        content = json.dumps({"version": 1, "exportedAt": datetime.now().isoformat(), "cases": cases}, ensure_ascii=False, indent=2)
-        return Response(
-            content=content,
-            media_type="application/json",
-            headers={"Content-Disposition": 'attachment; filename="xianzhi_cases.json"'},
-        )
-    try:
+        return _cases_json_response(_load_file_cases())
+    with api_guard("导出命例失败"):
         with _get_pool().connection() as conn:
-            cur = conn.execute(
-                "SELECT id, name, tags, birth_time, gender, bio, analysis, keypoints, domains, chart_data, created_at, updated_at FROM cases ORDER BY updated_at DESC"
-            )
-            cases = []
-            for row in cur:
-                chart_data = row[9] if isinstance(row[9], dict) else json.loads(row[9])
-                cases.append({
-                    "id": str(row[0]),
-                    "name": row[1],
-                    "tags": row[2] or [],
-                    "birthTime": row[3],
-                    "gender": row[4],
-                    "bio": row[5] or "",
-                    "analysis": row[6] or "",
-                    "keypoints": row[7] or "",
-                    "domains": row[8] or [],
-                    "chartData": chart_data,
-                    "createdAt": str(row[10]) if row[10] else "",
-                    "updatedAt": str(row[11]) if row[11] else "",
-                })
-        content = json.dumps({"version": 1, "exportedAt": datetime.now().isoformat(), "cases": cases}, ensure_ascii=False, indent=2)
-        return Response(
-            content=content,
-            media_type="application/json",
-            headers={"Content-Disposition": 'attachment; filename="xianzhi_cases.json"'},
-        )
-    except Exception as e:
-        log.exception("导出命例失败")
-        raise HTTPException(status_code=500, detail=client_error(e))
+            cur = conn.execute(f"SELECT {_CASE_COLUMNS} FROM cases ORDER BY updated_at DESC")
+            cases = [_case_from_row(row, brief=False) for row in cur]
+        return _cases_json_response(cases)
 
 
 @router.post("/import/json", dependencies=[Depends(require_admin)])
@@ -437,7 +372,7 @@ async def import_cases_json(payload: dict):
         _save_file_cases(existing)
         return {"inserted": inserted, "skipped": skipped, "storage": "file"}
 
-    try:
+    with api_guard("导入命例失败"):
         with _get_pool().connection() as conn:
             for c in cases:
                 cid = c.get("id")
@@ -469,6 +404,3 @@ async def import_cases_json(payload: dict):
                 )
                 inserted += 1
         return {"inserted": inserted, "skipped": skipped}
-    except Exception as e:
-        log.exception("导入命例失败")
-        raise HTTPException(status_code=500, detail=client_error(e))

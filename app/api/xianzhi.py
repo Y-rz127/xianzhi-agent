@@ -5,9 +5,16 @@ from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSock
 from sse_starlette.sse import EventSourceResponse
 
 from app.api import state
-from app.api.common import check_message_length, client_error, is_message_too_long, message_too_long_text
-from app.api.deps import require_admin
-from app.db import users as user_store
+from app.api.common import (
+    api_guard,
+    attachment_response,
+    check_message_length,
+    client_error,
+    is_message_too_long,
+    message_too_long_text,
+)
+from app.api.deps import require_admin, require_user_by_token, user_id_from_token
+from app.api.ws import safe_ws_send
 from app.logger import log
 
 router = APIRouter(prefix="/xianzhi", tags=["Xianzhi"])
@@ -36,11 +43,7 @@ async def chat_with_xianzhi(
 ):
     """先知 SSE 流式对话接口（支持挂载出生信息，流式返回 + 可选 chart_context 事件）。"""
     check_message_length(message)
-    uid = ""
-    if token:
-        u = user_store.get_by_token(token)
-        if u:
-            uid = u["id"]
+    uid = user_id_from_token(token)
     try:
         agent, lock = state.get_xianzhi(conversation_id)
     except RuntimeError:
@@ -75,15 +78,6 @@ async def chat_with_xianzhi(
     return EventSourceResponse(event_stream())
 
 
-async def _safe_ws_send(websocket: WebSocket, data: dict) -> bool:
-    """安全发送 WS 消息，客户端已断开时返回 False 而非抛异常。"""
-    try:
-        await websocket.send_json(data)
-        return True
-    except (WebSocketDisconnect, RuntimeError, Exception):
-        return False
-
-
 @router.websocket("/ws")
 async def ws_chat_with_xianzhi(websocket: WebSocket):
     """先知 WebSocket 流式对话接口（小程序无 SSE，用 WS 替代）。"""
@@ -99,20 +93,15 @@ async def ws_chat_with_xianzhi(websocket: WebSocket):
             yun_sect = data.get("yun_sect", 1)
             verbose = bool(data.get("verbose", False))
             birth_place = data.get("birth_place") or ""
-            token = data.get("token") or ""
-            uid = ""
-            if token:
-                u = user_store.get_by_token(token)
-                if u:
-                    uid = u["id"]
+            uid = user_id_from_token(data.get("token") or "")
             if is_message_too_long(message):
-                if not await _safe_ws_send(websocket, {"type": "error", "data": message_too_long_text(message)}):
+                if not await safe_ws_send(websocket, {"type": "error", "data": message_too_long_text(message)}):
                     break
                 continue
             try:
                 agent, lock = state.get_xianzhi(conversation_id)
             except RuntimeError:
-                if not await _safe_ws_send(websocket, {"type": "error", "data": "Xianzhi not initialized"}):
+                if not await safe_ws_send(websocket, {"type": "error", "data": "Xianzhi not initialized"}):
                     break
                 continue
             async with lock:
@@ -122,14 +111,14 @@ async def ws_chat_with_xianzhi(websocket: WebSocket):
                 client_alive = True
                 try:
                     async for chunk in agent.arun_stream(message, verbose=verbose):
-                        if not await _safe_ws_send(websocket, {"type": "message", "data": chunk}):
+                        if not await safe_ws_send(websocket, {"type": "message", "data": chunk}):
                             client_alive = False
                             log.info("客户端已断开，停止流式发送")
                             break
                 except Exception as e:
                     log.exception("WebSocket stream error")
                     if client_alive:
-                        await _safe_ws_send(websocket, {"type": "error", "data": client_error(e)})
+                        await safe_ws_send(websocket, {"type": "error", "data": client_error(e)})
                     client_alive = False
                 # 流结束后，如果后端从工具调用中提取到出生信息，通知前端（覆盖自然语言输入场景）
                 if client_alive and agent._last_birth_info:
@@ -137,17 +126,17 @@ async def ws_chat_with_xianzhi(websocket: WebSocket):
                     ws_payload = {"birth_time": bi.get("time"), "gender": bi.get("gender")}
                     if bi.get("place"):
                         ws_payload["birth_place"] = bi["place"]
-                    await _safe_ws_send(websocket, {
+                    await safe_ws_send(websocket, {
                         "type": "chart_context",
                         "data": ws_payload,
                     })
                 if client_alive:
-                    await _safe_ws_send(websocket, {"type": "done"})
+                    await safe_ws_send(websocket, {"type": "done"})
     except WebSocketDisconnect:
         log.info("WebSocket disconnected")
     except Exception as e:
         log.exception("WebSocket error")
-        await _safe_ws_send(websocket, {"type": "error", "data": client_error(e)})
+        await safe_ws_send(websocket, {"type": "error", "data": client_error(e)})
 
 
 @router.get("/chat/sync")
@@ -163,11 +152,7 @@ async def chat_with_xianzhi_sync(
 ):
     """先知同步对话接口（run 在线程池执行，避免阻塞事件循环）。"""
     check_message_length(message)
-    uid = ""
-    if token:
-        u = user_store.get_by_token(token)
-        if u:
-            uid = u["id"]
+    uid = user_id_from_token(token)
     try:
         agent, lock = state.get_xianzhi(conversation_id)
     except RuntimeError:
@@ -197,10 +182,7 @@ async def list_xianzhi_sessions(prefix: str = "web-xianzhi"):
 @router.get("/sessions/mine")
 async def list_my_sessions(token: str = Query(None)):
     """我的对话：按登录用户隔离的先知会话列表（小程序「我的」页用）。"""
-    from app.db import users as user_store
-    user = user_store.get_by_token(token) if token else None
-    if not user:
-        raise HTTPException(status_code=401, detail="未登录")
+    user = require_user_by_token(token)
     from app.memory.postgres_memory import get_session_info
     return get_session_info(prefix="mp-xianzhi", user_id=user["id"])
 
@@ -297,30 +279,28 @@ async def infer_bazi_dates(payload: dict):
     return {"pillars": pillars, "gender": gender, "candidates": candidates}
 
 
+def _report_texts(birth_time: str, gender: str) -> dict[str, str]:
+    """调四个规则工具拉 PDF 报告所需的四段文本（基础报告与完整报告共用）。"""
+    from app.tools.bazi import bazi_analysis, bazi_chart, bazi_dayun, bazi_liunian
+
+    return {
+        "chart_text": bazi_chart.invoke({"birth_time": birth_time, "gender": gender}),
+        "analysis_text": bazi_analysis.invoke(
+            {"birth_time": birth_time, "gender": gender, "question": "整体命盘"}
+        ),
+        "dayun_text": bazi_dayun.invoke({"birth_time": birth_time, "gender": gender, "count": 8}),
+        "liunian_text": bazi_liunian.invoke({"birth_time": birth_time, "gender": gender, "years": 10}),
+    }
+
+
 @router.get("/report")
 async def generate_report(birth_time: str, gender: str):
-    from fastapi import Response
-    from app.tools.bazi import bazi_chart, bazi_analysis, bazi_dayun, bazi_liunian
     from app.tools.pdf_report import generate_bazi_report
 
-    chart_text = bazi_chart.invoke({"birth_time": birth_time, "gender": gender})
-    analysis_text = bazi_analysis.invoke({"birth_time": birth_time, "gender": gender, "question": "整体命盘"})
-    dayun_text = bazi_dayun.invoke({"birth_time": birth_time, "gender": gender, "count": 8})
-    liunian_text = bazi_liunian.invoke({"birth_time": birth_time, "gender": gender, "years": 10})
-
-    try:
-        pdf_bytes = generate_bazi_report(
-            birth_time=birth_time,
-            gender=gender,
-            chart_text=chart_text,
-            analysis_text=analysis_text,
-            dayun_text=dayun_text,
-            liunian_text=liunian_text,
-        )
-        return Response(content=pdf_bytes, media_type="application/pdf", headers={"Content-Disposition": 'attachment; filename="xianzhi_bazi_report.pdf"'})
-    except Exception as e:
-        log.exception("PDF 报告生成失败")
-        raise HTTPException(status_code=500, detail=client_error(e))
+    texts = _report_texts(birth_time, gender)
+    with api_guard("PDF 报告生成失败"):
+        pdf_bytes = generate_bazi_report(birth_time=birth_time, gender=gender, **texts)
+        return attachment_response(pdf_bytes, "application/pdf", "xianzhi_bazi_report.pdf")
 
 
 @router.get("/full_report")
@@ -329,15 +309,11 @@ async def full_report(birth_time: str, gender: str, sections: str = ""):
     chat_model = state.get_chat_model()
     if chat_model is None:
         return {"error": "Xianzhi not initialized"}
-    from app.tools.report_generator import generate_full_report, DEFAULT_SECTIONS
+    from app.tools.report_generator import DEFAULT_SECTIONS, generate_full_report
 
     selected = sections.split(",") if sections else DEFAULT_SECTIONS
-    try:
-        content = generate_full_report(chat_model, birth_time, gender, selected)
-        return {"content": content}
-    except Exception as e:
-        log.exception("生成命理报告失败")
-        raise HTTPException(status_code=500, detail=client_error(e))
+    with api_guard("生成命理报告失败"):
+        return {"content": generate_full_report(chat_model, birth_time, gender, selected)}
 
 
 @router.get("/full_report_pdf")
@@ -346,32 +322,16 @@ async def full_report_pdf(birth_time: str, gender: str, sections: str = ""):
     chat_model = state.get_chat_model()
     if chat_model is None:
         return {"error": "Xianzhi not initialized"}
-    from fastapi import Response
-    from app.tools.report_generator import generate_full_report, DEFAULT_SECTIONS
     from app.tools.pdf_report import generate_bazi_report
-    from app.tools.bazi import bazi_chart, bazi_analysis, bazi_dayun, bazi_liunian
+    from app.tools.report_generator import DEFAULT_SECTIONS, generate_full_report
 
     selected = sections.split(",") if sections else DEFAULT_SECTIONS
-    try:
+    with api_guard("生成 PDF 报告失败"):
         ai_commentary = generate_full_report(chat_model, birth_time, gender, selected)
-        chart_text = bazi_chart.invoke({"birth_time": birth_time, "gender": gender})
-        analysis_text = bazi_analysis.invoke({"birth_time": birth_time, "gender": gender, "question": "整体命盘"})
-        dayun_text = bazi_dayun.invoke({"birth_time": birth_time, "gender": gender, "count": 8})
-        liunian_text = bazi_liunian.invoke({"birth_time": birth_time, "gender": gender, "years": 10})
         pdf_bytes = generate_bazi_report(
             birth_time=birth_time,
             gender=gender,
-            chart_text=chart_text,
-            analysis_text=analysis_text,
-            dayun_text=dayun_text,
-            liunian_text=liunian_text,
             ai_commentary=ai_commentary,
+            **_report_texts(birth_time, gender),
         )
-        return Response(
-            content=pdf_bytes,
-            media_type="application/pdf",
-            headers={"Content-Disposition": 'attachment; filename="xianzhi_full_report.pdf"'},
-        )
-    except Exception as e:
-        log.exception("生成 PDF 报告失败")
-        raise HTTPException(status_code=500, detail=client_error(e))
+        return attachment_response(pdf_bytes, "application/pdf", "xianzhi_full_report.pdf")

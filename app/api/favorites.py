@@ -3,10 +3,9 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from app.api.common import client_error
+from app.api.common import api_guard
 from app.api.deps import get_current_user
 from app.db import user_data
-from app.logger import log
 
 router = APIRouter(prefix="/favorites", tags=["Favorites"])
 
@@ -14,11 +13,8 @@ router = APIRouter(prefix="/favorites", tags=["Favorites"])
 @router.get("")
 async def list_favorites(current_user: dict = Depends(get_current_user)):
     """列出当前登录用户收藏的命例。"""
-    try:
+    with api_guard("获取收藏失败"):
         return user_data.list_favorites(current_user["id"])
-    except Exception as e:
-        log.exception("获取收藏失败")
-        raise HTTPException(status_code=500, detail=client_error(e))
 
 
 @router.post("")
@@ -27,12 +23,9 @@ async def add_favorite(body: dict, current_user: dict = Depends(get_current_user
     case_id = body.get("case_id") or body.get("caseId")
     if not case_id:
         raise HTTPException(status_code=400, detail="缺少 case_id")
-    try:
+    with api_guard("添加收藏失败"):
         user_data.add_favorite(current_user["id"], case_id)
         return {"status": "ok"}
-    except Exception as e:
-        log.exception("添加收藏失败")
-        raise HTTPException(status_code=500, detail=client_error(e))
 
 
 @router.get("/{case_id}/status")

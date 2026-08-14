@@ -4,7 +4,7 @@ from __future__ import annotations
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
 
-from app.api.common import client_error
+from app.api.common import api_guard
 from app.api.deps import get_current_user
 from app.config import settings
 from app.db import users as user_store
@@ -16,14 +16,9 @@ router = APIRouter(prefix="/auth", tags=["Auth"])
 @router.post("/register")
 async def register(body: dict):
     """注册：昵称 + 密码，返回 token 与用户资料。"""
-    try:
+    with api_guard("注册失败", bad_request=(ValueError,)):
         user = user_store.create_user(body.get("nickname", ""), body.get("password", ""))
         return {"token": user["token"], "user": _safe(user)}
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        log.exception("注册失败")
-        raise HTTPException(status_code=500, detail=client_error(e))
 
 
 @router.post("/login")
@@ -44,7 +39,7 @@ async def me(current_user: dict = Depends(get_current_user)):
 @router.put("/me")
 async def update_me(body: dict, current_user: dict = Depends(get_current_user)):
     """修改昵称 / 头像 / 密码。"""
-    try:
+    with api_guard("更新资料失败", bad_request=(ValueError,)):
         updated = user_store.update_user(
             current_user["id"],
             nickname=body.get("nickname"),
@@ -52,11 +47,6 @@ async def update_me(body: dict, current_user: dict = Depends(get_current_user)):
             password=body.get("password"),
         )
         return {"user": _safe(updated)}
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        log.exception("更新资料失败")
-        raise HTTPException(status_code=500, detail=client_error(e))
 
 
 def _safe(u: dict) -> dict:
@@ -71,7 +61,7 @@ async def wx_login(body: dict):
         raise HTTPException(status_code=400, detail="缺少 code 参数")
     if not settings.wechat_appid or not settings.wechat_secret:
         raise HTTPException(status_code=501, detail="未配置微信登录（需设置 WECHAT_APPID / WECHAT_SECRET）")
-    try:
+    with api_guard("微信登录异常"):
         url = "https://api.weixin.qq.com/sns/jscode2session"
         params = {
             "appid": settings.wechat_appid,
@@ -91,8 +81,3 @@ async def wx_login(body: dict):
             raise HTTPException(status_code=400, detail="未能获取微信 openid")
         user = user_store.create_or_get_by_wxopenid(openid)
         return {"token": user["token"], "user": _safe(user)}
-    except HTTPException:
-        raise
-    except Exception as e:
-        log.exception("微信登录异常")
-        raise HTTPException(status_code=500, detail=client_error(e))

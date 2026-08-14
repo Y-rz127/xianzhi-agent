@@ -1,14 +1,11 @@
 """问题反馈（登录用户带 user_id，未登录可匿名提交）。"""
 from __future__ import annotations
 
-import json
-from datetime import datetime
+from fastapi import APIRouter, Depends, HTTPException, Query
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
-
-from app.api.common import client_error
-from app.api.deps import require_admin
-from app.db import user_data, users as user_store
+from app.api.common import api_guard, jsonl_attachment
+from app.api.deps import require_admin, require_user_by_token, user_id_from_token
+from app.db import user_data
 from app.logger import log
 
 router = APIRouter(prefix="/feedback", tags=["Feedback"])
@@ -20,17 +17,10 @@ async def submit_feedback(body: dict, token: str = Query(None)):
     content = (body.get("content") or "").strip()
     if len(content) < 5:
         raise HTTPException(status_code=400, detail="反馈内容至少 5 个字")
-    uid = None
-    if token:
-        u = user_store.get_by_token(token)
-        if u:
-            uid = u["id"]
-    try:
+    uid = user_id_from_token(token) or None
+    with api_guard("提交反馈失败"):
         fid = user_data.add_feedback(uid, content, body.get("contact", ""))
         return {"id": fid}
-    except Exception as e:
-        log.exception("提交反馈失败")
-        raise HTTPException(status_code=500, detail=client_error(e))
 
 
 @router.post("/answer")
@@ -42,12 +32,8 @@ async def submit_answer_feedback(body: dict, token: str = Query(None)):
         raise HTTPException(status_code=400, detail="rating 必须是 up 或 down")
     if len(answer) < 5:
         raise HTTPException(status_code=400, detail="回答内容过短，无法记录反馈")
-    uid = None
-    if token:
-        u = user_store.get_by_token(token)
-        if u:
-            uid = u["id"]
-    try:
+    uid = user_id_from_token(token) or None
+    with api_guard("提交回答反馈失败"):
         chart_snapshot = body.get("chart_snapshot") or {}
         fid = user_data.add_answer_feedback(
             uid,
@@ -80,9 +66,6 @@ async def submit_answer_feedback(body: dict, token: str = Query(None)):
                     log.warning("提取断事知识失败（不影响主流程）: {}", e)
 
         return {"id": fid}
-    except Exception as e:
-        log.exception("提交回答反馈失败")
-        raise HTTPException(status_code=500, detail=client_error(e))
 
 
 def _extract_fact_to_profile(
@@ -139,25 +122,18 @@ def _extract_fact_to_profile(
 @router.delete("/{fid}", dependencies=[Depends(require_admin)])
 async def delete_feedback(fid: str):
     """删除一条反馈；不存在返回 404。"""
-    try:
+    with api_guard("删除反馈失败"):
         ok = user_data.delete_feedback(fid)
         if not ok:
             raise HTTPException(status_code=404, detail="反馈不存在")
         return {"ok": True}
-    except HTTPException:
-        raise
-    except Exception as e:
-        log.exception("删除反馈失败")
-        raise HTTPException(status_code=500, detail=client_error(e))
+
+
 @router.get("", dependencies=[Depends(require_admin)])
 async def get_feedback_list(limit: int = Query(default=200, ge=1, le=1000)):
     """管理员查看反馈列表（按时间倒序）。"""
-    try:
-        items = user_data.list_feedback(limit)
-        return {"items": items}
-    except Exception as e:
-        log.exception("获取反馈列表失败")
-        raise HTTPException(status_code=500, detail=client_error(e))
+    with api_guard("获取反馈列表失败"):
+        return {"items": user_data.list_feedback(limit)}
 
 
 @router.get("/answers", dependencies=[Depends(require_admin)])
@@ -166,12 +142,8 @@ async def get_answer_feedback_list(
     rating: str | None = Query(default=None),
 ):
     """管理员查看回答偏好反馈列表。"""
-    try:
-        items = user_data.list_answer_feedback(limit, rating)
-        return {"items": items}
-    except Exception as e:
-        log.exception("获取回答反馈列表失败")
-        raise HTTPException(status_code=500, detail=client_error(e))
+    with api_guard("获取回答反馈列表失败"):
+        return {"items": user_data.list_answer_feedback(limit, rating)}
 
 
 @router.get("/answers/export/sft", dependencies=[Depends(require_admin)])
@@ -182,51 +154,32 @@ async def export_answer_feedback_sft(
     """导出回答反馈为 JSONL SFT 训练样本。"""
     if rating not in {"up", "down"}:
         raise HTTPException(status_code=400, detail="rating 必须是 up 或 down")
-    try:
+    with api_guard("导出 SFT 样本失败"):
         samples = user_data.export_sft_samples(limit=limit, rating=rating)
-        content = "\n".join(json.dumps(s, ensure_ascii=False) for s in samples)
-        filename = f"xianzhi_sft_{rating}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jsonl"
-        return Response(
-            content=content,
-            media_type="application/x-ndjson; charset=utf-8",
-            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-        )
-    except Exception as e:
-        log.exception("导出 SFT 样本失败")
-        raise HTTPException(status_code=500, detail=client_error(e))
+        return jsonl_attachment(samples, f"xianzhi_sft_{rating}")
 
 
 @router.post("/answers/{fid}/review", dependencies=[Depends(require_admin)])
 async def review_answer_feedback(fid: str, body: dict | None = None):
     """标记一条回答反馈为已审核。"""
     reviewer = (body or {}).get("reviewer", "admin")
-    try:
+    with api_guard("审核回答反馈失败"):
         ok = user_data.mark_answer_reviewed(fid, reviewer)
         if not ok:
             raise HTTPException(status_code=404, detail="反馈不存在")
         return {"ok": True}
-    except HTTPException:
-        raise
-    except Exception as e:
-        log.exception("审核回答反馈失败")
-        raise HTTPException(status_code=500, detail=client_error(e))
 
 
 @router.post("/answers/{fid}/promote", dependencies=[Depends(require_admin)])
 async def promote_answer_to_case(fid: str, body: dict | None = None):
     """将一条已审核的回答反馈转为结构化案例（支持好评/差评）。"""
     reviewer = (body or {}).get("reviewer", "admin")
-    try:
+    with api_guard("好评转案例失败"):
         result = user_data.promote_to_case(fid, reviewer)
         if result is None:
             raise HTTPException(status_code=400, detail="仅已审核的反馈可转为案例，或反馈不存在")
         case_id, file_path = result
         return {"case_id": case_id, "file_path": file_path}
-    except HTTPException:
-        raise
-    except Exception as e:
-        log.exception("好评转案例失败")
-        raise HTTPException(status_code=500, detail=client_error(e))
 
 
 @router.get("/answers/export/dpo", dependencies=[Depends(require_admin)])
@@ -234,18 +187,9 @@ async def export_dpo_samples(
     limit: int = Query(default=500, ge=1, le=5000),
 ):
     """导出 DPO 偏好对（chosen/rejected）为 JSONL。"""
-    try:
+    with api_guard("导出 DPO 样本失败"):
         samples = user_data.export_dpo_samples(limit=limit)
-        content = "\n".join(json.dumps(s, ensure_ascii=False) for s in samples)
-        filename = f"xianzhi_dpo_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jsonl"
-        return Response(
-            content=content,
-            media_type="application/x-ndjson; charset=utf-8",
-            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-        )
-    except Exception as e:
-        log.exception("导出 DPO 样本失败")
-        raise HTTPException(status_code=500, detail=client_error(e))
+        return jsonl_attachment(samples, "xianzhi_dpo")
 
 
 # ---------------- 命盘画像 & 断事知识 API ----------------
@@ -254,17 +198,9 @@ async def export_dpo_samples(
 @router.get("/profiles")
 async def get_chart_profiles(token: str = Query(None)):
     """获取当前用户所有命盘的画像列表。"""
-    if not token:
-        raise HTTPException(status_code=401, detail="请先登录")
-    u = user_store.get_by_token(token)
-    if not u:
-        raise HTTPException(status_code=401, detail="登录已过期")
-    try:
-        profiles = user_data.list_chart_profiles_by_user(u["id"])
-        return {"profiles": profiles}
-    except Exception as e:
-        log.exception("获取命盘画像失败")
-        raise HTTPException(status_code=500, detail=client_error(e))
+    user = require_user_by_token(token)
+    with api_guard("获取命盘画像失败"):
+        return {"profiles": user_data.list_chart_profiles_by_user(user["id"])}
 
 
 @router.get("/profiles/{profile_id}/facts")
@@ -275,14 +211,6 @@ async def get_profile_facts(
     limit: int = Query(default=20, ge=1, le=100),
 ):
     """获取指定命盘画像的断事知识列表。"""
-    if not token:
-        raise HTTPException(status_code=401, detail="请先登录")
-    u = user_store.get_by_token(token)
-    if not u:
-        raise HTTPException(status_code=401, detail="登录已过期")
-    try:
-        facts = user_data.get_chart_facts(profile_id, confidence, limit)
-        return {"facts": facts}
-    except Exception as e:
-        log.exception("获取断事知识失败")
-        raise HTTPException(status_code=500, detail=client_error(e))
+    require_user_by_token(token)
+    with api_guard("获取断事知识失败"):
+        return {"facts": user_data.get_chart_facts(profile_id, confidence, limit)}

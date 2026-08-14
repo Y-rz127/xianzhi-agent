@@ -25,6 +25,21 @@ class CaseRecord:
     features: dict[str] = field(default_factory=dict)
 
 
+def _to_case_record(item: dict, content: str, default_source: str, default_rating: int) -> CaseRecord:
+    """DB 行字典 → CaseRecord（cases 与 chart_cases 两张表共用映射）。"""
+    domains = item.get("domains") or []
+    return CaseRecord(
+        id=str(item.get("id") or ""),
+        title=str(item.get("title") or ""),
+        question_domain=domains[0] if domains else "general",
+        content=content,
+        source=str(item.get("source") or default_source),
+        rating=int(item.get("rating") or default_rating),
+        verified=bool(item.get("verified", True)),
+        features=dict(item.get("features") or {}),
+    )
+
+
 def _read_db_cases() -> list[CaseRecord]:
     """从 PostgreSQL 读取相似命例：cases（命理库八字命例）+ chart_cases（用户反馈结构化案例）。"""
     try:
@@ -34,34 +49,14 @@ def _read_db_cases() -> list[CaseRecord]:
         # 1) cases 表：命理库收录的八字命例（Web 端新建 + 历史命盘）
         for item in user_data.search_cases_for_rag(limit=200):
             content = (item.get("content") or "").strip()
-            if not content:
-                continue
-            records.append(CaseRecord(
-                id=str(item.get("id") or ""),
-                title=str(item.get("title") or ""),
-                question_domain=(item.get("domains") or ["general"])[0] if item.get("domains") else "general",
-                content=content,
-                source=str(item.get("source") or "cases"),
-                rating=int(item.get("rating") or 5),
-                verified=bool(item.get("verified", True)),
-                features=dict(item.get("features") or {}),
-            ))
+            if content:
+                records.append(_to_case_record(item, content, "cases", 5))
 
         # 2) chart_cases 表：用户反馈转换的结构化案例
         for item in user_data.search_chart_cases(limit=200):
             content = (item.get("analysis") or "").strip()
-            if not content:
-                continue
-            records.append(CaseRecord(
-                id=str(item.get("id") or ""),
-                title=str(item.get("title") or ""),
-                question_domain=(item.get("domains") or ["general"])[0] if item.get("domains") else "general",
-                content=content,
-                source=str(item.get("source") or "chart_cases"),
-                rating=int(item.get("rating") or 4),
-                verified=bool(item.get("verified", True)),
-                features=dict(item.get("features") or {}),
-            ))
+            if content:
+                records.append(_to_case_record(item, content, "chart_cases", 4))
 
         return records
     except Exception as e:
