@@ -339,10 +339,10 @@ def check_facts(answer: str, chart: BaziChart, other_chart: BaziChart | None = N
         expected = year_to_gz.get(year)
         if not expected or stated == expected:
             continue
-        # 大运语境排除：匹配到的干支是某步大运干支，且上下文附近有大运关键词 → 跳过
-        if stated in dayun_gz_set:
-            start = max(0, match.start() - 15)
-            end = min(len(answer), match.end() + 15)
+        # 大运语境排除：年份+干支附近若明确在描述大运（出现大运关键词），则该干支视为大运而非流年，跳过校验。
+            # 直接以「年份附近有大运关键词」语义判断，避免把大运干支误判为流年错误（不依赖 dayun 集合完整度）。
+            start = max(0, match.start() - 18)
+            end = min(len(answer), match.end() + 18)
             context = answer[start:end]
             if any(kw in context for kw in _DAYUN_KEYWORDS):
                 continue
