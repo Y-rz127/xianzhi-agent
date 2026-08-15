@@ -332,7 +332,7 @@ def check_facts(answer: str, chart: BaziChart, other_chart: BaziChart | None = N
     dayun_gz_set: set[str] = {item.ganzhi for item in chart.dayun}
     if other_chart is not None:
         dayun_gz_set.update(item.ganzhi for item in other_chart.dayun)
-    _DAYUN_KEYWORDS = ("大运", "交运", "交", "步入", "起运", "运柱", "走", "行运")
+    _DAYUN_KEYWORDS = ("大运", "交运", "起运", "运柱", "行运", "运", "步入", "走", "交")
     for match in YEAR_GANZHI_RE.finditer(answer):
         year = int(match.group("year"))
         stated = match.group("ganzhi")
@@ -341,8 +341,8 @@ def check_facts(answer: str, chart: BaziChart, other_chart: BaziChart | None = N
             continue
         # 大运语境排除：年份+干支附近若明确在描述大运（出现大运关键词），则该干支视为大运而非流年，跳过校验。
         # 直接以「年份附近有大运关键词」语义判断，避免把大运干支误判为流年错误（不依赖 dayun 集合完整度）。
-        start = max(0, match.start() - 18)
-        end = min(len(answer), match.end() + 18)
+        start = max(0, match.start() - 30)
+        end = min(len(answer), match.end() + 30)
         context = answer[start:end]
         if any(kw in context for kw in _DAYUN_KEYWORDS):
             continue
