@@ -634,3 +634,26 @@ class Xianzhi(ToolCallAgent):
         # 命盘上下文持久化到会话：不清空，下一轮同会话仍可用
         # 仅在切换会话（set_conversation_id）时才主动清空
         super().cleanup()
+
+
+def create_xianzhi_agent(
+    chat_model,
+    local_tools,
+    memory=None,
+    conversation_id: str = "xianzhi-default",
+    decompose_model=None,
+    reviewer_model=None,
+) -> "Xianzhi":
+    """构造先知智能体的工厂函数（集中化入口，等价于直接 new Xianzhi）。
+
+    会话池（app.api.context）统一经此创建有状态的每会话实例，避免构造参数散落。
+    本函数不做额外逻辑，仅透传参数给 ``Xianzhi.__init__``，便于后续统一加默认/校验。
+    """
+    return Xianzhi(
+        chat_model=chat_model,
+        local_tools=local_tools,
+        memory=memory,
+        conversation_id=conversation_id,
+        decompose_model=decompose_model,
+        reviewer_model=reviewer_model,
+    )

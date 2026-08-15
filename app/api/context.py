@@ -65,8 +65,8 @@ class AppContext:
                 return hit
             if self.chat_model is None:
                 raise RuntimeError("Xianzhi not initialized")
-            from app.agent.xianzhi import Xianzhi
-            agent = Xianzhi(
+            from app.agent.xianzhi import create_xianzhi_agent
+            agent = create_xianzhi_agent(
                 chat_model=self.chat_model,
                 local_tools=self.local_tools,
                 memory=self.memory,
