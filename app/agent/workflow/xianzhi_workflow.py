@@ -68,6 +68,7 @@ from app.agent.workflow.workflow_workers import (  # noqa: F401
     ReviewerWorker,
 )
 from app.core.logger import log
+from app.core.thinking_router import use_thinking
 
 # 检索策略（领域关键词/领域检索词/理论术语检索词/术语识别）统一由 app.rag.retrieval 提供，
 # 与 ReAct 工具路径（app/tools/rag_search.py）共用一套体系
@@ -215,13 +216,16 @@ class XianzhiWorkflow:
                     log.warning("[match] 解析对方命盘失败: {}", e)
 
         # ===== LangGraph 图编排：分类→扩盘→检索→生成→校验→修复（唯一执行路径） =====
-        result = self._graph.invoke({
-            "user_prompt": user_prompt,
-            "chart_context": chart_context,
-            "history": history or [],
-            "intent": intent,
-            "summary": summary,
-        })
+        # 思考模式：闲聊（intent.domain=="chitchat"）关闭，其他路径开启；
+        # 由 use_thinking 写入 contextvar，图内 generate/repair 节点的 chat_model.invoke 自动读取。
+        with use_thinking(intent.domain != "chitchat"):
+            result = self._graph.invoke({
+                "user_prompt": user_prompt,
+                "chart_context": chart_context,
+                "history": history or [],
+                "intent": intent,
+                "summary": summary,
+            })
         final = (result.get("final_answer") or "").strip()
         if not final:
             # 图各节点均保证非空 final_answer（_invoke 对空产出有兜底文案），

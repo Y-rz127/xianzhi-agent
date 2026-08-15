@@ -44,8 +44,9 @@ async def lifespan(app: FastAPI):
 
     # 1. LLM（直连 DashScope，不经系统代理）
     import httpx
+    from app.core.thinking_router import ThinkingRouter
     _http = httpx.Client(trust_env=False)
-    chat_model = ChatOpenAI(
+    _raw_chat_model = ChatOpenAI(
         model=settings.dashscope_model,
         base_url=settings.dashscope_url,
         api_key=settings.dashscope_api_key,
@@ -55,6 +56,9 @@ async def lifespan(app: FastAPI):
         extra_body={"enable_thinking": settings.llm_enable_thinking},
         http_client=_http,
     )
+    # 思考模式中间件：闲聊由调用方用 use_thinking(False) 关闭，其他路径默认开启。
+    # 底层 ChatOpenAI 在构造期已派生 ON/OFF 两份副本，运行时按 contextvar 透明切换。
+    chat_model = ThinkingRouter(_raw_chat_model, default_thinking=settings.llm_enable_thinking)
     # 意图拆解模型（轻量快速，留空则复用主模型）
     _decompose_http = httpx.Client(trust_env=False) if settings.decompose_model else None
     decompose_model = ChatOpenAI(

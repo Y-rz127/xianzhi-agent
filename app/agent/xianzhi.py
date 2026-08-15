@@ -36,6 +36,7 @@ from app.agent.workflow.xianzhi_workflow import (
 )
 from app.core.config import settings
 from app.core.logger import log
+from app.core.thinking_router import use_thinking
 from app.domain.bazi_engine import find_birth_dates_from_pillars
 from app.memory import create_chat_memory
 from app.tools.bazi import _normalize_birth_time
@@ -408,37 +409,39 @@ class Xianzhi(ToolCallAgent):
     def _chitchat_reply(self, user_prompt: str) -> str:
         """闲聊短路：直接调一次 LLM，不走 ReAct 循环，不调任何工具。"""
         log.info("[xianzhi] 闲聊短路，跳过 ReAct 工具调用")
-        self.state = AgentState.RUNNING
-        self.message_list.append(HumanMessage(content=user_prompt))
-        try:
-            history_ctx = "\n".join(
-                f"{m.__class__.__name__.replace('Message','')}: {str(getattr(m,'content',''))[:180]}"
-                for m in self.message_list[-6:]
-                if str(getattr(m, "content", "")).strip()
-            ) or "（无）"
-            messages = [
-                SystemMessage(content=CHITCHAT_SYSTEM),
-                HumanMessage(content=(
-                    f"【最近对话】\n{history_ctx}\n\n"
-                    f"【用户说】\n{user_prompt}\n\n"
-                    "请自然回应。"
-                )),
-            ]
-            response = self.chat_model.invoke(messages)
-            content = (getattr(response, "content", "") or "").strip()
-            content = clean_think_tags(content)
-            content = _dedupe_content(content) if content else ""
-            if not content:
-                content = "嗯，我在听，你继续说。"
-            self.final_answer = content
-            self.message_list.append(AIMessage(content=content))
-            self.state = AgentState.FINISHED
-            return content
-        except Exception as e:
-            self.state = AgentState.ERROR
-            self._last_error = str(e)
-            log.exception("[xianzhi] 闲聊短路失败")
-            return "我刚才走神了，你再说一遍？"
+        # 闲聊关闭思考模式（在调用线程内设置，确保 run_stream / arun_stream 两种路径都生效）
+        with use_thinking(False):
+            self.state = AgentState.RUNNING
+            self.message_list.append(HumanMessage(content=user_prompt))
+            try:
+                history_ctx = "\n".join(
+                    f"{m.__class__.__name__.replace('Message','')}: {str(getattr(m,'content',''))[:180]}"
+                    for m in self.message_list[-6:]
+                    if str(getattr(m, "content", "")).strip()
+                ) or "（无）"
+                messages = [
+                    SystemMessage(content=CHITCHAT_SYSTEM),
+                    HumanMessage(content=(
+                        f"【最近对话】\n{history_ctx}\n\n"
+                        f"【用户说】\n{user_prompt}\n\n"
+                        "请自然回应。"
+                    )),
+                ]
+                response = self.chat_model.invoke(messages)
+                content = (getattr(response, "content", "") or "").strip()
+                content = clean_think_tags(content)
+                content = _dedupe_content(content) if content else ""
+                if not content:
+                    content = "嗯，我在听，你继续说。"
+                self.final_answer = content
+                self.message_list.append(AIMessage(content=content))
+                self.state = AgentState.FINISHED
+                return content
+            except Exception as e:
+                self.state = AgentState.ERROR
+                self._last_error = str(e)
+                log.exception("[xianzhi] 闲聊短路失败")
+                return "我刚才走神了，你再说一遍？"
 
     def run_stream(self, user_prompt, verbose: bool = False):
         """同步流式执行。
