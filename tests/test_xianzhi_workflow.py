@@ -3,8 +3,14 @@ import datetime as dt
 from langchain_core.language_models.fake_chat_models import FakeListChatModel
 
 from app.agent.xianzhi import Xianzhi
-from app.agent.xianzhi_workflow import XianzhiWorkflow, build_chart_context, classify_question, detect_theory_topic
-
+from app.agent.workflow.xianzhi_workflow import (
+    XianzhiWorkflow,
+    build_chart_context,
+    classify_question,
+    detect_theory_topic,
+)
+from app.agent.workflow.workflow_retrieval import build_theory_queries
+from app.agent.workflow.workflow_messages import fact_block
 
 MALE = "\u7537"
 
@@ -52,7 +58,7 @@ def test_build_theory_queries_uses_focused_queries():
     """理论问题：识别到术语时以用户原句为首条、术语精准 query 其次，
     不叠加个性化/命例/古籍/断法"""
     workflow = XianzhiWorkflow(chat_model=None)
-    queries, meta = workflow._build_theory_queries("用神是什么")
+    queries, meta = build_theory_queries("用神是什么")
     assert len(queries) == 2
     assert meta.startswith("topic=")
     assert queries[0] == "用神是什么"           # 用户原句置首
@@ -63,13 +69,16 @@ def test_build_theory_queries_uses_focused_queries():
 
 
 def test_build_theory_queries_fallback_when_no_topic():
-    """未识别到具体术语时走 fallback（仍注入用户原句为首条）"""
+    """未识别到具体术语时走 fallback：仅保留用户原句，不追加泛化 query。
+
+    口径变更（降噪）：泛化兜底 query 总会命中术语白话对照表 chunk，
+    对综合性理论回答引入噪音，故 fallback 不再叠加。
+    """
     workflow = XianzhiWorkflow(chat_model=None)
-    queries, meta = workflow._build_theory_queries("命理学有哪些流派")
+    queries, meta = build_theory_queries("命理学有哪些流派")
     assert meta == "fallback"
-    assert len(queries) == 2
+    assert len(queries) == 1
     assert queries[0] == "命理学有哪些流派"
-    assert queries[1] == "命理 术语 概念 解释"
 
 
 def test_decompose_query_parses_llm_json():
@@ -113,8 +122,8 @@ def test_needs_chart_overrides_skip_facts():
     assert "系统排盘事实" in human_content
 
 
-def test_build_messages_injects_similar_cases_for_duanshi():
-    """断事类问题会注入相似命例参考，作为 few-shot 分析范式。"""
+def test_build_messages_no_longer_injects_similar_cases_for_duanshi():
+    """回归：相似命例注入已在重构中移除（f150847 移除相似命盘检索），断事类不再注入命例参考。"""
     workflow = XianzhiWorkflow(chat_model=None)
     ctx = build_chart_context("1990-05-20 14:30", MALE)
     intent = classify_question("我的婚姻感情怎么样？", today=dt.date(2026, 7, 5))
@@ -122,8 +131,8 @@ def test_build_messages_injects_similar_cases_for_duanshi():
     messages = workflow._build_messages("我的婚姻感情怎么样？", intent, ctx, "知识", [], None)
     human_content = [m for m in messages if hasattr(m, "content") and "用户问题" in m.content][-1].content
 
-    assert "相似命例参考" in human_content
-    assert "不得照搬结论" in human_content
+    assert "相似命例参考" not in human_content
+    assert "不得照搬结论" not in human_content
 
 
 def test_build_messages_skips_similar_cases_for_theory():
@@ -177,7 +186,7 @@ def test_fact_block_exposes_special_pattern_and_useful_hint():
     ctx = build_chart_context("1990-05-20 14:30", MALE)
     intent = classify_question("我的命局用神是什么", today=dt.date(2026, 7, 5))
 
-    facts = workflow._fact_block(ctx.chart, intent)
+    facts = fact_block(ctx.chart, intent)
 
     # 取用神参考：必须进事实
     assert "用神提示:" in facts

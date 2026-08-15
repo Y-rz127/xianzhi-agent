@@ -1,14 +1,16 @@
 """先知（Xianzhi）相关接口。"""
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
 from sse_starlette.sse import EventSourceResponse
 
-from app.api import state
 from app.api.common import check_message_length, client_error, is_message_too_long, message_too_long_text
+from app.api.context import AppContext, app_context_dependency, get_app_context
 from app.api.deps import require_admin
-from app.db import users as user_store
-from app.logger import log
+from app.db import repository as repo
+from app.core.logger import log
 
 router = APIRouter(prefix="/xianzhi", tags=["Xianzhi"])
 
@@ -33,16 +35,17 @@ async def chat_with_xianzhi(
     verbose: bool = False,
     birth_place: str = "",
     token: str = Query(None),
+    app_ctx: AppContext = Depends(app_context_dependency),
 ):
     """先知 SSE 流式对话接口（支持挂载出生信息，流式返回 + 可选 chart_context 事件）。"""
     check_message_length(message)
     uid = ""
     if token:
-        u = user_store.get_by_token(token)
+        u = await repo.get_by_token(token)
         if u:
             uid = u["id"]
     try:
-        agent, lock = state.get_xianzhi(conversation_id)
+        agent, lock = app_ctx.get_xianzhi(conversation_id)
     except RuntimeError:
         return {"error": "Xianzhi not initialized"}
 
@@ -102,7 +105,7 @@ async def ws_chat_with_xianzhi(websocket: WebSocket):
             token = data.get("token") or ""
             uid = ""
             if token:
-                u = user_store.get_by_token(token)
+                u = await repo.get_by_token(token)
                 if u:
                     uid = u["id"]
             if is_message_too_long(message):
@@ -110,7 +113,7 @@ async def ws_chat_with_xianzhi(websocket: WebSocket):
                     break
                 continue
             try:
-                agent, lock = state.get_xianzhi(conversation_id)
+                agent, lock = get_app_context().get_xianzhi(conversation_id)
             except RuntimeError:
                 if not await _safe_ws_send(websocket, {"type": "error", "data": "Xianzhi not initialized"}):
                     break
@@ -160,16 +163,17 @@ async def chat_with_xianzhi_sync(
     yun_sect: int = 1,
     birth_place: str = "",
     token: str = Query(None),
+    app_ctx: AppContext = Depends(app_context_dependency),
 ):
     """先知同步对话接口（run 在线程池执行，避免阻塞事件循环）。"""
     check_message_length(message)
     uid = ""
     if token:
-        u = user_store.get_by_token(token)
+        u = await repo.get_by_token(token)
         if u:
             uid = u["id"]
     try:
-        agent, lock = state.get_xianzhi(conversation_id)
+        agent, lock = app_ctx.get_xianzhi(conversation_id)
     except RuntimeError:
         return {"error": "Xianzhi not initialized"}
     async with lock:
@@ -178,7 +182,6 @@ async def chat_with_xianzhi_sync(
         _mount_chart_context(agent, birth_time, gender, sect, yun_sect, uid, birth_place)
         try:
             # run 是同步阻塞调用，放到线程池避免卡住事件循环
-            import asyncio
             return {"result": await asyncio.to_thread(agent.run, message)}
         except Exception as e:
             log.exception("Sync chat error")
@@ -190,41 +193,35 @@ async def list_xianzhi_sessions(prefix: str = "web-xianzhi"):
     """获取先知会话列表。
     prefix 可选值：web-xianzhi（默认，PC 端）/ mp-xianzhi（小程序端）。
     """
-    from app.memory.postgres_memory import get_session_info
-    return get_session_info(prefix)
+    return await repo.get_session_info(prefix)
 
 
 @router.get("/sessions/mine")
 async def list_my_sessions(token: str = Query(None)):
     """我的对话：按登录用户隔离的先知会话列表（小程序「我的」页用）。"""
-    from app.db import users as user_store
-    user = user_store.get_by_token(token) if token else None
+    user = await repo.get_by_token(token) if token else None
     if not user:
         raise HTTPException(status_code=401, detail="未登录")
-    from app.memory.postgres_memory import get_session_info
-    return get_session_info(prefix="mp-xianzhi", user_id=user["id"])
+    return await repo.get_session_info(prefix="mp-xianzhi", user_id=user["id"])
 
 
 @router.delete("/sessions/{session_id}")
 async def delete_xianzhi_session(session_id: str):
     """删除先知会话（含消息记录）。"""
-    from app.memory.postgres_memory import delete_session
-    delete_session(session_id)
+    await repo.delete_session(session_id)
     return {"status": "ok"}
 
 
 @router.get("/sessions/{session_id}/messages")
 async def get_xianzhi_session_messages(session_id: str):
     """获取会话的完整消息记录。"""
-    from app.memory.postgres_memory import get_messages
-    return get_messages(session_id)
+    return await repo.get_messages(session_id)
 
 
 @router.get("/sessions/{session_id}/birth-info")
 async def get_xianzhi_session_birth_info(session_id: str):
     """从会话历史中的排盘工具调用提取出生信息，供前端恢复命盘上下文。"""
-    from app.memory.postgres_memory import get_birth_info_from_session
-    info = get_birth_info_from_session(session_id)
+    info = await repo.get_birth_info_from_session(session_id)
     return info or {"time": None, "gender": None}
 
 
@@ -235,13 +232,8 @@ async def cache_stats():
     return bazi_cache.stats()
 
 
-@router.get("/chart")
-async def get_chart(birth_time: str, gender: str, sect: int = 2, yun_sect: int = 1, longitude: float | None = None):
-    """直接排盘，返回四柱/五行/大运/流年等结构化数据。
-
-    Args:
-        longitude: 出生地经度（用于真太阳时校正，可选）
-    """
+def _compute_chart_payload(birth_time: str, gender: str, sect: int, yun_sect: int, longitude: float | None) -> dict:
+    """同步排盘流水线（标准化 → 校验 → 排盘 → 格式化），输入非法抛 ValueError。"""
     from app.domain.bazi_engine import (
         build_bazi_chart,
         chart_to_api_dict,
@@ -252,15 +244,11 @@ async def get_chart(birth_time: str, gender: str, sect: int = 2, yun_sect: int =
         parse_birth,
         parse_gender,
     )
-    from app.tools.bazi import _normalize_birth_time
-    try:
-        # 标准化出生时间（支持公历+时辰、农历、节日等格式，与 bazi_chart 工具入口一致）
-        birth_time = _normalize_birth_time(birth_time)
-        parse_birth(birth_time)
-        parse_gender(gender)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
+    from app.domain.time_parse import _normalize_birth_time
+    # 标准化出生时间（支持公历+时辰、农历、节日等格式，与 bazi_chart 工具入口一致）
+    birth_time = _normalize_birth_time(birth_time)
+    parse_birth(birth_time)
+    parse_gender(gender)
     chart = build_bazi_chart(birth_time, gender, sect=sect, yun_sect=yun_sect, dayun_count=8, liunian_years=5, longitude=longitude)
     payload = chart_to_api_dict(chart)
     payload.update({
@@ -270,6 +258,20 @@ async def get_chart(birth_time: str, gender: str, sect: int = 2, yun_sect: int =
         "liunianText": format_liunian_text(chart),
     })
     return payload
+
+
+@router.get("/chart")
+async def get_chart(birth_time: str, gender: str, sect: int = 2, yun_sect: int = 1, longitude: float | None = None):
+    """直接排盘，返回四柱/五行/大运/流年等结构化数据。
+
+    Args:
+        longitude: 出生地经度（用于真太阳时校正，可选）
+    """
+    try:
+        # 排盘为同步重计算，放到线程池避免阻塞事件循环
+        return await asyncio.to_thread(_compute_chart_payload, birth_time, gender, sect, yun_sect, longitude)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 _GAN = "甲乙丙丁戊己庚辛壬癸"
@@ -291,32 +293,37 @@ async def infer_bazi_dates(payload: dict):
     if len(seq) < 8:
         raise HTTPException(status_code=400, detail="八字应为 4 个干支共 8 字，如 甲申庚午壬申甲辰")
     try:
-        candidates = find_birth_dates_from_pillars(pillars, gender, top_n=top_n)
+        candidates = await asyncio.to_thread(find_birth_dates_from_pillars, pillars, gender, top_n=top_n)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return {"pillars": pillars, "gender": gender, "candidates": candidates}
 
 
-@router.get("/report")
-async def generate_report(birth_time: str, gender: str):
-    from fastapi import Response
-    from app.tools.bazi import bazi_chart, bazi_analysis, bazi_dayun, bazi_liunian
+def _build_pdf_report(birth_time: str, gender: str) -> bytes:
+    """同步生成基础 PDF 报告（排盘工具 invoke + PDF 渲染）。"""
+    from app.tools.bazi import bazi_analysis, bazi_chart, bazi_dayun, bazi_liunian
     from app.tools.pdf_report import generate_bazi_report
 
     chart_text = bazi_chart.invoke({"birth_time": birth_time, "gender": gender})
     analysis_text = bazi_analysis.invoke({"birth_time": birth_time, "gender": gender, "question": "整体命盘"})
     dayun_text = bazi_dayun.invoke({"birth_time": birth_time, "gender": gender, "count": 8})
     liunian_text = bazi_liunian.invoke({"birth_time": birth_time, "gender": gender, "years": 10})
+    return generate_bazi_report(
+        birth_time=birth_time,
+        gender=gender,
+        chart_text=chart_text,
+        analysis_text=analysis_text,
+        dayun_text=dayun_text,
+        liunian_text=liunian_text,
+    )
+
+
+@router.get("/report")
+async def generate_report(birth_time: str, gender: str):
+    from fastapi import Response
 
     try:
-        pdf_bytes = generate_bazi_report(
-            birth_time=birth_time,
-            gender=gender,
-            chart_text=chart_text,
-            analysis_text=analysis_text,
-            dayun_text=dayun_text,
-            liunian_text=liunian_text,
-        )
+        pdf_bytes = await asyncio.to_thread(_build_pdf_report, birth_time, gender)
         return Response(content=pdf_bytes, media_type="application/pdf", headers={"Content-Disposition": 'attachment; filename="xianzhi_bazi_report.pdf"'})
     except Exception as e:
         log.exception("PDF 报告生成失败")
@@ -324,49 +331,59 @@ async def generate_report(birth_time: str, gender: str):
 
 
 @router.get("/full_report")
-async def full_report(birth_time: str, gender: str, sections: str = ""):
+async def full_report(birth_time: str, gender: str, sections: str = "",
+                      app_ctx: AppContext = Depends(app_context_dependency)):
     """生成 LLM 分节命理报告（Markdown）。"""
-    chat_model = state.get_chat_model()
+    chat_model = app_ctx.chat_model
     if chat_model is None:
         return {"error": "Xianzhi not initialized"}
-    from app.tools.report_generator import generate_full_report, DEFAULT_SECTIONS
+    from app.tools.report_generator import DEFAULT_SECTIONS, generate_full_report
 
     selected = sections.split(",") if sections else DEFAULT_SECTIONS
     try:
-        content = generate_full_report(chat_model, birth_time, gender, selected)
+        content = await asyncio.to_thread(generate_full_report, chat_model, birth_time, gender, selected)
         return {"content": content}
     except Exception as e:
         log.exception("生成命理报告失败")
         raise HTTPException(status_code=500, detail=client_error(e))
 
 
+def _build_full_report_pdf(chat_model, birth_time: str, gender: str, selected: list) -> bytes:
+    """同步生成 LLM 分节报告 PDF（多次 LLM 调用 + 排盘工具 invoke + PDF 渲染）。"""
+    from app.tools.bazi import bazi_analysis, bazi_chart, bazi_dayun, bazi_liunian
+    from app.tools.pdf_report import generate_bazi_report
+    from app.tools.report_generator import generate_full_report
+
+    ai_commentary = generate_full_report(chat_model, birth_time, gender, selected)
+    chart_text = bazi_chart.invoke({"birth_time": birth_time, "gender": gender})
+    analysis_text = bazi_analysis.invoke({"birth_time": birth_time, "gender": gender, "question": "整体命盘"})
+    dayun_text = bazi_dayun.invoke({"birth_time": birth_time, "gender": gender, "count": 8})
+    liunian_text = bazi_liunian.invoke({"birth_time": birth_time, "gender": gender, "years": 10})
+    return generate_bazi_report(
+        birth_time=birth_time,
+        gender=gender,
+        chart_text=chart_text,
+        analysis_text=analysis_text,
+        dayun_text=dayun_text,
+        liunian_text=liunian_text,
+        ai_commentary=ai_commentary,
+    )
+
+
 @router.get("/full_report_pdf")
-async def full_report_pdf(birth_time: str, gender: str, sections: str = ""):
+async def full_report_pdf(birth_time: str, gender: str, sections: str = "",
+                          app_ctx: AppContext = Depends(app_context_dependency)):
     """生成 LLM 分节命理报告 PDF。"""
-    chat_model = state.get_chat_model()
+    chat_model = app_ctx.chat_model
     if chat_model is None:
         return {"error": "Xianzhi not initialized"}
     from fastapi import Response
-    from app.tools.report_generator import generate_full_report, DEFAULT_SECTIONS
-    from app.tools.pdf_report import generate_bazi_report
-    from app.tools.bazi import bazi_chart, bazi_analysis, bazi_dayun, bazi_liunian
+
+    from app.tools.report_generator import DEFAULT_SECTIONS
 
     selected = sections.split(",") if sections else DEFAULT_SECTIONS
     try:
-        ai_commentary = generate_full_report(chat_model, birth_time, gender, selected)
-        chart_text = bazi_chart.invoke({"birth_time": birth_time, "gender": gender})
-        analysis_text = bazi_analysis.invoke({"birth_time": birth_time, "gender": gender, "question": "整体命盘"})
-        dayun_text = bazi_dayun.invoke({"birth_time": birth_time, "gender": gender, "count": 8})
-        liunian_text = bazi_liunian.invoke({"birth_time": birth_time, "gender": gender, "years": 10})
-        pdf_bytes = generate_bazi_report(
-            birth_time=birth_time,
-            gender=gender,
-            chart_text=chart_text,
-            analysis_text=analysis_text,
-            dayun_text=dayun_text,
-            liunian_text=liunian_text,
-            ai_commentary=ai_commentary,
-        )
+        pdf_bytes = await asyncio.to_thread(_build_full_report_pdf, chat_model, birth_time, gender, selected)
         return Response(
             content=pdf_bytes,
             media_type="application/pdf",

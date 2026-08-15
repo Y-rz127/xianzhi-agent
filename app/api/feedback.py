@@ -8,8 +8,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from app.api.common import client_error
 from app.api.deps import require_admin
-from app.db import user_data, users as user_store
-from app.logger import log
+from app.db import repository as repo
+from app.core.logger import log
 
 router = APIRouter(prefix="/feedback", tags=["Feedback"])
 
@@ -22,11 +22,11 @@ async def submit_feedback(body: dict, token: str = Query(None)):
         raise HTTPException(status_code=400, detail="反馈内容至少 5 个字")
     uid = None
     if token:
-        u = user_store.get_by_token(token)
+        u = await repo.get_by_token(token)
         if u:
             uid = u["id"]
     try:
-        fid = user_data.add_feedback(uid, content, body.get("contact", ""))
+        fid = await repo.add_feedback(uid, content, body.get("contact", ""))
         return {"id": fid}
     except Exception as e:
         log.exception("提交反馈失败")
@@ -44,12 +44,12 @@ async def submit_answer_feedback(body: dict, token: str = Query(None)):
         raise HTTPException(status_code=400, detail="回答内容过短，无法记录反馈")
     uid = None
     if token:
-        u = user_store.get_by_token(token)
+        u = await repo.get_by_token(token)
         if u:
             uid = u["id"]
     try:
         chart_snapshot = body.get("chart_snapshot") or {}
-        fid = user_data.add_answer_feedback(
+        fid = await repo.add_answer_feedback(
             uid,
             body.get("conversation_id", ""),
             body.get("question", ""),
@@ -67,7 +67,7 @@ async def submit_answer_feedback(body: dict, token: str = Query(None)):
             gender = chart_snapshot.get("gender") or ""
             if birth_time and gender:
                 try:
-                    _extract_fact_to_profile(
+                    await _extract_fact_to_profile(
                         extract_uid, birth_time, gender,
                         body.get("conversation_id", ""),
                         body.get("question", ""),
@@ -85,7 +85,7 @@ async def submit_answer_feedback(body: dict, token: str = Query(None)):
         raise HTTPException(status_code=500, detail=client_error(e))
 
 
-def _extract_fact_to_profile(
+async def _extract_fact_to_profile(
     user_id: str,
     birth_time: str,
     gender: str,
@@ -98,7 +98,7 @@ def _extract_fact_to_profile(
 ):
     """从反馈中提取断事知识，存入命盘画像和断事知识库。"""
     # 确保命盘画像存在
-    pid = user_data.upsert_chart_profile(
+    pid = await repo.upsert_chart_profile(
         user_id, birth_time, gender, chart_data, interaction_count=1
     )
 
@@ -108,7 +108,7 @@ def _extract_fact_to_profile(
     # 根据反馈类型设置置信度
     confidence = "verified" if rating == "up" else "disputed"
 
-    user_data.add_chart_fact(
+    await repo.add_chart_fact(
         user_id=user_id,
         chart_profile_id=pid,
         conversation_id=conversation_id,
@@ -119,13 +119,13 @@ def _extract_fact_to_profile(
     )
 
     # 更新画像统计
-    profile = user_data.get_chart_profile(user_id, birth_time, gender)
+    profile = await repo.get_chart_profile(user_id, birth_time, gender)
     if profile:
         stats = profile.get("feedback_stats") or {}
         stats["up"] = (stats.get("up") or 0) + (1 if rating == "up" else 0)
         stats["down"] = (stats.get("down") or 0) + (1 if rating == "down" else 0)
         stats["total"] = (stats.get("up") or 0) + (stats.get("down") or 0)
-        user_data.update_chart_profile_stats(
+        await repo.update_chart_profile_stats(
             user_id, birth_time, gender,
             feedback_stats=stats,
         )
@@ -140,7 +140,7 @@ def _extract_fact_to_profile(
 async def delete_feedback(fid: str):
     """删除一条反馈；不存在返回 404。"""
     try:
-        ok = user_data.delete_feedback(fid)
+        ok = await repo.delete_feedback(fid)
         if not ok:
             raise HTTPException(status_code=404, detail="反馈不存在")
         return {"ok": True}
@@ -153,7 +153,7 @@ async def delete_feedback(fid: str):
 async def get_feedback_list(limit: int = Query(default=200, ge=1, le=1000)):
     """管理员查看反馈列表（按时间倒序）。"""
     try:
-        items = user_data.list_feedback(limit)
+        items = await repo.list_feedback(limit)
         return {"items": items}
     except Exception as e:
         log.exception("获取反馈列表失败")
@@ -167,7 +167,7 @@ async def get_answer_feedback_list(
 ):
     """管理员查看回答偏好反馈列表。"""
     try:
-        items = user_data.list_answer_feedback(limit, rating)
+        items = await repo.list_answer_feedback(limit, rating)
         return {"items": items}
     except Exception as e:
         log.exception("获取回答反馈列表失败")
@@ -183,7 +183,7 @@ async def export_answer_feedback_sft(
     if rating not in {"up", "down"}:
         raise HTTPException(status_code=400, detail="rating 必须是 up 或 down")
     try:
-        samples = user_data.export_sft_samples(limit=limit, rating=rating)
+        samples = await repo.export_sft_samples(limit=limit, rating=rating)
         content = "\n".join(json.dumps(s, ensure_ascii=False) for s in samples)
         filename = f"xianzhi_sft_{rating}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jsonl"
         return Response(
@@ -201,7 +201,7 @@ async def review_answer_feedback(fid: str, body: dict | None = None):
     """标记一条回答反馈为已审核。"""
     reviewer = (body or {}).get("reviewer", "admin")
     try:
-        ok = user_data.mark_answer_reviewed(fid, reviewer)
+        ok = await repo.mark_answer_reviewed(fid, reviewer)
         if not ok:
             raise HTTPException(status_code=404, detail="反馈不存在")
         return {"ok": True}
@@ -217,7 +217,7 @@ async def promote_answer_to_case(fid: str, body: dict | None = None):
     """将一条已审核的回答反馈转为结构化案例（支持好评/差评）。"""
     reviewer = (body or {}).get("reviewer", "admin")
     try:
-        result = user_data.promote_to_case(fid, reviewer)
+        result = await repo.promote_to_case(fid, reviewer)
         if result is None:
             raise HTTPException(status_code=400, detail="仅已审核的反馈可转为案例，或反馈不存在")
         case_id, file_path = result
@@ -235,7 +235,7 @@ async def export_dpo_samples(
 ):
     """导出 DPO 偏好对（chosen/rejected）为 JSONL。"""
     try:
-        samples = user_data.export_dpo_samples(limit=limit)
+        samples = await repo.export_dpo_samples(limit=limit)
         content = "\n".join(json.dumps(s, ensure_ascii=False) for s in samples)
         filename = f"xianzhi_dpo_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jsonl"
         return Response(
@@ -256,11 +256,11 @@ async def get_chart_profiles(token: str = Query(None)):
     """获取当前用户所有命盘的画像列表。"""
     if not token:
         raise HTTPException(status_code=401, detail="请先登录")
-    u = user_store.get_by_token(token)
+    u = await repo.get_by_token(token)
     if not u:
         raise HTTPException(status_code=401, detail="登录已过期")
     try:
-        profiles = user_data.list_chart_profiles_by_user(u["id"])
+        profiles = await repo.list_chart_profiles_by_user(u["id"])
         return {"profiles": profiles}
     except Exception as e:
         log.exception("获取命盘画像失败")
@@ -277,11 +277,11 @@ async def get_profile_facts(
     """获取指定命盘画像的断事知识列表。"""
     if not token:
         raise HTTPException(status_code=401, detail="请先登录")
-    u = user_store.get_by_token(token)
+    u = await repo.get_by_token(token)
     if not u:
         raise HTTPException(status_code=401, detail="登录已过期")
     try:
-        facts = user_data.get_chart_facts(profile_id, confidence, limit)
+        facts = await repo.get_chart_facts(profile_id, confidence, limit)
         return {"facts": facts}
     except Exception as e:
         log.exception("获取断事知识失败")

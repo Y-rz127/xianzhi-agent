@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from app.domain.bazi_engine import BaziChart
-from app.logger import log
+from app.core.logger import log
 from app.rag.vector_store import _keyword_overlap
 
 

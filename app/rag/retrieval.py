@@ -4,13 +4,14 @@ ReAct 工具路径（app/tools/rag_search.py）与 workflow 路径（app/agent/x
 共用本模块的检索策略，避免两套体系各自维护、行为漂移。
 
 分层职责：
-- 本模块：领域关键词、领域检索词、理论术语检索词、query 构造、跨 query 去重检索
+- 本模块：领域关键词、领域检索词、理论术语检索词、query 构造、跨 query 去重检索（唯一入口 retrieve_for_context）
 - rag_search.py（ReAct 工具）：结果格式化（来源标签人性化）与工具协议
 - xianzhi_workflow.py（workflow）：意图分类、命盘个性化 query 叠加、prompt 组装
 """
 from __future__ import annotations
 
-from app.rag.vector_store import knowledge_base
+from app.core.logger import log
+from app.rag.vector_store import get_knowledge_base
 
 # ============================================================
 # 领域识别（关键词打分）
@@ -287,6 +288,10 @@ def expand_knowledge_queries(query: str, limit: int = 4) -> list[str]:
     # 理论术语已命中时，跳过 theory 领域规则 query（避免追加"命理 术语 概念 解释"这类泛化词）
     if domain and not (match and domain == "theory"):
         queries.extend(DOMAIN_RULE_QUERIES.get(domain, ()))
+    # 时间维度叠加：含流年信号（今年/明年/流年…）且主域非 liunian 时，
+    # 追加流年规则 query——单域打分无法同时表达"事业+今年"两个维度
+    if domain != "liunian" and any(kw in text for kw in DOMAIN_KEYWORDS["liunian"]):
+        queries.extend(DOMAIN_RULE_QUERIES["liunian"])
     if not queries:
         queries.append("八字 命理 基础 大运 流年 用神")
     deduped: list[str] = []
@@ -296,34 +301,64 @@ def expand_knowledge_queries(query: str, limit: int = 4) -> list[str]:
     return deduped[:limit]
 
 
+def retrieve_for_context(
+    queries: list[str],
+    max_docs: int = 4,
+    max_chars_per_chunk: int = 600,
+    verbose: bool = False,
+):
+    """统一检索入口：对多条 query 逐一检索并跨 query 去重，返回 [(query, doc), ...]。
+
+    ReAct 工具路径与 workflow 路径均经此入口，去重/截断口径单一实现，
+    两侧差异仅以参数表达（max_docs / max_chars_per_chunk / verbose）。
+
+    - 每条 query 取 top-1 最相关 chunk
+    - 去重键：(来源文件, 内容前120字)
+    - 控量：单 chunk 截断 ≤ max_chars_per_chunk，最多 max_docs 条
+    """
+    docs = []
+    seen = set()
+    dedup_count = 0
+    for idx, q in enumerate(queries, 1):
+        results = get_knowledge_base().search(q)
+        if not results:
+            if verbose:
+                log.info("[检索] [{}/{}] query={} 无匹配", idx, len(queries), q)
+            continue
+        doc = results[0]  # top-1
+        key = (doc.metadata.get("source", ""), doc.page_content[:120])
+        if key in seen:
+            dedup_count += 1
+            if verbose:
+                log.info("[检索] [{}/{}] query={} top-1 chunk 重复，跳过", idx, len(queries), q)
+            continue
+        seen.add(key)
+        # 单 chunk 截断兜底
+        if len(doc.page_content) > max_chars_per_chunk:
+            from langchain_core.documents import Document as _Doc
+            doc = _Doc(page_content=doc.page_content[:max_chars_per_chunk] + "…",
+                       metadata=doc.metadata)
+        docs.append((q, doc))
+        if verbose:
+            preview = doc.page_content.replace("\n", " ")[:200]
+            log.info("[检索] [{}/{}] query={} 命中={}字", idx, len(queries), q, len(doc.page_content))
+            log.info("[检索] [{}/{}] 内容预览: {}", idx, len(queries), preview)
+        if len(docs) >= max_docs:
+            break
+    if verbose:
+        log.info("[检索] 汇总: {}条query → {}条有效结果, 去重跳过{}条chunk",
+                 len(queries), len(docs), dedup_count)
+    return docs
+
+
 def search_deduped(
     queries: list[str],
     max_docs: int = 4,
     max_chars_per_query: int = 600,
 ):
-    """对多条 query 逐一检索并跨 query 去重，返回 [(query, doc), ...]。
-
-    与 workflow 路径策略一致：每条 query 取 top-1 最相关 chunk，去重合并。
-    去重键：(来源文件, 内容前120字)。
-    控量：单 chunk 截断 ≤ max_chars_per_query，最多 max_docs 条。
-    """
-    docs = []
-    seen = set()
-    for q in queries:
-        results = knowledge_base.search(q)
-        if not results:
-            continue
-        doc = results[0]  # top-1
-        key = (doc.metadata.get("source", ""), doc.page_content[:120])
-        if key in seen:
-            continue
-        seen.add(key)
-        # 单 chunk 截断兜底
-        if len(doc.page_content) > max_chars_per_query:
-            from langchain_core.documents import Document as _Doc
-            doc = _Doc(page_content=doc.page_content[:max_chars_per_query] + "…",
-                       metadata=doc.metadata)
-        docs.append((q, doc))
-        if len(docs) >= max_docs:
-            break
-    return docs
+    """兼容别名：等价于 retrieve_for_context（保留原参数名）。"""
+    return retrieve_for_context(
+        queries,
+        max_docs=max_docs,
+        max_chars_per_chunk=max_chars_per_query,
+    )

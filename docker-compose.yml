@@ -7,7 +7,8 @@ services:
     environment:
       POSTGRES_DB: xianzhi
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      # 本地开发默认 postgres；部署时应在 .env / 环境变量中设置 POSTGRES_PASSWORD 覆盖
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
     volumes:
       - xianzhi-pg-data:/var/lib/postgresql/data
     healthcheck:
@@ -27,7 +28,7 @@ services:
       # 通过 .env 文件注入 DASHSCOPE_API_KEY、EMBEDDING_API_KEY、API_KEYS 等关键变量
       - .env
     environment:
-      POSTGRES_CONNECTION_STRING: postgresql://postgres:postgres@postgres:5432/xianzhi
+      POSTGRES_CONNECTION_STRING: postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/xianzhi
       VECTOR_STORE_TYPE: postgres
       MEMORY_STORE_TYPE: postgres
     depends_on:

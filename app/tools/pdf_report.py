@@ -20,7 +20,7 @@ from reportlab.platypus import (
     SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle,
 )
 
-from app.logger import log
+from app.core.logger import log
 
 
 _FONT_REGISTERED = False

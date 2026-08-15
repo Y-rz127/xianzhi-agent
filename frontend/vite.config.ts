@@ -7,10 +7,13 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),
+      // R11 共享 API 层：仓库根 shared/（纯 TS，Web/小程序共用）
+      "@shared": fileURLToPath(new URL("../shared", import.meta.url)),
     },
   },
   server: {
     port: 5173,
+    fs: { allow: [".."] },
     proxy: {
       "/api": { target: "http://localhost:8123", changeOrigin: true },
     },

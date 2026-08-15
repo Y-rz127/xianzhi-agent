@@ -2,7 +2,7 @@
 import os
 import sys
 from loguru import logger
-from app.config import settings
+from app.core.config import settings
 
 logger.remove()
 # 仅 stderr 输出。CloudBase/容器平台同时捕获 stdout 和 stderr，

@@ -18,8 +18,8 @@ import time
 from collections import defaultdict
 from typing import Any
 
-from app.config import settings
-from app.logger import log
+from app.core.config import settings
+from app.core.logger import log
 
 # 进程内 API 指标存储
 _metrics_lock = threading.Lock()
@@ -27,8 +27,19 @@ _metrics: dict[str, Any] = {
     "endpoints": defaultdict(lambda: {"count": 0, "total_latency_ms": 0.0}),
     "status_codes": {"2xx": 0, "4xx": 0, "5xx": 0},
     "recent_errors": [],
+    # 内部错误分类计数（DB/记忆层失败等被降级兜住的错误，供 /metrics 观测）
+    "internal_errors": defaultdict(int),
     "started_at": time.time(),
 }
+
+
+def record_error(category: str) -> None:
+    """记录一次内部错误（如记忆写入失败、DB 读取降级），供 /metrics 暴露。
+
+    降级路径（吞错返回默认值）也必须调用，确保静默故障可观测。
+    """
+    with _metrics_lock:
+        _metrics["internal_errors"][category] += 1
 
 
 def record_request(method: str, path: str, status: int, duration: float) -> None:
@@ -103,6 +114,7 @@ def get_metrics() -> dict[str, Any]:
             "endpoints": endpoints,
             "top_endpoints": endpoints[:5],
             "recent_errors": list(_metrics["recent_errors"]),
+            "internal_errors": dict(_metrics["internal_errors"]),
             "uptime_seconds": round(time.time() - _metrics["started_at"], 2),
         }
 
@@ -137,10 +149,14 @@ def init_observability() -> bool:
 
 
 def _validate_api_key(api_key: str) -> bool:
-    """快速校验 LangSmith API Key 是否有效，避免启动后持续刷 403 报错。"""
+    """快速校验 LangSmith API Key 是否有效，避免启动后持续刷 403 报错。
+
+    失败关闭：无法确认 Key 有效时（401/403 或网络异常）一律视为无效，
+    自动关闭追踪，避免带着无效 Key 持续产生 403 噪音。
+    """
     try:
-        import urllib.request
         import urllib.error
+        import urllib.request
         req = urllib.request.Request(
             "https://api.smith.langchain.com/info",
             headers={"x-api-key": api_key},
@@ -151,9 +167,11 @@ def _validate_api_key(api_key: str) -> bool:
     except urllib.error.HTTPError as e:
         if e.code in (401, 403):
             return False
-        return True
-    except Exception:
-        return True
+        log.warning("LangSmith Key 校验返回非预期状态 {}，按无效处理", e.code)
+        return False
+    except Exception as e:
+        log.warning("LangSmith Key 校验失败（{}），按无效处理，关闭追踪", e)
+        return False
 
 
 def get_status() -> dict:

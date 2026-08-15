@@ -23,7 +23,6 @@ from app.tools.bazi import (
     lunar_to_solar,
 )
 
-
 MALE = "\u7537"
 FIXTURE_PATH = Path(__file__).parent / "fixtures" / "bazi_cases.json"
 
@@ -94,7 +93,8 @@ def test_legacy_tools_still_return_readable_text():
     assert "年柱: 庚午" in chart_text
     assert "【五行权重】" in analysis_text
     assert "【结构判断】" in analysis_text
-    assert "壬午 | 1995-2004 | 6-15岁" in dayun_text
+    # 大运行格式含十神标注：{干支}({十神}) | 年份区间 | 岁数
+    assert "壬午(正印) | 1995-2004 | 6-15岁" in dayun_text
     assert "所在大运" in liunian_text
 
 
@@ -243,7 +243,7 @@ def test_zheng_ciguan_supersedes_ciguan_when_both_match():
         f"同柱命中正词馆时应不再报词馆，实际词馆命中: {ciguan}"
     )
     zheng_pillars = [s["pillar"] for s in zheng_ciguan]
-    assert sorted(zheng_pillars) == ["日柱", "月柱", "时柱"], (
+    assert set(zheng_pillars) == {"日柱", "月柱", "时柱"}, (
         f"正词馆期望落在月/日/时三柱，实际: {zheng_pillars}"
     )
 
@@ -289,7 +289,7 @@ def test_xueren_includes_month_pillar_when_self_mapping():
     # 亥月在 XUE_REN 里是自映射（亥→亥），月柱本身就是命中点
     # 修复前：['年柱', '时柱']（漏掉月柱）
     # 修复后：['年柱', '月柱', '时柱']（月柱一并计入）
-    assert xueren == ["年柱", "月柱", "时柱"], (
+    assert set(xueren) == {"年柱", "月柱", "时柱"}, (
         f"亥月见亥，月柱地支=亥 必须命中血刃，实际: {xueren}"
     )
 

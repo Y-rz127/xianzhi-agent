@@ -8,9 +8,8 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Query
 
 from app.api.common import client_error
-from app.db import user_data, users as user_store
-from app.logger import log
-from app.memory.postgres_memory import get_session_info
+from app.db import repository as repo
+from app.core.logger import log
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
 
@@ -22,19 +21,19 @@ async def list_users(
 ):
     """列出用户（含各模块数据量统计）与总数。"""
     try:
-        rows = user_store.list_users(limit=limit, offset=offset)
-        total = user_store.count_users()
+        rows = await repo.list_users(limit=limit, offset=offset)
+        total = await repo.count_users()
         users = []
         for u in rows:
             uid = u["id"]
-            sessions = get_session_info(prefix="mp-xianzhi", user_id=uid)
+            sessions = await repo.get_session_info(prefix="mp-xianzhi", user_id=uid)
             users.append(
                 {
                     **u,
                     "stats": {
-                        "profiles": len(user_data.list_profiles(uid)),
-                        "favorites": len(user_data.list_favorites(uid)),
-                        "tarotRecords": len(user_data.list_tarot_records(uid)),
+                        "profiles": len(await repo.list_profiles(uid)),
+                        "favorites": len(await repo.list_favorites(uid)),
+                        "tarotRecords": len(await repo.list_tarot_records(uid)),
                         "sessions": len(sessions),
                     },
                 }
@@ -48,16 +47,16 @@ async def list_users(
 @router.get("/users/{user_id}")
 async def get_user_detail(user_id: str):
     """查看单个用户的数据：八字档案 / 命例收藏 / 塔罗记录 / 会话列表。"""
-    user = user_store.get_by_id(user_id)
+    user = await repo.get_by_id(user_id)
     if not user:
         raise HTTPException(status_code=404, detail="用户不存在")
     try:
-        sessions = get_session_info(prefix="mp-xianzhi", user_id=user_id)
+        sessions = await repo.get_session_info(prefix="mp-xianzhi", user_id=user_id)
         return {
             "user": user,
-            "profiles": user_data.list_profiles(user_id),
-            "favorites": user_data.list_favorites(user_id),
-            "tarotRecords": user_data.list_tarot_records(user_id),
+            "profiles": await repo.list_profiles(user_id),
+            "favorites": await repo.list_favorites(user_id),
+            "tarotRecords": await repo.list_tarot_records(user_id),
             "sessions": sessions,
         }
     except Exception as e:

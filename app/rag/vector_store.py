@@ -4,7 +4,6 @@
 向量库支持：
 - chroma  : 本地嵌入式（兜底使用，开箱即用）
 - postgres: PostgreSQL + pgvector（本项目默认使用）
-- milvus  : Milvus（参考笔记 07_RAG）
 
 Embedding 默认用阿里云 DashScope text-embedding-v2；
 DashScope 不可用（欠费/网络）时按配置回退本地 HuggingFace 模型。
@@ -28,9 +27,8 @@ from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-from app.config import settings
-from app.logger import log
-
+from app.core.config import settings
+from app.core.logger import log
 
 KNOWLEDGE_DIR = Path(__file__).parent / "knowledge_docs"
 _FINGERPRINT_FILE = "knowledge_fingerprint.json"
@@ -421,32 +419,6 @@ def _load_postgres(embeddings: Embeddings):
     return store
 
 
-def _build_milvus(chunks: list[Document], embeddings: Embeddings):
-    """Milvus 向量库（参考笔记 07_RAG）。"""
-    from langchain_milvus import Milvus
-    store = Milvus.from_documents(
-        documents=chunks,
-        embedding=embeddings,
-        collection_name="xianzhi_knowledge",
-        connection_args={"uri": settings.milvus_uri},
-        drop_old=True,
-    )
-    log.info("Milvus 向量库重建完成: {}", settings.milvus_uri)
-    return store
-
-
-def _load_milvus(embeddings: Embeddings):
-    """加载已有 Milvus 索引（指纹一致时调用）。"""
-    from langchain_milvus import Milvus
-    store = Milvus(
-        embedding_function=embeddings,
-        collection_name="xianzhi_knowledge",
-        connection_args={"uri": settings.milvus_uri},
-    )
-    log.info("Milvus 向量库复用已有索引（文档未变更，跳过 embedding）")
-    return store
-
-
 def _rebuild_store(chunks: list[Document], embeddings: Embeddings, store_type: str):
     """按配置全量重建向量库，返回 (store, 实际生效的 store_type)。
 
@@ -460,14 +432,7 @@ def _rebuild_store(chunks: list[Document], embeddings: Embeddings, store_type: s
         except Exception as e:
             log.warning("Postgres 向量库不可用，回退 Chroma: {}", e)
 
-    # 2. Milvus
-    if store_type == "milvus" and settings.milvus_uri:
-        try:
-            return _build_milvus(chunks, embeddings), "milvus"
-        except Exception as e:
-            log.warning("Milvus 不可用，回退 Chroma: {}", e)
-
-    # 3. 默认 Chroma
+    # 2. 默认 Chroma
     return _build_chroma(chunks, embeddings), "chroma"
 
 
@@ -496,7 +461,7 @@ def _build_vector_store(embeddings: Embeddings, embedding_id: str, force: bool =
 
     # 显式配置了更高优先级后端（如 postgres）但指纹仍记着回退类型（chroma）：
     # 视为后端已恢复，忽略指纹、按配置类型全量重建，避免永远卡在 chroma 回退。
-    _priority = {"postgres": 3, "milvus": 2, "chroma": 1}
+    _priority = {"postgres": 2, "chroma": 1}
     backend_recovered = bool(fp) and _priority.get(configured_type, 1) > _priority.get(effective_type, 1)
 
     # 指纹未变且未触发后端恢复 → 直接加载已有索引，零 embedding API 调用
@@ -506,8 +471,6 @@ def _build_vector_store(embeddings: Embeddings, embedding_id: str, force: bool =
         try:
             if effective_type == "postgres":
                 return _load_postgres(embeddings), "postgres"
-            if effective_type == "milvus" and settings.milvus_uri:
-                return _load_milvus(embeddings), "milvus"
             return _load_chroma(embeddings), "chroma"
         except Exception as e:
             log.warning("已有索引加载失败，将全量重建: {}", e)
@@ -667,4 +630,17 @@ class KnowledgeBase:
 
 
 # 全局单例
-knowledge_base = KnowledgeBase()
+# R8 启动去副作用：知识库实例改为惰性构造（首次调用时创建），
+# 导入本模块不再产生实例构造副作用；真正的重初始化仍由 lifespan 后台触发。
+_kb_instance: KnowledgeBase | None = None
+_kb_lock = threading.Lock()
+
+
+def get_knowledge_base() -> KnowledgeBase:
+    """获取知识库惰性单例（首次调用时构造）。"""
+    global _kb_instance
+    if _kb_instance is None:
+        with _kb_lock:
+            if _kb_instance is None:
+                _kb_instance = KnowledgeBase()
+    return _kb_instance

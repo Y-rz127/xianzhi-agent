@@ -14,7 +14,7 @@ from urllib.parse import parse_qs
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from app.config import settings
+from app.core.config import settings
 
 # 豁免路径：健康检查、API 文档、静态资源不限流不鉴权
 _EXEMPT_PREFIXES = (

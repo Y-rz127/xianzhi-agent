@@ -1,14 +1,21 @@
-"""可选的LangGraph封装，用于Xianzhi工作流。
+"""Xianzhi 工作流的 LangGraph 编排实现（唯一编排后端）。
 
-该应用无需安装langgraph即可运行。如果可用，此模块会构建一个StateGraph，以反映确定性的工作流节点。
-本模块接入多 Agent 协作架构：节点从 state 取 worker 配置，与 XianzhiWorkflow.answer() 新架构保持一致。
+构建 StateGraph：分类→扩盘→检索→生成→校验→（条件路由）修复。
+节点逻辑均委托 XianzhiWorkflow 的既有方法，本模块只负责图结构与状态流转。
+langgraph 为硬依赖（requirements.txt）：导入失败会在 XianzhiWorkflow 构造期快速失败。
 """
 from __future__ import annotations
 
 from typing import Any, TypedDict
 
-from app.agent.xianzhi_workflow import DomainWorker, WORKERS, QuestionIntent, WorkflowChartContext, classify_question
-from app.logger import log
+from app.agent.workflow.xianzhi_workflow import (
+    WORKERS,
+    DomainWorker,
+    QuestionIntent,
+    WorkflowChartContext,
+    classify_question,
+)
+from app.core.logger import log
 
 
 class XianzhiGraphState(TypedDict, total=False):
@@ -16,6 +23,7 @@ class XianzhiGraphState(TypedDict, total=False):
     user_prompt: str
     chart_context: WorkflowChartContext
     history: list[Any]
+    summary: str
     intent: QuestionIntent
     worker: DomainWorker
     knowledge: str
@@ -25,11 +33,8 @@ class XianzhiGraphState(TypedDict, total=False):
 
 
 def create_xianzhi_graph(workflow):
-    """Create a compiled LangGraph app if langgraph is installed."""
-    try:
-        from langgraph.graph import END, StateGraph
-    except Exception:
-        return None
+    """构建编译后的 LangGraph 编排图；langgraph 未安装时直接抛 ImportError（硬依赖）。"""
+    from langgraph.graph import END, StateGraph
 
     def classify_node(state: XianzhiGraphState) -> XianzhiGraphState:
         """分类节点：优先复用 answer() 已拆解的 intent，否则关键词兜底；匹配对应 Worker。"""
@@ -58,7 +63,7 @@ def create_xianzhi_graph(workflow):
         return {"knowledge": knowledge}
 
     def generate_node(state: XianzhiGraphState) -> XianzhiGraphState:
-        """生成节点：组装 Worker 消息并调用 LLM 产出原始回答。"""
+        """生成节点：组装 Worker 消息并调用 LLM 产出原始回答（含会话摘要透传）。"""
         worker = state.get("worker")
         messages = workflow._build_messages(
             state["user_prompt"],
@@ -67,6 +72,7 @@ def create_xianzhi_graph(workflow):
             state.get("knowledge", ""),
             state.get("history", []),
             state.get("worker"),
+            state.get("summary", ""),
         )
         raw = workflow._invoke(messages)
         log.info("[Worker] {} 生成回答 {}字", getattr(worker, "label", "?"), len(raw))
@@ -108,7 +114,7 @@ def create_xianzhi_graph(workflow):
 
         闲聊场景无 issues 可修（check_node 已跳过 LLM 深审），无意义再走 repair。
         """
-        from app.agent.xianzhi_workflow import FactCheckResult
+        from app.agent.workflow.xianzhi_workflow import FactCheckResult
 
         intent = state.get("intent")
         is_chitchat = bool(intent and getattr(intent, "domain", "") == "chitchat")

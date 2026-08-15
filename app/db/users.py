@@ -12,7 +12,7 @@ import secrets
 import uuid
 from typing import Optional
 
-from app.logger import log
+from app.core.logger import log
 from app.memory.postgres_memory import _get_pool
 
 _TABLE_READY = False
@@ -123,24 +123,39 @@ def authenticate(nickname: str, password: str) -> Optional[dict]:
 
 
 def get_by_token(token: str) -> Optional[dict]:
-    """按登录 token 查询用户；token 为空或查询失败时返回 None。"""
+    """按登录 token 查询用户；token 为空或查询失败时返回 None。
+
+    流程：
+        1. 空值快速返回，避免无意义的数据库查询；
+        2. 确保 users 表已创建（惰性建表）；
+        3. 按 token 查询用户基本信息（id / nickname / avatar）；
+        4. 查到用户后，立即刷新 last_active_at，用于统计最近活跃时间；
+        5. 将数据库行转为公开用户字典（_public_user）后返回；
+        6. 任何异常均降级返回 None 并记录警告日志，保证调用方安全。
+    """
+    # 1. token 为空则无需查询
     if not token:
         return None
+    # 2. 惰性建表
     _ensure_table()
     try:
         with _get_pool().connection() as conn:
+            # 3. 按 token 查询用户基本信息
             row = conn.execute(
                 "SELECT id, nickname, avatar FROM users WHERE token = %s", (token,)
             ).fetchone()
             if not row:
                 return None
+            # 4. 刷新最后活跃时间
             conn.execute(
                 "UPDATE users SET last_active_at = NOW() WHERE id = %s", (row[0],)
             )
+            # 5. 转为公开用户字典返回
             return _public_user(
                 {"id": str(row[0]), "nickname": row[1], "avatar": row[2] or ""}
             )
     except Exception as e:
+        # 6. 异常降级：记录日志并返回 None
         log.warning("按 token 查用户失败: {}", e)
         return None
 

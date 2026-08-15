@@ -11,6 +11,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import uuid
 from datetime import datetime
@@ -21,7 +22,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 
 from app.api.common import client_error
 from app.api.deps import require_admin
-from app.logger import log
+from app.core.logger import log
 
 router = APIRouter(prefix="/cases", tags=["Cases"])
 
@@ -107,6 +108,7 @@ def _build_chart_data(birth_time: str, gender: str) -> dict[str, Any]:
     from app.domain.bazi_engine import (
         build_bazi_chart,
         chart_to_api_dict,
+        extract_bazi_brief,
         format_analysis_text,
         format_chart_text,
         format_dayun_text,
@@ -124,29 +126,40 @@ def _build_chart_data(birth_time: str, gender: str) -> dict[str, Any]:
     return payload
 
 
-def _extract_bazi_brief(chart_data: Any) -> str | None:
-    """从 chart_data JSON 中提取四柱干支摘要，如 '辛卯 丁酉 庚午 丙子'。"""
-    try:
-        pillars = chart_data.get("pillars")
-        if isinstance(pillars, list) and len(pillars) >= 4:
-            parts = []
-            for p in pillars:
-                gz = p.get("ganzhi") if isinstance(p, dict) else None
-                if isinstance(gz, list) and len(gz) >= 2:
-                    parts.append(f"{gz[0]}{gz[1]}")
-                elif isinstance(gz, str):
-                    parts.append(gz)
-            if len(parts) >= 4:
-                return " ".join(parts[:4])
-    except Exception:
-        pass
-    return None
+def _db_list_cases() -> list[dict[str, Any]]:
+    """同步查询命例列表（handler 中经 asyncio.to_thread 调用）。"""
+    with _get_pool().connection() as conn:
+        cur = conn.execute(
+            """
+            SELECT id, name, tags, birth_time, gender, bio, analysis, keypoints,
+                   domains, created_at, updated_at, chart_data
+            FROM cases ORDER BY updated_at DESC
+            """
+        )
+        result = []
+        for row in cur:
+            cd = row[11] if isinstance(row[11], dict) else json.loads(row[11]) if row[11] else {}
+            result.append({
+                "id": str(row[0]),
+                "name": row[1],
+                "tags": row[2] or [],
+                "birthTime": row[3],
+                "gender": row[4],
+                "bio": row[5] or "",
+                "analysis": row[6] or "",
+                "keypoints": row[7] or "",
+                "domains": row[8] or [],
+                "createdAt": str(row[9]) if row[9] else "",
+                "updatedAt": str(row[10]) if row[10] else "",
+                "bazi": extract_bazi_brief(cd),
+            })
+    return result
 
 
 @router.get("", dependencies=[Depends(require_admin)])
 async def list_cases():
     """获取所有命例列表（cases 表，Bazi 结构）。"""
-    if not ensure_table():
+    if not await asyncio.to_thread(ensure_table):
         cases = _load_file_cases()
         return [
             {
@@ -157,40 +170,32 @@ async def list_cases():
                 "gender": c.get("gender", ""),
                 "createdAt": c.get("createdAt", ""),
                 "updatedAt": c.get("updatedAt", ""),
-                "bazi": _extract_bazi_brief(c.get("chartData") or c.get("chart_data")),
+                "bazi": extract_bazi_brief(c.get("chartData") or c.get("chart_data")),
             }
             for c in sorted(cases, key=lambda x: x.get("updatedAt", ""), reverse=True)
         ]
     try:
-        with _get_pool().connection() as conn:
-            cur = conn.execute(
-                """
-                SELECT id, name, tags, birth_time, gender, bio, analysis, keypoints,
-                       domains, created_at, updated_at, chart_data
-                FROM cases ORDER BY updated_at DESC
-                """
-            )
-            result = []
-            for row in cur:
-                cd = row[11] if isinstance(row[11], dict) else json.loads(row[11]) if row[11] else {}
-                result.append({
-                    "id": str(row[0]),
-                    "name": row[1],
-                    "tags": row[2] or [],
-                    "birthTime": row[3],
-                    "gender": row[4],
-                    "bio": row[5] or "",
-                    "analysis": row[6] or "",
-                    "keypoints": row[7] or "",
-                    "domains": row[8] or [],
-                    "createdAt": str(row[9]) if row[9] else "",
-                    "updatedAt": str(row[10]) if row[10] else "",
-                    "bazi": _extract_bazi_brief(cd),
-                })
-        return result
+        return await asyncio.to_thread(_db_list_cases)
     except Exception as e:
         log.exception("获取命例列表失败")
         raise HTTPException(status_code=500, detail=client_error(e))
+
+
+def _db_create_case(name: str, tags: list, birth_time: str, gender: str, chart_data: dict[str, Any],
+                    bio: str, analysis: str, keypoints: str, domains: list) -> str:
+    """同步写入新命例，返回新 id。"""
+    with _get_pool().connection() as conn:
+        cur = conn.execute(
+            """
+            INSERT INTO cases (id, name, tags, birth_time, gender, chart_data, bio, analysis, keypoints, domains)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING id
+            """,
+            (str(uuid.uuid4()), name, tags, birth_time, gender, json.dumps(chart_data),
+             bio, analysis, keypoints, domains),
+        )
+        row = cur.fetchone()
+    return str(row[0])
 
 
 @router.post("", dependencies=[Depends(require_admin)])
@@ -211,9 +216,9 @@ async def create_case(payload: dict):
     analysis = (payload.get("analysis") or "").strip()
     keypoints = (payload.get("keypoints") or "").strip()
     domains = payload.get("domains") or []
-    chart_data = payload.get("chart_data") or _build_chart_data(birth_time, gender)
+    chart_data = payload.get("chart_data") or await asyncio.to_thread(_build_chart_data, birth_time, gender)
 
-    if not ensure_table():
+    if not await asyncio.to_thread(ensure_table):
         cases = _load_file_cases()
         case = _new_file_case(name, birth_time, gender, tags, chart_data)
         cases.append(case)
@@ -221,54 +226,55 @@ async def create_case(payload: dict):
         return {"id": case["id"], "status": "ok", "storage": "file"}
 
     try:
-        with _get_pool().connection() as conn:
-            cur = conn.execute(
-                """
-                INSERT INTO cases (id, name, tags, birth_time, gender, chart_data, bio, analysis, keypoints, domains)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                RETURNING id
-                """,
-                (str(uuid.uuid4()), name, tags, birth_time, gender, json.dumps(chart_data),
-                 bio, analysis, keypoints, domains),
-            )
-            row = cur.fetchone()
-        return {"id": str(row[0]), "status": "ok"}
+        cid = await asyncio.to_thread(
+            _db_create_case, name, tags, birth_time, gender, chart_data,
+            bio, analysis, keypoints, domains,
+        )
+        return {"id": cid, "status": "ok"}
     except Exception as e:
         log.exception("保存命例失败")
         raise HTTPException(status_code=500, detail=client_error(e))
 
 
+def _db_get_case(case_id: str) -> dict[str, Any] | None:
+    """同步查询单个命例；不存在返回 None。"""
+    with _get_pool().connection() as conn:
+        cur = conn.execute(
+            "SELECT id, name, tags, birth_time, gender, bio, analysis, keypoints, domains, chart_data, created_at, updated_at FROM cases WHERE id = %s",
+            (case_id,),
+        )
+        row = cur.fetchone()
+    if not row:
+        return None
+    return {
+        "id": str(row[0]),
+        "name": row[1],
+        "tags": row[2] or [],
+        "birthTime": row[3],
+        "gender": row[4],
+        "bio": row[5] or "",
+        "analysis": row[6] or "",
+        "keypoints": row[7] or "",
+        "domains": row[8] or [],
+        "chartData": row[9] if isinstance(row[9], dict) else json.loads(row[9]),
+        "createdAt": str(row[10]) if row[10] else "",
+        "updatedAt": str(row[11]) if row[11] else "",
+    }
+
+
 @router.get("/{case_id}", dependencies=[Depends(require_admin)])
 async def get_case(case_id: str):
     """获取单个命例详情（cases 表）。"""
-    if not ensure_table():
+    if not await asyncio.to_thread(ensure_table):
         for c in _load_file_cases():
             if c.get("id") == case_id:
                 return c
         raise HTTPException(status_code=404, detail="命例不存在")
     try:
-        with _get_pool().connection() as conn:
-            cur = conn.execute(
-                "SELECT id, name, tags, birth_time, gender, bio, analysis, keypoints, domains, chart_data, created_at, updated_at FROM cases WHERE id = %s",
-                (case_id,),
-            )
-            row = cur.fetchone()
-        if not row:
+        item = await asyncio.to_thread(_db_get_case, case_id)
+        if not item:
             raise HTTPException(status_code=404, detail="命例不存在")
-        return {
-            "id": str(row[0]),
-            "name": row[1],
-            "tags": row[2] or [],
-            "birthTime": row[3],
-            "gender": row[4],
-            "bio": row[5] or "",
-            "analysis": row[6] or "",
-            "keypoints": row[7] or "",
-            "domains": row[8] or [],
-            "chartData": row[9] if isinstance(row[9], dict) else json.loads(row[9]),
-            "createdAt": str(row[10]) if row[10] else "",
-            "updatedAt": str(row[11]) if row[11] else "",
-        }
+        return item
     except HTTPException:
         raise
     except Exception as e:
@@ -276,10 +282,51 @@ async def get_case(case_id: str):
         raise HTTPException(status_code=500, detail=client_error(e))
 
 
+def _db_update_case(case_id: str, payload: dict) -> None:
+    """同步执行命例更新 SQL；无更新字段时抛 ValueError。"""
+    with _get_pool().connection() as conn:
+        updates = []
+        params = []
+        if "name" in payload:
+            updates.append("name = %s")
+            params.append(payload["name"])
+        if "tags" in payload:
+            updates.append("tags = %s")
+            params.append(payload["tags"])
+        if "bio" in payload:
+            updates.append("bio = %s")
+            params.append((payload["bio"] or "").strip())
+        if "analysis" in payload:
+            updates.append("analysis = %s")
+            params.append((payload["analysis"] or "").strip())
+        if "keypoints" in payload:
+            updates.append("keypoints = %s")
+            params.append((payload["keypoints"] or "").strip())
+        if "domains" in payload:
+            updates.append("domains = %s")
+            params.append(payload["domains"] or [])
+        if "birth_time" in payload and "gender" in payload:
+            birth_time = payload["birth_time"]
+            gender = payload["gender"]
+            updates.extend(["birth_time = %s", "gender = %s"])
+            params.extend([birth_time, gender])
+            if payload.get("regenerate_chart_data", True):
+                updates.append("chart_data = %s")
+                params.append(json.dumps(_build_chart_data(birth_time, gender)))
+        if not updates:
+            raise ValueError("无更新字段")
+        updates.append("updated_at = NOW()")
+        params.append(case_id)
+        conn.execute(
+            "UPDATE cases SET {} WHERE id = %s".format(", ".join(updates)),
+            tuple(params),
+        )
+
+
 @router.put("/{case_id}", dependencies=[Depends(require_admin)])
 async def update_case(case_id: str, payload: dict):
     """更新命例（名称、标签、出生信息）。"""
-    if not ensure_table():
+    if not await asyncio.to_thread(ensure_table):
         cases = _load_file_cases()
         for c in cases:
             if c.get("id") != case_id:
@@ -292,78 +339,72 @@ async def update_case(case_id: str, payload: dict):
                 c["birthTime"] = payload["birth_time"]
                 c["gender"] = payload["gender"]
                 if payload.get("regenerate_chart_data", True):
-                    c["chartData"] = _build_chart_data(payload["birth_time"], payload["gender"])
+                    c["chartData"] = await asyncio.to_thread(_build_chart_data, payload["birth_time"], payload["gender"])
             c["updatedAt"] = datetime.now().isoformat()
             _save_file_cases(cases)
             return {"status": "ok", "storage": "file"}
         raise HTTPException(status_code=404, detail="命例不存在")
     try:
-        with _get_pool().connection() as conn:
-            updates = []
-            params = []
-            if "name" in payload:
-                updates.append("name = %s")
-                params.append(payload["name"])
-            if "tags" in payload:
-                updates.append("tags = %s")
-                params.append(payload["tags"])
-            if "bio" in payload:
-                updates.append("bio = %s")
-                params.append((payload["bio"] or "").strip())
-            if "analysis" in payload:
-                updates.append("analysis = %s")
-                params.append((payload["analysis"] or "").strip())
-            if "keypoints" in payload:
-                updates.append("keypoints = %s")
-                params.append((payload["keypoints"] or "").strip())
-            if "domains" in payload:
-                updates.append("domains = %s")
-                params.append(payload["domains"] or [])
-            if "birth_time" in payload and "gender" in payload:
-                birth_time = payload["birth_time"]
-                gender = payload["gender"]
-                updates.extend(["birth_time = %s", "gender = %s"])
-                params.extend([birth_time, gender])
-                if payload.get("regenerate_chart_data", True):
-                    updates.append("chart_data = %s")
-                    params.append(json.dumps(_build_chart_data(birth_time, gender)))
-            if not updates:
-                raise HTTPException(status_code=400, detail="无更新字段")
-            updates.append("updated_at = NOW()")
-            params.append(case_id)
-            conn.execute(
-                "UPDATE cases SET {} WHERE id = %s".format(", ".join(updates)),
-                tuple(params),
-            )
+        await asyncio.to_thread(_db_update_case, case_id, payload)
         return {"status": "ok"}
-    except HTTPException:
-        raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         log.exception("更新命例失败")
         raise HTTPException(status_code=500, detail=client_error(e))
 
 
+def _db_delete_case(case_id: str) -> None:
+    with _get_pool().connection() as conn:
+        conn.execute("DELETE FROM cases WHERE id = %s", (case_id,))
+
+
 @router.delete("/{case_id}", dependencies=[Depends(require_admin)])
 async def delete_case(case_id: str):
     """删除命例（cases 表）。"""
-    if not ensure_table():
+    if not await asyncio.to_thread(ensure_table):
         cases = _load_file_cases()
         kept = [c for c in cases if c.get("id") != case_id]
         _save_file_cases(kept)
         return {"status": "ok", "storage": "file"}
     try:
-        with _get_pool().connection() as conn:
-            conn.execute("DELETE FROM cases WHERE id = %s", (case_id,))
+        await asyncio.to_thread(_db_delete_case, case_id)
         return {"status": "ok"}
     except Exception as e:
         log.exception("删除命例失败")
         raise HTTPException(status_code=500, detail=client_error(e))
 
 
+def _db_export_cases() -> list[dict[str, Any]]:
+    """同步导出全部命例。"""
+    with _get_pool().connection() as conn:
+        cur = conn.execute(
+            "SELECT id, name, tags, birth_time, gender, bio, analysis, keypoints, domains, chart_data, created_at, updated_at FROM cases ORDER BY updated_at DESC"
+        )
+        cases = []
+        for row in cur:
+            chart_data = row[9] if isinstance(row[9], dict) else json.loads(row[9])
+            cases.append({
+                "id": str(row[0]),
+                "name": row[1],
+                "tags": row[2] or [],
+                "birthTime": row[3],
+                "gender": row[4],
+                "bio": row[5] or "",
+                "analysis": row[6] or "",
+                "keypoints": row[7] or "",
+                "domains": row[8] or [],
+                "chartData": chart_data,
+                "createdAt": str(row[10]) if row[10] else "",
+                "updatedAt": str(row[11]) if row[11] else "",
+            })
+    return cases
+
+
 @router.get("/export/json", dependencies=[Depends(require_admin)])
 async def export_cases_json():
     """导出所有命例为 JSON 文件（cases 表，Bazi 结构）。"""
-    if not ensure_table():
+    if not await asyncio.to_thread(ensure_table):
         cases = _load_file_cases()
         content = json.dumps({"version": 1, "exportedAt": datetime.now().isoformat(), "cases": cases}, ensure_ascii=False, indent=2)
         return Response(
@@ -372,27 +413,7 @@ async def export_cases_json():
             headers={"Content-Disposition": 'attachment; filename="xianzhi_cases.json"'},
         )
     try:
-        with _get_pool().connection() as conn:
-            cur = conn.execute(
-                "SELECT id, name, tags, birth_time, gender, bio, analysis, keypoints, domains, chart_data, created_at, updated_at FROM cases ORDER BY updated_at DESC"
-            )
-            cases = []
-            for row in cur:
-                chart_data = row[9] if isinstance(row[9], dict) else json.loads(row[9])
-                cases.append({
-                    "id": str(row[0]),
-                    "name": row[1],
-                    "tags": row[2] or [],
-                    "birthTime": row[3],
-                    "gender": row[4],
-                    "bio": row[5] or "",
-                    "analysis": row[6] or "",
-                    "keypoints": row[7] or "",
-                    "domains": row[8] or [],
-                    "chartData": chart_data,
-                    "createdAt": str(row[10]) if row[10] else "",
-                    "updatedAt": str(row[11]) if row[11] else "",
-                })
+        cases = await asyncio.to_thread(_db_export_cases)
         content = json.dumps({"version": 1, "exportedAt": datetime.now().isoformat(), "cases": cases}, ensure_ascii=False, indent=2)
         return Response(
             content=content,
@@ -402,6 +423,43 @@ async def export_cases_json():
     except Exception as e:
         log.exception("导出命例失败")
         raise HTTPException(status_code=500, detail=client_error(e))
+
+
+def _db_import_cases(cases: list) -> tuple[int, int]:
+    """同步批量导入命例，返回 (inserted, skipped)。"""
+    inserted = 0
+    skipped = 0
+    with _get_pool().connection() as conn:
+        for c in cases:
+            cid = c.get("id")
+            if cid:
+                cur = conn.execute("SELECT 1 FROM cases WHERE id = %s", (cid,))
+                if cur.fetchone():
+                    skipped += 1
+                    continue
+            name = (c.get("name") or "未命名命例").strip()
+            birth_time = (c.get("birthTime") or c.get("birth_time") or "").strip()
+            gender = (c.get("gender") or "").strip()
+            tags = c.get("tags") or []
+            bio = (c.get("bio") or "").strip()
+            analysis = (c.get("analysis") or "").strip()
+            keypoints = (c.get("keypoints") or "").strip()
+            domains = c.get("domains") or []
+            chart_data = c.get("chartData") or c.get("chart_data")
+            if not birth_time or not gender:
+                continue
+            if not chart_data:
+                chart_data = _build_chart_data(birth_time, gender)
+            conn.execute(
+                """
+                INSERT INTO cases (id, name, tags, birth_time, gender, chart_data, bio, analysis, keypoints, domains)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (str(uuid.uuid4()), name, tags, birth_time, gender, json.dumps(chart_data),
+                 bio, analysis, keypoints, domains),
+            )
+            inserted += 1
+    return inserted, skipped
 
 
 @router.post("/import/json", dependencies=[Depends(require_admin)])
@@ -417,7 +475,7 @@ async def import_cases_json(payload: dict):
 
     inserted = 0
     skipped = 0
-    if not ensure_table():
+    if not await asyncio.to_thread(ensure_table):
         existing = _load_file_cases()
         existing_ids = {c.get("id") for c in existing}
         for c in cases:
@@ -431,43 +489,14 @@ async def import_cases_json(payload: dict):
                 continue
             name = (c.get("name") or "未命名命例").strip()
             tags = c.get("tags") or []
-            chart_data = c.get("chartData") or c.get("chart_data") or _build_chart_data(birth_time, gender)
+            chart_data = c.get("chartData") or c.get("chart_data") or await asyncio.to_thread(_build_chart_data, birth_time, gender)
             existing.append(_new_file_case(name, birth_time, gender, tags, chart_data))
             inserted += 1
         _save_file_cases(existing)
         return {"inserted": inserted, "skipped": skipped, "storage": "file"}
 
     try:
-        with _get_pool().connection() as conn:
-            for c in cases:
-                cid = c.get("id")
-                if cid:
-                    cur = conn.execute("SELECT 1 FROM cases WHERE id = %s", (cid,))
-                    if cur.fetchone():
-                        skipped += 1
-                        continue
-                name = (c.get("name") or "未命名命例").strip()
-                birth_time = (c.get("birthTime") or c.get("birth_time") or "").strip()
-                gender = (c.get("gender") or "").strip()
-                tags = c.get("tags") or []
-                bio = (c.get("bio") or "").strip()
-                analysis = (c.get("analysis") or "").strip()
-                keypoints = (c.get("keypoints") or "").strip()
-                domains = c.get("domains") or []
-                chart_data = c.get("chartData") or c.get("chart_data")
-                if not birth_time or not gender:
-                    continue
-                if not chart_data:
-                    chart_data = _build_chart_data(birth_time, gender)
-                conn.execute(
-                    """
-                    INSERT INTO cases (id, name, tags, birth_time, gender, chart_data, bio, analysis, keypoints, domains)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    """,
-                    (str(uuid.uuid4()), name, tags, birth_time, gender, json.dumps(chart_data),
-                     bio, analysis, keypoints, domains),
-                )
-                inserted += 1
+        inserted, skipped = await asyncio.to_thread(_db_import_cases, cases)
         return {"inserted": inserted, "skipped": skipped}
     except Exception as e:
         log.exception("导入命例失败")

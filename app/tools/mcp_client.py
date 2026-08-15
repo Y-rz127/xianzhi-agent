@@ -17,8 +17,8 @@ from typing import Any
 from langchain_core.tools import BaseTool
 from pydantic import BaseModel, Field
 
-from app.config import settings
-from app.logger import log
+from app.core.config import settings
+from app.core.logger import log
 
 
 class _MCPToolSchema(BaseModel):

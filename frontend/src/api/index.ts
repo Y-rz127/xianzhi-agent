@@ -1,6 +1,19 @@
+// R11 共享 API 层：数据模型/文本解析器/端点常量与小程序端共用，统一在仓库根 shared/api 维护
+export type {
+  AnswerFeedbackPayload, BaziCandidate, ChartAnalysis, ChartCase, ChartData,
+  ChatOptions, ChatSession, DayunItem, LiuNianItem, Pillar, SessionBirthInfo,
+  SessionMessage, ShenshaItem, WuxingItem,
+} from "@shared/api"
+export { EP, parseDayun, parsePillars, parseShensha, parseWuxing } from "@shared/api"
+import type { AnswerFeedbackPayload, BaziCandidate, BaziProfile, ChartCase, ChartData, ChatOptions, ChatSession, FavoriteCase, SessionBirthInfo, SessionMessage, TarotRecord } from "@shared/api"
+import { EP } from "@shared/api"
+
 const API_BASE = import.meta.env.VITE_API_BASE
   || (import.meta.env.DEV ? "http://localhost:8123/api" : "/api")
-const API_KEY = "xianzhi-yrz-admin"
+// 管理端 API Key：优先读 VITE_API_KEY（.env.local，已 gitignore，需与后端 API_KEYS 对齐）。
+// 注意：前端可见的 Key 只能防君子不能防小人；转公开站点时应改为后端代理转发，见 docs/architecture_review.md。
+// 兜底值仅供本地开发（后端 API_KEYS 为空时鉴权关闭，不影响使用）。
+const API_KEY = import.meta.env.VITE_API_KEY || "xianzhi-yrz-admin"
 
 function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const headers = new Headers(init?.headers)
@@ -20,14 +33,6 @@ export interface SSECallbacks {
   onError?: (err: Event) => void
   onDone?: () => void
   onChartContext?: (birthTime: string, gender: string, birthPlace?: string) => void
-}
-
-export interface ChatOptions {
-  birth_time?: string
-  gender?: string
-  birth_place?: string
-  sect?: number
-  yun_sect?: number
 }
 
 export function connectSSE(path: string, params: Record<string, string | undefined>, cb: SSECallbacks): EventSource {
@@ -84,45 +89,6 @@ export async function generateFullReport(birthTime: string, gender: string, sect
   return data.content || ""
 }
 
-export interface ChartAnalysis {
-  day_master?: string
-  day_master_wuxing?: string
-  strength?: string
-  strength_score?: number
-  useful_hint?: string
-  tenGods?: Record<string, number>
-  exposedStems?: string[]
-  rootedStems?: string[]
-  combinations?: string[]
-  clashes?: string[]
-  harms?: string[]
-  punishments?: string[]
-  season?: string
-  adjustment?: string
-  patternHint?: string
-  confidence?: number
-}
-
-export interface ChartData {
-  birth?: Record<string, any>
-  pillars: Pillar[]
-  wuxing: WuxingItem[]
-  dayun: DayunItem[]
-  liunian: LiuNianItem[]
-  shensha: ShenshaItem[]
-  analysis?: ChartAnalysis
-  startYun?: Record<string, any>
-  warnings?: string[]
-  chartText?: string
-  analysisText?: string
-  dayunText?: string
-  liunianText?: string
-  mingGong?: string
-  shenGong?: string
-}
-
-export interface ChartCase { id: string; name: string; tags: string[]; birthTime: string; gender: string; createdAt: string; updatedAt: string; bazi?: string; chartData?: ChartData; bio?: string; analysis?: string; keypoints?: string }
-
 export async function getChart(birthTime: string, gender: string, sect = 2, yunSect = 1, longitude?: number): Promise<ChartData> {
   const params = new URLSearchParams({
     birth_time: birthTime,
@@ -131,15 +97,13 @@ export async function getChart(birthTime: string, gender: string, sect = 2, yunS
     yun_sect: String(yunSect),
   })
   if (longitude !== undefined && longitude !== 0) params.set("longitude", String(longitude))
-  const res = await apiFetch(`${API_BASE}/ai/xianzhi/chart?${params.toString()}`)
+  const res = await apiFetch(`${API_BASE}${EP.CHART}?${params.toString()}`)
   if (!res.ok) throw new Error(`排盘失败 ${res.status}`)
   return await res.json()
 }
 
-export interface BaziCandidate { birth_time: string; ganzhi: string; shi_chen: string }
-
 export async function inferBaziDates(payload: { pillars: string; gender: string; top_n?: number }): Promise<{ candidates: BaziCandidate[] }> {
-  const res = await apiFetch(`${API_BASE}/ai/xianzhi/bazi/infer-dates`, {
+  const res = await apiFetch(`${API_BASE}${EP.INFER_DATES}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ pillars: payload.pillars, gender: payload.gender, top_n: payload.top_n || 3 }),
@@ -238,90 +202,9 @@ export function downloadFullReportPDF(birthTime: string, gender: string, section
   window.open(url, "_blank")
 }
 
-export interface Pillar {
-  name: string
-  ganzhi: string
-  nayin: string
-  gan?: string
-  zhi?: string
-  ganWuxing?: string
-  zhiWuxing?: string
-  xunkong?: string
-  hiddenStems?: string[]
-  shishenGan?: string
-  shishenZhi?: string[]
-  changsheng?: string
-  zizuo?: string
-}
-export function parsePillars(text: string): Pillar[] {
-  if (!text) return []
-  const result: Pillar[] = []
-  const re = /(年柱|月柱|日柱|时柱)[:\s]*([^\s(]+)\s*\(([^)]+)\)/g
-  let m: RegExpExecArray | null
-  while ((m = re.exec(text)) !== null) {
-    result.push({ name: m[1], ganzhi: m[2].trim(), nayin: m[3].trim() })
-  }
-  return result
-}
-
-export interface WuxingItem { name: string; count: number; color: string }
-export function parseWuxing(text: string): WuxingItem[] {
-  if (!text) return []
-  const colors: Record<string, string> = { "金": "#d4af37", "木": "#4a7c3a", "水": "#3a6ea5", "火": "#c0392b", "土": "#8b6f47" }
-  const result: WuxingItem[] = []
-  const m = text.match(/['"]?金['"]?\s*[:=]\s*(\d+).*?['"]?木['"]?\s*[:=]\s*(\d+).*?['"]?水['"]?\s*[:=]\s*(\d+).*?['"]?火['"]?\s*[:=]\s*(\d+).*?['"]?土['"]?\s*[:=]\s*(\d+)/s)
-  if (m) {
-    const vals = [parseInt(m[1]), parseInt(m[2]), parseInt(m[3]), parseInt(m[4]), parseInt(m[5])]
-    const names = ["金", "木", "水", "火", "土"]
-    names.forEach((n, i) => result.push({ name: n, count: vals[i], color: colors[n] }))
-  }
-  return result
-}
-
-export interface DayunItem {
-  year: string; ganzhi: string; startAge: number; startYear: number; endAge?: number; endYear?: number;
-  xunkong?: string; shishenGan?: string; gan?: string; zhi?: string;
-  hiddenStems?: string[]; shishenZhi?: string[]; changsheng?: string;
-  shensha?: { name: string; description: string }[];
-  liunian?: LiuNianItem[]
-}
-export interface LiuNianItem {
-  year: string; ganzhi: string; age?: number; dayun?: string;
-  dayunStartYear?: number; dayunEndYear?: number; xunkong?: string;
-  shishenGan?: string; gan?: string; zhi?: string;
-  hiddenStems?: string[]; shishenZhi?: string[]; changsheng?: string;
-  shensha?: { name: string; description: string }[]
-}
-export function parseDayun(text: string): DayunItem[] {
-  if (!text) return []
-  const result: DayunItem[] = []
-  const re = /(\d+)[\s-~至~到](\d+)岁?\s*([^\s]+)\s*(\d+)-(\d+)/g
-  let m: RegExpExecArray | null
-  while ((m = re.exec(text)) !== null) {
-    result.push({ year: m[3], ganzhi: m[3], startAge: parseInt(m[1]), startYear: parseInt(m[4]) })
-  }
-  return result
-}
-
-export interface ShenshaItem { name: string; description: string; pillar?: string }
-export function parseShensha(text: string): ShenshaItem[] {
-  if (!text) return []
-  const result: ShenshaItem[] = []
-  const re = /([^\n:：]+)[：:]\s*([^\n]+)/g
-  let m: RegExpExecArray | null
-  while ((m = re.exec(text)) !== null) {
-    const name = m[1].trim()
-    if (name && name.length < 20 && !name.includes("柱") && !name.includes("五行")) {
-      result.push({ name, description: m[2].trim() })
-    }
-  }
-  return result.slice(0, 8)
-}
-
-export interface ChatSession { id: string; title: string; lastMessage: string; lastTime: string; messageCount: number }
 export async function fetchSessions(type: "xianzhi"): Promise<ChatSession[]> {
   try {
-    const res = await apiFetch(`${API_BASE}/ai/xianzhi/sessions`)
+    const res = await apiFetch(`${API_BASE}${EP.SESSIONS}`)
     if (!res.ok) throw new Error("Not found")
     return res.json()
   } catch { return [] }
@@ -330,11 +213,9 @@ export async function fetchSessions(type: "xianzhi"): Promise<ChatSession[]> {
 export async function deleteSession(type: "xianzhi", id: string): Promise<void> {
   if (!id) return
   try {
-    await apiFetch(`${API_BASE}/ai/xianzhi/sessions/${id}`, { method: "DELETE" })
+    await apiFetch(`${API_BASE}${EP.SESSIONS}/${id}`, { method: "DELETE" })
   } catch {}
 }
-
-export interface SessionMessage { role: "user" | "assistant"; content: string; time?: string }
 
 export interface RagDoc { filename: string; size: number; modified: string }
 export interface RagStatus { ready: boolean; count: number }
@@ -416,15 +297,13 @@ export async function getSessionMessages(type: "xianzhi", id: string): Promise<S
     const res = await apiFetch(`${API_BASE}/ai/xianzhi/sessions/${id}/messages`)
     if (!res.ok) return []
     const data = await res.json()
-    return data.map((m: any) => ({
+    return data.map((m: { role?: string; content?: unknown; time?: string }) => ({
       role: (m.role === "user" || m.role === "human") ? "user" : "assistant",
       content: typeof m.content === "string" ? m.content : "",
       time: m.time || undefined,
     }))
   } catch { return [] }
 }
-
-export interface SessionBirthInfo { time: string | null; gender: string | null }
 
 /** 从会话历史中的排盘工具调用提取出生信息（支持农历/节日/时辰等自然语言输入场景）。 */
 export async function getSessionBirthInfo(id: string): Promise<SessionBirthInfo> {
@@ -525,10 +404,10 @@ export interface AdminUser {
 
 export interface AdminUserDetail {
   user: { id: string; nickname: string; avatar: string }
-  profiles: any[]
-  favorites: any[]
-  tarotRecords: any[]
-  sessions: any[]
+  profiles: BaziProfile[]
+  favorites: FavoriteCase[]
+  tarotRecords: TarotRecord[]
+  sessions: ChatSession[]
 }
 
 export async function listAdminUsers(limit = 200, offset = 0): Promise<{ total: number; users: AdminUser[] }> {
@@ -553,15 +432,6 @@ export interface FeedbackItem {
   content: string
   contact: string
   created_at: string
-}
-
-export interface AnswerFeedbackPayload {
-  conversation_id: string
-  question?: string
-  answer: string
-  rating: "up" | "down"
-  reason?: string
-  chart_snapshot?: Record<string, unknown>
 }
 
 export interface AnswerFeedbackItem {

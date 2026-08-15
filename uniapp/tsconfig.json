@@ -2,6 +2,8 @@
   "compilerOptions": {
     "target": "ESNext",
     "module": "ESNext",
+    // 历史坑：曾锁定 TS 4.9.5，moduleResolution "bundler" 不被识别导致 vue-tsc 报 TS5070；
+    // 已升级 typescript ^5.5 / vue-tsc ^2（与 frontend/ 对齐），恢复 bundler 解析。
     "moduleResolution": "bundler",
     "strict": true,
     "jsx": "preserve",
@@ -16,7 +18,8 @@
     "sourceMap": true,
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@shared/*": ["../shared/*"]
     },
     "lib": ["esnext", "dom"],
     "types": ["@dcloudio/types"],

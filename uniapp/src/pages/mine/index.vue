@@ -28,7 +28,7 @@
       </view>
 
       <!-- 八字档案 -->
-      <view v-if="user" class="card entry-card" @tap="uni.navigateTo({ url: '/pages/mine/profiles' })">
+      <view v-if="user" class="card entry-card" @tap="uniApp.navigateTo({ url: '/pages/mine/profiles' })">
         <view class="entry-head">
           <view class="card-title-row"><text class="card-dot">✦</text><text class="card-title">我的八字档案</text></view>
           <text class="entry-arrow">›</text>
@@ -37,7 +37,7 @@
       </view>
 
       <!-- 命例收藏 -->
-      <view v-if="user" class="card entry-card" @tap="uni.navigateTo({ url: '/pages/mine/favorites' })">
+      <view v-if="user" class="card entry-card" @tap="uniApp.navigateTo({ url: '/pages/mine/favorites' })">
         <view class="entry-head">
           <view class="card-title-row"><text class="card-dot">✦</text><text class="card-title">命例收藏</text></view>
           <text class="entry-arrow">›</text>
@@ -46,7 +46,7 @@
       </view>
 
       <!-- 塔罗记录 -->
-      <view v-if="user" class="card entry-card" @tap="uni.navigateTo({ url: '/pages/mine/tarots' })">
+      <view v-if="user" class="card entry-card" @tap="uniApp.navigateTo({ url: '/pages/mine/tarots' })">
         <view class="entry-head">
           <view class="card-title-row"><text class="card-dot">✦</text><text class="card-title">塔罗记录</text></view>
           <text class="entry-arrow">›</text>
@@ -78,6 +78,9 @@ import {
   fetchTarotRecords,
   updateMe,
 } from '@/api'
+
+// 模板中直接调用 uni.navigateTo 需显式暴露全局对象
+const uniApp = uni
 
 function goBack() {
   const pages = getCurrentPages()

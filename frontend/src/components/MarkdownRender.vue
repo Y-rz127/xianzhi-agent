@@ -5,6 +5,8 @@
 <script setup lang="ts">
 import { computed, onMounted } from "vue"
 import { marked } from "marked"
+// 安全底线（§3.4）：LLM 回答属不可信内容，v-html 渲染前必须经 DOMPurify 清洗防 XSS
+import DOMPurify from "dompurify"
 // 按需加载 highlight.js 核心，减少 bundle 体积（默认只注册常见语言）
 import hljs from "highlight.js/lib/core"
 import json from "highlight.js/lib/languages/json"
@@ -53,7 +55,10 @@ marked.use({
   },
 })
 
-const rendered = computed(() => marked(props.content) as string)
+// ADD_ATTR 保留自定义 renderer 注入的 style/target 属性；style 内容仍由 DOMPurify 清洗
+const rendered = computed(() =>
+  DOMPurify.sanitize(marked(props.content) as string, { ADD_ATTR: ["style", "target"] })
+)
 
 onMounted(() => { hljs.highlightAll() })
 </script>

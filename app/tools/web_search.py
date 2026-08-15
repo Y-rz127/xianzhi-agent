@@ -2,7 +2,7 @@
 from __future__ import annotations
 import httpx
 from langchain_core.tools import tool
-from app.config import settings
+from app.core.config import settings
 
 
 @tool

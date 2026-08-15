@@ -3,11 +3,11 @@ from __future__ import annotations
 
 from fastapi import Header, HTTPException, Query
 
-from app.config import settings
-from app.db import users as user_store
+from app.core.config import settings
+from app.db import repository as repo
 
 
-def get_current_user(
+async def get_current_user(
     authorization: str = Header(None),
     token: str = Query(None),
 ) -> dict:
@@ -22,7 +22,7 @@ def get_current_user(
         t = token
     if not t:
         raise HTTPException(status_code=401, detail="未登录或登录已失效")
-    user = user_store.get_by_token(t)
+    user = await repo.get_by_token(t)
     if not user:
         raise HTTPException(status_code=401, detail="未登录或登录已失效")
     return user

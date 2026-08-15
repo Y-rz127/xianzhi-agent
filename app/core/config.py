@@ -70,8 +70,6 @@ class Settings(BaseSettings):
     embedding_api_key: str = Field(default="", alias="EMBEDDING_API_KEY")
     # 向量数据库类型：chroma | postgres
     vector_store_type: str = Field(default="chroma", alias="VECTOR_STORE_TYPE")
-    # 向量数据库连接串（VECTOR_STORE_TYPE=postgres 时使用）
-    milvus_uri: str = Field(default="", alias="MILVUS_URI")
     # 向量数据库目录（VECTOR_STORE_TYPE=chroma 时使用）
     vector_db_dir: Path = Field(default=Path("./data/vector_db"), alias="VECTOR_DB_DIR")
     rag_k: int = Field(default=1, alias="RAG_K")
@@ -116,6 +114,14 @@ class Settings(BaseSettings):
         return f"{dsn}{sep}connect_timeout={timeout}"
 
 
+def ensure_dirs() -> None:
+    """创建运行时所需目录（显式调用，不在导入期触盘）。
+
+    R8 启动去副作用：原模块级 mkdir 改为由启动方（lifespan）显式调用，
+    保证导入 config 不产生文件系统副作用。
+    """
+    settings.memory_dir.mkdir(parents=True, exist_ok=True)
+    settings.vector_db_dir.mkdir(parents=True, exist_ok=True)
+
+
 settings = Settings()
-settings.memory_dir.mkdir(parents=True, exist_ok=True)
-settings.vector_db_dir.mkdir(parents=True, exist_ok=True)

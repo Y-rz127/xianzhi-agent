@@ -6,7 +6,7 @@ import asyncio
 from fastapi import APIRouter
 
 from app.api.common import client_error
-from app.logger import log
+from app.core.logger import log
 from app.tools.text_clean import clean_think_tags
 
 router = APIRouter(prefix="/xianzhi", tags=["Tools"])
@@ -48,6 +48,7 @@ async def hehun(
 ):
     """合婚分析。先调规则工具拿基础数据，再调 LLM 做综合解读。"""
     from fastapi import HTTPException
+
     from app.tools.bazi import bazi_hehun
     try:
         # 1. 规则层：排盘 + 五行互补评分（同步阻塞计算，放线程池避免卡住事件循环）
@@ -61,8 +62,11 @@ async def hehun(
             raise HTTPException(status_code=400, detail=base_result)
 
         # 2. LLM 层：基于规则结果做综合解读
-        from app.api import state
-        llm = state.get_chat_model()
+        from app.api.context import get_app_context
+        try:
+            llm = get_app_context().chat_model
+        except RuntimeError:
+            llm = None
         if llm is None:
             # 兜底：LLM 不可用时只返回规则结果
             return {"result": base_result}

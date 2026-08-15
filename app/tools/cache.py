@@ -11,7 +11,7 @@ import time
 from collections import OrderedDict
 from typing import Any
 
-from app.logger import log
+from app.core.logger import log
 
 
 class BaziCache:

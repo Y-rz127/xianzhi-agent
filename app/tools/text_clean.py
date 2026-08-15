@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 
-from app.logger import log
+from app.core.logger import log
 
 
 # 编译正则，避免每次调用重新编译

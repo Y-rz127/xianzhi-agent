@@ -7,13 +7,12 @@ from __future__ import annotations
 import hashlib
 import threading
 import time
-from typing import Any
 
-from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.language_models import BaseChatModel
+from langchain_core.messages import HumanMessage, SystemMessage
 
-from app.tools.bazi import bazi_chart, bazi_analysis, bazi_dayun
-
+from app.agent.prompts import REPORT_PROMPT_TEMPLATE, REPORT_SYSTEM_PROMPT
+from app.tools.bazi import bazi_analysis, bazi_chart, bazi_dayun
 
 SECTIONS = {
     "overview": "命盘总览",
@@ -33,33 +32,9 @@ _REPORT_CACHE_MAX = 50
 _report_cache: dict[str, tuple[float, str]] = {}
 _report_cache_lock = threading.Lock()
 
-_SYSTEM_PROMPT = "你是先知，一位精通八字命理的预测师。请基于传统命理理论客观分析，不夸大、不恐吓，末尾提醒用户理性看待。"
+_SYSTEM_PROMPT = REPORT_SYSTEM_PROMPT
 
-_REPORT_PROMPT = """请根据以下命盘信息，为用户生成一份结构化八字命理报告。
-
-用户出生时间：{birth_time}
-性别：{gender}
-
-【四柱排盘】
-{chart_text}
-
-【五行十神分析】
-{analysis_text}
-
-【大运信息】
-{dayun_text}
-
-请生成以下章节，每个章节用 ## 标题 分隔：
-{sections_text}
-
-要求：
-- 基于传统八字命理理论，客观分析
-- 每个章节内容充实，不少于 200 字
-- 不做绝对化断言，用语平和
-- 使用 Markdown 格式，可适当使用列表、加粗
-- 报告末尾用一段简短文字提醒理性看待命理
-
-直接输出报告正文，不要包含额外的开场白。"""
+_REPORT_PROMPT = REPORT_PROMPT_TEMPLATE
 
 
 def _report_cache_key(birth_time: str, gender: str, sections: list[str]) -> str:

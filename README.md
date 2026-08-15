@@ -144,10 +144,10 @@ LLM 自主规划、自主调工具，适合首次对话、用户主动提供生�
 
 ### 检索分层说明
 
-知识检索为「Layer 1 相似度召回 + 关键词重叠重排 + Layer 2 多 query 编排」结构；两条路径的上层编排是两套独立实现、预算口径不同：
+知识检索为「Layer 1 相似度召回 + 关键词重叠重排 + Layer 2 多 query 编排」结构；两条路径共用统一检索入口 `app.rag.retrieval.retrieve_for_context`（top-1 chunk + 跨 query 去重，去重键 `(source, content[:120])`，单 chunk 截断与条数上限由参数控制），差异仅在 query 构造：
 
-- **ReAct 工具路径**（`search_knowledge`）：`search_deduped(...)`，每条问题扩展为最多 4 条 query（原文 + 理论术语精准 query + 领域规则 query），跨 query 去重，**最多 6 条文档**。
-- **workflow 路径**（`_retrieve_rules`）：自研循环，**不调用 `search_deduped`**，按 `_MAX_KNOWLEDGE_TOTAL=2500` **字符**预算截断（单 query 还受 `_MAX_TEXT_PER_QUERY` 截断）；理论 / 专项 query 均注入用户原句以提升个性化召回；**chunk 级去重**（以 `(source, content[:120])` 为去重键），避免不同 query 命中相同首 chunk 时误杀后续不同 chunk。
+- **ReAct 工具路径**（`search_knowledge`）：`expand_knowledge_queries` 把每条问题扩展为最多 4 条 query（原文 + 理论术语精准 query + 领域规则 query），检索后最多取 4 条文档。
+- **workflow 路径**（`_retrieve_rules`）：query 来自 LLM 拆解 / 理论路径 / 断事路径（理论 / 专项 query 均注入用户原句以提升个性化召回），单 chunk 受 `_MAX_TEXT_PER_QUERY` 截断。
 
 Layer 1（`KnowledgeBase.search` → `_search_reranked`）为后端无关的两段式检索：
 
@@ -471,7 +471,7 @@ Supervisor (XianzhiWorkflow)
 
 ```powershell
 .venv\Scripts\python.exe -c "
-from app.agent.xianzhi_workflow import WORKERS, ReviewerWorker
+from app.agent.workflow.xianzhi_workflow import WORKERS, ReviewerWorker
 print(f'Workers: {len(WORKERS)}')
 reviewer = ReviewerWorker()
 print(f'Compliance risks: {len(reviewer.COMPLIANCE_RISKS)}')

@@ -3,10 +3,10 @@ from __future__ import annotations
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from app.api import state
 from app.api.common import client_error, is_message_too_long, message_too_long_text
-from app.logger import log
-from app.tarot_app import SPREADS
+from app.api.context import get_app_context
+from app.core.logger import log
+from app.tarot.tarot_app import SPREADS
 
 router = APIRouter(prefix="/tarot", tags=["Tarot"])
 
@@ -54,7 +54,8 @@ async def ws_tarot_divine(websocket: WebSocket):
             if spread not in SPREADS:
                 spread = "daily"
 
-            if state._tarot_app is None:
+            tarot_app = get_app_context().tarot_app
+            if tarot_app is None:
                 if not await _safe_ws_send(
                     websocket, {"type": "error", "data": "TarotApp not initialized"}
                 ):
@@ -64,7 +65,7 @@ async def ws_tarot_divine(websocket: WebSocket):
             # ===== 阶段一：抽牌 =====
             if action == "draw":
                 try:
-                    cards = state._tarot_app.draw_cards(spread)
+                    cards = tarot_app.draw_cards(spread)
                 except Exception as e:
                     log.exception("塔罗抽牌失败")
                     if not await _safe_ws_send(
@@ -95,7 +96,7 @@ async def ws_tarot_divine(websocket: WebSocket):
 
                 client_alive = True
                 try:
-                    async for chunk in state._tarot_app.divine_stream(question, spread, cards):
+                    async for chunk in tarot_app.divine_stream(question, spread, cards):
                         if not await _safe_ws_send(websocket, {"type": "message", "data": chunk}):
                             client_alive = False
                             log.info("客户端已断开，停止 LLM 解读")

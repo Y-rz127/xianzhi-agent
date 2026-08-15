@@ -9,9 +9,8 @@ import re
 
 from langchain_core.tools import tool
 
-from app.rag.retrieval import expand_knowledge_queries, search_deduped
-from app.rag.vector_store import knowledge_base
-
+from app.rag.retrieval import expand_knowledge_queries, retrieve_for_context
+from app.rag.vector_store import get_knowledge_base
 
 # 来源文件名 → 用户可读分类标签
 # 避免 LLM 看到"11_婚恋关系规则卡.md"后误写"《婚恋关系规则卡》"
@@ -106,11 +105,14 @@ def search_knowledge(query: str) -> str:
               知识库按命理概念索引，不按年份/人名/事件索引，带这些信息会检索不到结果。
 
     Returns:
-        命理知识库中相关的知识片段，包含来源标注
+        命理知识库中相关的知识片段，包含来源标注（如"断法·事业工作""古籍·《渊海子平》"）。
+        引用时：仅"古籍·《XXX》"类可加书名号写「《XXX》原文：」；其余类别只能意译，
+        禁止写「《XX规则卡》原文：」，也禁止在回答出现内部文档标题。
+        query 必须抽象为命理概念+断法方向，禁止带具体年份/人名/事件。
     """
-    if not knowledge_base.ready:
+    if not get_knowledge_base().ready:
         return "知识库未就绪"
-    docs = search_deduped(expand_knowledge_queries(query), max_docs=4)
+    docs = retrieve_for_context(expand_knowledge_queries(query), max_docs=4)
     if not docs:
         return "（未检索到相关知识）"
     parts = []

@@ -13,6 +13,7 @@ dist/
 
 # 虚拟环境
 .venv/
+.venv_review/
 venv/
 env/
 ENV/
@@ -50,9 +51,11 @@ htmlcov/
 # TRAE 工作区记忆
 .workbuddy/
 
-# 前端构建生成的类型声明
+# 前端构建生成的类型声明/编译产物（源文件为 *.config.ts，产物不得入库）
 frontend/*.config.d.ts
+frontend/*.config.js
 uniapp/*.config.d.ts
+uniapp/*.config.js
 
 # 本地向量模型
 models/*

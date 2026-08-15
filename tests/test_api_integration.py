@@ -18,7 +18,13 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.api import state as app_state
+from app.core.config import settings
 from main import app
+
+# 本地/CI 环境若配置了 API_KEYS，管理类端点（observability/rag/sessions）需携带 Key，
+# 否则中间件/require_admin 返回 401；未配置时为空 dict，行为不变。
+_FIRST_KEY = next((k.strip() for k in settings.api_keys.split(",") if k.strip()), "")
+AUTH_HEADERS = {"X-API-Key": _FIRST_KEY} if _FIRST_KEY else {}
 
 
 BIRTH_TIME = "1990-05-20 14:30"
@@ -89,14 +95,14 @@ def test_cache_stats(client: TestClient) -> None:
 
 
 def test_observability_status(client: TestClient) -> None:
-    response = client.get("/api/ai/observability/status")
+    response = client.get("/api/ai/observability/status", headers=AUTH_HEADERS)
     assert response.status_code == 200
     data = response.json()
     assert isinstance(data, dict)
 
 
 def test_sessions(client: TestClient) -> None:
-    response = client.get("/api/ai/xianzhi/sessions")
+    response = client.get("/api/ai/xianzhi/sessions", headers=AUTH_HEADERS)
     assert response.status_code == 200
     data = response.json()
     assert isinstance(data, list)
@@ -104,7 +110,7 @@ def test_sessions(client: TestClient) -> None:
 
 def test_rag_status(client: TestClient) -> None:
     """知识库状态端点：问答已并入先知对话流，此处只校验知识库本身可用。"""
-    response = client.get("/api/ai/rag/status")
+    response = client.get("/api/ai/rag/status", headers=AUTH_HEADERS)
     assert response.status_code == 200
     data = response.json()
     assert isinstance(data.get("ready"), bool)

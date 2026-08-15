@@ -1,8 +1,8 @@
 """ReAct 模式代理基类（对应 Java ReActAgent）。"""
 from __future__ import annotations
 from abc import abstractmethod
-from app.agent.base_agent import BaseAgent, AgentState
-from app.logger import log
+from app.agent.core.base_agent import BaseAgent, AgentState
+from app.core.logger import log
 
 
 class ReActAgent(BaseAgent):

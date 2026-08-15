@@ -4,7 +4,7 @@ import json
 import threading
 from pathlib import Path
 from langchain_core.messages import messages_from_dict, messages_to_dict
-from app.logger import log
+from app.core.logger import log
 
 
 class FileBasedChatMemory:

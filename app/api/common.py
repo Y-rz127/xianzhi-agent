@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from fastapi import HTTPException
 
-from app.config import settings
+from app.core.config import settings
 
 
 def client_error(e: Exception) -> str:

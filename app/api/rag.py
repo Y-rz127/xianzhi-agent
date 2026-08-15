@@ -11,8 +11,8 @@ from pathlib import Path
 from fastapi import APIRouter, File, HTTPException, UploadFile
 
 from app.api.common import client_error
-from app.logger import log
-from app.rag.vector_store import KNOWLEDGE_DIR, knowledge_base
+from app.core.logger import log
+from app.rag.vector_store import KNOWLEDGE_DIR, get_knowledge_base
 
 # 知识库管理接口
 mgmt_router = APIRouter(prefix="/rag", tags=["RAG"])
@@ -98,9 +98,10 @@ async def rebuild_rag_index(force: bool = False):
     force=true 时无视指纹强制全量重建。
     """
     try:
-        ready = knowledge_base.init(force=force)
-        return {"ready": ready, "embedding": knowledge_base.embedding_id}
-    except Exception as e:
+        kb = get_knowledge_base()
+        ready = kb.init(force=force)
+        return {"ready": ready, "embedding": kb.embedding_id}
+    except Exception:
         log.exception("重建 RAG 向量库失败")
         raise HTTPException(status_code=500, detail="重建失败，请查看服务日志")
 
@@ -109,6 +110,6 @@ async def rebuild_rag_index(force: bool = False):
 async def rag_status():
     """获取 RAG 知识库状态。"""
     return {
-        "ready": knowledge_base.ready,
+        "ready": get_knowledge_base().ready,
         "count": len(_list_markdown_files()),
     }

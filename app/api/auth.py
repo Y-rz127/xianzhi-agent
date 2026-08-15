@@ -6,9 +6,9 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from app.api.common import client_error
 from app.api.deps import get_current_user
-from app.config import settings
-from app.db import users as user_store
-from app.logger import log
+from app.core.config import settings
+from app.db import repository as repo
+from app.core.logger import log
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
 
@@ -17,7 +17,7 @@ router = APIRouter(prefix="/auth", tags=["Auth"])
 async def register(body: dict):
     """注册：昵称 + 密码，返回 token 与用户资料。"""
     try:
-        user = user_store.create_user(body.get("nickname", ""), body.get("password", ""))
+        user = await repo.create_user(body.get("nickname", ""), body.get("password", ""))
         return {"token": user["token"], "user": _safe(user)}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -29,7 +29,7 @@ async def register(body: dict):
 @router.post("/login")
 async def login(body: dict):
     """登录：昵称 + 密码，返回 token 与用户资料。"""
-    user = user_store.authenticate(body.get("nickname", ""), body.get("password", ""))
+    user = await repo.authenticate(body.get("nickname", ""), body.get("password", ""))
     if not user:
         raise HTTPException(status_code=401, detail="昵称或密码错误")
     return {"token": user["token"], "user": _safe(user)}
@@ -45,7 +45,7 @@ async def me(current_user: dict = Depends(get_current_user)):
 async def update_me(body: dict, current_user: dict = Depends(get_current_user)):
     """修改昵称 / 头像 / 密码。"""
     try:
-        updated = user_store.update_user(
+        updated = await repo.update_user(
             current_user["id"],
             nickname=body.get("nickname"),
             avatar=body.get("avatar"),
@@ -89,7 +89,7 @@ async def wx_login(body: dict):
             raise HTTPException(status_code=400, detail=f"微信登录失败: {data.get('errmsg', '未知错误')}")
         if not openid:
             raise HTTPException(status_code=400, detail="未能获取微信 openid")
-        user = user_store.create_or_get_by_wxopenid(openid)
+        user = await repo.create_or_get_by_wxopenid(openid)
         return {"token": user["token"], "user": _safe(user)}
     except HTTPException:
         raise

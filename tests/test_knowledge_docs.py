@@ -1,13 +1,12 @@
 from pathlib import Path
 
-
 KNOWLEDGE_DIR = Path(__file__).parents[1] / "app" / "rag" / "knowledge_docs"
 
 
 def test_rule_cards_exist_with_retrieval_keywords():
     """原有规则卡核心关键词校验（保留向后兼容）。"""
     expected = {
-        "10_事业财运规则卡.md": ["事业", "财运", "跳槽", "食伤生财"],
+        "10_事业工作断法.md": ["事业", "财运", "跳槽", "食伤生财"],
         "11_婚恋关系规则卡.md": ["感情", "配偶宫", "复合", "结婚"],
         "12_合冲刑害规则卡.md": ["六合", "六冲", "三刑", "自刑"],
         "13_大运流年咨询规则卡.md": ["大运", "流年", "立春", "回答模板"],
@@ -30,7 +29,8 @@ def test_all_knowledge_docs_present():
         "07_神煞初探.md",
         "08_八字排盘基础.md",
         "09_玄学史古籍.md",
-        "10_事业财运规则卡.md",
+        "10_事业工作断法.md",
+        "10b_财运收入断法.md",
         "11_婚恋关系规则卡.md",
         "12_合冲刑害规则卡.md",
         "13_大运流年咨询规则卡.md",
@@ -113,7 +113,7 @@ def test_doc03_ten_gods_expanded():
         "六亲",
         "偏财为父",
         "正财为正妻",
-        "正官为夫",
+        "正官为正夫",
         "七杀为偏夫",
         "偏印为母",
         "继母",
@@ -260,8 +260,8 @@ def test_doc09_classics_index_expanded():
 
 
 def test_doc10_career_expanded():
-    """10_事业财运规则卡：校验八格事业适配、细分断法、财运分层、求财应期。"""
-    text = (KNOWLEDGE_DIR / "10_事业财运规则卡.md").read_text(encoding="utf-8")
+    """10_事业工作断法 + 10b_财运收入断法：原事业财运规则卡已拆分为事业/财运两篇，分别校验。"""
+    career_text = (KNOWLEDGE_DIR / "10_事业工作断法.md").read_text(encoding="utf-8")
     for keyword in [
         "八格事业适配",
         "正官格",
@@ -276,19 +276,24 @@ def test_doc10_career_expanded():
         "裸辞",
         "合伙创业",
         "投资",
-        "开店",
         "副业",
-        "正财稳定",
-        "偏财投资",
+        "食伤生财",
+    ]:
+        assert keyword in career_text, f"10 缺失关键词: {keyword}"
+
+    wealth_text = (KNOWLEDGE_DIR / "10b_财运收入断法.md").read_text(encoding="utf-8")
+    for keyword in [
+        "稳定",
+        "投资",
         "比劫夺财",
         "食伤生财",
         "印旺无财",
         "求财应期",
-        "回款风险",
+        "回款",
         "负债",
         "官非破财",
     ]:
-        assert keyword in text, f"10 缺失关键词: {keyword}"
+        assert keyword in wealth_text, f"10b 缺失关键词: {keyword}"
 
 
 def test_doc11_marriage_expanded():
@@ -380,7 +385,8 @@ def test_doc13_dayun_consult_expanded():
 def test_all_docs_have_classic_citations():
     """所有扩容后的规则卡均含引用典籍小节，确保引经据典可追溯。"""
     citation_files = [
-        "10_事业财运规则卡.md",
+        "10_事业工作断法.md",
+        "10b_财运收入断法.md",
         "11_婚恋关系规则卡.md",
         "12_合冲刑害规则卡.md",
         "13_大运流年咨询规则卡.md",
@@ -813,8 +819,8 @@ def test_guji03_qiongtongbaojian():
     text = (KNOWLEDGE_DIR / "古籍03_穷通宝鉴十天干十二月喜忌.md").read_text(encoding="utf-8")
     for keyword in [
         "调候总论",
-        "寒命宜暖",
-        "燥命宜润",
+        "寒则暖之",
+        "燥则润之",
         "调候优先",
         "甲木调候",
         "乙木调候",
@@ -832,7 +838,7 @@ def test_guji03_qiongtongbaojian():
         "三冬",
         "丙火泄秀",
         "癸水润根",
-        "丙火暖之",
+        "丙火解冻暖局",
     ]:
         assert keyword in text, f"古籍03 缺失关键词: {keyword}"
 

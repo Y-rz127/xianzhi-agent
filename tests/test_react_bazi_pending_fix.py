@@ -5,6 +5,7 @@ sys.path.insert(0, r'c:\MyProjects\xianzhi-agent')
 
 from unittest.mock import patch, MagicMock
 from app.agent.xianzhi import Xianzhi
+from app.agent.birth_parse import resolve_bazi_selection
 
 
 def test_bazi_pending_blocks_chitchat():
@@ -56,12 +57,12 @@ def test_bazi_pending_survives_reset():
         assert agent._bazi_pending == pending, "_bazi_pending 应原样保留"
         print("  ✓ reset() 后 _bazi_pending 仍保留，下一轮可正常解析选择")
 
-        # 验证 _resolve_bazi_selection 仍能工作
-        bt = agent._resolve_bazi_selection("第一个", pending)
+        # 验证 resolve_bazi_selection 仍能工作（已抽离至 birth_parse 模块）
+        bt = resolve_bazi_selection("第一个", pending)
         assert bt == "1992-09-22 08:00", f"期望解析出 1992-09-22 08:00，实际 {bt}"
-        print("  ✓ _resolve_bazi_selection('第一个') 仍能命中候选")
+        print("  ✓ resolve_bazi_selection('第一个') 仍能命中候选")
 
-        bt2 = agent._resolve_bazi_selection("1992年", pending)
+        bt2 = resolve_bazi_selection("1992年", pending)
         assert bt2 == "1992-09-22 08:00", f"期望解析出 1992-09-22 08:00，实际 {bt2}"
         print("  ✓ _resolve_bazi_selection('1992年') 仍能命中候选")
 

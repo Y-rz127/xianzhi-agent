@@ -19,8 +19,11 @@ from typing import List
 
 from langchain_core.messages import BaseMessage
 
-from app.config import settings
-from app.logger import log
+from app.core.config import settings
+from app.core.logger import log
+
+
+from app.core.observability import record_error as _record_error  # 统一实现，消除跨模块重复定义
 
 
 # ---------------------------------------------------------------
@@ -155,7 +158,8 @@ class PostgresChatMemory:
             with _get_pool().connection() as conn:
                 return self._history(conversation_id, conn).messages
         except Exception as e:
-            log.warning("读取PG记忆失败 {} : {}", conversation_id, e)
+            log.error("读取PG记忆失败 {} : {}", conversation_id, e)
+            _record_error("memory.get")
             return []
 
     def add(self, conversation_id: str, messages: List[BaseMessage]):
@@ -181,7 +185,11 @@ class PostgresChatMemory:
                 for m in messages:
                     history.add_message(m)
         except Exception as e:
-            log.warning("写入PG记忆失败 {} : {}", conversation_id, e)
+            # 写入失败 = 丢对话轮次，不静默吞掉：记错误 + 埋点后重抛，
+            # 由调用方（如 cleanup）决定降级策略
+            log.error("写入PG记忆失败 {} : {}", conversation_id, e)
+            _record_error("memory.add")
+            raise
 
     def clear(self, conversation_id: str):
         """清空该会话在 PG 中的全部消息。"""
@@ -189,7 +197,10 @@ class PostgresChatMemory:
             with _get_pool().connection() as conn:
                 self._history(conversation_id, conn).clear()
         except Exception as e:
-            log.warning("清空PG记忆失败 {} : {}", conversation_id, e)
+            # 删除是用户显式操作，失败必须可见，不假装成功
+            log.error("清空PG记忆失败 {} : {}", conversation_id, e)
+            _record_error("memory.clear")
+            raise
 
     def close(self):
         """连接由模块级连接池统一管理，实例无需单独关闭（保留接口兼容）。"""
@@ -205,7 +216,8 @@ class PostgresChatMemory:
                 ).fetchone()
                 return (row[0] or "").strip() if row else ""
         except Exception as e:
-            log.warning("获取会话摘要失败 {} : {}", conversation_id, e)
+            log.error("获取会话摘要失败 {} : {}", conversation_id, e)
+            _record_error("memory.get_summary")
             return ""
 
     def save_summary(self, conversation_id: str, summary: str, msg_count: int):
@@ -220,7 +232,10 @@ class PostgresChatMemory:
                     (summary, msg_count, session_uuid),
                 )
         except Exception as e:
-            log.warning("保存会话摘要失败 {} : {}", conversation_id, e)
+            # 摘要丢失会导致后续上下文窗口失真，重抛由调用方（异步摘要任务）感知
+            log.error("保存会话摘要失败 {} : {}", conversation_id, e)
+            _record_error("memory.save_summary")
+            raise
 
     def get_message_count(self, conversation_id: str) -> int:
         """获取会话消息总数。"""
@@ -233,7 +248,8 @@ class PostgresChatMemory:
                 ).fetchone()
                 return row[0] if row else 0
         except Exception as e:
-            log.warning("获取消息计数失败 {} : {}", conversation_id, e)
+            log.error("获取消息计数失败 {} : {}", conversation_id, e)
+            _record_error("memory.get_message_count")
             return 0
 
     def get_last_summary_count(self, conversation_id: str) -> int:
@@ -247,7 +263,8 @@ class PostgresChatMemory:
                 ).fetchone()
                 return (row[0] or 0) if row else 0
         except Exception as e:
-            log.warning("获取上次摘要计数失败 {} : {}", conversation_id, e)
+            log.error("获取上次摘要计数失败 {} : {}", conversation_id, e)
+            _record_error("memory.get_last_summary_count")
             return 0
 
 
@@ -382,8 +399,9 @@ def get_session_info(prefix: str = "", user_id: str = None) -> list:
                 "messageCount": row[7],
             })
         return sessions
-    except Exception as e:
+    except Exception:
         log.exception("获取会话列表失败")
+        _record_error("memory.get_session_info")
         return []
 
 def _resolve_session_uuid(session_id: str) -> str:
@@ -397,8 +415,10 @@ def _resolve_session_uuid(session_id: str) -> str:
             ).fetchone()
         if row:
             return str(row[0])
-    except Exception:
-        pass
+    except Exception as e:
+        # 降级为确定性 UUID 计算（可能指向空会话），但错误必须可见
+        log.warning("解析 session_uuid 失败，回退确定性 UUID: {}", e)
+        _record_error("memory.resolve_session_uuid")
     return PostgresChatMemory._to_uuid(session_id)
 
 
@@ -409,8 +429,11 @@ def delete_session(session_id: str):
         with _get_pool().connection() as conn:
             conn.execute("DELETE FROM message_store WHERE session_id = %s", (session_uuid,))
             conn.execute("DELETE FROM session_metadata WHERE session_id = %s", (session_uuid,))
-    except Exception as e:
+    except Exception:
+        # 删除失败重抛，API 层返回 5xx，不向用户假装删除成功
         log.exception("删除会话失败: {}", session_id)
+        _record_error("memory.delete_session")
+        raise
 
 
 def get_messages(session_id: str) -> list:
@@ -456,8 +479,9 @@ def get_messages(session_id: str) -> list:
                 "time": str(row[1]) if row[1] else "",
             })
         return messages
-    except Exception as e:
+    except Exception:
         log.exception("获取会话消息失败: {}", session_id)
+        _record_error("memory.get_messages")
         return []
 
 
@@ -496,12 +520,13 @@ def get_birth_info_from_session(session_id: str) -> dict | None:
                     gd = args.get("gender")
                     if bt and gd:
                         try:
-                            from app.tools.bazi import _normalize_birth_time
+                            from app.domain.time_parse import _normalize_birth_time
                             bt = _normalize_birth_time(bt)
                         except Exception:
                             pass
                         return {"time": bt, "gender": gd}
         return None
     except Exception as e:
-        log.warning("提取会话出生信息失败 {} : {}", session_id, e)
+        log.error("提取会话出生信息失败 {} : {}", session_id, e)
+        _record_error("memory.get_birth_info")
         return None

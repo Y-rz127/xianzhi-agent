@@ -1,0 +1,87 @@
+# 先知智能体 · CI 门禁
+# 对应 docs/code-review-standard.md §3（硬指标机拦）与 §8。
+# 作用：把"格式/类型/单测/覆盖率"从人工盯变成自动拦截，审查人只审逻辑/设计/安全判断。
+# 注意：本文件为可直接启用的起点，数据库相关测试若与你们的 TEST_DB_URL 约定不符，请微调 env。
+
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: 后端 (ruff + pytest + cov)
+    runs-on: ubuntu-latest
+    # pgvector 服务：供依赖 PostgreSQL/pgvector 的测试使用。
+    services:
+      pg:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: xianzhi_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 设置 Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          # 注意：项目约束 requires-python ">=3.11,<3.13"，勿升到 3.13。
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.lock
+          # dev 工具（pytest/ruff/pytest-asyncio）在 pyproject optional，这里显式安装稳妥。
+          pip install "pytest>=8.0.0" "pytest-asyncio>=0.24.0" "ruff>=0.7.0" "pytest-cov"
+
+      - name: Ruff 检查（硬指标：零错误）
+        run: ruff check .
+
+      - name: 运行测试 + 覆盖率门禁
+        env:
+          # 测试库连接串；如你们的测试约定不同，改这里。
+          TEST_DB_URL: postgresql://postgres:postgres@localhost:5432/xianzhi_test
+        run: |
+          # 整体覆盖率硬门槛 60%（§3.6）。核心模块 ≥80% 建议后续用 .coveragerc 分模块强化。
+          pytest -q --cov=app --cov-report=term-missing --cov-fail-under=60
+
+  frontend:
+    name: 前端 (vue-tsc + build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 设置 Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: 安装依赖
+        run: |
+          if [ -f package-lock.json ]; then npm ci; else npm install; fi
+
+      - name: 类型检查（硬指标：零错误，strict）
+        run: npm run build
+        # 注：当前 package.json 仅有 dev/build/preview，无独立 lint 脚本。
+        # 如需 ESLint/Prettier，待补充配置后在此追加一步。

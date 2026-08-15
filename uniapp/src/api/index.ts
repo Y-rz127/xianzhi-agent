@@ -6,6 +6,21 @@
 import { getConfig } from '@/config'
 import { getToken } from '@/utils/storage'
 
+// R11 共享 API 层：数据模型/文本解析器/端点常量与 Web 端共用，统一在仓库根 shared/api 维护
+export type {
+  AnswerFeedbackPayload, BaziProfile, ChartAnalysis, ChartCase, ChartData,
+  ChatSession, DayunItem, FavoriteCase, HehunParams, LiuNianItem, Pillar,
+  SessionMessage, ShenshaItem, TarotRecord, WuxingItem, XzUser,
+} from '@shared/api'
+export type { SessionBirthInfo as BirthInfo } from '@shared/api'
+export { parseDayun, parsePillars, parseShensha, parseWuxing } from '@shared/api'
+import type {
+  AnswerFeedbackPayload, BaziProfile, ChartCase, ChartData, ChatSession,
+  FavoriteCase, HehunParams, SessionMessage, TarotCard, TarotRecord, XzUser,
+} from '@shared/api'
+import type { SessionBirthInfo } from '@shared/api'
+import { EP, profileBody } from '@shared/api'
+
 function getApiBase(): string {
   return getConfig().apiBase
 }
@@ -31,6 +46,7 @@ function request<T = any>(options: UniApp.RequestOptions): Promise<T> {
         if (res.statusCode >= 200 && res.statusCode < 300) {
           resolve(res.data as T)
         } else {
+          // any 理由：后端错误响应结构未知，仅安全提取 detail 字段
           const detail =
             typeof res.data === 'object' && res.data !== null && 'detail' in res.data
               ? (res.data as any).detail
@@ -64,6 +80,7 @@ function get<T = any>(url: string, params?: Record<string, any>): Promise<T> {
   return request<T>({ url: url + qs, method: 'GET' })
 }
 
+// any 理由：通用传输层，响应/请求体类型由调用方泛型 T 约束，此处无法静态推导
 function post<T = any>(url: string, data?: any): Promise<T> {
   return request<T>({ url: withToken(url), method: 'POST', data, header: { 'Content-Type': 'application/json' } })
 }
@@ -98,20 +115,8 @@ export const chatWithXianzhiSync = (
 
 export interface HehunResult { result?: string }
 
-export interface HehunParams {
-  birthTimeA: string
-  genderA: string
-  birthTimeB: string
-  genderB: string
-  /** 日柱流派：1=早子时（子时换日），2=晚子时（默认） */
-  sect?: number
-  /** 出生地经度（°E），用于真太阳时校正 */
-  longitudeA?: number
-  longitudeB?: number
-}
-
 export const hehun = (a: HehunParams) =>
-  get<HehunResult>('/ai/xianzhi/hehun', {
+  get<HehunResult>(EP.HEHUN, {
     birth_time_a: a.birthTimeA,
     gender_a: a.genderA,
     birth_time_b: a.birthTimeB,
@@ -125,27 +130,10 @@ export const getCacheStats = () => get('/ai/xianzhi/cache_stats')
 
 export const getHealth = () => get<{ status: string; rag_ready: boolean }>('/ai/health')
 
-/* ============ 直排盘结构化数据 ============ */
-
-export interface ChartData {
-  pillars: Pillar[]
-  wuxing: WuxingItem[]
-  dayun: DayunItem[]
-  liunian: LiuNianItem[]
-  shensha: ShenshaItem[]
-  analysis?: ChartAnalysis
-  startYun?: Record<string, any>
-  warnings?: string[]
-  chartText?: string
-  analysisText?: string
-  dayunText?: string
-  liunianText?: string
-  mingGong?: string
-  shenGong?: string
-}
+/* ============ 直排盘结构化数据（类型见 shared/api/types） ============ */
 
 export const getChart = (birthTime: string, gender: string, sect = 2, yunSect = 1, longitude?: number) =>
-  get<ChartData>('/ai/xianzhi/chart', {
+  get<ChartData>(EP.CHART, {
     birth_time: birthTime,
     gender,
     sect,
@@ -206,27 +194,12 @@ export const downloadFullReportPdf = (birthTime: string, gender: string, section
     ...(sections?.length ? { sections: sections.join(',') } : {}),
   })
 
-/* ============ 命例管理 ============ */
+/* ============ 命例管理（类型见 shared/api/types） ============ */
 
-export interface ChartCase {
-  id: string
-  name: string
-  tags: string[]
-  birthTime: string
-  gender: string
-  createdAt: string
-  updatedAt: string
-  bazi?: string
-  chartData?: any
-  bio?: string
-  analysis?: string
-  keypoints?: string
-}
-
-export const fetchChartCases = () => get<ChartCase[]>('/ai/xianzhi/cases')
+export const fetchChartCases = () => get<ChartCase[]>(EP.CASES)
 
 export const createChartCase = (payload: Partial<ChartCase>) =>
-  post<{ id?: string; error?: string }>('/ai/xianzhi/cases', {
+  post<{ id?: string; error?: string }>(EP.CASES, {
     name: payload.name,
     birth_time: payload.birthTime,
     gender: payload.gender,
@@ -235,24 +208,16 @@ export const createChartCase = (payload: Partial<ChartCase>) =>
   })
 
 export const updateChartCase = (id: string, payload: Partial<ChartCase>) =>
-  put(`/ai/xianzhi/cases/${id}`, {
+  put(`${EP.CASES}/${id}`, {
     name: payload.name,
     tags: payload.tags,
     birth_time: payload.birthTime,
     gender: payload.gender,
   })
 
-export const deleteChartCase = (id: string) => del(`/ai/xianzhi/cases/${id}`)
+export const deleteChartCase = (id: string) => del(`${EP.CASES}/${id}`)
 
 /* ============ 会话管理 ============ */
-
-export interface ChatSession {
-  id: string
-  title: string
-  lastMessage: string
-  lastTime: string
-  messageCount: number
-}
 
 export const fetchSessions = (type: 'xianzhi') => {
   const endpoint = 'xianzhi'
@@ -264,240 +229,86 @@ export const deleteSession = (type: 'xianzhi', id: string) => {
   return del(`/ai/xianzhi/sessions/${id}`)
 }
 
-export interface SessionMessage {
-  role: 'user' | 'assistant'
-  content: string
-  time?: string
-}
-
 export const getSessionMessages = async (type: 'xianzhi', id: string): Promise<SessionMessage[]> => {
   if (!id) return []
-  const data = await get<any[]>(`/ai/xianzhi/sessions/${id}/messages`)
+  interface RawMessage { role?: string; content?: unknown; time?: string }
+  const data = await get<RawMessage[]>(`/ai/xianzhi/sessions/${id}/messages`)
   // 后端 get_messages 已统一返回 'user'/'assistant'，并已过滤 tool/system/next_step_prompt
   // 前端只需直接透传，避免二次映射导致 user 被错分成 assistant
-  return (data || []).map((m: any) => ({
+  return (data || []).map((m: RawMessage) => ({
     role: (m.role === 'user' || m.role === 'assistant') ? m.role : 'assistant',
     content: typeof m.content === 'string' ? m.content : '',
     time: m.time || undefined,
   }))
 }
 
-export interface BirthInfo { time: string | null; gender: string | null }
-
 /** 从会话历史中的排盘工具调用提取出生信息（支持农历/节日/时辰等自然语言输入场景）。 */
-export const getSessionBirthInfo = async (id: string): Promise<BirthInfo> => {
+export const getSessionBirthInfo = async (id: string): Promise<SessionBirthInfo> => {
   if (!id) return { time: null, gender: null }
   try {
-    return await get<BirthInfo>(`/ai/xianzhi/sessions/${id}/birth-info`)
+    return await get<SessionBirthInfo>(`/ai/xianzhi/sessions/${id}/birth-info`)
   } catch {
     return { time: null, gender: null }
   }
 }
 
-/* ============ 文本解析工具（与 Web 端 frontend/src/api 一致） ============ */
+/* ============ 文本解析工具：已上收至 shared/api/parsers（顶部重导出） ============ */
 
-export interface Pillar {
-  name: string
-  ganzhi: string
-  nayin: string
-  gan?: string
-  zhi?: string
-  ganWuxing?: string
-  zhiWuxing?: string
-  hiddenStems?: string[]
-  shishenGan?: string
-  shishenZhi?: string[]
-  changsheng?: string
-  zizuo?: string
-  xunkong?: string
-}
-export function parsePillars(text: string): Pillar[] {
-  if (!text) return []
-  const result: Pillar[] = []
-  const re = /(年柱|月柱|日柱|时柱)[:\s]*([^\s(]+)\s*\(([^)]+)\)/g
-  let m: RegExpExecArray | null
-  while ((m = re.exec(text)) !== null) {
-    result.push({ name: m[1], ganzhi: m[2].trim(), nayin: m[3].trim() })
-  }
-  return result
-}
-
-export interface WuxingItem { name: string; count: number; color: string }
-export function parseWuxing(text: string): WuxingItem[] {
-  if (!text) return []
-  const colors: Record<string, string> = {
-    金: '#d4af37', 木: '#4a7c3a', 水: '#3a6ea5', 火: '#c0392b', 土: '#8b6f47',
-  }
-  const result: WuxingItem[] = []
-  const m = text.match(/['"]?金['"]?\s*[:=]\s*(\d+).*?['"]?木['"]?\s*[:=]\s*(\d+).*?['"]?水['"]?\s*[:=]\s*(\d+).*?['"]?火['"]?\s*[:=]\s*(\d+).*?['"]?土['"]?\s*[:=]\s*(\d+)/s)
-  if (m) {
-    const vals = [parseInt(m[1]), parseInt(m[2]), parseInt(m[3]), parseInt(m[4]), parseInt(m[5])]
-    const names = ['金', '木', '水', '火', '土']
-    names.forEach((n, i) => result.push({ name: n, count: vals[i], color: colors[n] }))
-  }
-  return result
-}
-
-export interface ChartAnalysis {
-  day_master?: string
-  day_master_wuxing?: string
-  strength?: string
-  strength_score?: number
-  useful_hint?: string
-  tenGods?: Record<string, number>
-  exposedStems?: string[]
-  rootedStems?: string[]
-  combinations?: string[]
-  clashes?: string[]
-  harms?: string[]
-  punishments?: string[]
-  threeAssemblies?: string[]
-  season?: string
-  adjustment?: string
-  patternHint?: string
-  confidence?: number
-}
-
-export interface DayunItem { year: string; ganzhi: string; startAge: number; startYear: number; endAge?: number; endYear?: number }
-export interface LiuNianItem { year: string; ganzhi: string; age?: number; dayun?: string; dayunStartYear?: number; dayunEndYear?: number; xunkong?: string }
-export function parseDayun(text: string): DayunItem[] {
-  if (!text) return []
-  const result: DayunItem[] = []
-  const re = /(\d+)[\s-~至~到](\d+)岁?\s*([^\s]+)\s*(\d+)-(\d+)/g
-  let m: RegExpExecArray | null
-  while ((m = re.exec(text)) !== null) {
-    result.push({ year: m[3], ganzhi: m[3], startAge: parseInt(m[1]), startYear: parseInt(m[4]) })
-  }
-  return result
-}
-
-export interface ShenshaItem { name: string; description: string; pillar?: string }
-export function parseShensha(text: string): ShenshaItem[] {
-  if (!text) return []
-  const result: ShenshaItem[] = []
-  const re = /([^\n:：]+)[：:]\s*([^\n]+)/g
-  let m: RegExpExecArray | null
-  while ((m = re.exec(text)) !== null) {
-    const name = m[1].trim()
-    if (name && name.length < 20 && !name.includes('柱') && !name.includes('五行')) {
-      result.push({ name, description: m[2].trim() })
-    }
-  }
-  return result.slice(0, 8)
-}
-
-/* ============ 账号登录 ============ */
-
-export interface XzUser { id: string; nickname: string; avatar: string }
+/* ============ 账号登录（类型见 shared/api/types） ============ */
 
 export const register = (nickname: string, password: string) =>
-  post<{ token: string; user: XzUser }>('/ai/auth/register', { nickname, password })
+  post<{ token: string; user: XzUser }>(EP.AUTH_REGISTER, { nickname, password })
 
 export const login = (nickname: string, password: string) =>
-  post<{ token: string; user: XzUser }>('/ai/auth/login', { nickname, password })
+  post<{ token: string; user: XzUser }>(EP.AUTH_LOGIN, { nickname, password })
 
 export const wxLogin = (code: string) =>
-  post<{ token: string; user: XzUser }>('/ai/auth/wx-login', { code })
+  post<{ token: string; user: XzUser }>(EP.AUTH_WX_LOGIN, { code })
 
-export const fetchMe = () => get<{ user: XzUser }>('/ai/auth/me')
+export const fetchMe = () => get<{ user: XzUser }>(EP.AUTH_ME)
 
 export const updateMe = (body: { nickname?: string; avatar?: string; password?: string }) =>
-  put<{ user: XzUser }>('/ai/auth/me', body)
+  put<{ user: XzUser }>(EP.AUTH_ME, body)
 
 /* ============ 八字档案（按用户隔离） ============ */
 
-export interface BaziProfile {
-  id: string
-  name: string
-  relation: string
-  birthTime: string
-  gender: string
-  sect: number
-  yunSect: number
-  chartData?: any
-  createdAt: string
-}
-
-export const fetchProfiles = () => get<BaziProfile[]>('/ai/profiles')
+export const fetchProfiles = () => get<BaziProfile[]>(EP.PROFILES)
 
 export const createProfile = (p: Partial<BaziProfile>) =>
-  post<{ id: string }>('/ai/profiles', {
-    name: p.name,
-    relation: p.relation,
-    birth_time: p.birthTime,
-    gender: p.gender,
-    sect: p.sect ?? 2,
-    yun_sect: p.yunSect ?? 1,
-    chart_data: p.chartData,
-  })
+  post<{ id: string }>(EP.PROFILES, profileBody(p))
 
 export const updateProfile = (id: string, p: Partial<BaziProfile>) =>
-  put(`/ai/profiles/${id}`, {
-    name: p.name,
-    relation: p.relation,
-    birth_time: p.birthTime,
-    gender: p.gender,
-    sect: p.sect ?? 2,
-    yun_sect: p.yunSect ?? 1,
-    chart_data: p.chartData,
-  })
+  put(`${EP.PROFILES}/${id}`, profileBody(p))
 
-export const deleteProfile = (id: string) => del(`/ai/profiles/${id}`)
+export const deleteProfile = (id: string) => del(`${EP.PROFILES}/${id}`)
 
 /* ============ 命例收藏（按用户隔离） ============ */
 
-export interface FavoriteCase {
-  caseId: string
-  name: string
-  tags: string[]
-  birthTime: string
-  gender: string
-  chartData?: any
-  createdAt: string
-}
-
-export const fetchFavorites = () => get<FavoriteCase[]>('/ai/favorites')
-export const addFavorite = (caseId: string) => post('/ai/favorites', { case_id: caseId })
-export const removeFavorite = (caseId: string) => del(`/ai/favorites/${caseId}`)
+export const fetchFavorites = () => get<FavoriteCase[]>(EP.FAVORITES)
+export const addFavorite = (caseId: string) => post(EP.FAVORITES, { case_id: caseId })
+export const removeFavorite = (caseId: string) => del(`${EP.FAVORITES}/${caseId}`)
 export const favoriteStatus = (caseId: string) =>
-  get<{ favorited: boolean }>(`/ai/favorites/${caseId}/status`)
+  get<{ favorited: boolean }>(`${EP.FAVORITES}/${caseId}/status`)
 
 /* ============ 塔罗记录（按用户隔离） ============ */
 
-export interface TarotRecord {
-  id: string
-  spread: string
-  question: string
-  cards: any[]
-  interpretation: string
-  createdAt: string
-}
-
-export const fetchTarotRecords = () => get<TarotRecord[]>('/ai/tarot_records')
-export const createTarotRecord = (r: { spread: string; question?: string; cards: any[]; interpretation: string }) =>
-  post<{ id: string }>('/ai/tarot_records', r)
-export const deleteTarotRecord = (id: string) => del(`/ai/tarot_records/${id}`)
+export const fetchTarotRecords = () => get<TarotRecord[]>(EP.TAROT_RECORDS)
+export const createTarotRecord = (r: { spread: string; question?: string; cards: TarotCard[]; interpretation: string }) =>
+  post<{ id: string }>(EP.TAROT_RECORDS, r)
+export const deleteTarotRecord = (id: string) => del(`${EP.TAROT_RECORDS}/${id}`)
 
 /* ============ 我的聚合 + 我的对话 ============ */
 
-export const fetchMyOverview = () => get<{ user: XzUser; stats: any }>('/ai/me')
-export const fetchMySessions = () => get<ChatSession[]>('/ai/xianzhi/sessions/mine')
+export const fetchMyOverview = () =>
+  get<{ user: XzUser; stats: { profiles: number; favorites: number; tarotRecords: number; sessions: number } }>(EP.ME)
+export const fetchMySessions = () => get<ChatSession[]>(EP.SESSIONS_MINE)
 
 /* ============ 问题反馈 ============ */
 
 export const submitFeedback = (content: string, contact?: string) =>
-  post('/ai/feedback', { content, contact })
+  post(EP.FEEDBACK, { content, contact })
 
 /* ============ 回答反馈（点赞/点踩） ============ */
 
-export interface AnswerFeedbackPayload {
-  conversation_id: string
-  question?: string
-  answer: string
-  rating: 'up' | 'down'
-  reason?: string
-  chart_snapshot?: Record<string, unknown>
-}
-
 export const submitAnswerFeedback = (payload: AnswerFeedbackPayload) =>
-  post<{ id: string }>('/ai/feedback/answer', payload)
+  post<{ id: string }>(EP.FEEDBACK_ANSWER, payload)
