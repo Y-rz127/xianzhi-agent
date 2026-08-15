@@ -340,12 +340,12 @@ def check_facts(answer: str, chart: BaziChart, other_chart: BaziChart | None = N
         if not expected or stated == expected:
             continue
         # 大运语境排除：年份+干支附近若明确在描述大运（出现大运关键词），则该干支视为大运而非流年，跳过校验。
-            # 直接以「年份附近有大运关键词」语义判断，避免把大运干支误判为流年错误（不依赖 dayun 集合完整度）。
-            start = max(0, match.start() - 18)
-            end = min(len(answer), match.end() + 18)
-            context = answer[start:end]
-            if any(kw in context for kw in _DAYUN_KEYWORDS):
-                continue
+        # 直接以「年份附近有大运关键词」语义判断，避免把大运干支误判为流年错误（不依赖 dayun 集合完整度）。
+        start = max(0, match.start() - 18)
+        end = min(len(answer), match.end() + 18)
+        context = answer[start:end]
+        if any(kw in context for kw in _DAYUN_KEYWORDS):
+            continue
         issues.append(f"{year}年流年应为{expected}，回答写成了{stated}")
 
     # 每个柱名下，两张盘各自合法的干支都算正确
