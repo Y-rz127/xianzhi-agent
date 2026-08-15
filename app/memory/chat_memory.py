@@ -1,9 +1,12 @@
 """基于文件的对话记忆（对应 Java FileBasedChatMemory）。"""
 from __future__ import annotations
+
 import json
 import threading
 from pathlib import Path
+
 from langchain_core.messages import messages_from_dict, messages_to_dict
+
 from app.core.logger import log
 
 

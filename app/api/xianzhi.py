@@ -9,8 +9,8 @@ from sse_starlette.sse import EventSourceResponse
 from app.api.common import check_message_length, client_error, is_message_too_long, message_too_long_text
 from app.api.context import AppContext, app_context_dependency, get_app_context
 from app.api.deps import require_admin
-from app.db import repository as repo
 from app.core.logger import log
+from app.db import repository as repo
 
 router = APIRouter(prefix="/xianzhi", tags=["Xianzhi"])
 

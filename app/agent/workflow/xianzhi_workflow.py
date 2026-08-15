@@ -16,13 +16,20 @@ from dataclasses import replace
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 
-from app.agent.core.base_agent import _wrap_user_input
 from app.agent.prompts import (
-    ORACLE_BASE_SYSTEM,
-    WORKER_PREAMBLE_TEMPLATE,
-    WORKFLOW_FACT_REDLINE,
     domain_sysprompt,
-    reflect_sysprompt,
+)
+
+# 消息装配 / 事实校验职责已抽离至 workflow_messages（解耦单一职责模块）
+from app.agent.workflow.workflow_messages import (  # noqa: F401
+    build_messages,
+    build_repair_messages,
+    check_facts,
+    compact_facts,
+    compact_history,
+    fact_block,
+    get_chart_facts_text,
+    invoke,
 )
 
 # ---- R9 拆分：子模块符号重导出（既有 import 不变） ----
@@ -33,6 +40,14 @@ from app.agent.workflow.workflow_models import (  # noqa: F401
     QuestionIntent,
     WorkerResult,
     WorkflowChartContext,
+)
+
+# 检索 / 合婚对方盘解析职责已抽离至 workflow_retrieval（解耦单一职责模块）
+from app.agent.workflow.workflow_retrieval import (  # noqa: F401
+    build_match_basis,
+    extend_chart_if_needed,
+    parse_other_birth,
+    retrieve_rules,
 )
 from app.agent.workflow.workflow_support import (  # noqa: F401
     _ALL_BAZI_SIGNALS,
@@ -52,46 +67,13 @@ from app.agent.workflow.workflow_workers import (  # noqa: F401
     WORKERS,
     ReviewerWorker,
 )
-from app.domain.bazi_engine import (
-    CONTROLS,
-    GAN_CHONG,
-    GAN_HE,
-    GAN_WUXING,
-    BaziChart,
-    _compute_shensha,
-    build_bazi_chart,
-    parse_gender,
-)
 from app.core.logger import log
 
 # 检索策略（领域关键词/领域检索词/理论术语检索词/术语识别）统一由 app.rag.retrieval 提供，
 # 与 ReAct 工具路径（app/tools/rag_search.py）共用一套体系
 from app.rag.retrieval import (
-    DOMAIN_RULE_QUERIES,
     detect_domain,
-    detect_theory_topic,
-    retrieve_for_context,
-)
-from app.rag.vector_store import get_knowledge_base
-from app.tools.text_clean import clean_think_tags
-
-# 检索 / 合婚对方盘解析职责已抽离至 workflow_retrieval（解耦单一职责模块）
-from app.agent.workflow.workflow_retrieval import (  # noqa: F401
-    build_match_basis,
-    extend_chart_if_needed,
-    parse_other_birth,
-    retrieve_rules,
-)
-# 消息装配 / 事实校验职责已抽离至 workflow_messages（解耦单一职责模块）
-from app.agent.workflow.workflow_messages import (  # noqa: F401
-    build_messages,
-    build_repair_messages,
-    check_facts,
-    compact_facts,
-    compact_history,
-    fact_block,
-    get_chart_facts_text,
-    invoke,
+    detect_theory_topic,  # noqa: F401  # 测试仍从本模块导入
 )
 
 

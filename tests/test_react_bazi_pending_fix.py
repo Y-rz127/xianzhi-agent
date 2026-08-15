@@ -1,11 +1,12 @@
 """验证 ReAct 路径修复：不依赖真实 LLM，直接构造 Xianzhi Agent 状态。"""
 import sys
-import os
+
 sys.path.insert(0, r'c:\MyProjects\xianzhi-agent')
 
-from unittest.mock import patch, MagicMock
-from app.agent.xianzhi import Xianzhi
+from unittest.mock import MagicMock, patch
+
 from app.agent.birth_parse import resolve_bazi_selection
+from app.agent.xianzhi import Xianzhi
 
 
 def test_bazi_pending_blocks_chitchat():

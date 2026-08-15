@@ -23,6 +23,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from app.api.common import client_error
 from app.api.deps import require_admin
 from app.core.logger import log
+from app.domain.bazi_engine import extract_bazi_brief
 
 router = APIRouter(prefix="/cases", tags=["Cases"])
 
@@ -108,7 +109,6 @@ def _build_chart_data(birth_time: str, gender: str) -> dict[str, Any]:
     from app.domain.bazi_engine import (
         build_bazi_chart,
         chart_to_api_dict,
-        extract_bazi_brief,
         format_analysis_text,
         format_chart_text,
         format_dayun_text,

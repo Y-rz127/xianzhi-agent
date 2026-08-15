@@ -117,7 +117,8 @@ async def create_admin_account(req: Request) -> dict:
     for acc in accounts:
         if acc.get("username") == username:
             raise HTTPException(status_code=409, detail="用户名已存在")
-    import time, datetime
+    import datetime
+    import time
     new_id = f"acc_{int(time.time())}"
     new_account = {
         "id": new_id,

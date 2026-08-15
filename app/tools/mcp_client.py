@@ -108,7 +108,7 @@ class MCPManager:
         self._loop = asyncio.get_running_loop()
         try:
             from mcp import ClientSession
-            from mcp.client.stdio import stdio_client, StdioServerParameters
+            from mcp.client.stdio import StdioServerParameters, stdio_client
         except ImportError:
             log.warning("未安装 mcp 库，跳过 MCP")
             return

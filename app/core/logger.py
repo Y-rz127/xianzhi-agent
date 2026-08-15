@@ -1,7 +1,8 @@
 """统一日志配置。"""
-import os
 import sys
+
 from loguru import logger
+
 from app.core.config import settings
 
 logger.remove()

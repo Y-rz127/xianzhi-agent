@@ -8,8 +8,8 @@ import json
 import re
 import uuid
 
-from app.db.schema import _ensure_tables, _record_error, _safe_json
 from app.core.logger import log
+from app.db.schema import _ensure_tables, _record_error, _safe_json
 from app.memory.postgres_memory import _get_pool
 
 

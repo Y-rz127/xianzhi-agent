@@ -12,8 +12,8 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from app.agent.prompts import REVIEWER_SYSTEM
 from app.agent.workflow.workflow_models import DomainWorker, FactCheckResult
 from app.agent.workflow.workflow_support import _parse_json
-from app.domain.bazi_engine import BaziChart, format_fact_context
 from app.core.logger import log
+from app.domain.bazi_engine import BaziChart, format_fact_context
 
 _REVIEWER_SYSTEM = REVIEWER_SYSTEM
 

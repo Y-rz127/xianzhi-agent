@@ -11,13 +11,6 @@ from typing import Optional
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
-from app.agent.core.base_agent import AgentState, BaseAgent
-from app.agent.prompts import (
-    CHITCHAT_SYSTEM,
-    ORACLE_BASE_SYSTEM,
-    REACT_FACT_GUARDRAILS,
-    REACT_NEXT_STEP_PROMPT,
-)
 from app.agent.birth_parse import (  # 解耦：生辰解析职责独立成模块
     detect_birth_signal,
     extract_birth_info,
@@ -25,7 +18,14 @@ from app.agent.birth_parse import (  # 解耦：生辰解析职责独立成模�
     extract_pillars,
     resolve_bazi_selection,
 )
+from app.agent.core.base_agent import AgentState, BaseAgent
 from app.agent.core.tool_call_agent import ToolCallAgent
+from app.agent.prompts import (
+    CHITCHAT_SYSTEM,
+    ORACLE_BASE_SYSTEM,
+    REACT_FACT_GUARDRAILS,
+    REACT_NEXT_STEP_PROMPT,
+)
 from app.agent.workflow.xianzhi_workflow import (
     WorkflowChartContext,
     XianzhiWorkflow,
@@ -35,8 +35,8 @@ from app.agent.workflow.xianzhi_workflow import (
     render_full_fact_context,
 )
 from app.core.config import settings
-from app.domain.bazi_engine import find_birth_dates_from_pillars
 from app.core.logger import log
+from app.domain.bazi_engine import find_birth_dates_from_pillars
 from app.memory import create_chat_memory
 from app.tools.bazi import _normalize_birth_time
 from app.tools.mcp_client import mcp_manager

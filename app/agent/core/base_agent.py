@@ -1,8 +1,11 @@
 """抽象基础代理类（对应 Java BaseAgent）。"""
 from __future__ import annotations
+
 from abc import ABC, abstractmethod
 from enum import Enum
+
 from langchain_core.messages import HumanMessage
+
 from app.core.logger import log
 
 
@@ -69,7 +72,8 @@ class BaseAgent(ABC):
 
     def run_stream(self, user_prompt):
         """同步流式执行：后台线程跑执行循环，通过队列逐条产出步骤结果（不推内部状态标记）。"""
-        import queue, threading
+        import queue
+        import threading
         q = queue.Queue()
         _SENTINEL = object()
 
@@ -77,7 +81,9 @@ class BaseAgent(ABC):
             try:
                 self._validate(user_prompt)
             except Exception as e:
-                q.put("错误: {}".format(e)); q.put(_SENTINEL); return
+                q.put("错误: {}".format(e))
+                q.put(_SENTINEL)
+                return
             self.state = AgentState.RUNNING
             self.message_list.append(HumanMessage(content=_wrap_user_input(user_prompt)))
             try:
@@ -100,13 +106,16 @@ class BaseAgent(ABC):
                 log.info("执行错误: {}".format(e))
                 q.put("__ERROR__:" + str(e))
             finally:
-                self.cleanup(); q.put(_SENTINEL)
+                self.cleanup()
+                q.put(_SENTINEL)
 
         def generator():
-            t = threading.Thread(target=_worker, daemon=True); t.start()
+            t = threading.Thread(target=_worker, daemon=True)
+            t.start()
             while True:
                 item = q.get()
-                if item is _SENTINEL: break
+                if item is _SENTINEL:
+                    break
                 if item == "__MAX_STEPS__" or (isinstance(item, str) and item.startswith("__ERROR__:")):
                     continue
                 yield item

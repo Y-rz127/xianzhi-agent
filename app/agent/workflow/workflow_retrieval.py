@@ -9,7 +9,6 @@ from __future__ import annotations
 import datetime as _dt
 
 from app.agent.workflow.workflow_models import (
-    DOMAIN_LABELS,
     DomainWorker,
     QuestionIntent,
     WorkflowChartContext,
@@ -18,8 +17,8 @@ from app.agent.workflow.workflow_support import (
     _OTHER_BIRTH_RE1,
     _OTHER_BIRTH_RE2,
 )
-from app.domain.bazi_engine import build_bazi_chart
 from app.core.logger import log
+from app.domain.bazi_engine import build_bazi_chart
 from app.rag.retrieval import (
     DOMAIN_RULE_QUERIES,
     detect_theory_topic,

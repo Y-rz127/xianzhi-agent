@@ -1,5 +1,6 @@
 """记忆模块：根据配置返回文件版或 PostgreSQL 版对话记忆。"""
 from __future__ import annotations
+
 from app.core.config import settings
 from app.core.logger import log
 

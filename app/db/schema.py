@@ -4,15 +4,12 @@ R9 拆分自 user_data.py；user_data 门面重导出全部符号。"""
 from __future__ import annotations
 
 import json
-from typing import Any
 
 from app.core.logger import log
+from app.core.observability import record_error as _record_error  # 统一实现，消除跨模块重复定义
 from app.memory.postgres_memory import _get_pool
 
 _READY = False
-
-
-from app.core.observability import record_error as _record_error  # 统一实现，消除跨模块重复定义
 
 
 def _ensure_tables():

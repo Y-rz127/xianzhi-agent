@@ -11,7 +11,6 @@ import re
 
 from app.core.logger import log
 
-
 # 编译正则，避免每次调用重新编译
 _THINK_BLOCK_RE = re.compile(r"<think>[\s\S]*?</think>\s*", re.IGNORECASE)
 _THINK_OPEN_RE = re.compile(r"<think>[\s\S]*$", re.IGNORECASE)

@@ -9,8 +9,6 @@ from __future__ import annotations
 import re
 from typing import Optional
 
-from app.core.logger import log
-
 # 从用户输入中尝试提取出生时间与性别（完整公历，如 "男 1992-05-03 14:30"）
 _BIRTH_INFO_RE = re.compile(
     r"(?P<gender>男|女)[^\d]*(?P<year>\d{4})[-年/](?P<month>\d{1,2})[-月/](?P<day>\d{1,2})[日\s]*(?P<hour>\d{1,2})[:：](?P<minute>\d{1,2})",

@@ -30,6 +30,7 @@ from app.agent.workflow.workflow_support import (
     _dedupe_content,
 )
 from app.agent.workflow.workflow_workers import WORKERS
+from app.core.logger import log
 from app.domain.bazi_engine import (
     CONTROLS,
     GAN_CHONG,
@@ -39,7 +40,6 @@ from app.domain.bazi_engine import (
     _compute_shensha,
     parse_gender,
 )
-from app.core.logger import log
 from app.tools.text_clean import clean_think_tags
 
 

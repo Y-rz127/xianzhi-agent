@@ -7,13 +7,15 @@ import json
 import uuid
 from datetime import datetime
 
+from app.core.logger import log
 from app.db.chart_store import add_chart_case
 from app.db.schema import (
     _ensure_tables,
     _safe_json,
 )
-from app.domain.bazi_engine import extract_bazi_brief  # noqa: F401  (命盘摘要提取，重复定义已收敛至 domain 层)
-from app.core.logger import log
+from app.domain.bazi_engine import (
+    extract_bazi_brief,  # noqa: F401  (命盘摘要提取，重复定义已收敛至 domain 层)
+)
 from app.memory.postgres_memory import _get_pool
 
 

@@ -3,7 +3,6 @@ from pathlib import Path
 
 from app.evaluation.xianzhi_eval import evaluate_answer_case
 
-
 FIXTURE_PATH = Path(__file__).parent / "fixtures" / "xianzhi_answer_eval.json"
 
 

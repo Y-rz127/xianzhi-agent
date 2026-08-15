@@ -21,10 +21,7 @@ from langchain_core.messages import BaseMessage
 
 from app.core.config import settings
 from app.core.logger import log
-
-
 from app.core.observability import record_error as _record_error  # 统一实现，消除跨模块重复定义
-
 
 # ---------------------------------------------------------------
 # 模块级连接池（懒创建，线程安全）

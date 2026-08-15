@@ -10,7 +10,6 @@ from typing import Any
 
 from app.agent.workflow.xianzhi_workflow import XianzhiWorkflow, build_chart_context
 
-
 REPORT_MARKERS = ("【基本信息】", "【四柱】", "【五行】", "完整报告", "第一章", "第二章")
 
 

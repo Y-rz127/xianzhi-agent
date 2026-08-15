@@ -40,7 +40,6 @@ from app.db.schema import (  # noqa: F401
     _record_error,
     _safe_json,
 )
-from app.domain.chart_format import extract_bazi_brief  # noqa: F401  (命盘摘要提取，重复定义已收敛至 domain 层)
 from app.db.user_records import (  # noqa: F401
     add_answer_feedback,
     add_favorite,
@@ -59,4 +58,7 @@ from app.db.user_records import (  # noqa: F401
     mark_answer_reviewed,
     promote_to_case,
     remove_favorite,
+)
+from app.domain.chart_format import (
+    extract_bazi_brief,  # noqa: F401  (命盘摘要提取，重复定义已收敛至 domain 层)
 )

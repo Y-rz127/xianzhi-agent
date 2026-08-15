@@ -8,8 +8,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from app.domain.bazi_engine import BaziChart
 from app.core.logger import log
+from app.domain.bazi_engine import BaziChart
 from app.rag.vector_store import _keyword_overlap
 
 

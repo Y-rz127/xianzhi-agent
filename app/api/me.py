@@ -5,8 +5,8 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from app.api.common import client_error
 from app.api.deps import get_current_user
-from app.db import repository as repo
 from app.core.logger import log
+from app.db import repository as repo
 
 router = APIRouter(prefix="/me", tags=["Me"])
 

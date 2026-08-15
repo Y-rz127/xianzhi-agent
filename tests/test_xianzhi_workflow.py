@@ -2,15 +2,15 @@ import datetime as dt
 
 from langchain_core.language_models.fake_chat_models import FakeListChatModel
 
-from app.agent.xianzhi import Xianzhi
+from app.agent.workflow.workflow_messages import fact_block
+from app.agent.workflow.workflow_retrieval import build_theory_queries
 from app.agent.workflow.xianzhi_workflow import (
     XianzhiWorkflow,
     build_chart_context,
     classify_question,
     detect_theory_topic,
 )
-from app.agent.workflow.workflow_retrieval import build_theory_queries
-from app.agent.workflow.workflow_messages import fact_block
+from app.agent.xianzhi import Xianzhi
 
 MALE = "\u7537"
 
@@ -57,7 +57,7 @@ def test_detect_theory_topic_returns_none_for_unrelated():
 def test_build_theory_queries_uses_focused_queries():
     """理论问题：识别到术语时以用户原句为首条、术语精准 query 其次，
     不叠加个性化/命例/古籍/断法"""
-    workflow = XianzhiWorkflow(chat_model=None)
+    _workflow = XianzhiWorkflow(chat_model=None)
     queries, meta = build_theory_queries("用神是什么")
     assert len(queries) == 2
     assert meta.startswith("topic=")
@@ -74,7 +74,7 @@ def test_build_theory_queries_fallback_when_no_topic():
     口径变更（降噪）：泛化兜底 query 总会命中术语白话对照表 chunk，
     对综合性理论回答引入噪音，故 fallback 不再叠加。
     """
-    workflow = XianzhiWorkflow(chat_model=None)
+    _workflow = XianzhiWorkflow(chat_model=None)
     queries, meta = build_theory_queries("命理学有哪些流派")
     assert meta == "fallback"
     assert len(queries) == 1
@@ -182,7 +182,7 @@ def test_xianzhi_prefers_workflow_when_chart_context_exists():
 def test_fact_block_exposes_special_pattern_and_useful_hint():
     """命盘事实须显式携带：用神提示（取用神参考）+ 特殊格局分类（专旺/从格），
     供 LLM 在其上叠加合化/调候/大运破格推理。"""
-    workflow = XianzhiWorkflow(chat_model=None)
+    _workflow = XianzhiWorkflow(chat_model=None)
     ctx = build_chart_context("1990-05-20 14:30", MALE)
     intent = classify_question("我的命局用神是什么", today=dt.date(2026, 7, 5))
 

@@ -1,7 +1,9 @@
 """联网搜索工具（对应 Java WebSearchTool / WebScrapingTool）。"""
 from __future__ import annotations
+
 import httpx
 from langchain_core.tools import tool
+
 from app.core.config import settings
 
 

@@ -309,3 +309,46 @@ def check_facts(self, answer, chart, other_chart=None):
 - `app/agent/prompts.py`、`app/agent/birth_parse.py`：单文件、无同类散落，归包无收益；
 - `tests/`（11 个平铺测试文件）：测试平铺是常规约定，用户未选「tests 也分组」；
 - `app/api/`（20 个路由模块）：已自洽的单一职责目录，内部 `tarot.py`/`tarot_records.py` 与 `app/tarot/` 通过 `from app.tarot.tarot_app import` 协作，无需再拆。
+
+---
+
+## 九、推送后 CI 失败修复（2026-08-15）
+
+用户 push 后 GitHub Actions 双失败（前端 `vue-tsc + build`、后端 `ruff + pytest + cov`），本地复现并修复。
+
+### 9.1 后端 `ruff` 失败
+
+原因：项目内存在大量既有 ruff 违规（E701/E702/I001/F401/F821/F841 等），之前未在本地跑过 `ruff check .`。
+修复动作：
+- 先用 `ruff check --fix .` 自动修复 74 处（import 排序、拆分多 import、删除未使用 import 等）；
+- 剩余 12 处手动修复：
+  - `app/agent/core/base_agent.py`：拆分 4 处 `;` / `:` 多语句行；
+  - `app/api/cases.py`：补 `from app.domain.bazi_engine import extract_bazi_brief`（之前重复函数收敛后 import 丢失，F821）；
+  - `app/db/schema.py`：把 `from app.core.observability import record_error as _record_error` 移到模块顶部（E402）；
+  - `tests/test_xianzhi_workflow.py`：3 处 `workflow = XianzhiWorkflow(...)` 未使用 → 改为 `_workflow`；
+  - `app/db/user_records.py`：import 块排序（I001）；
+  - `app/agent/workflow/xianzhi_workflow.py`：ruff autofix 误删了测试仍依赖的 `detect_theory_topic` 重导出，补回 `from app.rag.retrieval import detect_domain, detect_theory_topic`（带 `# noqa: F401`）。
+
+验证：本地 `ruff check .` → **All checks passed!**；`pytest -q` → **145 passed**（零回归）。
+
+> 说明：CI 中的 `pytest --cov=app` 在本地因 WorkBuddy 沙箱阻止 `.coverage.*` 临时文件删除而报 `OSError: windows-sandbox-recycle-bin-unavailable`，但测试本身 145 passed；CI 环境（Ubuntu）无此沙箱限制，应能正常生成覆盖率。
+
+### 9.2 前端 `vue-tsc + build` 失败
+
+原因：`frontend/tsconfig.json` 与 `frontend/tsconfig.node.json` 中 `"ignoreDeprecations": "6.0"` 对 TypeScript 5.x 是无效值（TS5103）。
+修复动作：改为 `"ignoreDeprecations": "5.0"`。
+验证：本地 `vue-tsc -b` 通过；`vite build` 因沙箱阻止 `frontend/dist` 清空而失败，属本地环境限制，CI（Ubuntu）可正常完成 build。
+
+### 9.3 后端依赖安装失败：`pywin32==312`
+
+原因：`pywin32` 是 Windows-only 包，被 `mcp` 作为传递依赖锁定在 `requirements.lock` 第 337 行；CI（Ubuntu）执行 `pip install -r requirements.lock` 时报 `No matching distribution found for pywin32==312`。
+修复动作：给该行加平台环境标记：
+```text
+pywin32==312; platform_system=="Windows"
+```
+这样 Linux/macOS CI 会跳过该包，Windows 开发机仍会安装。
+
+### 9.4 后续推送建议
+
+- 本次改动面较大（ruff autofix 触及约 40 个文件），建议 `git add -A` 后做一次新的 commit（或 `git commit --amend` 到本次重构提交），再 push；
+- 如希望保留文件移动的历史追溯，可让 git 识别 rename：`git config --global diff.renames true`（默认已开），commit 后 GitHub 会显示 rename；若仍显示 delete+add，可 `git add -A && git commit -m "..."` 后 push。
