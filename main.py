@@ -64,6 +64,7 @@ async def lifespan(app: FastAPI):
         temperature=0.1,
         timeout=30.0,
         max_retries=settings.llm_max_retries,
+        extra_body={"enable_thinking": False},
         http_client=_decompose_http,
     ) if settings.decompose_model else chat_model
     # Reviewer 审核模型（独立实例，留空则复用主模型）
