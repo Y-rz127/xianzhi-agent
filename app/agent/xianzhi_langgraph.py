@@ -88,8 +88,7 @@ def create_xianzhi_graph(workflow):
         intent = state.get("intent")
         is_chitchat = bool(intent and getattr(intent, "domain", "") == "chitchat")
         log.info("[Reviewer] 开始审核 {} Worker 产出 ({}字){}...",
-                 getattr(worker, "label", "?"), len(raw),
-                 " [闲聊短路: 跳过LLM深审]" if is_chitchat else "")
+                 getattr(worker, "label", "?"), len(raw))
         second_chart = getattr(intent, "second_chart", None)
         review = workflow._reviewer.review(
             raw,

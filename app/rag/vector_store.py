@@ -614,7 +614,7 @@ class KnowledgeBase:
         scored = [item for item in scored if item[2] >= _MIN_OVERLAP]
         top = scored[:k]
         log.info("[rerank] query={} 候选数={} 选取前{}条={}",
-                  query[:30], len(scored), k,
+                  query[:30], len(scored), k if len(scored)!=0 else 0,
                   [(round(o, 3), d.metadata.get("doc_type", "?"), d.page_content[:18]) for d, s, o in top])
         return [d for d, _, _ in top]
 
