@@ -427,9 +427,9 @@ def test_phase2_docs_present():
         "16_健康伤病断法.md",
         "17_学业功名断法.md",
         "18_官非口舌出行.md",
-        "19_性格心性详断.md",
+        "19_性格心性断法.md",
         "20_子女子嗣断法.md",
-        "21_贫富层次判断.md",
+        "21_贫富层次断法.md",
         "22_男女命差异化论命.md",
         "23_流月流日断事细则.md",
     ]
@@ -577,8 +577,8 @@ def test_doc18_guanfei_expanded():
 
 
 def test_doc19_xingge_expanded():
-    """19_性格心性详断：校验十神性格、干支性格、焦虑、人际关系。"""
-    text = (KNOWLEDGE_DIR / "19_性格心性详断.md").read_text(encoding="utf-8")
+    """19_性格心性断法：校验十神性格、干支性格、焦虑、人际关系。"""
+    text = (KNOWLEDGE_DIR / "19_性格心性断法.md").read_text(encoding="utf-8")
     for keyword in [
         "正官",
         "七杀",
@@ -626,8 +626,8 @@ def test_doc20_zinv_expanded():
 
 
 def test_doc21_pinfu_expanded():
-    """21_贫富层次判断：校验富贵、中产、普通、劳碌、贫贱判定。"""
-    text = (KNOWLEDGE_DIR / "21_贫富层次判断.md").read_text(encoding="utf-8")
+    """21_贫富层次断法：校验富贵、中产、普通、劳碌、贫贱判定。"""
+    text = (KNOWLEDGE_DIR / "21_贫富层次断法.md").read_text(encoding="utf-8")
     for keyword in [
         "大富大贵",
         "中富中贵",
@@ -709,9 +709,9 @@ def test_phase2_docs_have_classic_citations():
         "16_健康伤病断法.md",
         "17_学业功名断法.md",
         "18_官非口舌出行.md",
-        "19_性格心性详断.md",
+        "19_性格心性断法.md",
         "20_子女子嗣断法.md",
-        "21_贫富层次判断.md",
+        "21_贫富层次断法.md",
         "22_男女命差异化论命.md",
         "23_流月流日断事细则.md",
     ]
