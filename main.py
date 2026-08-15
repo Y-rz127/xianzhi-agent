@@ -44,6 +44,7 @@ async def lifespan(app: FastAPI):
 
     # 1. LLM（直连 DashScope，不经系统代理）
     import httpx
+
     from app.core.thinking_router import ThinkingRouter
     _http = httpx.Client(trust_env=False)
     _raw_chat_model = ChatOpenAI(
