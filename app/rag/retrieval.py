@@ -10,6 +10,8 @@ ReAct 工具路径（app/tools/rag_search.py）与 workflow 路径（app/agent/x
 """
 from __future__ import annotations
 
+import concurrent.futures
+
 from app.core.logger import log
 from app.rag.vector_store import get_knowledge_base
 
@@ -307,7 +309,7 @@ def retrieve_for_context(
     max_chars_per_chunk: int = 600,
     verbose: bool = False,
 ):
-    """统一检索入口：对多条 query 逐一检索并跨 query 去重，返回 [(query, doc), ...]。
+    """统一检索入口：对多条 query 并发检索并跨 query 去重，返回 [(query, doc), ...]。
 
     ReAct 工具路径与 workflow 路径均经此入口，去重/截断口径单一实现，
     两侧差异仅以参数表达（max_docs / max_chars_per_chunk / verbose）。
@@ -316,11 +318,30 @@ def retrieve_for_context(
     - 去重键：(来源文件, 内容前120字)
     - 控量：单 chunk 截断 ≤ max_chars_per_chunk，最多 max_docs 条
     """
+    # 并发检索：每条 query 的 search 为独立 I/O（embedding + 向量查询），
+    # 串行时单条慢查询/空命中会线性拖垮全部；并发后整体耗时≈最慢一条，空命中不再累加。
+    # search() 已用锁保护缓存（_cache_lock / _init_lock），线程安全；
+    # 结果按原始 query 顺序归并，跨 query 去重口径与串行一致。
+    kb = get_knowledge_base()
+    order: dict[object, int] = {}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(queries), 8)) as ex:
+        for i, q in enumerate(queries):
+            order[ex.submit(kb.search, q)] = i
+        raw: dict[int, list] = {}
+        for fut in concurrent.futures.as_completed(order):
+            i = order[fut]
+            try:
+                raw[i] = fut.result()
+            except Exception as e:  # 单条失败不影响其它 query
+                if verbose:
+                    log.warning("[检索] query={} 检索异常: {}", queries[i], e)
+                raw[i] = []
+
     docs = []
     seen = set()
     dedup_count = 0
     for idx, q in enumerate(queries, 1):
-        results = get_knowledge_base().search(q)
+        results = raw.get(idx - 1, [])
         if not results:
             if verbose:
                 log.info("[检索] [{}/{}] query={} 无匹配", idx, len(queries), q)
@@ -346,7 +367,7 @@ def retrieve_for_context(
         if len(docs) >= max_docs:
             break
     if verbose:
-        log.info("[检索] 汇总: {}条query → {}条有效结果, 去重跳过{}条chunk",
+        log.info("[检索] 汇总: {}条query → {}条有效结果(并发检索), 去重跳过{}条chunk",
                  len(queries), len(docs), dedup_count)
     return docs
 
