@@ -25,7 +25,7 @@ from pathlib import Path
 
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
-from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter, MarkdownHeaderTextSplitter
 
 from app.core.config import settings
 from app.core.logger import log
@@ -38,7 +38,7 @@ _SEARCH_CACHE_MAX = 200
 CHUNK_SIZE = 600
 CHUNK_OVERLAP = 120
 # 元数据版本：chunk metadata 结构变更时递增，触发向量库重建（如新增 doc_type 字段）
-_META_VERSION = 1
+_META_VERSION = 2
 
 
 class BatchEmbeddings(Embeddings):
@@ -154,27 +154,49 @@ def _load_knowledge_docs() -> list[Document]:
 
 
 def _split_chunks(docs: list[Document]) -> list[Document]:
-    """切分文档为片段。
+    """两阶段切分：先按 markdown 标题切片（一/二级），再 RecursiveCharacterTextSplitter 二级切。
 
-    用 RecursiveCharacterTextSplitter 多级递归切分，针对中文命理文档优化：
-    - separators 依次按 段落(\\n\\n) → 换行(\\n) → 句号(。) → 分号(；) → 逗号(，) → 空格 → 兜底硬切 降级切分，保证语义完整
-    - chunk_size=600、chunk_overlap=120（由 CHUNK_SIZE/CHUNK_OVERLAP 常量控制）：保证断法体系/规则卡完整段落不被切碎
-    - 每个 chunk 前注入文档标题上下文（从文件名提取），让向量检索和 rerank 都能匹配到文档主题
+    阶段一 MarkdownHeaderTextSplitter：
+    - 仅按 # 一级标题、## 二级标题切分（不切到 ### 三级，避免碎片过细稀释主题）
+    - 每个切片携带 heading 层级元数据（一级标题/二级标题），并保留原有 source/doc_type
+    阶段二 RecursiveCharacterTextSplitter（中文命理优化）：
+    - separators 依次 段落(\\n\\n)→换行(\\n)→句号(。)→分号(；)→逗号(，)→空格→兜底硬切 降级
+    - chunk_size=600、chunk_overlap=120：仅在【单个小节内部】拼装，跨小节语义不再混杂
+    - 每个 chunk 前注入 [文档标题｜一级标题｜二级标题] 上下文（文档标题置首，兼容检索前缀对齐）
     """
+    # 阶段一：按标题切片（只切到二级，三级不切）
+    # 注：本版本 MarkdownHeaderTextSplitter 仅暴露 split_text（入参为字符串），
+    # 返回 Document 只带 heading 元数据、不含原 source/doc_type，需手动合并补回。
+    header_splitter = MarkdownHeaderTextSplitter(
+        headers_to_split_on=[("#", "一级标题"), ("##", "二级标题")],
+        strip_headers=True,
+    )
+    header_docs: list[Document] = []
+    for doc in docs:
+        for piece in header_splitter.split_text(doc.page_content):
+            merged = {**doc.metadata, **piece.metadata}  # 保留 source/doc_type + 注入标题层级
+            header_docs.append(Document(page_content=piece.page_content, metadata=merged))
+    header_docs = [d for d in header_docs if d.page_content.strip()]
+    # 阶段二：小节内部递归切到 ≤600
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=CHUNK_SIZE,
         chunk_overlap=CHUNK_OVERLAP,
         separators=["\n\n", "\n", "。", "；", "，", " ", ""],
     )
-    chunks = splitter.split_documents(docs)
-    # 为每个 chunk 注入文档标题上下文（提升检索相关性）
+    chunks = splitter.split_documents(header_docs)
+    # 注入标题上下文：文档标题置首 + 章节层级（兼容 retrieval.py 的前缀对齐逻辑）
     for chunk in chunks:
-        source = chunk.metadata.get("source", "")
+        md = chunk.metadata
+        source = md.get("source", "")
         title = source.replace(".md", "")
         if "_" in title:
             title = title.split("_", 1)[-1]  # 去掉序号前缀，如 "11_婚恋关系规则卡" → "婚恋关系规则卡"
-        chunk.page_content = f"[{title}]\n{chunk.page_content}"
-    log.info("切分为 {} 个知识片段", len(chunks))
+        parts = [title]
+        for h in (md.get("一级标题"), md.get("二级标题")):
+            if h and h not in parts:  # 去重：文档标题常与 # 一级标题同名
+                parts.append(h)
+        chunk.page_content = "[" + "｜".join(parts) + "]\n" + chunk.page_content
+    log.info("切分为 {} 个知识片段（两阶段：标题切片→递归切分）", len(chunks))
     return chunks
 
 
