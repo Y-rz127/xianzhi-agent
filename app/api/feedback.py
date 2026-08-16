@@ -229,6 +229,24 @@ async def promote_answer_to_case(fid: str, body: dict | None = None):
         raise HTTPException(status_code=500, detail=client_error(e))
 
 
+@router.delete("/answers/{fid}/promote", dependencies=[Depends(require_admin)])
+async def unpromote_answer_to_case(fid: str):
+    """取消一条已沉淀的案例：删除 chart_cases 行 + 清空 answer_feedback.case_id 引用。
+
+    幂等：若该反馈未转过案例（answer_feedback.case_id 为空），返回 404。
+    """
+    try:
+        ok = await repo.unpromote_answer_to_case(fid)
+        if not ok:
+            raise HTTPException(status_code=404, detail="该反馈未转过案例")
+        return {"ok": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.exception("取消案例沉淀失败")
+        raise HTTPException(status_code=500, detail=client_error(e))
+
+
 @router.get("/answers/export/dpo", dependencies=[Depends(require_admin)])
 async def export_dpo_samples(
     limit: int = Query(default=500, ge=1, le=5000),

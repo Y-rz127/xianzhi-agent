@@ -8,6 +8,28 @@
       </div>
     </Transition>
 
+    <!-- 自定义确认弹窗 -->
+    <Transition name="modal">
+      <div v-if="pendingUnpromote" class="modal-mask" @click.self="cancelUnpromote">
+        <div class="modal-box">
+          <div class="modal-title">
+            <span class="title-dot" />
+            取消案例沉淀
+          </div>
+          <div class="modal-body">
+            <p>确认取消该案例的沉淀吗？</p>
+            <p class="modal-hint">已沉淀到 <code>chart_cases</code> 的对应行会被删除，前端列表将恢复为「转案例」状态。</p>
+          </div>
+          <div class="modal-actions">
+            <button class="modal-btn" :disabled="unpromoting" @click="cancelUnpromote">取消</button>
+            <button class="modal-btn primary danger" :disabled="unpromoting" @click="confirmUnpromote">
+              {{ unpromoting ? '处理中…' : '确认取消' }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Transition>
+
     <div class="page-header">
       <div>
         <h2>回答反馈</h2>
@@ -57,7 +79,13 @@
           <span class="session">{{ item.conversation_id || "无会话" }}</span>
           <span class="card-actions">
             <button v-if="!item.reviewed" class="act-btn" @click="doReview(item)">审核</button>
-            <button v-if="item.rating === 'up' && item.reviewed" class="act-btn promote" @click="doPromote(item)">转案例</button>
+            <template v-if="item.rating === 'up' && item.reviewed">
+              <button v-if="!item.case_id" class="act-btn promote" @click="doPromote(item)">转案例</button>
+              <template v-else>
+                <span class="act-btn done" title="已转案例 case_id 可在管理后台查看">已转案例</span>
+                <button class="act-btn rollback" @click="doUnpromote(item)">取消案例沉淀</button>
+              </template>
+            </template>
           </span>
         </div>
         <div class="qa-block">
@@ -75,11 +103,15 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue"
-import { answerFeedbackSftExportUrl, answerFeedbackDpoExportUrl, fetchAnswerFeedbacks, reviewAnswerFeedback, promoteAnswerToCase, type AnswerFeedbackItem } from "@/api"
+import { answerFeedbackSftExportUrl, answerFeedbackDpoExportUrl, fetchAnswerFeedbacks, reviewAnswerFeedback, promoteAnswerToCase, unpromoteAnswerToCase, type AnswerFeedbackItem } from "@/api"
 
 const items = ref<AnswerFeedbackItem[]>([])
 const loading = ref(false)
 const ratingFilter = ref<"" | "up" | "down">("")
+
+// 取消案例沉淀自定义弹窗状态
+const pendingUnpromote = ref<AnswerFeedbackItem | null>(null)
+const unpromoting = ref(false)
 
 const toastMessage = ref('')
 const toastType = ref<'success' | 'error'>('success')
@@ -133,10 +165,36 @@ async function doReview(item: AnswerFeedbackItem) {
 async function doPromote(item: AnswerFeedbackItem) {
   try {
     const result = await promoteAnswerToCase(item.id)
+    item.case_id = result.case_id
     showToast(`案例已沉淀: ${result.case_id}`, 'success')
   } catch (e: any) {
     console.error("转案例失败", e)
     showToast(`转案例失败: ${e.message || e}`, 'error')
+  }
+}
+
+async function doUnpromote(item: AnswerFeedbackItem) {
+  pendingUnpromote.value = item
+}
+
+function cancelUnpromote() {
+  pendingUnpromote.value = null
+}
+
+async function confirmUnpromote() {
+  const item = pendingUnpromote.value
+  if (!item) return
+  unpromoting.value = true
+  try {
+    await unpromoteAnswerToCase(item.id)
+    item.case_id = ""
+    pendingUnpromote.value = null
+    showToast('案例沉淀已取消', 'success')
+  } catch (e: any) {
+    console.error("取消案例沉淀失败", e)
+    showToast(`取消案例沉淀失败: ${e.message || e}`, 'error')
+  } finally {
+    unpromoting.value = false
   }
 }
 
@@ -226,6 +284,114 @@ function formatTime(t: string): string {
 .act-btn:hover { border-color: rgba(212,175,55,0.35); color: var(--accent-light); }
 .act-btn.promote { background: rgba(139,232,199,0.08); border-color: rgba(139,232,199,0.2); color: #8be8c7; }
 .act-btn.promote:hover { background: rgba(139,232,199,0.15); }
+.act-btn.done { background: rgba(139,232,199,0.18); border-color: rgba(139,232,199,0.35); color: #8be8c7; cursor: default; }
+.act-btn.done:hover { background: rgba(139,232,199,0.18); border-color: rgba(139,232,199,0.35); color: #8be8c7; }
+.act-btn.rollback { background: rgba(232,139,139,0.06); border-color: rgba(232,139,139,0.22); color: #e88b8b; }
+.act-btn.rollback:hover { background: rgba(232,139,139,0.14); border-color: rgba(232,139,139,0.4); color: #ffb0b0; }
+
+/* 自定义确认弹窗：与全站深色 + 金色描边风格一致 */
+.modal-mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 24px;
+}
+.modal-box {
+  width: min(440px, 100%);
+  background: linear-gradient(180deg, rgba(20, 26, 42, 0.96), rgba(12, 16, 28, 0.96));
+  border: 1px solid rgba(212, 175, 55, 0.28);
+  border-radius: 14px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(212, 175, 55, 0.08) inset;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.modal-title {
+  padding: 18px 22px 14px;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  color: var(--accent-light, #d4af37);
+  border-bottom: 1px solid rgba(212, 175, 55, 0.14);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.title-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #e88b8b;
+  box-shadow: 0 0 8px rgba(232, 139, 139, 0.7);
+}
+.modal-body {
+  padding: 18px 22px 22px;
+  color: var(--text, #e6ebf5);
+  line-height: 1.7;
+  font-size: 14px;
+}
+.modal-body p { margin: 0 0 8px; }
+.modal-body p:last-child { margin-bottom: 0; }
+.modal-hint {
+  color: var(--text-muted, #8a9bb0);
+  font-size: 13px;
+}
+.modal-body code {
+  background: rgba(212, 175, 55, 0.12);
+  border: 1px solid rgba(212, 175, 55, 0.22);
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-size: 12px;
+  color: var(--accent-light, #d4af37);
+  font-family: monospace;
+}
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 12px 18px 16px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(0, 0, 0, 0.18);
+}
+.modal-btn {
+  height: 36px;
+  padding: 0 18px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-dim, #aab4c4);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.modal-btn:hover:not(:disabled) { border-color: rgba(212, 175, 55, 0.35); color: var(--accent-light, #d4af37); }
+.modal-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.modal-btn.primary { background: rgba(212, 175, 55, 0.15); border-color: rgba(212, 175, 55, 0.4); color: var(--accent-light, #d4af37); }
+.modal-btn.primary:hover:not(:disabled) { background: rgba(212, 175, 55, 0.25); }
+.modal-btn.danger { background: rgba(232, 139, 139, 0.12); border-color: rgba(232, 139, 139, 0.4); color: #ffb0b0; }
+.modal-btn.danger:hover:not(:disabled) { background: rgba(232, 139, 139, 0.22); border-color: rgba(232, 139, 139, 0.6); }
+
+.modal-enter-active,
+.modal-leave-active {
+  transition: all 0.2s ease;
+}
+.modal-enter-from,
+.modal-leave-to {
+  opacity: 0;
+}
+.modal-enter-from .modal-box,
+.modal-leave-to .modal-box {
+  transform: translateY(8px) scale(0.97);
+}
+.modal-enter-active .modal-box,
+.modal-leave-active .modal-box {
+  transition: all 0.22s ease;
+}
 .time,
 .session { color: rgba(138,155,176,0.55); font-size: 12px; font-family: monospace; }
 .qa-block { display: grid; grid-template-columns: 48px 1fr; gap: 12px; margin-top: 10px; }

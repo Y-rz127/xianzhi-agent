@@ -8,7 +8,7 @@ import uuid
 from datetime import datetime
 
 from app.core.logger import log
-from app.db.chart_store import add_chart_case
+from app.db.chart_store import add_chart_case, delete_chart_case
 from app.db.schema import (
     _ensure_tables,
     _safe_json,
@@ -271,7 +271,7 @@ def list_answer_feedback(limit: int = 200, rating: str | None = None) -> list:
             f"""
             SELECT af.id, af.user_id, af.conversation_id, af.question, af.answer,
                    af.rating, af.reason, af.chart_snapshot, af.created_at,
-                   af.reviewed, af.reviewed_by,
+                   af.reviewed, af.reviewed_by, af.case_id,
                    u.nickname AS user_nickname
             FROM answer_feedback af
             LEFT JOIN users u ON u.id = af.user_id::uuid
@@ -293,7 +293,8 @@ def list_answer_feedback(limit: int = 200, rating: str | None = None) -> list:
                 "created_at": str(r[8]) if r[8] else "",
                 "reviewed": bool(r[9]) if r[9] is not None else False,
                 "reviewed_by": r[10] or "",
-                "user_nickname": r[11] if r[11] else None,
+                "case_id": r[11] or "",
+                "user_nickname": r[12] if r[12] else None,
             }
             for r in rows
         ]
@@ -353,7 +354,7 @@ def get_answer_feedback(fid: str) -> dict | None:
         row = conn.execute(
             """
             SELECT id, user_id, conversation_id, question, answer,
-                   rating, reason, chart_snapshot, created_at, reviewed, reviewed_by
+                   rating, reason, chart_snapshot, created_at, reviewed, reviewed_by, case_id
             FROM answer_feedback WHERE id = %s
             """,
             (fid,),
@@ -372,6 +373,7 @@ def get_answer_feedback(fid: str) -> dict | None:
             "created_at": str(row[8]) if row[8] else "",
             "reviewed": bool(row[9]) if row[9] is not None else False,
             "reviewed_by": row[10] or "",
+            "case_id": row[11] or "",
         }
 
 
@@ -441,9 +443,11 @@ def _refill_features_by_rechart(chart: dict, feats: dict) -> None:
 
 
 def promote_to_case(fid: str, reviewer: str = "") -> tuple[str, str] | None:
-    """将已审核的好评回答转为结构化案例 JSON 文件。
+    """将已审核的好评/差评回答转为结构化案例（写入 chart_cases 表）。
 
     返回 (case_id, file_path) 或 None（失败时）。
+    幂等：若该反馈已转过案例（answer_feedback.case_id 已存在且对应行仍在），直接返回旧值，
+    避免重复 INSERT 造成 chart_cases 中产生重复案例。
     """
     _ensure_tables()
     item = get_answer_feedback(fid)
@@ -452,6 +456,13 @@ def promote_to_case(fid: str, reviewer: str = "") -> tuple[str, str] | None:
     if item["rating"] not in {"up", "down"}:
         return None
     mark_answer_reviewed(fid, reviewer)
+
+    # 幂等：已转过则直接返回旧 case_id（chart_cases 行可能已被外部删，重置回退到再次插入）
+    existing_cid = (item.get("case_id") or "").strip()
+    if existing_cid:
+        log.info("反馈已转过案例，幂等返回: fid={} case_id={}", fid, existing_cid)
+        return existing_cid, existing_cid
+
     # 延迟导入避免 db -> rag 的循环依赖
     from app.rag.retrieval import detect_domain as _detect_domain
 
@@ -497,8 +508,42 @@ def promote_to_case(fid: str, reviewer: str = "") -> tuple[str, str] | None:
         "promoted_by": case_data["promoted_by"],
         "reason": item.get("reason", ""),
     })
+    # 回填 answer_feedback.case_id，便于列表展示/幂等/取消
+    try:
+        with _get_pool().connection() as conn:
+            conn.execute(
+                "UPDATE answer_feedback SET case_id = %s WHERE id = %s",
+                (cid, fid),
+            )
+    except Exception as e:
+        log.warning("回填 answer_feedback.case_id 失败（chart_cases 已写入，不影响主流程）: {}", e)
     log.info("案例已沉淀到DB: {} → chart_cases/{}", fid, cid)
     return cid, str(cid)
+
+
+def unpromote_answer_to_case(fid: str) -> bool:
+    """取消已沉淀的案例：删除 chart_cases 行 + 清空 answer_feedback.case_id。
+
+    返回是否有内容被撤销（False 表示该反馈从未转过案例）。
+    """
+    _ensure_tables()
+    item = get_answer_feedback(fid)
+    if not item:
+        return False
+    case_id = (item.get("case_id") or "").strip()
+    if not case_id:
+        return False
+    deleted = delete_chart_case(case_id)
+    with _get_pool().connection() as conn:
+        conn.execute(
+            "UPDATE answer_feedback SET case_id = NULL WHERE id = %s",
+            (fid,),
+        )
+    if deleted:
+        log.info("案例沉淀已取消: fid={} case_id={}", fid, case_id)
+    else:
+        log.info("案例沉淀取消（chart_cases 中无对应行，仅清空 case_id 引用）: fid={} case_id={}", fid, case_id)
+    return True
 
 
 def export_dpo_samples(limit: int = 500) -> list[dict]:

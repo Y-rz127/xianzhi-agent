@@ -16,6 +16,7 @@ from app.db.chart_store import (  # noqa: F401
     _extract_bazi_features,
     add_chart_case,
     add_chart_fact,
+    delete_chart_case,
     get_chart_facts,
     get_chart_facts_for_llm,
     get_chart_profile,
@@ -58,6 +59,7 @@ from app.db.user_records import (  # noqa: F401
     mark_answer_reviewed,
     promote_to_case,
     remove_favorite,
+    unpromote_answer_to_case,
 )
 from app.domain.chart_format import (
     extract_bazi_brief,  # noqa: F401  (命盘摘要提取，重复定义已收敛至 domain 层)

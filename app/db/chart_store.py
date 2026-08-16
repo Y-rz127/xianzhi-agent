@@ -309,6 +309,17 @@ def add_chart_case(data: dict) -> str:
     return cid
 
 
+def delete_chart_case(cid: str) -> bool:
+    """删除 chart_cases 表中一条结构化案例（取消案例沉淀用）。返回是否存在并删除。"""
+    _ensure_tables()
+    with _get_pool().connection() as conn:
+        cur = conn.execute(
+            "DELETE FROM chart_cases WHERE id = %s",
+            (cid,),
+        )
+        return cur.rowcount > 0
+
+
 def search_chart_cases(domain: str = "", min_rating: int = 4, limit: int = 200) -> list[dict]:
     """按领域搜索 chart_cases 表中的高质量案例（种子命例）。"""
     _ensure_tables()

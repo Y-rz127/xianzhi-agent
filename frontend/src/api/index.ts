@@ -447,6 +447,7 @@ export interface AnswerFeedbackItem {
   created_at: string
   reviewed: boolean
   reviewed_by: string
+  case_id: string
 }
 
 export async function submitFeedback(content: string, contact?: string): Promise<{ id: string }> {
@@ -519,6 +520,17 @@ export async function promoteAnswerToCase(fid: string): Promise<{ case_id: strin
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: "转案例失败" }))
     throw new Error(err.detail || "转案例失败")
+  }
+  return res.json()
+}
+
+export async function unpromoteAnswerToCase(fid: string): Promise<{ ok: boolean }> {
+  const res = await apiFetch(`${API_BASE}/ai/feedback/answers/${fid}/promote`, {
+    method: "DELETE",
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: "取消案例沉淀失败" }))
+    throw new Error(err.detail || "取消案例沉淀失败")
   }
   return res.json()
 }

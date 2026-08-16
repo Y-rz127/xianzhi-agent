@@ -121,6 +121,12 @@ def _do_ensure_tables():
             "CREATE INDEX IF NOT EXISTS idx_answer_feedback_reviewed ON answer_feedback(reviewed)"
         )
         conn.execute(
+            "ALTER TABLE answer_feedback ADD COLUMN IF NOT EXISTS case_id TEXT DEFAULT NULL"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_answer_feedback_case ON answer_feedback(case_id)"
+        )
+        conn.execute(
             """
             CREATE TABLE IF NOT EXISTS chart_profiles (
                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
