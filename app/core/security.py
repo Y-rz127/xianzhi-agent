@@ -1,7 +1,7 @@
 """安全中间件：API Key 鉴权 + 单 IP 滑动窗口限流。
 
-- 鉴权：API_KEYS 为空时关闭（本地开发默认）；非空时仅对管理后台路径校验。
-  HTTP 支持 X-API-Key 请求头或 ?api_key= 查询参数；WebSocket 同规则（小程序无法自定义头时用 query）。
+- 鉴权：API_KEYS 为空时关闭；非空时仅校验管理后台路径。
+  HTTP 支持 X-API-Key 请求头或 ?api_key= 查询参数；WebSocket 同规则。
 - 限流：内存滑动窗口，单 IP 每分钟 RATE_LIMIT_PER_MINUTE 次（0=不限流）。
   多 worker 部署时应换 Redis 等共享存储，本实现覆盖单进程场景。
 """
@@ -16,7 +16,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 from app.core.config import settings
 
-# 豁免路径：健康检查、API 文档、静态资源不限流不鉴权
+# 豁免路径：健康检查、文档、静态资源不限流不鉴权
 _EXEMPT_PREFIXES = (
     "/api/ai/health",
     "/health",
@@ -30,16 +30,13 @@ _EXEMPT_PREFIXES = (
 )
 
 # 管理后台路径（需 API Key 鉴权；普通用户接口不受影响）
+# 命例库/反馈管理类接口属管理操作；submit_feedback 等用户接口不在此列
 _ADMIN_PREFIXES = (
     "/api/ai/admin/",
     "/api/ai/metrics",
     "/api/ai/rag/",
     "/api/ai/observability/",
-    # 命例库管理（增删改查、导入导出）属于管理类操作，需 API Key
     "/api/ai/xianzhi/cases",
-    # 反馈管理类接口（回答反馈列表/导出/审核/转案例）需 API Key
-    # 注意：submit_feedback(POST /feedback)、submit_answer_feedback(POST /feedback/answer) 仍为用户接口
-    # GET /feedback（反馈列表）、DELETE /feedback/{fid} 通过 Depends(require_admin) 鉴权
     "/api/ai/feedback/answers",
 )
 
@@ -66,6 +63,7 @@ class ApiKeyAuthMiddleware:
 
     def __init__(self, app: ASGIApp):
         self.app = app
+        self._api_keys = {k.strip() for k in settings.api_keys.split(",") if k.strip()}
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send):
         if scope["type"] not in ("http", "websocket"):
@@ -75,23 +73,18 @@ class ApiKeyAuthMiddleware:
         if scope.get("method") == "OPTIONS":
             await self.app(scope, receive, send)
             return
-        keys = {k.strip() for k in settings.api_keys.split(",") if k.strip()}
         path = scope.get("path", "")
-        if not keys or _is_exempt(path):
+        # 关闭鉴权或非管理路径时不校验
+        if not self._api_keys or _is_exempt(path) or not _is_admin_path(path):
             await self.app(scope, receive, send)
             return
-        # 只对管理后台路径要求 API Key，普通用户接口不受影响
-        if not _is_admin_path(path):
-            await self.app(scope, receive, send)
-            return
-        if _extract_api_key(scope) in keys:
+        if _extract_api_key(scope) in self._api_keys:
             await self.app(scope, receive, send)
             return
         if scope["type"] == "websocket":
             await send({"type": "websocket.close", "code": 4401, "reason": "Unauthorized"})
             return
-        response = JSONResponse({"detail": "无效或缺失的 API Key"}, status_code=401)
-        await response(scope, receive, send)
+        await JSONResponse({"detail": "无效或缺失的 API Key"}, status_code=401)(scope, receive, send)
 
 
 class RateLimitMiddleware:
@@ -103,20 +96,16 @@ class RateLimitMiddleware:
         self._last_sweep = time.monotonic()
 
     def _sweep(self, now: float):
-        """每分钟清理一次空窗口，防止 IP 表无限增长。"""
-        if now - self._last_sweep < 60:
-            return
-        self._last_sweep = now
-        empty = [ip for ip, w in self._hits.items() if not w or now - w[-1] > 120]
-        for ip in empty:
-            self._hits.pop(ip, None)
+        """每分钟清理空窗口，防止 IP 表无限增长。"""
+        if now - self._last_sweep >= 60:
+            self._last_sweep = now
+            for ip, w in list(self._hits.items()):
+                if not w or now - w[-1] > 120:
+                    del self._hits[ip]
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send):
         limit = settings.rate_limit_per_minute
-        if scope["type"] not in ("http", "websocket") or limit <= 0:
-            await self.app(scope, receive, send)
-            return
-        if _is_exempt(scope.get("path", "")):
+        if scope["type"] not in ("http", "websocket") or limit <= 0 or _is_exempt(scope.get("path", "")):
             await self.app(scope, receive, send)
             return
         client = scope.get("client")
@@ -128,9 +117,8 @@ class RateLimitMiddleware:
         if len(window) >= limit:
             if scope["type"] == "websocket":
                 await send({"type": "websocket.close", "code": 429, "reason": "Too Many Requests"})
-                return
-            response = JSONResponse({"detail": "请求过于频繁，请稍后再试"}, status_code=429)
-            await response(scope, receive, send)
+            else:
+                await JSONResponse({"detail": "请求过于频繁，请稍后再试"}, status_code=429)(scope, receive, send)
             return
         window.append(now)
         self._sweep(now)

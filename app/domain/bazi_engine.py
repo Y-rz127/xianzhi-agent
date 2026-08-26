@@ -1,14 +1,6 @@
 """八字命盘结构化引擎（兼容门面）。
 
-R9 拆分：原 2200 行单体按子域拆为
-- tables        查表数据（五行/干支/合冲刑害/神煞表）
-- models        结构化数据模型（BaziChart 等 dataclass）
-- shensha_calc  神煞计算
-- analysis_calc 五行强弱/格局/十神/合冲分析
-- chart_builder 排盘构建（出生时间解析、四柱/大运/流年）
-- chart_format  文本格式化与出生日期反推
-
-本模块保留全部原公共符号的重导出，既有 import 无需改动；
+统一重导出各子域模块的公共符号，既有 import 无需改动；
 新代码建议直接从子域模块导入。
 """
 from app.domain.analysis_calc import (  # noqa: F401

@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import datetime
 import re
 
 from langchain_core.tools import tool
@@ -21,9 +22,8 @@ from app.domain.bazi_engine import (
     parse_birth,
     parse_gender,
 )
-
-# 时间解析（农历/节日/时辰智能解析与出生时间标准化）已下沉到领域层
-# app/domain/time_parse.py（消除记忆层对工具层的反向依赖）；此处重导入以保持本模块引用不变
+# 时间解析（农历/节日/时辰智能解析与出生时间标准化）已下沉到领域层 app/domain/time_parse.py，
+# 此处重导入以保持本模块对外引用不变（app.agent.xianzhi 仍从本模块导入 _normalize_birth_time）
 from app.domain.time_parse import (
     _CN_DAY,
     _CN_MONTH,
@@ -34,20 +34,28 @@ from app.domain.time_parse import (
 )
 from app.tools.cache import bazi_cache
 
-
-def _parse_gender(gender):
-    return parse_gender(gender)
+# 节日 → 农历月日（用于把"春节/端午/中秋"等转成农历日期；冬至按节气单独处理）
+_FESTIVAL_MAP = {
+    "春节": ("正", "初一"), "元旦": ("正", "初一"),
+    "端午": ("五", "初五"), "端午日": ("五", "初五"),
+    "中秋": ("八", "十五"), "中秋日": ("八", "十五"),
+    "重阳": ("九", "初九"), "重阳节": ("九", "初九"),
+    "元宵": ("正", "十五"), "元宵节": ("正", "十五"),
+    "七夕": ("七", "初七"), "七夕节": ("七", "初七"),
+    "中元": ("七", "十五"), "中元节": ("七", "十五"),
+    "腊八": ("十二", "初八"), "腊八节": ("十二", "初八"),
+    "冬至": ("十一", "初"),  # 冬至按节气，简化处理
+}
 
 
 def _apply_solar_time(y: int, m: int, d: int, h: int, mi: int, longitude: float | None) -> tuple:
     """真太阳时校正：基准经度 120°E（北京时间），每度差 4 分钟。返回校正后的 (y, m, d, h, mi)。"""
-    import datetime as _dt
     corr = 0
     if longitude and 60 <= longitude <= 140:
         corr = round((120 - longitude) * 4)
     if corr == 0:
         return y, m, d, h, mi
-    corrected = _dt.datetime(y, m, d, h, mi) + _dt.timedelta(minutes=corr)
+    corrected = datetime.datetime(y, m, d, h, mi) + datetime.timedelta(minutes=corr)
     return corrected.year, corrected.month, corrected.day, corrected.hour, corrected.minute
 
 
@@ -69,27 +77,13 @@ def lunar_to_solar(query: str) -> str:
         转换后的公历日期+时辰，以及对应的八字四柱（如可用）
     """
     try:
-        # 节日映射：把"春节/端午/中秋/重阳"等转为该年农历日期
-        FESTIVAL_MAP = {
-            "春节": ("正", "初一"), "元旦": ("正", "初一"),
-            "端午": ("五", "初五"), "端午日": ("五", "初五"),
-            "中秋": ("八", "十五"), "中秋日": ("八", "十五"),
-            "重阳": ("九", "初九"), "重阳节": ("九", "初九"),
-            "元宵": ("正", "十五"), "元宵节": ("正", "十五"),
-            "七夕": ("七", "初七"), "七夕节": ("七", "初七"),
-            "中元": ("七", "十五"), "中元节": ("七", "十五"),
-            "腊八": ("十二", "初八"), "腊八节": ("十二", "初八"),
-            "冬至": ("十一", "初"),  # 冬至按节气，简化处理
-        }
         s = query.strip()
-        # 提取年份
         ym = re.search(r"(\d{4})年", s)
         year = int(ym.group(1)) if ym else None
 
         # 节日替换：把节日名转成"X月初X"
-        for festival, (mo, day) in FESTIVAL_MAP.items():
+        for festival, (mo, day) in _FESTIVAL_MAP.items():
             if festival in s and year:
-                # 冬至特殊处理（按节气，这里用近似日期）
                 if festival == "冬至":
                     # 冬至在公历12月21-23日之间，用 lunar-python 查节气
                     solar_test = Solar.fromYmdHms(year, 12, 22, 12, 0, 0)
@@ -106,14 +100,12 @@ def lunar_to_solar(query: str) -> str:
                 solar_obj = lunar_obj.getSolar()
                 return f"{s} → 公历 {solar_obj.getYear()}-{solar_obj.getMonth():02d}-{solar_obj.getDay():02d} {hh:02d}:{mm:02d}"
 
-        # 不是节日，尝试直接解析为农历
-        # 1) 含农历字眼
+        # 不是节日，尝试直接解析为农历（含农历字眼或中文日）
         if "农历" in s or "阴历" in s or _parse_cn_day(s) is not None:
-            # 用 _parse_birth_smart 处理
-            solar, lunar, ec, h, mi, source = _parse_birth_smart(s)
+            solar, _, _, h, mi, _ = _parse_birth_smart(s)
             return f"{s} → 公历 {solar.getYear()}-{solar.getMonth():02d}-{solar.getDay():02d} {h:02d}:{mi:02d}"
 
-        # 2) 仅时辰
+        # 仅时辰
         zhi_h = _parse_zhi_hour(s)
         if zhi_h is not None and not ym:
             return f"传统时辰 {s} → {zhi_h:02d}:00（{zhi_h}点-{zhi_h+2 if zhi_h<22 else 0}点之间）"
@@ -220,7 +212,6 @@ def bazi_liunian(birth_time: str, gender: str, years: int = 10, yun_sect: int = 
         每年的干支、年份、虚岁
     """
     try:
-        import datetime
         birth_time = _normalize_birth_time(birth_time)
         current_year = datetime.date.today().year
         # 缓存 key 含 years 与起始年，避免跨年后命中旧流年
@@ -258,9 +249,7 @@ def bazi_liuyue(birth_time: str, gender: str, year: int = None, sect: int = 2, y
         指定年份每个月的干支、节气信息
     """
     try:
-        import datetime
         birth_time = _normalize_birth_time(birth_time)
-        y, m, d, h, mi = parse_birth(birth_time)
         target_year = year or datetime.date.today().year
         # 缓存 key 含目标年份，避免不同年份互相污染
         cache_tool = "liuyue:{}".format(target_year)
@@ -302,7 +291,6 @@ def bazi_liuri(birth_time: str, gender: str, year: int = None, month: int = None
         指定年月每日的干支、农历日期
     """
     try:
-        import datetime
         today = datetime.date.today()
         target_year = year or today.year
         target_month = month or today.month
@@ -352,7 +340,7 @@ def bazi_hehun(birth_time_a: str, gender_a: str, birth_time_b: str, gender_b: st
     try:
         birth_time_a = _normalize_birth_time(birth_time_a)
         birth_time_b = _normalize_birth_time(birth_time_b)
-        # 合婚结果对双方输入确定，走缓存（双方时间+性别+流派+经度组合为 key）
+        # 缓存 key 覆盖双方时间+性别+流派+经度组合
         cache_key_a = "{}|{}|{}|{}".format(birth_time_a, gender_a, sect, longitude_a)
         cache_key_b = "{}|{}|{}|{}".format(birth_time_b, gender_b, sect, longitude_b)
         cached = bazi_cache.get(cache_key_a, cache_key_b, sect, 1, "hehun")
@@ -361,7 +349,7 @@ def bazi_hehun(birth_time_a: str, gender_a: str, birth_time_b: str, gender_b: st
 
         y_a, m_a, d_a, h_a, mi_a = parse_birth(birth_time_a)
         y_a, m_a, d_a, h_a, mi_a = _apply_solar_time(y_a, m_a, d_a, h_a, mi_a, longitude_a)
-        g_a = _parse_gender(gender_a)
+        g_a = parse_gender(gender_a)
         solar_a = Solar.fromYmdHms(y_a, m_a, d_a, h_a, mi_a, 0)
         ec_a = solar_a.getLunar().getEightChar()
         if sect != 2:
@@ -369,7 +357,7 @@ def bazi_hehun(birth_time_a: str, gender_a: str, birth_time_b: str, gender_b: st
 
         y_b, m_b, d_b, h_b, mi_b = parse_birth(birth_time_b)
         y_b, m_b, d_b, h_b, mi_b = _apply_solar_time(y_b, m_b, d_b, h_b, mi_b, longitude_b)
-        g_b = _parse_gender(gender_b)
+        g_b = parse_gender(gender_b)
         solar_b = Solar.fromYmdHms(y_b, m_b, d_b, h_b, mi_b, 0)
         ec_b = solar_b.getLunar().getEightChar()
         if sect != 2:
@@ -415,9 +403,6 @@ def bazi_hehun(birth_time_a: str, gender_a: str, birth_time_b: str, gender_b: st
         else:
             complement_score += 10
             complement_reasons.append("日主五行相同，心性相投")
-
-        if len(complement_reasons) == 0:
-            complement_reasons.append("五行分布较为均衡")
 
         lines = [
             "【合婚分析】",
@@ -510,4 +495,15 @@ def bazi_infer_dates(pillars: str, gender: str, top_n: int = 3) -> str:
     return "\n".join(lines)
 
 
-bazi_tools = [lunar_to_solar, bazi_chart, bazi_analysis, bazi_dayun, bazi_liunian, bazi_liuyue, bazi_liuri, bazi_hehun, bazi_full, bazi_infer_dates]
+bazi_tools = [
+    lunar_to_solar,
+    bazi_chart,
+    bazi_analysis,
+    bazi_dayun,
+    bazi_liunian,
+    bazi_liuyue,
+    bazi_liuri,
+    bazi_hehun,
+    bazi_full,
+    bazi_infer_dates,
+]

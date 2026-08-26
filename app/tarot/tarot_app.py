@@ -1,9 +1,4 @@
-"""塔罗占卜应用。
-
-- 78 张完整牌组（22 大阿卡纳 + 56 小阿卡纳）
-- 抽牌在后端完成（Fisher-Yates 洗牌，不可预测）
-- LLM 流式解读：根据问题 + 牌阵 + 正逆位组合给出深度解读
-"""
+"""塔罗占卜应用：78 张牌组、后端抽牌（Fisher-Yates 洗牌）、LLM 流式解读（带 fallback）。"""
 from __future__ import annotations
 
 import random
@@ -15,7 +10,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from app.agent.prompts import TAROT_SYSTEM_PROMPT
 from app.core.logger import log
 
-# ============ 牌组数据 ============
+# 牌组数据
 
 class TarotCard:
     __slots__ = ("name", "name_en", "emblem", "arcana", "suit", "meaning", "reversed_meaning")
@@ -115,7 +110,7 @@ _MAJOR_ARCANA: list[TarotCard] = [
 
 def _minor(suit: str, suit_cn: str, emblem: str, theme: str, rev_theme: str,
            numbers: list[tuple[str, str, str]]) -> list[TarotCard]:
-    """批量生成小阿卡纳某花色的 14 张牌。
+    """批量生成某花色小阿卡纳的 14 张牌。
 
     numbers: [(牌名, 正位含义, 逆位含义), ...] 共 14 项
     """
@@ -216,7 +211,7 @@ DECK: list[TarotCard] = _MAJOR_ARCANA + _WANDS + _CUPS + _SWORDS + _PENTACLES
 assert len(DECK) == 78, f"牌组数量错误: {len(DECK)}"
 
 
-# ============ 牌阵定义 ============
+# 牌阵定义
 
 SpreadKey = Literal["daily", "three_card", "relationship"]
 
@@ -242,36 +237,18 @@ SPREADS: dict[str, dict] = {
 }
 
 
-# ============ 系统提示词 ============
-
-SYSTEM_PROMPT = TAROT_SYSTEM_PROMPT
-
-
-# ============ 业务类 ============
+# 业务类
 
 class TarotApp:
     def __init__(self, chat_model: BaseChatModel):
         self.chat_model = chat_model
 
     def draw_cards(self, spread: SpreadKey) -> list[dict]:
-        """根据牌阵抽牌（后端洗牌，不可预测）。
-
-        Returns:
-            list[dict]: 每张牌的字典表示（含 isReversed 和 meaning）
-        """
-        spread_info = SPREADS.get(spread, SPREADS["daily"])
-        count = spread_info["count"]
-
-        # Fisher-Yates 洗牌
+        """根据牌阵抽牌（后端洗牌，不可预测）。"""
+        count = SPREADS.get(spread, SPREADS["daily"])["count"]
         deck = list(DECK)
         random.shuffle(deck)
-
-        drawn: list[dict] = []
-        for i in range(count):
-            card = deck[i]
-            is_reversed = random.random() < 0.5
-            drawn.append(card.to_dict(is_reversed))
-        return drawn
+        return [deck[i].to_dict(random.random() < 0.5) for i in range(count)]
 
     async def divine_stream(
         self,
@@ -279,19 +256,13 @@ class TarotApp:
         spread: SpreadKey,
         cards: list[dict],
     ) -> AsyncIterator[str]:
-        """LLM 流式解读（带 fallback）。
-
-        Args:
-            question: 用户的问题（可为空，空则用"今日运势指引"）
-            spread: 牌阵 key
-            cards: draw_cards 返回的牌组数据
-        """
+        """LLM 流式解读，失败或返回空时回退到基础牌义解读。"""
         spread_info = SPREADS.get(spread, SPREADS["daily"])
         positions = spread_info["positions"]
         spread_name = spread_info["name"]
+        q = (question or "").strip() or "今日运势指引"
 
-        # 构造牌阵描述
-        card_lines: list[str] = []
+        card_lines = []
         for i, c in enumerate(cards):
             pos = positions[i] if i < len(positions) else f"位置{i + 1}"
             orientation = "逆位" if c["isReversed"] else "正位"
@@ -300,8 +271,6 @@ class TarotApp:
                 f"  牌义：{c['meaning']}"
             )
         cards_text = "\n".join(card_lines)
-
-        q = question.strip() if question and question.strip() else "今日运势指引"
 
         user_prompt = f"""请为以下塔罗占卜做深度解读：
 
@@ -314,7 +283,7 @@ class TarotApp:
 请按照系统提示中的结构解读：整体基调 → 逐张牌解读 → 综合叙事 → 具体建议。
 解读要落到问卜者的具体问题上。"""
 
-        msgs = [SystemMessage(content=SYSTEM_PROMPT), HumanMessage(content=user_prompt)]
+        msgs = [SystemMessage(content=TAROT_SYSTEM_PROMPT), HumanMessage(content=user_prompt)]
         try:
             has_any_chunk = False
             async for chunk in self.chat_model.astream(msgs):
@@ -323,13 +292,11 @@ class TarotApp:
                     has_any_chunk = True
                     yield text
             if not has_any_chunk:
-                # LLM 返回空，fallback
                 log.warning("塔罗 LLM 返回空片段，使用 fallback 解读")
                 for piece in self._fallback_reading(question, spread, cards):
                     yield piece
         except Exception as e:
             log.exception("塔罗 LLM 解读失败，使用 fallback")
-            # 先发送错误提示，再 fallback
             yield f"\n\n[AI 解读暂不可用：{type(e).__name__}]\n\n"
             for piece in self._fallback_reading(question, spread, cards):
                 yield piece
@@ -337,21 +304,17 @@ class TarotApp:
     def _fallback_reading(
         self, question: str, spread: SpreadKey, cards: list[dict]
     ) -> list[str]:
-        """当 LLM 不可用时，返回基于牌面基础信息的解读。"""
+        """LLM 不可用时，基于牌面基础信息给出解读。"""
         spread_info = SPREADS.get(spread, SPREADS["daily"])
         positions = spread_info["positions"]
         spread_name = spread_info["name"]
-        q = question.strip() if question and question.strip() else "今日运势指引"
+        q = (question or "").strip() or "今日运势指引"
 
-        lines: list[str] = []
-        lines.append(f"你问的是：{q}。牌阵选择：{spread_name}。\n\n")
+        lines = [f"你问的是：{q}。牌阵选择：{spread_name}。\n\n"]
         for i, c in enumerate(cards):
             pos = positions[i] if i < len(positions) else f"位置{i + 1}"
             orientation = "逆位" if c["isReversed"] else "正位"
-            lines.append(
-                f"位置「{pos}」抽到{orientation}「{c['name']}」：{c['meaning']}\n\n"
-            )
-        # 简单综合
+            lines.append(f"位置「{pos}」抽到{orientation}「{c['name']}」：{c['meaning']}\n\n")
         names = "、".join(c["name"] for c in cards)
         lines.append(
             f"\n三张牌「{names}」组合在一起，呈现出一个由过去经由现在通往未来的完整脉络。"

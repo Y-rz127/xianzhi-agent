@@ -54,7 +54,6 @@ class FileBasedChatMemory:
 
     def add(self, conversation_id, messages):
         """追加消息到会话（读-改-写整体持锁，避免并发覆盖丢消息）。"""
-        # 读-改-写整体持锁，避免并发请求互相覆盖导致消息丢失
         with self._lock_for(conversation_id):
             existing = self.get(conversation_id)
             existing.extend(messages)
@@ -68,7 +67,6 @@ class FileBasedChatMemory:
                 p.unlink()
 
     def _write(self, conversation_id, messages):
-        """将消息列表以 JSON 形式写入会话文件。"""
         p = self._path(conversation_id)
         data = messages_to_dict(messages)
         p.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")

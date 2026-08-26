@@ -1,37 +1,32 @@
 """基于 PostgreSQL 的对话记忆（与 FileBasedChatMemory 同接口）。
 
-利用 langchain_postgres.PostgresChatMessageHistory 持久化对话，
-表名默认 message_store，session_id 作为会话隔离键。
-
-连接管理：模块级 psycopg_pool 连接池（线程安全）。
-psycopg.Connection 本身非线程安全，全局单连接在并发请求下会互相干扰；
-连接池按需检出/归还，配合会话 Agent 池支持多会话并行。
-
-注意：PostgresChatMessageHistory 的签名是
-  __init__(table_name, session_id, /, *, sync_connection=, async_connection=)
-即 table_name/session_id 是位置参数，连接必须传 psycopg.Connection 对象。
+利用 langchain_postgres.PostgresChatMessageHistory 持久化对话（表名默认 message_store），
+session_id 作为会话隔离键。连接统一走模块级 psycopg_pool 连接池（线程安全）：
+psycopg.Connection 非线程安全，全局单连接在并发下会互相干扰，连接池按需检出/归还。
+注意 PostgresChatMessageHistory 的 table_name/session_id 是位置参数，
+连接需传 psycopg.Connection 对象（sync_connection）。
 """
 from __future__ import annotations
 
+import json
 import threading
 import uuid as uuid_module
 from typing import List
 
-from langchain_core.messages import BaseMessage
+from langchain_core.messages import BaseMessage, messages_from_dict
 
 from app.core.config import settings
 from app.core.logger import log
-from app.core.observability import record_error as _record_error  # 统一实现，消除跨模块重复定义
+from app.core.observability import record_error as _record_error
 
-# ---------------------------------------------------------------
 # 模块级连接池（懒创建，线程安全）
-# ---------------------------------------------------------------
-_pg_pool = None           # 全局单例，None 表示还没创建
-_pool_lock = threading.Lock()  # 互斥锁，防止并发创建多个池
+_pg_pool = None
+_pool_lock = threading.Lock()
 _schema_ready = False
 
+
 def _check_connection(conn) -> bool:
-    """借出连接前的健康检查：探活失败则丢弃重建。"""
+    """借出连接前探活：失败则丢弃重建（服务端超时断开的死连接不可外借）。"""
     try:
         conn.execute("SELECT 1")
         return True
@@ -42,21 +37,19 @@ def _check_connection(conn) -> bool:
 
 def _get_pool():
     global _pg_pool
-    with _pool_lock:             # ① 加锁，同一时刻只有一个线程进入
-        if _pg_pool is None:     # ② 双重检查：锁内再判一次，避免重复创建
+    with _pool_lock:  # 双重检查，避免并发重复建池
+        if _pg_pool is None:
             from psycopg_pool import ConnectionPool
             _pg_pool = ConnectionPool(
                 settings.pg_dsn(),
                 min_size=1,
                 max_size=5,
                 kwargs={"autocommit": True},
-                # 借出前先 SELECT 1 探活，避免把被服务端超时断开的死连接借给请求
-                check=_check_connection,
-                # 空闲连接最长存活 30 分钟，主动回收，降低踩到 PG 空闲超时的概率
-                max_lifetime=1800,
+                check=_check_connection,  # 借出前探活，避免借到被服务端断开的死连接
+                max_lifetime=1800,  # 空闲连接 30 分钟主动回收，降低踩到 PG 空闲超时的概率
                 open=True,
             )
-        return _pg_pool          # ③ 返回池（已存在则直接返回）
+        return _pg_pool
 
 
 def _ensure_schema():
@@ -72,7 +65,7 @@ def _ensure_schema():
             with pool.connection() as conn:
                 from langchain_postgres import PostgresChatMessageHistory
                 PostgresChatMessageHistory.create_tables(conn, settings.memory_table_name)
-                # 会话元数据表：持久化 UUID -> conversation_id 的映射
+                # 会话元数据表：持久化 UUID -> conversation_id 映射
                 conn.execute("""
                     CREATE TABLE IF NOT EXISTS session_metadata (
                         session_id UUID PRIMARY KEY,
@@ -83,9 +76,8 @@ def _ensure_schema():
                         updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
                     )
                 """)
-                # 兼容旧部署：补充 user_id 列
+                # 兼容旧部署：补充 user_id / 会话摘要列
                 conn.execute("ALTER TABLE session_metadata ADD COLUMN IF NOT EXISTS user_id TEXT")
-                # 会话摘要（渐进式压缩，600 字上限）
                 conn.execute("ALTER TABLE session_metadata ADD COLUMN IF NOT EXISTS summary TEXT DEFAULT ''")
                 conn.execute("ALTER TABLE session_metadata ADD COLUMN IF NOT EXISTS last_summary_msg_count INT DEFAULT 0")
                 # 会话列表/消息查询的高频过滤列，避免每次全表扫描
@@ -117,22 +109,21 @@ def close_global_conn():
 class PostgresChatMemory:
     """PostgreSQL 版对话记忆，与 FileBasedChatMemory 接口一致。
 
-    连接从模块级连接池按需检出，实例本身不持有连接，
-    因此同一实例可被多线程（多会话 Agent）安全共享。
+    连接从模块级连接池按需检出，实例本身不持有连接，可被多线程安全共享。
     """
 
     # 固定命名空间，确保同一 conversation_id 始终映射到同一 UUID
     _NAMESPACE = uuid_module.UUID("00000000-0000-0000-0000-000000000001")
 
     def __init__(self, connection_string: str = None, table_name: str = "message_store"):
-        # connection_string 保留用于接口兼容；实际连接统一走模块级连接池
+        # connection_string 仅保留用于接口兼容，实际连接统一走模块级连接池
         self.connection_string = connection_string or settings.postgres_connection_string
         self.table_name = table_name
         _ensure_schema()
 
     @staticmethod
     def _to_uuid(conversation_id: str) -> str:
-        """将任意 conversation_id 转为确定性 UUID（PostgresChatMessageHistory 要求）"""
+        """将任意 conversation_id 转为确定性 UUID（PostgresChatMessageHistory 要求）。"""
         return str(uuid_module.uuid5(PostgresChatMemory._NAMESPACE, conversation_id))
 
     @staticmethod
@@ -149,15 +140,14 @@ class PostgresChatMemory:
             sync_connection=conn,
         )
 
-    # get() 只拉最近 N 条历史：_load_history 载入后还会按 2000 token 截断，
-    # 全量拉取长会话时每轮对话重复传输全部历史，IO 放大明显
+    # 只拉最近 N 条历史，避免长会话每轮全量重传造成 IO 放大（载入后另有 2000 token 截断）
     _GET_HISTORY_LIMIT = 60
 
     def get(self, conversation_id: str) -> List[BaseMessage]:
-        """从 PostgreSQL 读取会话最近历史消息（失败返回空列表）。
+        """读取会话最近历史（失败返回空列表）。
 
         只取最近 _GET_HISTORY_LIMIT 条（DESC 取再反转为时间正序），
-        单条消息反序列化失败跳过（防个别脏数据丢整段历史）。
+        单条消息反序列化失败跳过，防个别脏数据丢整段历史。
         """
         try:
             session_uuid = self._to_uuid(conversation_id)
@@ -172,27 +162,23 @@ class PostgresChatMemory:
             log.error("读取PG记忆失败 {} : {}", conversation_id, e)
             _record_error("memory.get")
             return []
-        from langchain_core.messages import messages_from_dict
 
         msgs = []
         for row in rows:
             try:
                 raw = row[0]
                 if isinstance(raw, str):
-                    import json as _json
-                    raw = _json.loads(raw)
+                    raw = json.loads(raw)
                 msgs.extend(messages_from_dict([raw]))
             except Exception:
-                continue  # 脏消息跳过，不影响其余历史
+                continue  # 单条脏消息跳过，不影响其余历史
         return list(reversed(msgs))
 
     def add(self, conversation_id: str, messages: List[BaseMessage]):
         """写入消息并持久化会话元数据（UUID 映射、模块、user_id）。"""
         try:
             session_uuid = self._to_uuid(conversation_id)
-            # 注：_session_uuid_map 仅做下标赋值，无需 global 声明
             _session_uuid_map[session_uuid] = conversation_id
-            # 持久化 UUID -> conversation_id 映射
             module = _extract_module(conversation_id)
             with _get_pool().connection() as conn:
                 user_id = _extract_user_id(conversation_id)
@@ -209,8 +195,7 @@ class PostgresChatMemory:
                 for m in messages:
                     history.add_message(m)
         except Exception as e:
-            # 写入失败 = 丢对话轮次，不静默吞掉：记错误 + 埋点后重抛，
-            # 由调用方（如 cleanup）决定降级策略
+            # 写入失败 = 丢对话轮次，不静默吞掉：记错误 + 埋点后重抛，由调用方决定降级策略
             log.error("写入PG记忆失败 {} : {}", conversation_id, e)
             _record_error("memory.add")
             raise
@@ -312,13 +297,8 @@ def _strip_user_input_boundary(content: str) -> str:
 def _extract_module(conversation_id: str) -> str:
     """从 conversation_id 提取模块前缀。
 
-    格式约定：
-      - "web-xianzhi-1783429404556"       → "web-xianzhi"（旧格式）
-      - "mp-xianzhi__<userId>__<rand>"    → "mp-xianzhi"（用户态，双下划线分隔）
-      - "default" / 无连字符               → ""
-
-    双下划线 `__` 用于分隔 user_id，避免与模块名里的连字符冲突，
-    这样 PC web、小程序、先知、用户态会话互不干扰。
+    格式约定：'web-xianzhi-<ts>' → 'web-xianzhi'；'mp-xianzhi__<userId>__<rand>' → 'mp-xianzhi'；
+    'default' / 无连字符 → ''。双下划线分隔 user_id，避免与模块名里的连字符冲突。
     """
     if not conversation_id:
         return ""
@@ -333,10 +313,7 @@ def _extract_module(conversation_id: str) -> str:
 
 
 def _extract_user_id(conversation_id: str) -> str:
-    """从 conversation_id 提取 user_id（格式 `module__<userId>__<rand>`）。
-
-    旧格式或游客会话返回空串。
-    """
+    """从 conversation_id 提取 user_id（格式 `module__<userId>__<rand>`），旧格式/游客返回空串。"""
     parts = conversation_id.split("__")
     if len(parts) >= 2 and parts[1]:
         return parts[1]
@@ -344,15 +321,10 @@ def _extract_user_id(conversation_id: str) -> str:
 
 
 def get_session_info(prefix: str = "", user_id: str = None) -> list:
-    """获取所有会话信息（用于前端会话列表），按 prefix/user_id 过滤。
+    """获取所有会话信息（前端会话列表），按 prefix/user_id 过滤。
 
-    单条 SQL 完成聚合 + 最后一条消息提取：
-    - 聚合子查询算首末时间与消息数；
-    - DISTINCT ON 子查询取每个会话最新一条消息（配合 session_id+created_at 索引），
-      替代原来的逐组相关子查询，消除 N+1 放大；
-    - module/user_id 过滤下推 SQL（原来 prefix 在 Python 侧过滤，全表聚合后丢弃），
-      LIMIT 兜底防止极端库拖垮接口。
-    Python 侧仅保留 sm 缺失（旧数据）时的内存映射兜底过滤。
+    单条 SQL 完成聚合 + 每个会话最新一条消息提取（DISTINCT ON），消除逐组相关子查询的 N+1；
+    module/user_id 过滤下推 SQL，LIMIT 兜底防极端库拖垮接口。
     """
     try:
         _ensure_schema()
@@ -387,8 +359,7 @@ def get_session_info(prefix: str = "", user_id: str = None) -> list:
                 conditions.append("sm.user_id = %s")
                 params.append(user_id)
             elif prefix:
-                # prefix 下推：优先匹配 sm.module；sm 缺失的旧行留在结果里，
-                # 由下方 Python 兜底（内存映射推 module 后再过滤）
+                # prefix 下推：优先匹配 sm.module；sm 缺失的旧行保留，由下方 Python 兜底
                 conditions.append("(sm.module = %s OR sm.conversation_id IS NULL)")
                 params.append(prefix)
             if conditions:
@@ -401,18 +372,16 @@ def get_session_info(prefix: str = "", user_id: str = None) -> list:
             session_uuid = str(row[0])
             conversation_id = row[1]
             module = row[2]
-            # 如果 session_metadata 中没有记录（旧数据或尚未同步），使用内存映射
+            # 旧数据/尚未同步时 session_metadata 无记录，用内存映射兜底
             if not conversation_id:
                 conversation_id = _session_uuid_map.get(session_uuid, session_uuid)
                 module = _extract_module(str(conversation_id))
-            # 按 prefix 过滤
             if prefix and str(module) != prefix:
                 continue
             last_msg_raw = row[4]
             last_msg_text = ""
             if last_msg_raw:
                 try:
-                    import json
                     if isinstance(last_msg_raw, str):
                         msg_obj = json.loads(last_msg_raw)
                     else:
@@ -439,9 +408,9 @@ def get_session_info(prefix: str = "", user_id: str = None) -> list:
         _record_error("memory.get_session_info")
         return []
 
+
 def _resolve_session_uuid(session_id: str) -> str:
-    """解析 conversation_id 为真实的 session_uuid。
-    优先查询 session_metadata，找不到再用 _to_uuid 计算。"""
+    """解析 conversation_id 为真实 session_uuid：优先查 session_metadata，查不到再用确定性 UUID 计算。"""
     try:
         with _get_pool().connection() as conn:
             row = conn.execute(
@@ -458,12 +427,10 @@ def _resolve_session_uuid(session_id: str) -> str:
 
 
 def get_session_owner(session_id: str) -> str:
-    """获取会话归属用户 ID（session_metadata.user_id）。
+    """获取会话归属用户 ID（session_metadata.user_id），游客/旧格式会话返回空串。
 
-    游客会话/旧格式会话无归属，返回空串。
     供 API 层做会话越权校验：user_id 非空的会话仅限本人 token 访问。
-    查询失败时返回空串（放行），避免 DB 抖动直接打断正常用户，
-    越权防护在 DB 正常时仍然生效。
+    查询失败时返回空串放行，避免 DB 抖动直接打断正常用户。
     """
     try:
         with _get_pool().connection() as conn:
@@ -492,12 +459,10 @@ def delete_session(session_id: str):
 
 
 def get_messages(session_id: str) -> list:
-    """获取指定会话的所有消息。
+    """获取指定会话所有消息（前端 role 格式：user / assistant）。
 
-    返回前端期望的 role 格式：user / assistant。
-    过滤掉 tool/system 类型消息（工具调用结果、推理片段）以及
-    tool_call_agent.think 注入的 next_step_prompt 占位 HumanMessage，
-    防止历史会话恢复时显示无效内容。
+    过滤 tool/system 消息、tool_call_agent 注入的 next_step_prompt 占位消息及空消息；
+    user 消息剥离 base_agent 注入的指令防护边界标记。
     """
     try:
         session_uuid = _resolve_session_uuid(session_id)
@@ -512,20 +477,15 @@ def get_messages(session_id: str) -> list:
             msg = row[0]
             content = msg.get("data", {}).get("content", "") or ""
             raw_role = msg.get("type", "").replace("_message", "")
-            # 过滤：工具调用结果、推理片段、系统消息
             if raw_role in ("tool", "system"):
                 continue
-            # 过滤 next_step_prompt 占位消息（tool_call_agent 注入的 HumanMessage，
-            # 关键词须与 app.agent.xianzhi.NEXT_STEP_PROMPT 实际文本一致，避免历史恢复时把
-            # 工具调度模板当作用户消息显示）
+            # next_step_prompt 占位消息（tool_call_agent 注入的 HumanMessage）不作为用户消息展示，
+            # 关键词须与 app.agent.xianzhi.NEXT_STEP_PROMPT 实际文本一致
             if raw_role == "human" and "根据用户需求选最合适的工具，复杂任务分解多步" in content:
                 continue
-            # 过滤无内容的空消息
             if not content.strip():
                 continue
-            # 映射 role 为前端期望的格式
             role = "user" if raw_role == "human" else "assistant"
-            # 剥离指令注入防护边界标记（base_agent._wrap_user_input 添加的）
             if role == "user":
                 content = _strip_user_input_boundary(content)
             messages.append({
@@ -548,11 +508,10 @@ _BAZI_TOOL_NAMES = {
 
 
 def get_birth_info_from_session(session_id: str) -> dict | None:
-    """从会话消息历史中的排盘工具调用参数提取出生信息。
+    """从会话历史中的排盘工具调用参数提取出生信息。
 
     用户可能用农历/节日/时辰等自然语言输入（如"2004年端午节 辰时 男"），
-    前端正则无法提取。此函数从 AIMessage 的 tool_calls 中提取 LLM 已解析的
-    标准 birth_time/gender，供前端从历史会话恢复时使用。
+    前端正则无法提取；这里从 AIMessage 的 tool_calls 中取 LLM 已解析的标准 birth_time/gender。
     """
     try:
         session_uuid = _resolve_session_uuid(session_id)

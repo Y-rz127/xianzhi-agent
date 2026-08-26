@@ -1,6 +1,4 @@
-"""神煞计算：以四柱 + 月支推算全部神煞命中。
-
-R9 拆分自 bazi_engine.py。"""
+"""神煞计算：以四柱 + 月支推算全部神煞命中。"""
 from __future__ import annotations
 
 from app.domain.models import Pillar
@@ -95,9 +93,7 @@ def _compute_shensha(pillars: list[Pillar], gender_int: int | None = None) -> li
         seen.add(key)
         result.append({"name": name, "description": desc, "pillar": pillar_name})
 
-    # ================================================================
-    # 一、以日干 / 年干查的神煞（口径对齐 07_神煞初探.md / FateMaster）
-    # ================================================================
+    # 一、以日干/年干查的神煞
     year_nayin_wx = pillars[0].nayin[-1] if pillars[0].nayin else ""
 
     def _adv(zhi: str, step: int) -> str:
@@ -140,10 +136,8 @@ def _compute_shensha(pillars: list[Pillar], gender_int: int | None = None) -> li
             if p.zhi == yangren:
                 add("羊刃", "刚烈勇猛、有勇有谋；得制化为武贵，失制化易招灾", p.name)
 
-    # 学堂 / 词馆（年柱纳音五行查月日时支的长生/临官位；禄命法）
-    # 注意：只查月日时三柱（pillars[1:]），不包含年柱自身（古诀"见其他三支"）
-    # 正学堂 / 正词馆 是 学堂 / 词馆 的精确位（干支完全匹配 ⊃ 仅地支匹配）。
-    # 同柱同时命中"正X"和"X"时仅保留"正X"，避免重复标记。
+    # 学堂/词馆：按年柱纳音查月日时三柱（不含年柱自身）；
+    # 正学堂/正词馆为精确位（干支全配），同柱命中"正X"时不再报"X"
     _other_three = pillars[1:]
     xt = XUE_TANG.get(year_nayin_wx)
     zxt = ZHENG_XUE_TANG.get(year_nayin_wx)
@@ -219,9 +213,7 @@ def _compute_shensha(pillars: list[Pillar], gender_int: int | None = None) -> li
             if p.zhi == hy:
                 add("红艳煞", "异性缘过旺、易陷复杂感情纠葛，女命尤忌", p.name)
 
-    # ================================================================
     # 二、以月支查的神煞（天德、月德 — 需四柱天干见对应字）
-    # ================================================================
     month_idx = _zhi_to_month_index(month_zhi)  # 寅=1, 卯=2, ..., 丑=12
 
     tiande_chars = TIAN_DE_MONTH.get(month_idx)
@@ -242,17 +234,13 @@ def _compute_shensha(pillars: list[Pillar], gender_int: int | None = None) -> li
 
     yuede_chars = YUE_DE_MONTH.get(month_idx)
     if yuede_chars:
-        # 月德贵人查四柱天干（口诀"亥卯未月甲干栖"中的"干"即天干），
-        # 不查藏干——否则亥/卯/未三合木局的藏干甲会被全部误报。
-        # 对齐 07_神煞初探.md §3 月德贵人。
+        # 月德贵人只查四柱天干：口诀"亥卯未月甲干栖"中的"干"即天干，查藏干会误报三合木局
         for c in yuede_chars:
             for p in pillars:
                 if p.gan == c:
                     add("月德贵人", "天干见{}，化煞解厄".format(c), p.name)
 
-    # 天德合（按月支查。卯/午/酉/子四个月支对应的天德是地支，
-    # 其天德合也走"地支六合"——对应值本身是地支，须查 p.zhi；
-    # 其余八个月支天德是天干，其天德合是"天干五合"——对应值是天干，查 p.gan）。
+    # 天德合：卯/午/酉/子月天德是地支，天德合查 p.zhi；其余月天德是天干，天德合查 p.gan
     tian_de_he = TIAN_DE_HE.get(month_zhi)
     if tian_de_he:
         is_branch_target = month_idx in TIAN_DE_IS_BRANCH
@@ -290,12 +278,8 @@ def _compute_shensha(pillars: list[Pillar], gender_int: int | None = None) -> li
             if p.zhi == tianyi_med:
                 add("天医", "医药有缘、善疗病痛，宜医护保健", p.name)
 
-    # ================================================================
-    # 三、以年支/日支查的神煞
-    # 注：文档明确「查余支/余三支」，即排除自身柱位
-    #   以年支查时排除年柱(index=0)，以日支查时排除日柱(index=2)
-    # ================================================================
-    for key_zhi, label, skip_idx in ((year_zhi, "年", 0), (day_zhi, "日", 2)):
+    # 三、以年支/日支查的神煞（排除自身柱位：年支查时排除年柱、日支查时排除日柱）
+    for key_zhi, skip_idx in ((year_zhi, 0), (day_zhi, 2)):
 
         huagai = HUA_GAI.get(key_zhi)
         if huagai:
@@ -347,10 +331,7 @@ def _compute_shensha(pillars: list[Pillar], gender_int: int | None = None) -> li
                 if p.zhi == wangshen:
                     add("亡神", "心思深沉，暗耗多端", p.name)
 
-    # ================================================================
-    # 四、以年支查的专属神煞（灾煞、红鸾、天喜、孤辰寡宿、吊客、病符、天医）
-    # 注：吊客/病符/天医传统只以年支查，故不放入上面的年/日双查循环
-    # ================================================================
+    # 四、以年支查的专属神煞（吊客/病符/天医等传统只以年支查）
     # 灾煞（将星冲位，以年支查余三支）
     zaisha = ZAI_SHA.get(year_zhi)
     if zaisha:
@@ -427,10 +408,7 @@ def _compute_shensha(pillars: list[Pillar], gender_int: int | None = None) -> li
             if p.zhi == z:
                 add("披麻", "孝服六亲有损，大运流年遇之主意外伤病", p.name)
 
-    # 血刃（以月支查四柱地支，含月柱自身）
-    # 口径对齐 07_神煞初探.md §38 ——「以月支查四柱干支」。
-    # 注：XUE_REN 表中"亥月→亥"是自映射，月柱本身就是命中点，
-    #     不能像"将星冲位/年支前后辰"那种余三支模式一样 skip 月柱。
+    # 血刃（以月支查四柱，含月柱自身）："亥月→亥"自映射，不能像余三支那样跳过月柱
     xr = XUE_REN.get(month_zhi)
     if xr:
         for p in pillars:
@@ -481,11 +459,7 @@ def _compute_shensha(pillars: list[Pillar], gender_int: int | None = None) -> li
         p_chen = next((p for p in pillars if p.zhi == "辰"), None)
         add("地网", "困顿羁绊、事业受阻", p_chen.name if p_chen else "")
 
-    # ================================================================
-    # 五、特殊组合类神煞（日柱特定组合 / 日柱纳音等）
-    # ================================================================
-
-    # ===== 五、特殊组合类神煞（日柱组合 / 日柱纳音 / 日时配合等） =====
+    # 五、特殊组合类神煞（日柱组合 / 日柱纳音 / 日时配合等）
     day_gz = pillars[2].ganzhi
     season_now = SEASON_OF_BRANCH.get(month_zhi)
 
@@ -547,13 +521,7 @@ def _compute_shensha(pillars: list[Pillar], gender_int: int | None = None) -> li
             if pillars[2].zhi == d and pillars[3].zhi == t:
                 add("拱禄", f"日时拱夹禄位{lu_zhi}，财禄拱护、富贵双全", "日柱")
 
-    # 三奇贵人（对齐 07_神煞初探.md §10 + 《渊海子平》卷一·论三奇贵人）：
-    #   硬性基础条件「天干顺次连续，不可颠倒、不可间隔其它天干」：
-    #   - 天上三奇 甲→戊→庚：仅 年甲·月戊·日庚  或  月甲·日戊·时庚
-    #   - 地下三奇 乙→丙→丁：仅 年乙·月丙·日丁  或  月乙·日丙·时丁
-    #   - 人中三奇 壬→癸→辛：仅 年壬·月癸·日辛  或  月壬·日癸·时辛
-    #   逆序、乱序、或在三干之间插入别的天干 → 直接不成立。
-    #   两个连续窗口（年-月-日 / 月-日-时）任一「精确顺序」匹配即命中（均天然含日柱）。
+    # 三奇贵人：天干顺次连续、不可颠倒间隔，仅认 年-月-日 / 月-日-时 两个连续窗口
     _SAN_QI_KIND = {
         ("甲", "戊", "庚"): "天上三奇",
         ("乙", "丙", "丁"): "地下三奇",
@@ -575,22 +543,8 @@ def _compute_shensha(pillars: list[Pillar], gender_int: int | None = None) -> li
         if _sanqi_hit:
             break
 
-    # 童子煞（月令 + 年柱纳音 + 日/时支分别判断，对齐 07_神煞初探.md）
-    # 「春秋寅子贵，冬夏卯未辰；金木马卯合，水火鸡犬多；土命逢辰巳」
-    def _check_tongzi(zhi: str, pillar_label: str) -> bool:
-        """判断某地支（日支或时支）是否落童子煞。
-
-        对齐知识库 07_神煞初探.md 口诀：
-        「春秋寅子贵，冬夏卯未辰；金木马卯合，水火鸡犬多；土命逢辰巳」。
-        判定依赖闭包变量 ``season_now``（当前季节）与 ``year_nayin_wx``（年柱纳音五行）。
-
-        Args:
-            zhi: 待查地支。
-            pillar_label: 来源柱标签（"日柱"/"时柱"），仅用于日志与调试。
-
-        Returns:
-            命中童子煞返回 True。
-        """
+    # 童子煞：依月令季节 + 年柱纳音，判断日/时支是否落口诀「春秋寅子贵，冬夏卯未辰；金木马卯合，水火鸡犬多；土命逢辰巳」
+    def _check_tongzi(zhi: str) -> bool:
         if season_now in ("春", "秋") and zhi in ("寅", "子"):
             return True
         if season_now in ("夏", "冬") and zhi in ("卯", "未", "辰"):
@@ -603,9 +557,9 @@ def _compute_shensha(pillars: list[Pillar], gender_int: int | None = None) -> li
             return True
         return False
 
-    if _check_tongzi(day_zhi, "日柱"):
+    if _check_tongzi(day_zhi):
         add("童子煞", "运气多阻、易遇小人，婚姻迟缓，宜修道艺", "日柱")
-    if len(pillars) > 3 and _check_tongzi(pillars[3].zhi, "时柱"):
+    if len(pillars) > 3 and _check_tongzi(pillars[3].zhi):
         add("童子煞", "运气多阻、易遇小人，婚姻迟缓，宜修道艺", "时柱")
 
     # 飞刃（羊刃对冲位）
@@ -616,10 +570,7 @@ def _compute_shensha(pillars: list[Pillar], gender_int: int | None = None) -> li
                 if p.zhi == feiren_zhi:
                     add("飞刃", f"羊刃{yangren}对冲{feiren_zhi}，刚烈更甚、主突发伤害", p.name)
 
-    # ================================================================
-    # 六、空亡（以年柱+日柱旬空双查，标注实际落住四柱的旬空位）
-    # ================================================================
-    # 传统子平法以日柱旬空为主，年柱旬空为辅；本实现双查，任一落空即标记
+    # 六、空亡（年柱+日柱旬空双查，任一落空即标记）
     xunkong_set: set[str] = set()
     for idx in (0, 2):  # 年柱=0, 日柱=2
         if pillars[idx].xunkong:

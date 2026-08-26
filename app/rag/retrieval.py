@@ -1,9 +1,7 @@
 """统一 RAG 检索策略：领域识别 + 检索词构造 + 去重检索执行。
 
-ReAct 工具路径（app/tools/rag_search.py）与 workflow 路径（app/agent/xianzhi_workflow.py）
-共用本模块的检索策略，避免两套体系各自维护、行为漂移。
-
-分层职责：
+ReAct 工具路径（app/tools/rag_search.py）与 workflow 路径（app/agent/workflow/xianzhi_workflow.py）
+共用本模块，避免两套体系各自维护、行为漂移：
 - 本模块：领域关键词、领域检索词、理论术语检索词、query 构造、跨 query 去重检索（唯一入口 retrieve_for_context）
 - rag_search.py（ReAct 工具）：结果格式化（来源标签人性化）与工具协议
 - xianzhi_workflow.py（workflow）：意图分类、命盘个性化 query 叠加、prompt 组装
@@ -16,9 +14,6 @@ import threading
 from app.core.logger import log
 from app.rag.vector_store import get_knowledge_base
 
-# ============================================================
-# 领域识别（关键词打分）
-# ============================================================
 
 DOMAIN_KEYWORDS = {
     "career": ("事业", "工作", "职业", "跳槽", "换工作", "升职", "创业", "老板", "岗位", "offer"),
@@ -72,10 +67,6 @@ def detect_domain(text: str) -> str:
     return best_domain
 
 
-# ============================================================
-# 领域 → 基础检索词
-# ============================================================
-
 DOMAIN_RULE_QUERIES = {
     # 领域规则 query：前缀对齐知识库文档标题（chunk 前缀 [标题]），最大化 2-gram 覆盖率
     "career": ("事业工作 断法 官杀 印星 食伤 升职",),
@@ -100,11 +91,8 @@ DOMAIN_RULE_QUERIES = {
 }
 
 
-# ============================================================
 # 理论术语 → 精准检索词
-# 设计原则：单一概念 + 必要的同义/近义扩展，避免一次拉一堆无关主题。
-# ============================================================
-
+# 设计原则：单一概念 + 必要的同义/近义扩展，避免一次拉一堆无关主题
 THEORY_TOPIC_QUERIES: dict[str, str] = {
     # 取用体系
     "用神": "用神 取用 喜忌 调候 扶抑 病药",
@@ -273,12 +261,7 @@ def detect_theory_topic(text: str) -> tuple[str, str] | None:
     return None
 
 
-# ============================================================
-# 统一 query 构造与检索执行
-# ============================================================
-
-# 模块级可复用检索线程池：检索调用频繁（每次对话多 query 并发），
-# 复用避免每次创建/销毁线程池的开销；懒创建 + 锁保护并发初始化
+# 模块级可复用检索线程池：检索调用频繁（每次对话多 query 并发），复用避免反复创建/销毁线程池
 _search_pool: "concurrent.futures.ThreadPoolExecutor | None" = None
 _search_pool_lock = threading.Lock()
 
@@ -307,8 +290,8 @@ def expand_knowledge_queries(query: str, limit: int = 4) -> list[str]:
     # 理论术语已命中时，跳过 theory 领域规则 query（避免追加"命理 术语 概念 解释"这类泛化词）
     if domain and not (match and domain == "theory"):
         queries.extend(DOMAIN_RULE_QUERIES.get(domain, ()))
-    # 时间维度叠加：含流年信号（今年/明年/流年…）且主域非 liunian 时，
-    # 追加流年规则 query——单域打分无法同时表达"事业+今年"两个维度
+    # 含流年信号（今年/明年/流年…）且主域非 liunian 时，追加流年规则 query——
+    # 单域打分无法同时表达"事业+今年"两个维度
     if domain != "liunian" and any(kw in text for kw in DOMAIN_KEYWORDS["liunian"]):
         queries.extend(DOMAIN_RULE_QUERIES["liunian"])
     if not queries:
@@ -336,11 +319,9 @@ def retrieve_for_context(
     - 去重键：(来源文件, 内容前120字)
     - 控量：单 chunk 截断 ≤ max_chars_per_chunk，最多 max_docs 条
     """
-    # 并发检索：每条 query 的 search 为独立 I/O（embedding + 向量查询），
-    # 串行时单条慢查询/空命中会线性拖垮全部；并发后整体耗时≈最慢一条，空命中不再累加。
-    # search() 已用锁保护缓存（_cache_lock / _init_lock），线程安全；
-    # 结果按原始 query 顺序归并，跨 query 去重口径与串行一致。
-    # 线程池复用模块级实例，避免每次检索的创建/销毁开销。
+    # 并发检索：每条 query 的 search 是独立 I/O（embedding + 向量查询），串行时单条慢查询/
+    # 空命中会线性拖垮全部；search() 已用锁保护缓存（_cache_lock / _init_lock），线程安全，
+    # 结果按原始 query 顺序归并，跨 query 去重口径与串行一致
     kb = get_knowledge_base()
     ex = _get_search_pool()
     order: dict[object, int] = {}

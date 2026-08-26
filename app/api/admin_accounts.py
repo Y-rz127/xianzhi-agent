@@ -1,9 +1,11 @@
 """管理员账号管理 API。"""
 from __future__ import annotations
 
+import datetime
 import hashlib
 import json
 import os
+import time
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
@@ -37,11 +39,7 @@ def _hash_password(password: str) -> str:
 
 
 def _init_default_admin() -> None:
-    """首次启动时从环境变量初始化默认管理员。
-
-    通过 DEFAULT_ADMIN_USERNAME / DEFAULT_ADMIN_PASSWORD 环境变量配置；
-    未配置则不创建默认管理员（生产环境更安全）。
-    """
+    """首次启动时从环境变量初始化默认管理员（未配置则跳过，生产环境更安全）。"""
     accounts = _load_accounts()
     if accounts:
         return
@@ -49,7 +47,6 @@ def _init_default_admin() -> None:
     password = os.environ.get("DEFAULT_ADMIN_PASSWORD", "").strip()
     if not username or not password:
         return
-    import datetime
     accounts.append({
         "id": "default",
         "username": username,
@@ -87,18 +84,18 @@ async def admin_login(req: Request) -> dict:
 
 @router.get("")
 async def list_admin_accounts() -> dict:
-    accounts = _load_accounts()
-    result = []
-    for acc in accounts:
-        result.append({
+    accounts = [
+        {
             "id": acc["id"],
             "username": acc["username"],
             "nickname": acc.get("nickname", ""),
             "enabled": acc.get("enabled", True),
             "is_super": acc.get("is_super", acc["id"] == "default"),
             "created_at": acc.get("created_at", ""),
-        })
-    return {"total": len(result), "accounts": result}
+        }
+        for acc in _load_accounts()
+    ]
+    return {"total": len(accounts), "accounts": accounts}
 
 
 @router.post("")
@@ -114,14 +111,10 @@ async def create_admin_account(req: Request) -> dict:
     if len(password) < 4:
         raise HTTPException(status_code=400, detail="密码长度至少 4 个字符")
     accounts = _load_accounts()
-    for acc in accounts:
-        if acc.get("username") == username:
-            raise HTTPException(status_code=409, detail="用户名已存在")
-    import datetime
-    import time
-    new_id = f"acc_{int(time.time())}"
+    if any(acc.get("username") == username for acc in accounts):
+        raise HTTPException(status_code=409, detail="用户名已存在")
     new_account = {
-        "id": new_id,
+        "id": f"acc_{int(time.time())}",
         "username": username,
         "password_hash": _hash_password(password),
         "nickname": nickname or username,
@@ -159,9 +152,8 @@ async def delete_admin_account(account_id: str) -> dict:
     if account_id == "default":
         raise HTTPException(status_code=403, detail="不能删除超级管理员账号")
     accounts = _load_accounts()
-    original_len = len(accounts)
-    accounts = [acc for acc in accounts if acc["id"] != account_id]
-    if len(accounts) == original_len:
+    kept = [acc for acc in accounts if acc["id"] != account_id]
+    if len(kept) == len(accounts):
         raise HTTPException(status_code=404, detail="账号不存在")
-    _save_accounts(accounts)
+    _save_accounts(kept)
     return {"message": "删除成功"}

@@ -51,12 +51,7 @@ class AppContext:
             self.reviewer_model = self.chat_model
 
     def get_xianzhi(self, conversation_id: str):
-        """获取（或创建）指定会话的 Xianzhi 实例及其专用锁。
-
-        Returns:
-            (agent, asyncio.Lock) 元组。调用方应在锁内完成
-            sect 设置、命盘挂载、流式执行这一组操作，避免并发污染。
-        """
+        """获取（或创建）指定会话的 Xianzhi 实例及其专用锁（调用方在锁内完成会话操作，避免并发污染）。"""
         cid = conversation_id if conversation_id and conversation_id.strip() else "xianzhi-default"
         with self._pool_lock:
             hit = self._agents.get(cid)
@@ -89,10 +84,7 @@ class AppContext:
 
     @staticmethod
     def workflow_backend() -> str:
-        """返回当前编排后端，供健康检查暴露。
-
-        R3 收敛后 LangGraph 为唯一编排实现（构建失败即启动失败），恒返回 langgraph。
-        """
+        """返回当前编排后端（LangGraph 为唯一编排实现）。"""
         return "langgraph"
 
 

@@ -58,10 +58,8 @@ def build_messages(
     Worker 配置优先（专业 Worker 提供 length_rule / skip_facts）；needs_chart 覆盖
     skip_facts：当用户问「我命盘是不是 XX」时必须注入命盘事实。尾部补入历史与会话摘要。
     """
-    # Worker 配置优先（专业 Worker 提供 length_rule 和 skip_facts）
     if worker is None:
         worker = WORKERS.get(intent.domain, WORKERS["general"])
-    # needs_chart 覆盖 skip_facts：用户问"我命盘是不是XX"时需要注入命盘事实
     skip = worker.skip_facts and not intent.needs_chart
     facts = "" if skip else compact_facts(ctx.chart, intent)
     recent_history = compact_history(history, summary)
@@ -285,9 +283,7 @@ def fact_block(chart: BaziChart, intent: QuestionIntent) -> str:
     birth_str = chart.birth.solar or ""
     current_age = ""
     try:
-        import re as _re
-
-        m = _re.search(r"(\d{4})-(\d{1,2})-(\d{1,2})", birth_str)
+        m = re.search(r"(\d{4})-(\d{1,2})-(\d{1,2})", birth_str)
         if m:
             by, bm, bd = int(m.group(1)), int(m.group(2)), int(m.group(3))
             age = today.year - by - ((today.month, today.day) < (bm, bd))
@@ -348,10 +344,6 @@ def check_facts(
     if other_chart is not None:
         for item in other_chart.liunian:
             year_to_gz.setdefault(item.year, item.ganzhi)
-    # 大运干支白名单：匹配到的干支如果是某步大运干支，且上下文有大运关键词，则跳过流年校验
-    dayun_gz_set: set[str] = {item.ganzhi for item in chart.dayun}
-    if other_chart is not None:
-        dayun_gz_set.update(item.ganzhi for item in other_chart.dayun)
     _DAYUN_KEYWORDS = ("大运", "交运", "起运", "运柱", "行运", "运", "步入", "走", "交")
     for match in YEAR_GANZHI_RE.finditer(answer):
         year = int(match.group("year"))

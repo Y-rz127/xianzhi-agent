@@ -1,20 +1,11 @@
-"""LangSmith 可观测性配置（对应笔记 01_基础调用/大模型接入LangSmith实战）。
-
-通过环境变量开启 LangChain V2 追踪，自动记录：
-- LLM 调用（输入/输出/耗时/Token）
-- 工具调用
-- RAG 检索
-- Agent 执行轨迹
-
-访问 https://smith.langchain.com/ 查看追踪数据。
-
-此外维护一份进程内 API 指标统计，供 /metrics 接口展示。
-"""
+"""LangSmith 可观测性：通过环境变量开启 LangChain V2 追踪，并维护进程内 API 指标供 /metrics 展示。"""
 from __future__ import annotations
 
 import os
 import threading
 import time
+import urllib.error
+import urllib.request
 from collections import defaultdict
 from typing import Any
 
@@ -27,30 +18,20 @@ _metrics: dict[str, Any] = {
     "endpoints": defaultdict(lambda: {"count": 0, "total_latency_ms": 0.0}),
     "status_codes": {"2xx": 0, "4xx": 0, "5xx": 0},
     "recent_errors": [],
-    # 内部错误分类计数（DB/记忆层失败等被降级兜住的错误，供 /metrics 观测）
+    # DB/记忆层失败等被降级兜住的错误，供 /metrics 观测
     "internal_errors": defaultdict(int),
     "started_at": time.time(),
 }
 
 
 def record_error(category: str) -> None:
-    """记录一次内部错误（如记忆写入失败、DB 读取降级），供 /metrics 暴露。
-
-    降级路径（吞错返回默认值）也必须调用，确保静默故障可观测。
-    """
+    """记录一次内部错误（如记忆写入失败、DB 读取降级）。降级路径也必须调用，确保静默故障可观测。"""
     with _metrics_lock:
         _metrics["internal_errors"][category] += 1
 
 
 def record_request(method: str, path: str, status: int, duration: float) -> None:
-    """记录一次 API 请求指标。
-
-    Args:
-        method: HTTP 方法，如 GET / POST。
-        path: 请求路径。
-        status: HTTP 状态码。
-        duration: 请求耗时（秒）。
-    """
+    """记录一次 API 请求指标。"""
     key = f"{method} {path}"
     latency_ms = duration * 1000
     with _metrics_lock:
@@ -66,14 +47,13 @@ def record_request(method: str, path: str, status: int, duration: float) -> None
             _metrics["status_codes"]["5xx"] += 1
 
         if status >= 400:
-            error_record = {
+            _metrics["recent_errors"].append({
                 "timestamp": time.time(),
                 "method": method,
                 "path": path,
                 "status": status,
                 "latency_ms": round(latency_ms, 2),
-            }
-            _metrics["recent_errors"].append(error_record)
+            })
             if len(_metrics["recent_errors"]) > 50:
                 _metrics["recent_errors"].pop(0)
 
@@ -103,8 +83,7 @@ def get_metrics() -> dict[str, Any]:
 
         avg_latency_ms = round(total_latency_ms / total_requests, 2) if total_requests else 0.0
         status = dict(_metrics["status_codes"])
-        error_count = status["4xx"] + status["5xx"]
-        error_rate = round(error_count / total_requests * 100, 2) if total_requests else 0.0
+        error_rate = round((status["4xx"] + status["5xx"]) / total_requests * 100, 2) if total_requests else 0.0
 
         return {
             "total_requests": total_requests,
@@ -120,19 +99,14 @@ def get_metrics() -> dict[str, Any]:
 
 
 def init_observability() -> bool:
-    """初始化 LangSmith 可观测性。返回是否启用。
-
-    在应用启动最早阶段调用，确保后续所有 LangChain 调用都被追踪。
-    """
+    """初始化 LangSmith 追踪。须在应用启动最早阶段调用，确保后续所有 LangChain 调用都被追踪。"""
     if not settings.langsmith_tracing:
         log.info("LangSmith 追踪未启用（LANGSMITH_TRACING=false）")
         return False
-
     if not settings.langsmith_api_key:
         log.warning("LANGSMITH_TRACING=true 但未配置 LANGSMITH_API_KEY，追踪未生效")
         return False
 
-    # 设置 LangChain 追踪环境变量（对应笔记的 os.environ 配置）
     os.environ["LANGCHAIN_TRACING_V2"] = "true"
     os.environ["LANGCHAIN_ENDPOINT"] = "https://api.smith.langchain.com"
     os.environ["LANGCHAIN_API_KEY"] = settings.langsmith_api_key
@@ -149,14 +123,11 @@ def init_observability() -> bool:
 
 
 def _validate_api_key(api_key: str) -> bool:
-    """快速校验 LangSmith API Key 是否有效，避免启动后持续刷 403 报错。
+    """快速校验 LangSmith API Key 是否有效，避免启动后持续刷 403。
 
-    失败关闭：无法确认 Key 有效时（401/403 或网络异常）一律视为无效，
-    自动关闭追踪，避免带着无效 Key 持续产生 403 噪音。
+    失败关闭：无法确认有效（401/403 或网络异常）一律视为无效并关闭追踪。
     """
     try:
-        import urllib.error
-        import urllib.request
         req = urllib.request.Request(
             "https://api.smith.langchain.com/info",
             headers={"x-api-key": api_key},

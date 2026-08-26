@@ -1,4 +1,4 @@
-"""应用配置加载（对应 Java 项目的 application.yml）。"""
+"""应用配置：基于 pydantic-settings 从 .env / 环境变量加载。"""
 from pathlib import Path
 from typing import Optional
 
@@ -7,10 +7,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    """应用配置模型（基于 pydantic-settings 从 .env / 环境变量加载，对应 Java 的 application.yml）。
+    """应用配置模型，字段均通过 alias 支持环境变量覆盖，便于容器化部署。"""
 
-    所有字段均通过 alias 支持环境变量覆盖，便于容器化部署。
-    """
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     # 大模型
@@ -20,13 +18,11 @@ class Settings(BaseSettings):
     )
     dashscope_api_key: str = Field(default="", alias="DASHSCOPE_API_KEY")
     dashscope_model: str = Field(default="qwen-plus", alias="DASHSCOPE_MODEL")
-    # 意图拆解模型（轻量快速，默认留空则复用主模型）
+    # 意图拆解/Reviewer 审核模型（轻量独立实例，留空则复用主模型）
     decompose_model: str = Field(default="", alias="DECOMPOSE_MODEL")
-    # Reviewer 审核模型（独立实例，默认留空则复用主模型）
     reviewer_model: str = Field(default="", alias="REVIEWER_MODEL")
-    # LLM 生成参数
+    # LLM 生成参数；thinking 默认关闭，避免  thinking 标签泄漏
     llm_temperature: float = Field(default=0.7, alias="LLM_TEMPERATURE")
-    # Qwen3 推理模型 thinking 模式开关（默认关闭，避免 <think> 标签泄漏）
     llm_enable_thinking: bool = Field(default=False, alias="LLM_ENABLE_THINKING")
     llm_timeout: float = Field(default=60.0, alias="LLM_TIMEOUT")
     llm_max_retries: int = Field(default=2, alias="LLM_MAX_RETRIES")
@@ -34,14 +30,13 @@ class Settings(BaseSettings):
     # 服务
     app_port: int = Field(default=8123, alias="APP_PORT")
     debug: bool = Field(default=False, alias="DEBUG")
-    # API 鉴权：逗号分隔的 API Key 列表；为空表示关闭鉴权（本地开发默认）
+    # API 鉴权：逗号分隔的 API Key 列表，为空表示关闭鉴权（本地开发默认）
     api_keys: str = Field(default="", alias="API_KEYS")
-    # 限流：单 IP 每分钟最大请求数（0=不限流；仅统计非静态/健康检查路径）
+    # 限流：单 IP 每分钟最大请求数（0=不限流）
     rate_limit_per_minute: int = Field(default=60, alias="RATE_LIMIT_PER_MINUTE")
     # 单条用户消息最大长度（字符），超出直接拒绝，防止 token 账单被打爆
     max_message_length: int = Field(default=4000, alias="MAX_MESSAGE_LENGTH")
     # CORS 允许的前端源（逗号分隔，支持通配符 *）
-    # 生产环境应配置实际域名，如 https://your-domain.com,https://www.your-domain.com
     cors_origins: str = Field(
         default="http://localhost:5173,http://localhost:5174,http://127.0.0.1:5173,http://127.0.0.1:5174",
         alias="CORS_ORIGINS",
@@ -73,12 +68,9 @@ class Settings(BaseSettings):
     # 向量数据库目录（VECTOR_STORE_TYPE=chroma 时使用）
     vector_db_dir: Path = Field(default=Path("./data/vector_db"), alias="VECTOR_DB_DIR")
     rag_k: int = Field(default=1, alias="RAG_K")
-    # 检索排序相关度权重（0~1）：越高越重视相关性、越低越重视多样性。
-    # 主路径（KnowledgeBase._search_reranked）按关键词重叠重排，不依赖本值；
-    # 本值仅在后端不支持 score 检索、回退 MMR retriever 时生效。
+    # 检索排序相关度权重（0~1），仅在后端不支持 score 检索、回退 MMR retriever 时生效
     rag_mmr_lambda: float = Field(default=0.7, alias="RAG_MMR_LAMBDA")
-    # 检索距离阈值（仅对支持 score 的后端有效，如 Chroma L2 距离）。
-    # None 表示不过滤；需按 embedding 模型距离分布实验标定，避免误伤召回。
+    # 检索距离阈值（仅对支持 score 的后端有效，如 Chroma L2 距离）；None 表示不过滤
     rag_distance_threshold: Optional[float] = Field(default=None, alias="RAG_DISTANCE_THRESHOLD")
     # PostgreSQL + pgvector 连接串（VECTOR_STORE_TYPE=postgres 时使用）
     postgres_connection_string: str = Field(
@@ -89,7 +81,7 @@ class Settings(BaseSettings):
     postgres_collection: str = Field(default="xianzhi_knowledge", alias="POSTGRES_COLLECTION")
     # DashScope embedding 不可用时回退本地 HuggingFace 模型（避免欠费导致服务崩溃）
     embedding_local_fallback: bool = Field(default=True, alias="EMBEDDING_LOCAL_FALLBACK")
-    # 检索结果缓存 TTL（秒），0 表示不缓存；避免多轮对话重复调用 embedding
+    # 检索结果缓存 TTL（秒），0=不缓存；避免多轮对话重复调用 embedding
     rag_search_cache_ttl: int = Field(default=60, alias="RAG_SEARCH_CACHE_TTL")
 
     # LangSmith 可观测性
@@ -102,11 +94,7 @@ class Settings(BaseSettings):
     wechat_secret: str = Field(default="", alias="WECHAT_SECRET")
 
     def pg_dsn(self, timeout: int = 5) -> str:
-        """返回带 connect_timeout 的 PG 连接串。
-
-        容器与数据库不在同一网络平面时，未设超时会令连接长时间挂起，
-        进而拖垮启动（存活探针失败）。统一在此兜底追加 connect_timeout。
-        """
+        """容器与数据库不在同一网络平面时连接会长时间挂起、拖垮启动，统一兜底追加 connect_timeout。"""
         dsn = self.postgres_connection_string
         if "connect_timeout" in dsn:
             return dsn
@@ -115,11 +103,7 @@ class Settings(BaseSettings):
 
 
 def ensure_dirs() -> None:
-    """创建运行时所需目录（显式调用，不在导入期触盘）。
-
-    R8 启动去副作用：原模块级 mkdir 改为由启动方（lifespan）显式调用，
-    保证导入 config 不产生文件系统副作用。
-    """
+    """创建运行时目录。由启动方（lifespan）显式调用，避免导入 config 产生文件系统副作用。"""
     settings.memory_dir.mkdir(parents=True, exist_ok=True)
     settings.vector_db_dir.mkdir(parents=True, exist_ok=True)
 

@@ -1,10 +1,8 @@
-"""排盘构建：出生时间解析、四柱/大运/流年构建、命盘组装与 API 序列化。
-
-R9 拆分自 bazi_engine.py。"""
+"""排盘构建：出生时间解析、四柱/大运/流年构建、命盘组装与 API 序列化。"""
 from __future__ import annotations
 
-import datetime as _dt
-import re as _re
+import datetime
+import re
 from dataclasses import asdict
 from typing import Any
 
@@ -37,18 +35,13 @@ from app.domain.tables import (
 
 
 def parse_birth(birth_time: str) -> tuple[int, int, int, int, int]:
-    """将多种格式的出生时间字符串解析为 (年, 月, 日, 时, 分)。
-
-    兼容中文年月日时、点/号、T、多种分隔符；不足 3 段或时辰非法则抛 ValueError。
-    """
+    """将多种格式的出生时间字符串解析为 (年, 月, 日, 时, 分)。"""
     s = birth_time.strip()
-    # 兼容多种分隔符：中文冒号、中文年月日时分、点号、T、汉字等
     s = s.replace("：", ":").replace("．", ".").replace("。", ".")
     s = s.replace("年", "-").replace("月", "-").replace("日", " ").replace("号", " ")
     s = s.replace("时", ":").replace("点", ":").replace("分", "").replace("T", " ")
-    # 移除多余空格，统一分隔符
     s = s.replace("/", "-").replace(".", "-")
-    s = _re.sub(r"\s+", " ", s).strip()
+    s = re.sub(r"\s+", " ", s).strip()
     parts = s.replace(":", " ").replace("-", " ").split()
     if len(parts) < 3:
         raise ValueError("请提供完整的出生时间，格式: YYYY-MM-DD HH:MM")
@@ -75,7 +68,7 @@ def _gender_label(gender_int: int) -> str:
 
 
 def _zizuo(gan: str, zhi: str) -> str:
-    """天干在其本柱地支的十二长生状态（自坐）。阳干顺行、阴干逆行。"""
+    """天干在其本柱地支的十二长生状态（自坐）：阳干顺行、阴干逆行。"""
     if not gan or not zhi:
         return ""
     base = _GAN_CHANGSHENG_ZHI.get(gan)
@@ -88,7 +81,7 @@ def _zizuo(gan: str, zhi: str) -> str:
 
 
 def _ten_god(day_master: str, target_gan: str) -> str:
-    """计算 target_gan 相对于 day_master 的十神（主星）。"""
+    """计算 target_gan 相对 day_master 的十神（主星）。"""
     if not day_master or not target_gan:
         return ""
     dm_wx = GAN_WUXING.get(day_master, "")
@@ -110,29 +103,16 @@ def _ten_god(day_master: str, target_gan: str) -> str:
 
 
 def _ganzhi_detail(ganzhi: str, day_master_gan: str, pillars: list[Pillar], gender_int: int) -> dict[str, Any]:
-    """为大运/流年干支计算详细字段：主星、天干、地支、藏干、副星、星运、神煞。
-
-    Args:
-        ganzhi: 大运/流年干支（如 "辛未"）
-        day_master_gan: 日主天干（如 "丙"）
-        pillars: 原局四柱（用于神煞查表）
-        gender_int: 性别（1=男 0=女）
-    Returns:
-        dict 含 shishen_gan/gan/zhi/hidden_stems/shishen_zhi/changsheng/shensha
-    """
+    """为大运/流年干支计算详细字段：主星、藏干、副星、星运、神煞。"""
     if not ganzhi or len(ganzhi) < 2:
         return {}
     gan = ganzhi[0]
     zhi = ganzhi[1]
-    # 主星：大运/流年天干相对日主的十神
     shishen_gan = _ten_god(day_master_gan, gan)
-    # 藏干
     hidden = [s for s, _ in HIDDEN_STEMS.get(zhi, ())]
-    # 副星：藏干天干相对日主的十神
     shishen_zhi = [_ten_god(day_master_gan, s) for s in hidden]
-    # 星运：日主在大运/流年地支的十二长生
     changsheng = _zizuo(day_master_gan, zhi)
-    # 神煞：创建临时 Pillar 加入四柱列表，调用 _compute_shensha 后筛出该柱神煞
+    # 临时 Pillar 并入四柱计算神煞，再筛出该柱神煞
     temp_name = "运柱"
     temp_pillar = Pillar(
         name=temp_name, ganzhi=ganzhi, gan=gan, zhi=zhi,
@@ -141,8 +121,7 @@ def _ganzhi_detail(ganzhi: str, day_master_gan: str, pillars: list[Pillar], gend
         shishen_gan=shishen_gan, shishen_zhi=shishen_zhi,
         changsheng=changsheng, zizuo="",
     )
-    all_pillars = pillars + [temp_pillar]
-    all_shensha = _compute_shensha(all_pillars, gender_int)
+    all_shensha = _compute_shensha(pillars + [temp_pillar], gender_int)
     shensha = [{"name": s["name"], "description": s["description"]} for s in all_shensha if s.get("pillar") == temp_name]
     return {
         "shishen_gan": shishen_gan,
@@ -157,22 +136,7 @@ def _ganzhi_detail(ganzhi: str, day_master_gan: str, pillars: list[Pillar], gend
 
 def _pillar(name: str, ganzhi: str, nayin: str, xunkong: str, hidden: str, shishen_gan: str, shishen_zhi: Any,
             changsheng: str = "", zizuo: str = "") -> Pillar:
-    """由 lunar_python 排盘产物构造单柱 Pillar，并解析天干/地支/五行/十神/藏干。
-
-    Args:
-        name: 柱名（年/月/日/时）。
-        ganzhi: 该柱干支串。
-        nayin: 纳音。
-        xunkong: 旬空。
-        hidden: 藏干（字符串或列表）。
-        shishen_gan: 天干十神。
-        shishen_zhi: 地支十神（字符串或列表）。
-        changsheng: 长生十二宫。
-        zizuo: 自坐。
-
-    Returns:
-        填充好的 Pillar 实例。
-    """
+    """由 lunar_python 排盘产物构造单柱 Pillar（解析天干/地支/五行/十神/藏干）。"""
     gan = ganzhi[0] if ganzhi else ""
     zhi = ganzhi[1] if len(ganzhi) > 1 else ""
     if isinstance(shishen_zhi, str):
@@ -197,18 +161,7 @@ def _pillar(name: str, ganzhi: str, nayin: str, xunkong: str, hidden: str, shish
 
 
 def _build_dayun(yun, count: int, day_master_gan: str = "", pillars: list[Pillar] | None = None, gender_int: int = 1) -> list[DayunItem]:
-    """构建大运序列（每项含起止年/龄、旬空与按日主标注的十神/神煞等）。
-
-    Args:
-        yun: lunar_python 的 Yun 对象（已按性别与顺逆排好）。
-        count: 需要的大运条数。
-        day_master_gan: 日干，用于 _ganzhi_detail 标注十神；为空则跳过明细。
-        pillars: 四柱（供 _ganzhi_detail 计算藏干/神煞）。
-        gender_int: 性别整数（1 男 / 2 女），透传给明细。
-
-    Returns:
-        大运 DayunItem 列表（最多 count 条）。
-    """
+    """构建大运序列（起止年/龄、旬空与按日主标注的十神/神煞等）。"""
     items: list[DayunItem] = []
     for d_yun in yun.getDaYun(count + 1):
         gz = d_yun.getGanZhi()
@@ -245,20 +198,10 @@ def _find_dayun_for_year(dayun: list[DayunItem], year: int) -> DayunItem | None:
 
 def _build_liunian(yun, dayun: list[DayunItem], start_year: int, years: int,
                    day_master_gan: str = "", pillars: list[Pillar] | None = None, gender_int: int = 1) -> list[LiunianItem]:
-    """构建流年序列，并为每年关联所处大运与十神/神煞明细。
+    """构建流年序列，并关联每年所处大运与十神/神煞明细。
 
-    优先用 lunar_python 的 LiuNian 查表；缺漏年份回退到「立春换岁」口径手工推算
-    干支、年龄与旬空。每年通过 _find_dayun_for_year 反查其所属大运区间。
-
-    Args:
-        yun: lunar_python 的 Yun 对象。
-        dayun: 已构建的大运列表（用于反查流年所属大运）。
-        start_year: 起始公历年份。
-        years: 生成年数。
-        day_master_gan / pillars / gender_int: 透传给 _ganzhi_detail。
-
-    Returns:
-        流年 LiunianItem 列表。
+    优先用 lunar_python 的 LiuNian 查表；缺漏年份以「立春换岁」口径手工推算，
+    再反查每年所属大运区间。
     """
     lookup: dict[int, Any] = {}
     for d_yun in yun.getDaYun(14):
@@ -312,31 +255,20 @@ def build_bazi_chart(
 ) -> BaziChart:
     """构建完整八字命盘（BaziChart）。
 
-    Args:
-        birth_time: 出生时间（公历/农历/时辰/节日格式）
-        gender: 性别（男/女）
-        sect: 日柱计算流派（默认 2）
-        yun_sect: 大运计算流派（默认 1）
-        dayun_count: 推算多少柱大运（默认 8）
-        liunian_years: 推算多少年流年（默认 5）
-        liunian_start_year: 流年起始年（默认当前年）
-        longitude: 出生地经度，用于真太阳时校正（基准 120°E，每度差 4 分钟）
-    Returns:
-        结构化 BaziChart（四柱/五行/十神/大运/流年/命宫/身宫/起运）
+    sect: 日柱计算流派；yun_sect: 大运计算流派；
+    longitude: 出生地经度，用于真太阳时校正（基准 120°E，每度差 4 分钟）。
     """
-
     y, m, d, h, mi = parse_birth(birth_time)
     gender_int = parse_gender(gender)
 
-    # 真太阳时校正：根据出生地经度修正时钟时间
+    # 真太阳时校正：按出生地经度修正时钟时间
     solar_correction_min = 0
     if longitude and 60 <= longitude <= 140:
         solar_correction_min = round((120 - longitude) * 4)
     if solar_correction_min != 0:
-        corrected = _dt.datetime(y, m, d, h, mi) + _dt.timedelta(minutes=solar_correction_min)
+        corrected = datetime.datetime(y, m, d, h, mi) + datetime.timedelta(minutes=solar_correction_min)
         h, mi = corrected.hour, corrected.minute
-        # 跨日处理
-        if corrected.date() != _dt.date(y, m, d):
+        if corrected.date() != datetime.date(y, m, d):
             y, m, d = corrected.year, corrected.month, corrected.day
 
     solar = Solar.fromYmdHms(y, m, d, h, mi, 0)
@@ -345,12 +277,9 @@ def build_bazi_chart(
     if sect != 2:
         ec.setSect(sect)
 
-    # 大运顺逆以年干阴阳+性别判定（传统《渊海子平》古法）
-    # 规则：阳年(甲丙戊庚壬)男/阴年女 → 顺排；阴年男/阳年女 → 逆排
-    # lunar-python 内部用年干阴阳+性别判定，与古法一致，直接传真实性别
-    yang_gan = {"甲", "丙", "戊", "庚", "壬"}
+    # 大运顺逆 = 年干阴阳与性别是否相同（阳年男/阴年女顺排，与《渊海子平》古法一致）
     year_gan = ec.getYearGan()
-    year_is_yang = year_gan in yang_gan
+    year_is_yang = year_gan in _YANG_GAN
     yun = ec.getYun(gender_int, yun_sect)
     start_solar = yun.getStartSolar()
     dayun_direction = "顺排" if (year_is_yang == (gender_int == 1)) else "逆排"
@@ -369,7 +298,7 @@ def build_bazi_chart(
     analysis = _build_domain_analysis(pillars, wuxing)
     day_master_gan = ec.getDayGan()
     dayun = _build_dayun(yun, dayun_count, day_master_gan, pillars, gender_int)
-    start_year = liunian_start_year or _dt.date.today().year
+    start_year = liunian_start_year or datetime.date.today().year
     liunian = _build_liunian(yun, dayun, start_year, liunian_years, day_master_gan, pillars, gender_int)
 
     warnings = [
@@ -411,6 +340,20 @@ def build_bazi_chart(
         },
         warnings=warnings,
     )
+
+
+def _yun_detail(item) -> dict[str, Any]:
+    """大运/流年共用的干支细节段。"""
+    return {
+        "xunkong": item.xunkong,
+        "shishenGan": item.shishen_gan,
+        "gan": item.gan,
+        "zhi": item.zhi,
+        "hiddenStems": item.hidden_stems,
+        "shishenZhi": item.shishen_zhi,
+        "changsheng": item.changsheng,
+        "shensha": item.shensha,
+    }
 
 
 def chart_to_api_dict(chart: BaziChart) -> dict[str, Any]:
@@ -456,41 +399,13 @@ def chart_to_api_dict(chart: BaziChart) -> dict[str, Any]:
             "confidence": chart.analysis.confidence,
         },
         "dayun": [
-            {
-                "year": item.ganzhi,
-                "ganzhi": item.ganzhi,
-                "startYear": item.start_year,
-                "endYear": item.end_year,
-                "startAge": item.start_age,
-                "endAge": item.end_age,
-                "xunkong": item.xunkong,
-                "shishenGan": item.shishen_gan,
-                "gan": item.gan,
-                "zhi": item.zhi,
-                "hiddenStems": item.hidden_stems,
-                "shishenZhi": item.shishen_zhi,
-                "changsheng": item.changsheng,
-                "shensha": item.shensha,
-            }
+            {"year": item.ganzhi, "ganzhi": item.ganzhi, "startYear": item.start_year, "endYear": item.end_year,
+             "startAge": item.start_age, "endAge": item.end_age, **_yun_detail(item)}
             for item in chart.dayun
         ],
         "liunian": [
-            {
-                "year": str(item.year),
-                "ganzhi": item.ganzhi,
-                "age": item.age,
-                "dayun": item.dayun_ganzhi,
-                "dayunStartYear": item.dayun_start_year,
-                "dayunEndYear": item.dayun_end_year,
-                "xunkong": item.xunkong,
-                "shishenGan": item.shishen_gan,
-                "gan": item.gan,
-                "zhi": item.zhi,
-                "hiddenStems": item.hidden_stems,
-                "shishenZhi": item.shishen_zhi,
-                "changsheng": item.changsheng,
-                "shensha": item.shensha,
-            }
+            {"year": str(item.year), "ganzhi": item.ganzhi, "age": item.age, "dayun": item.dayun_ganzhi,
+             "dayunStartYear": item.dayun_start_year, "dayunEndYear": item.dayun_end_year, **_yun_detail(item)}
             for item in chart.liunian
         ],
         "shensha": _compute_shensha(chart.pillars, parse_gender(chart.birth.gender)),

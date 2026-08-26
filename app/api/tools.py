@@ -3,9 +3,10 @@ from __future__ import annotations
 
 import asyncio
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 
 from app.api.common import client_error
+from app.api.context import get_app_context
 from app.core.logger import log
 from app.tools.text_clean import clean_think_tags
 
@@ -46,12 +47,10 @@ async def hehun(
     longitude_a: float | None = None,
     longitude_b: float | None = None,
 ):
-    """合婚分析。先调规则工具拿基础数据，再调 LLM 做综合解读。"""
-    from fastapi import HTTPException
-
+    """合婚分析：先调规则工具拿基础数据，再调 LLM 做综合解读。"""
     from app.tools.bazi import bazi_hehun
+
     try:
-        # 1. 规则层：排盘 + 五行互补评分（同步阻塞计算，放线程池避免卡住事件循环）
         base_result = await asyncio.to_thread(bazi_hehun.invoke, {
             "birth_time_a": birth_time_a, "gender_a": gender_a,
             "birth_time_b": birth_time_b, "gender_b": gender_b,
@@ -61,14 +60,12 @@ async def hehun(
         if base_result and base_result.startswith("合婚失败"):
             raise HTTPException(status_code=400, detail=base_result)
 
-        # 2. LLM 层：基于规则结果做综合解读
-        from app.api.context import get_app_context
+        # 排盘与 LLM 调用均为同步阻塞计算，放线程池避免卡住事件循环
         try:
             llm = get_app_context().chat_model
         except RuntimeError:
             llm = None
         if llm is None:
-            # 兜底：LLM 不可用时只返回规则结果
             return {"result": base_result}
 
         from langchain_core.messages import HumanMessage, SystemMessage
@@ -82,12 +79,8 @@ async def hehun(
         ]
         try:
             resp = await asyncio.to_thread(llm.invoke, messages)
-            content = (getattr(resp, "content", "") or "").strip()
-            # 过滤推理模型的 think 块
-            content = clean_think_tags(content)
-            if content:
-                return {"result": content}
-            return {"result": base_result}
+            content = clean_think_tags((getattr(resp, "content", "") or "").strip())
+            return {"result": content or base_result}
         except Exception as e:
             log.warning("合婚 LLM 解读失败，返回规则结果: {}", e)
             return {"result": base_result}
@@ -96,5 +89,3 @@ async def hehun(
     except Exception as e:
         log.exception("合婚分析失败")
         raise HTTPException(status_code=500, detail=client_error(e))
-
-

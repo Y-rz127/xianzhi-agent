@@ -313,15 +313,19 @@ class Xianzhi(ToolCallAgent):
                     out.append(line.strip())
         return "\n".join(out)
 
-    def _finalize_stream(self, src_stream):
-        """包装原 stream，在末尾追加命盘摘要段（若已挂载 chart_context）。"""
-        for chunk in src_stream:
-            yield chunk
+    def _chart_summary_chunk(self):
+        """命盘四柱摘要段（可视化兜底），未挂载或无可提取时无产出。"""
         if not self.chart_context:
             return
         summary = self._extract_chart_summary()
         if summary and "年柱" in summary:
             yield "\n[回答] 命盘四柱关键信息（用于可视化展示）：\n【四柱】\n{}".format(summary)
+
+    def _finalize_stream(self, src_stream):
+        """包装原 stream，在末尾追加命盘摘要段（若已挂载 chart_context）。"""
+        for chunk in src_stream:
+            yield chunk
+        yield from self._chart_summary_chunk()
 
     def _final_answer_or_error(self) -> Optional[str]:
         """从本轮执行状态提取最终回答（或错误兜底文案），无文本返回 None。
@@ -408,11 +412,11 @@ class Xianzhi(ToolCallAgent):
         - _birth_signal：模糊生辰信号（农历/节日/时辰/公历+时辰），走 ReAct 调 bazi_full
         """
         if self._workflow_context:
-            return False  # 有命盘走 workflow，chitchat 由 workflow 内部处理
+            return False
         if self._bazi_pending:
-            return False  # 八字待确认候选：必须走 ReAct，让 LLM 调 bazi_infer_dates 展示候选
+            return False
         if self._birth_signal:
-            return False  # 模糊生辰：走 ReAct，让 LLM 调 bazi_full（内部自动转公历）
+            return False
         intent = classify_question(user_prompt)
         return intent.domain == "chitchat"
 
@@ -498,10 +502,8 @@ class Xianzhi(ToolCallAgent):
             async for chunk in super().arun_stream(user_prompt):
                 yield chunk
             # verbose 模式下仍追加 chart 兜底（保持原有行为）
-            if self.chart_context:
-                summary = self._extract_chart_summary()
-                if summary and "年柱" in summary:
-                    yield "\n[回答] 命盘四柱关键信息（用于可视化展示）：\n【四柱】\n{}".format(summary)
+            for _summary in self._chart_summary_chunk():
+                yield _summary
             return
         # 正常模式：走 ReAct 工具循环，LLM 自行决定是否调 search_knowledge
         async for _ in super().arun_stream(user_prompt):

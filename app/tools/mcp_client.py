@@ -1,10 +1,7 @@
-"""MCP 客户端封装（对应 Java 项目的 ToolCallbackProvider + mcp-servers.json）。
+"""MCP 客户端封装：把 MCP 服务端工具动态包装成 LangChain BaseTool。
 
-将 MCP 服务端工具动态包装成 LangChain BaseTool，供 Agent 统一调用。
+MCPManager 单例在应用启动时建立 stdio 长连接，工具调用复用同一 session；应用关闭时清理。
 当前接入高德地图 MCP（地理/天气/导航），与 Java 项目 mcp-servers.json 配置一致。
-
-设计：MCPManager 单例在应用启动时建立 stdio 长连接，维持 session 活跃，
-工具调用复用同一 session；应用关闭时清理连接。
 """
 from __future__ import annotations
 
@@ -22,12 +19,11 @@ from app.core.logger import log
 
 
 class _MCPToolSchema(BaseModel):
-    """MCP 工具动态参数 schema 占位。"""
     args: dict = Field(default_factory=dict, description="工具参数 JSON 对象")
 
 
 class MCPToolWrapper(BaseTool):
-    """把单个 MCP 工具包装成 LangChain BaseTool。调用复用 manager 持有的 session。"""
+    """把单个 MCP 工具包装成 LangChain BaseTool，调用复用 manager 持有的 session。"""
     name: str
     description: str
     args_schema: type = _MCPToolSchema
@@ -44,7 +40,7 @@ class MCPToolWrapper(BaseTool):
             args = kwargs
         try:
             # MCP session 绑定在启动时的主事件循环上（stdio 流跨 loop 调用会报错），
-            # 同步路径必须把协程调度回主 loop 执行，而不是新建 loop。
+            # 同步路径必须把协程调度回主 loop 执行，而不是新建 loop
             loop = self._manager.loop
             if loop is not None and loop.is_running():
                 future = asyncio.run_coroutine_threadsafe(self._call_mcp(args), loop)
@@ -170,7 +166,7 @@ class MCPManager:
                 self._ready.set()
 
         self._task = asyncio.create_task(_run())
-        # 等待就绪或失败，最多 30 秒
+        # 等待就绪或失败，最多 30 秒（避免启动长时间阻塞）
         try:
             await asyncio.wait_for(self._ready.wait(), timeout=30)
         except asyncio.TimeoutError:

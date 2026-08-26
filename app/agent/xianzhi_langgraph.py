@@ -12,6 +12,7 @@ from typing import Any, TypedDict
 from app.agent.workflow.xianzhi_workflow import (
     WORKERS,
     DomainWorker,
+    FactCheckResult,
     QuestionIntent,
     WorkflowChartContext,
     classify_question,
@@ -38,6 +39,12 @@ def create_xianzhi_graph(workflow):
     """构建编译后的 LangGraph 编排图；langgraph 未安装时直接抛 ImportError（硬依赖）。"""
     from langgraph.graph import END, StateGraph
 
+    def _is_chitchat(intent) -> bool:
+        return bool(intent and getattr(intent, "domain", "") == "chitchat")
+
+    def _intent_needs_chart(intent) -> bool:
+        return bool(intent and getattr(intent, "needs_chart", True))
+
     def classify_node(state: XianzhiGraphState) -> XianzhiGraphState:
         """分类节点：优先复用 answer() 已拆解的 intent，否则关键词兜底；匹配对应 Worker。"""
         # 优先使用 answer() 入口已通过 LLM 拆解得到的 intent（含 queries/needs_chart），
@@ -57,7 +64,7 @@ def create_xianzhi_graph(workflow):
         """检索节点：闲聊意图短路跳过；否则检索命理知识库片段。"""
         # 闲聊场景短路：无需检索知识库
         intent = state.get("intent")
-        if intent and getattr(intent, "domain", "") == "chitchat":
+        if _is_chitchat(intent):
             log.info("[RAG] 闲聊意图，跳过知识检索")
             return {"knowledge": "（闲聊场景，无需命理知识检索）"}
         knowledge = workflow._retrieve_rules(
@@ -91,8 +98,8 @@ def create_xianzhi_graph(workflow):
         raw = state.get("raw_answer", "")
         worker = state.get("worker")
         intent = state.get("intent")
-        is_chitchat = bool(intent and getattr(intent, "domain", "") == "chitchat")
-        needs_chart = bool(intent and getattr(intent, "needs_chart", True))
+        is_chitchat = _is_chitchat(intent)
+        needs_chart = _intent_needs_chart(intent)
         log.info("[Reviewer] 开始审核 {} Worker 产出 ({}字)...", getattr(worker, "label", "?"), len(raw))
         second_chart = getattr(intent, "second_chart", None)
         review = workflow._reviewer.review(
@@ -127,11 +134,9 @@ def create_xianzhi_graph(workflow):
 
         闲聊场景无 issues 可修（check_node 已跳过 LLM 深审），无意义再走 repair。
         """
-        from app.agent.workflow.xianzhi_workflow import FactCheckResult
-
         intent = state.get("intent")
-        is_chitchat = bool(intent and getattr(intent, "domain", "") == "chitchat")
-        needs_chart = bool(intent and getattr(intent, "needs_chart", True))
+        is_chitchat = _is_chitchat(intent)
+        needs_chart = _intent_needs_chart(intent)
         # 闲聊短路：check_node 已通过正则，repair 不会带来改善，直接返回原答案
         if is_chitchat:
             log.info("[Reflextion] 闲聊场景，跳过修复节点，直接返回原答案")
@@ -155,7 +160,7 @@ def create_xianzhi_graph(workflow):
             getattr(worker, "label", "?"),
             len(repaired),
         )
-        second_chart = getattr(state.get("intent"), "second_chart", None)
+        second_chart = getattr(intent, "second_chart", None)
         # 修复后先走 regex 快筛（零 LLM 调用），通过则信任修复，不再全量 LLM 重审
         regex_issues = workflow._reviewer._regex_review(
             repaired,

@@ -1,10 +1,10 @@
-"""八字命理 PDF 报告生成
+"""八字命理 PDF 报告生成（reportlab）。
 
-使用 reportlab 生成结构化命理报告 PDF。
-注册 Windows 系统中文字体（SimHei/SimSun）以支持中文显示。
+注册中文字体以支持中文显示：优先项目内置字体，其次 Windows/Linux 系统字体，glob 扫描兜底。
 """
 from __future__ import annotations
 
+import datetime
 import io
 import os
 import threading
@@ -35,7 +35,7 @@ _PROJECT_FONT_DIR = os.path.join(os.path.dirname(__file__), "fonts")
 
 
 def _register_chinese_font():
-    """注册中文字体。优先 Windows 系统字体，其次 Linux 系统字体，最后项目内置字体。"""
+    """注册中文字体，返回实际生效的字体名（未找到时回退 Helvetica）。"""
     global _FONT_REGISTERED, _FONT_NAME
     if _FONT_REGISTERED:
         return _FONT_NAME
@@ -45,18 +45,18 @@ def _register_chinese_font():
         # 优先级：项目内置字体（随仓库分发，最可靠，不依赖容器系统字体轮廓类型）
         #         > Windows 本地字体 > Linux 系统字体（Debian/Alpine）> glob 兜底扫描
         candidates = [
-            # 0) 项目内置（已随仓库分发到 data/fonts/，TrueType 轮廓，reportlab 100% 支持）
+            # 项目内置（已随仓库分发，TrueType 轮廓，reportlab 100% 支持）
             ("ProjectSimHei", os.path.join(_PROJECT_FONT_DIR, "simhei.ttf")),
-            # 1) Windows 本地开发
+            # Windows 本地开发
             ("SimHei", r"C:\Windows\Fonts\simhei.ttf"),
             ("SimSun", r"C:\Windows\Fonts\simsun.ttc"),
             ("MSYH", r"C:\Windows\Fonts\msyh.ttc"),
-            # 2) Linux Debian/Ubuntu：fonts-noto-cjk 实际安装路径（opentype 目录，.ttc）
+            # Linux Debian/Ubuntu：fonts-noto-cjk 实际安装路径（opentype 目录，.ttc）
             ("NotoSansCJK", "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"),
             ("NotoSerifCJK", "/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc"),
             ("WenQuanYiZenHei", "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc"),
             ("WenQuanYiMicroHei", "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc"),
-            # 3) Alpine
+            # Alpine
             ("NotoSansCJK", "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc"),
         ]
         for name, path in candidates:
@@ -68,7 +68,7 @@ def _register_chinese_font():
                     break
                 except Exception as e:
                     log.warning("注册字体 {} 失败: {}", name, e)
-        # 4) glob 兜底：扫描系统字体目录里含 CJK 关键字的字体（路径随发行版变动时仍能命中）
+        # glob 兜底：扫描系统字体目录里含 CJK 关键字的字体（路径随发行版变动时仍能命中）
         if _FONT_NAME == "Helvetica":
             import glob as _glob
             for pat in (
@@ -140,6 +140,7 @@ def _pillar_table(pillars: dict, font_name: str):
     ]))
     return tbl
 
+
 def _escape(text: str) -> str:
     """转义 reportlab 段落特殊字符并保留换行。"""
     if not text:
@@ -195,23 +196,18 @@ def generate_bazi_report(
     )
 
     story = []
-    import datetime as _dt
-
-    # 标题
     story.append(Paragraph("先知 · 八字命理分析报告", styles["title"]))
     story.append(Paragraph("命由天定 · 运由己造", styles["subtitle"]))
     story.append(Spacer(1, 6))
 
-    # 一、基本信息
     story.append(Paragraph("一、基本信息", styles["h2"]))
     for line in [
         "出生时间：{}".format(birth_time),
         "性别：{}".format(gender),
-        "报告生成时间：{}".format(_dt.datetime.now().strftime("%Y-%m-%d %H:%M")),
+        "报告生成时间：{}".format(datetime.datetime.now().strftime("%Y-%m-%d %H:%M")),
     ]:
         story.append(Paragraph(line, styles["body"]))
 
-    # 二、四柱排盘
     story.append(Paragraph("二、四柱排盘", styles["h2"]))
     pillars = _extract_pillars(chart_text)
     if pillars:
@@ -219,25 +215,20 @@ def generate_bazi_report(
         story.append(Spacer(1, 8))
     story.append(Paragraph(_escape(chart_text), styles["body"]))
 
-    # 三、五行与十神分析
     story.append(Paragraph("三、五行与十神分析", styles["h2"]))
     story.append(Paragraph(_escape(analysis_text), styles["body"]))
 
-    # 四、大运推算
     story.append(Paragraph("四、大运推算", styles["h2"]))
     story.append(Paragraph(_escape(dayun_text), styles["body"]))
 
-    # 五、流年运势
     if liunian_text:
         story.append(Paragraph("五、流年运势", styles["h2"]))
         story.append(Paragraph(_escape(liunian_text), styles["body"]))
 
-    # 六、AI 综合解读
     if ai_commentary:
         story.append(Paragraph("六、先知综合解读", styles["h2"]))
         story.append(Paragraph(_escape(ai_commentary), styles["body"]))
 
-    # 免责声明
     story.append(Spacer(1, 20))
     story.append(Paragraph("【免责声明】", styles["h2"]))
     story.append(Paragraph(
@@ -246,7 +237,6 @@ def generate_bazi_report(
         styles["small"],
     ))
 
-    # 页脚
     story.append(Spacer(1, 30))
     story.append(Paragraph("—— 先知智能体 · Powered by Xianzhi Agent ——", styles["footer"]))
 

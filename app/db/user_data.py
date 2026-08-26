@@ -1,12 +1,5 @@
-"""用户私有数据（兼容门面）。
-
-R9 拆分：按资源拆为
-- schema        惰性建表与共享工具（_ensure_tables / _safe_json 等）
-- profiles      八字档案 CRUD
-- user_records  收藏/塔罗/反馈/答案反馈与训练样本导出
-- chart_store   命盘画像/断事知识/结构化命例
-
-本模块重导出全部原公共符号，既有 `from app.db import user_data` 用法无需改动。
+"""用户私有数据兼容门面：重导出 schema/profiles/user_records/chart_store 的公共符号，
+使既有 `from app.db import user_data` 用法无需改动。
 """
 from __future__ import annotations
 

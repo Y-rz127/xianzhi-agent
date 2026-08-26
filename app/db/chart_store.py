@@ -1,6 +1,4 @@
-"""命盘画像 / 断事知识 / 结构化命例，按命盘（birth_time + gender）隔离。
-
-R9 拆分自 user_data.py。"""
+"""命盘画像 / 断事知识 / 结构化命例，按命盘（birth_time + gender）隔离。"""
 from __future__ import annotations
 
 import hashlib
@@ -57,37 +55,44 @@ def upsert_chart_profile(
     return pid
 
 
+_PROFILE_COLUMNS = (
+    "id, user_id, chart_hash, birth_time, gender, chart_data, "
+    "common_topics, style_preference, feedback_stats, interaction_count, created_at, updated_at"
+)
+
+
+def _row_to_chart_profile(r) -> dict:
+    """数据库行 → 命盘画像字典。"""
+    return {
+        "id": str(r[0]),
+        "user_id": r[1],
+        "chart_hash": r[2],
+        "birth_time": r[3],
+        "gender": r[4],
+        "chart_data": r[5] if not isinstance(r[5], str) else _safe_json(r[5]),
+        "common_topics": list(r[6] or []),
+        "style_preference": r[7] or "",
+        "feedback_stats": r[8] if not isinstance(r[8], str) else _safe_json(r[8]),
+        "interaction_count": r[9] or 0,
+        "created_at": str(r[10]) if r[10] else "",
+        "updated_at": str(r[11]) if r[11] else "",
+    }
+
+
 def get_chart_profile(user_id: str, birth_time: str, gender: str) -> dict | None:
     """获取指定命盘的画像。"""
     _ensure_tables()
     ch = _chart_hash(birth_time, gender)
     with _get_pool().connection() as conn:
         row = conn.execute(
-            """
-            SELECT id, user_id, chart_hash, birth_time, gender, chart_data,
-                   common_topics, style_preference, feedback_stats, interaction_count,
-                   created_at, updated_at
+            f"""
+            SELECT {_PROFILE_COLUMNS}
             FROM chart_profiles
             WHERE user_id = %s AND chart_hash = %s
             """,
             (user_id, ch),
         ).fetchone()
-        if not row:
-            return None
-        return {
-            "id": str(row[0]),
-            "user_id": row[1],
-            "chart_hash": row[2],
-            "birth_time": row[3],
-            "gender": row[4],
-            "chart_data": row[5] if not isinstance(row[5], str) else _safe_json(row[5]),
-            "common_topics": list(row[6] or []),
-            "style_preference": row[7] or "",
-            "feedback_stats": row[8] if not isinstance(row[8], str) else _safe_json(row[8]),
-            "interaction_count": row[9] or 0,
-            "created_at": str(row[10]) if row[10] else "",
-            "updated_at": str(row[11]) if row[11] else "",
-        }
+        return _row_to_chart_profile(row) if row else None
 
 
 def list_chart_profiles_by_user(user_id: str) -> list:
@@ -95,33 +100,15 @@ def list_chart_profiles_by_user(user_id: str) -> list:
     _ensure_tables()
     with _get_pool().connection() as conn:
         rows = conn.execute(
-            """
-            SELECT id, user_id, chart_hash, birth_time, gender, chart_data,
-                   common_topics, style_preference, feedback_stats, interaction_count,
-                   created_at, updated_at
+            f"""
+            SELECT {_PROFILE_COLUMNS}
             FROM chart_profiles
             WHERE user_id = %s
             ORDER BY updated_at DESC
             """,
             (user_id,),
         ).fetchall()
-        return [
-            {
-                "id": str(r[0]),
-                "user_id": r[1],
-                "chart_hash": r[2],
-                "birth_time": r[3],
-                "gender": r[4],
-                "chart_data": r[5] if not isinstance(r[5], str) else _safe_json(r[5]),
-                "common_topics": list(r[6] or []),
-                "style_preference": r[7] or "",
-                "feedback_stats": r[8] if not isinstance(r[8], str) else _safe_json(r[8]),
-                "interaction_count": r[9] or 0,
-                "created_at": str(r[10]) if r[10] else "",
-                "updated_at": str(r[11]) if r[11] else "",
-            }
-            for r in rows
-        ]
+        return [_row_to_chart_profile(r) for r in rows]
 
 
 def update_chart_profile_stats(
@@ -235,11 +222,8 @@ def get_chart_facts_for_llm(
 ) -> tuple[list[str], list[str]]:
     """获取命盘已验证/已否定的断事摘要，供 LLM 上下文注入。
 
-    每条断事截断到 250 字；返回条数由 limit 控制（调用方默认 6 条，SQL LIMIT 兜底）。
-
-    Returns:
-        (verified_lines, disputed_lines): 两个字符串列表，
-        分别包含已验证断事和已否定断事的可读摘要。
+    每条摘要截断到 250 字；返回条数由 limit 控制（调用方默认 6 条，SQL LIMIT 兜底）。
+    返回 (verified_lines, disputed_lines)。
     """
     _ensure_tables()
     verified: list[str] = []
@@ -395,11 +379,10 @@ def _extract_bazi_features(chart_data: dict | None) -> dict:
 
 
 def search_cases_for_rag(limit: int = 200) -> list[dict]:
-    """检索 cases 表（命理库八字命例）用于 LLM 相似命例注入。
+    """检索 cases 表命例用于 LLM 相似命例注入。
 
-    内容优先级：bio/analysis/keypoints 新字段；若为空则回退 chart_data.analysisText，
-    使历史命例（康熙、曾国藩等）无需手工补录即可参与检索。
-    相似匹配特征（日主五行/旺衰）从 chart_data 实时抽取。
+    内容优先级：bio/analysis/keypoints 新字段，缺失时回退 chart_data.analysisText，
+    使历史命例无需手工补录即可参与检索；相似匹配特征从 chart_data 实时抽取。
     """
     _ensure_tables()
     try:
@@ -424,7 +407,6 @@ def search_cases_for_rag(limit: int = 200) -> list[dict]:
                 parts.append(f"命局结构分析：{analysis}")
             if keypoints:
                 parts.append(f"命理特征要点：{keypoints}")
-            # 新字段缺失时回退到排盘引擎生成的 analysisText
             if not parts and chart_data.get("analysisText"):
                 parts.append(chart_data["analysisText"])
             content = "\n\n".join(parts)

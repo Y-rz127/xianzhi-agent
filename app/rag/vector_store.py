@@ -1,15 +1,12 @@
-"""RAG 向量知识库管理。
+"""RAG 向量知识库管理：加载命理知识 markdown，切分、向量化、入库并提供检索。
 
-加载命理知识 markdown，切分、向量化、入库，提供检索能力。
-向量库支持：
-- chroma  : 本地嵌入式（兜底使用，开箱即用）
-- postgres: PostgreSQL + pgvector（本项目默认使用）
+- chroma：本地嵌入式（兜底使用，开箱即用）
+- postgres：PostgreSQL + pgvector（默认）
 
-Embedding 默认用阿里云 DashScope text-embedding-v2；
-DashScope 不可用（欠费/网络）时按配置回退本地 HuggingFace 模型。
+Embedding 优先阿里云 DashScope text-embedding-v2，不可用时按配置回退本地 HuggingFace。
 
-启动加速与成本控制：
-- 文档指纹（源文件内容 hash + embedding 模型标识）持久化到本地，
+成本控制：
+- 文档指纹（源文件内容 hash + embedding 模型 + 向量库类型）持久化到本地与 PG，
   指纹未变时直接加载已有索引，零 embedding API 调用；
 - 检索结果带 TTL 的 LRU 缓存，同一 query 短期内不重复检索。
 """
@@ -34,7 +31,7 @@ KNOWLEDGE_DIR = Path(__file__).parent / "knowledge_docs"
 _FINGERPRINT_FILE = "knowledge_fingerprint.json"
 _SEARCH_CACHE_MAX = 200
 
-# 切分参数（纳入文档指纹，变更后自动重建索引，避免新旧 chunk 混用）
+# 切分参数纳入文档指纹，变更后自动重建索引，避免新旧 chunk 混用
 CHUNK_SIZE = 600
 CHUNK_OVERLAP = 120
 # 元数据版本：chunk metadata 结构变更时递增，触发向量库重建（如新增 doc_type 字段）
@@ -59,7 +56,7 @@ class BatchEmbeddings(Embeddings):
 
 
 def get_embeddings() -> Embeddings:
-    """DashScope 文本嵌入模型（对应笔记 07 的 DashScopeEmbeddings）。"""
+    """DashScope 文本嵌入模型（批量调用包一层 BatchEmbeddings）。"""
     from langchain_community.embeddings import DashScopeEmbeddings
     return BatchEmbeddings(DashScopeEmbeddings(
         model=settings.embedding_model,
@@ -69,11 +66,7 @@ def get_embeddings() -> Embeddings:
 
 
 def _get_local_embeddings() -> Embeddings:
-    """本地 HuggingFace embedding（DashScope 不可用时的回退）。
-
-    需要额外安装: pip install sentence-transformers
-    首次使用会自动下载模型（约 100MB），之后完全离线可用。
-    """
+    """本地 HuggingFace embedding（DashScope 不可用时的回退）。"""
     try:
         from langchain_community.embeddings import HuggingFaceEmbeddings
     except ImportError as e:
@@ -86,7 +79,7 @@ def _select_embeddings() -> tuple[Embeddings, str]:
     """选择可用 embedding，返回 (embeddings, embedding_id)。
 
     优先 DashScope；实测调用失败且允许回退时切换本地模型。
-    embedding_id 参与文档指纹计算，换模型后指纹不匹配会自动重建索引，
+    embedding_id 参与文档指纹，换模型后指纹不匹配会自动重建索引，
     保证查询向量与入库向量来自同一模型。
     """
     dashscope = get_embeddings()
@@ -154,19 +147,15 @@ def _load_knowledge_docs() -> list[Document]:
 
 
 def _split_chunks(docs: list[Document]) -> list[Document]:
-    """两阶段切分：先按 markdown 标题切片（一/二级），再 RecursiveCharacterTextSplitter 二级切。
+    """两阶段切分：先按 markdown 标题（一/二级）切片，再递归字符切分到 ≤600 字。
 
-    阶段一 MarkdownHeaderTextSplitter：
-    - 仅按 # 一级标题、## 二级标题切分（不切到 ### 三级，避免碎片过细稀释主题）
-    - 每个切片携带 heading 层级元数据（一级标题/二级标题），并保留原有 source/doc_type
-    阶段二 RecursiveCharacterTextSplitter（中文命理优化）：
-    - separators 依次 段落(\\n\\n)→换行(\\n)→句号(。)→分号(；)→逗号(，)→空格→兜底硬切 降级
-    - chunk_size=600、chunk_overlap=120：仅在【单个小节内部】拼装，跨小节语义不再混杂
-    - 每个 chunk 前注入 [文档标题｜一级标题｜二级标题] 上下文（文档标题置首，兼容检索前缀对齐）
+    阶段一 MarkdownHeaderTextSplitter：只切到二级标题，避免三级碎片过细稀释主题；
+    该版本仅暴露 split_text（入参为字符串），返回的 Document 只带标题层级元数据、
+    不含原 source/doc_type，需手动合并补回。
+    阶段二 RecursiveCharacterTextSplitter：中文分隔符优先
+    （段落→换行→句号→分号→逗号→空格→硬切），仅在单个小节内部拼装，跨小节语义不混杂。
+    每个 chunk 前置 [文档标题｜一级标题｜二级标题] 上下文，兼容 retrieval 的前缀对齐逻辑。
     """
-    # 阶段一：按标题切片（只切到二级，三级不切）
-    # 注：本版本 MarkdownHeaderTextSplitter 仅暴露 split_text（入参为字符串），
-    # 返回 Document 只带 heading 元数据、不含原 source/doc_type，需手动合并补回。
     header_splitter = MarkdownHeaderTextSplitter(
         headers_to_split_on=[("#", "一级标题"), ("##", "二级标题")],
         strip_headers=True,
@@ -177,14 +166,13 @@ def _split_chunks(docs: list[Document]) -> list[Document]:
             merged = {**doc.metadata, **piece.metadata}  # 保留 source/doc_type + 注入标题层级
             header_docs.append(Document(page_content=piece.page_content, metadata=merged))
     header_docs = [d for d in header_docs if d.page_content.strip()]
-    # 阶段二：小节内部递归切到 ≤600
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=CHUNK_SIZE,
         chunk_overlap=CHUNK_OVERLAP,
         separators=["\n\n", "\n", "。", "；", "，", " ", ""],
     )
     chunks = splitter.split_documents(header_docs)
-    # 注入标题上下文：文档标题置首 + 章节层级（兼容 retrieval.py 的前缀对齐逻辑）
+    # 注入标题上下文：文档标题置首 + 章节层级（与 retrieval 检索前缀对齐）
     for chunk in chunks:
         md = chunk.metadata
         source = md.get("source", "")
@@ -219,11 +207,6 @@ def _keyword_overlap(query: str, text: str) -> float:
     return len(bq & bt) / len(bq)
 
 
-# ============================================================
-# 文档指纹：源文件内容 + embedding 模型 + 向量库类型
-# 指纹一致说明已有索引可直接复用，无需重新 embedding
-# ============================================================
-
 def _docs_hash() -> str:
     """对知识库全部源文件内容计算哈希。"""
     h = hashlib.sha256()
@@ -238,13 +221,10 @@ def _fingerprint_path() -> Path:
     return settings.vector_db_dir / _FINGERPRINT_FILE
 
 
-# ----------------------------------------------------------------------
-# 指纹持久化到 PostgreSQL
-# 容器重启后本地文件系统会被重置，原指纹文件丢失会导致每次启动误判
-# "需全量重建"，进而重复 embedding 全部知识片段（约 761 个）。PG 中的
-# 向量索引本身已持久，只要指纹能存活，重启即可直接复用现成索引、零 embedding。
-# 本地文件保留为兜底（首次迁移 / PG 不可用降级）。
-# ----------------------------------------------------------------------
+# 指纹持久化到 PostgreSQL：容器重启会重置本地文件系统，原指纹文件丢失会导致每次启动
+# 误判"需全量重建"，进而重复 embedding 全部知识片段（约 761 个）。PG 中向量索引本身
+# 已持久，只要指纹存活，重启即可直接复用现成索引、零 embedding。本地文件保留为兜底
+# （首次迁移 / PG 不可用降级）。
 _fp_pool = None
 _fp_lock = threading.Lock()
 
@@ -326,12 +306,10 @@ def _save_fingerprint_pg(data: dict) -> None:
 
 
 def _load_fingerprint() -> dict | None:
-    # 优先从 PostgreSQL 读取（容器重启后本地文件会被清空）
-    fp = _load_fingerprint_pg()
+    fp = _load_fingerprint_pg()  # 优先 PG：容器重启后本地文件会被清空
     if fp:
         return fp
-    # 回退本地文件（兼容首次迁移 / PG 不可用降级）
-    p = _fingerprint_path()
+    p = _fingerprint_path()  # 回退本地文件（兼容首次迁移 / PG 不可用降级）
     if not p.exists():
         return None
     try:
@@ -351,12 +329,10 @@ def _save_fingerprint(docs_hash: str, embedding_id: str, store_type: str,
         "meta_version": meta_version,
         "updated_at": time.time(),
     }
-    # 本地文件兜底
     p = _fingerprint_path()
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    # 同时持久化到 PostgreSQL，避免容器重启后丢失
-    _save_fingerprint_pg(data)
+    _save_fingerprint_pg(data)  # 同时持久化到 PG，避免容器重启后丢失
 
 
 def _is_up_to_date(docs_hash: str, embedding_id: str, store_type: str,
@@ -373,10 +349,6 @@ def _is_up_to_date(docs_hash: str, embedding_id: str, store_type: str,
         and fp.get("meta_version", 0) == meta_version
     )
 
-
-# ============================================================
-# 向量库构建 / 加载
-# ============================================================
 
 def _build_chroma(chunks: list[Document], embeddings: Embeddings):
     """Chroma 本地持久化向量库（全量重建）。"""
@@ -412,7 +384,6 @@ def _load_chroma(embeddings: Embeddings):
 def _build_postgres(chunks: list[Document], embeddings: Embeddings):
     """PostgreSQL + pgvector 向量库（全量重建）。
 
-    使用 langchain_postgres.PGVector，连接串从 .env 读取。
     pre_delete_collection=True 保证重建时以最新文档覆盖。
     """
     from langchain_postgres import PGVector
@@ -447,28 +418,21 @@ def _rebuild_store(chunks: list[Document], embeddings: Embeddings, store_type: s
     高优先级向量库不可用时回退 Chroma，指纹记录实际生效类型，
     避免下次启动重复尝试不可用后端。
     """
-    # 1. PostgreSQL + pgvector
     if store_type == "postgres":
         try:
             return _build_postgres(chunks, embeddings), "postgres"
         except Exception as e:
             log.warning("Postgres 向量库不可用，回退 Chroma: {}", e)
-
-    # 2. 默认 Chroma
     return _build_chroma(chunks, embeddings), "chroma"
 
 
 def _build_vector_store(embeddings: Embeddings, embedding_id: str, force: bool = False):
     """构建或加载向量库，返回 (store, 实际生效的 store_type)。
 
-    指纹（文档内容 + embedding 模型 + 向量库类型）一致时直接加载已有索引，
-    否则全量重建并更新指纹。
-
-    实际生效类型可能低于配置优先级（如配置了 postgres 但不可用会回退 chroma）。
-    指纹记录的是实际生效类型，下次启动优先按指纹记录的类型直接复用索引，
-    避免高优先级后端不可用时限重试、每次全量重建（含重复 embedding 调用）。
-    当配置切回高优先级后端（如 postgres 恢复可用）时会自动触发全量重建，
-    无需手动 force。
+    指纹（文档内容 + embedding 模型 + 向量库类型）一致时直接加载已有索引，否则全量重建并更新指纹。
+    实际生效类型可能低于配置优先级（如配置了 postgres 但不可用会回退 chroma），
+    指纹记录实际生效类型，下次启动优先按其直接复用索引，避免对不可用后端反复重试、每次全量重建。
+    当配置切回高优先级后端（如 postgres 恢复可用）时会自动触发全量重建，无需手动 force。
     """
     docs = _load_knowledge_docs()
     if not docs:
@@ -476,13 +440,12 @@ def _build_vector_store(embeddings: Embeddings, embedding_id: str, force: bool =
     docs_hash = _docs_hash()
     configured_type = settings.vector_store_type.lower()
 
-    # 指纹中记录的实际生效类型：上次回退后落盘的类型。
-    # 优先用它判断"索引是否可复用"，从而跳过对已不可用后端的重试。
+    # 指纹中记录的实际生效类型：优先用它判断"索引是否可复用"，跳过对已不可用后端的重试
     fp = _load_fingerprint()
     effective_type = fp.get("store_type", configured_type) if fp else configured_type
 
     # 显式配置了更高优先级后端（如 postgres）但指纹仍记着回退类型（chroma）：
-    # 视为后端已恢复，忽略指纹、按配置类型全量重建，避免永远卡在 chroma 回退。
+    # 视为后端已恢复，忽略指纹、按配置类型全量重建，避免永远卡在 chroma 回退
     _priority = {"postgres": 2, "chroma": 1}
     backend_recovered = bool(fp) and _priority.get(configured_type, 1) > _priority.get(effective_type, 1)
 
@@ -515,7 +478,7 @@ class KnowledgeBase:
         self._store_type = ""
         self._search_cache: OrderedDict[str, tuple[float, list[Document]]] = OrderedDict()
         self._cache_lock = threading.Lock()
-        # 初始化锁：防止并发 init 导致 collection 被互相覆盖删除
+        # 防止并发 init 导致 collection 被互相覆盖删除
         self._init_lock = threading.Lock()
         self._initializing = False
 
@@ -650,9 +613,7 @@ class KnowledgeBase:
         return "\n\n".join(parts)
 
 
-# 全局单例
-# R8 启动去副作用：知识库实例改为惰性构造（首次调用时创建），
-# 导入本模块不再产生实例构造副作用；真正的重初始化仍由 lifespan 后台触发。
+# 惰性单例：首次调用时构造，导入本模块不产生实例构造副作用；真正的重初始化由 lifespan 后台触发
 _kb_instance: KnowledgeBase | None = None
 _kb_lock = threading.Lock()
 

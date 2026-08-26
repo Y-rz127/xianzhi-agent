@@ -1,6 +1,4 @@
-"""八字档案（bazi_profiles）CRUD，按 user_id 隔离。
-
-R9 拆分自 user_data.py。"""
+"""八字档案（bazi_profiles）CRUD，按 user_id 隔离。"""
 from __future__ import annotations
 
 import json
@@ -102,7 +100,7 @@ def delete_profile(user_id: str, pid: str) -> bool:
 
 
 def _row_to_profile(r) -> dict:
-    """将数据库行元组转换为前端使用的档案字典（兼容 chart_data 为字符串的情况）。"""
+    """数据库行 → 前端档案字典（兼容 chart_data 为字符串的情况）。"""
     chart = r[7]
     if isinstance(chart, str):
         try:

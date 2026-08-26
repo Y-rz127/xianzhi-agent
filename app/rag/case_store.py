@@ -1,8 +1,6 @@
-"""Structured case retrieval for experience-style prompting.
+"""结构化命例库：与知识库规则分离，供 workflow 注入 few-shot 案例参考。
 
-The knowledge base keeps raw rules and classics.  This module keeps case-like
-records separate so the workflow can inject a few relevant examples as
-few-shot references without treating them as authoritative rules.
+知识库存原始规则与古籍，本模块单独存放案例类记录，避免把案例当作权威规则使用。
 """
 from __future__ import annotations
 
@@ -22,48 +20,35 @@ class CaseRecord:
     source: str = ""
     rating: int = 4
     verified: bool = True
-    features: dict[str] = field(default_factory=dict)
+    features: dict = field(default_factory=dict)
+
+
+def _to_record(item: dict, *, content_key: str, default_source: str, default_rating: int) -> CaseRecord | None:
+    content = (item.get(content_key) or "").strip()
+    if not content:
+        return None
+    domains = item.get("domains")
+    return CaseRecord(
+        id=str(item.get("id") or ""),
+        title=str(item.get("title") or ""),
+        question_domain=(domains or ["general"])[0] if domains else "general",
+        content=content,
+        source=str(item.get("source") or default_source),
+        rating=int(item.get("rating") or default_rating),
+        verified=bool(item.get("verified", True)),
+        features=dict(item.get("features") or {}),
+    )
 
 
 def _read_db_cases() -> list[CaseRecord]:
     """从 PostgreSQL 读取相似命例：cases（命理库八字命例）+ chart_cases（用户反馈结构化案例）。"""
     try:
         from app.db import user_data
-        records: list[CaseRecord] = []
-
-        # 1) cases 表：命理库收录的八字命例（Web 端新建 + 历史命盘）
-        for item in user_data.search_cases_for_rag(limit=200):
-            content = (item.get("content") or "").strip()
-            if not content:
-                continue
-            records.append(CaseRecord(
-                id=str(item.get("id") or ""),
-                title=str(item.get("title") or ""),
-                question_domain=(item.get("domains") or ["general"])[0] if item.get("domains") else "general",
-                content=content,
-                source=str(item.get("source") or "cases"),
-                rating=int(item.get("rating") or 5),
-                verified=bool(item.get("verified", True)),
-                features=dict(item.get("features") or {}),
-            ))
-
-        # 2) chart_cases 表：用户反馈转换的结构化案例
-        for item in user_data.search_chart_cases(limit=200):
-            content = (item.get("analysis") or "").strip()
-            if not content:
-                continue
-            records.append(CaseRecord(
-                id=str(item.get("id") or ""),
-                title=str(item.get("title") or ""),
-                question_domain=(item.get("domains") or ["general"])[0] if item.get("domains") else "general",
-                content=content,
-                source=str(item.get("source") or "chart_cases"),
-                rating=int(item.get("rating") or 4),
-                verified=bool(item.get("verified", True)),
-                features=dict(item.get("features") or {}),
-            ))
-
-        return records
+        records = [_to_record(item, content_key="content", default_source="cases", default_rating=5)
+                   for item in user_data.search_cases_for_rag(limit=200)]
+        records += [_to_record(item, content_key="analysis", default_source="chart_cases", default_rating=4)
+                    for item in user_data.search_chart_cases(limit=200)]
+        return [r for r in records if r is not None]
     except Exception as e:
         log.warning("从 DB 加载案例失败: {}", e)
         return []

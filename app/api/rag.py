@@ -14,7 +14,6 @@ from app.api.common import client_error
 from app.core.logger import log
 from app.rag.vector_store import KNOWLEDGE_DIR, get_knowledge_base
 
-# 知识库管理接口
 mgmt_router = APIRouter(prefix="/rag", tags=["RAG"])
 
 
@@ -35,18 +34,15 @@ def _list_markdown_files() -> list[dict]:
     """列出 knowledge_docs 目录下所有 markdown 文件。"""
     if not KNOWLEDGE_DIR.exists():
         return []
-    files = []
-    for md in sorted(KNOWLEDGE_DIR.glob("*.md")):
-        stat = md.stat()
-        files.append({
+    return [
+        {
             "filename": md.name,
-            "size": stat.st_size,
-            "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(),
-        })
-    return files
+            "size": md.stat().st_size,
+            "modified": datetime.fromtimestamp(md.stat().st_mtime).isoformat(),
+        }
+        for md in sorted(KNOWLEDGE_DIR.glob("*.md"))
+    ]
 
-
-# ---------- 知识库管理接口 ----------
 
 @mgmt_router.get("/docs")
 async def list_rag_docs():
@@ -64,12 +60,9 @@ async def upload_rag_doc(file: UploadFile = File(...)):
     path = _resolve_doc_path(filename)
     try:
         KNOWLEDGE_DIR.mkdir(parents=True, exist_ok=True)
-        content = await file.read()
-        path.write_bytes(content)
+        path.write_bytes(await file.read())
         log.info("上传知识库文档: {}", path.name)
         return {"filename": path.name, "size": path.stat().st_size}
-    except HTTPException:
-        raise
     except Exception as e:
         log.exception("上传知识库文档失败")
         raise HTTPException(status_code=500, detail=client_error(e))
@@ -99,8 +92,7 @@ async def rebuild_rag_index(force: bool = False):
     """
     try:
         kb = get_knowledge_base()
-        ready = kb.init(force=force)
-        return {"ready": ready, "embedding": kb.embedding_id}
+        return {"ready": kb.init(force=force), "embedding": kb.embedding_id}
     except Exception:
         log.exception("重建 RAG 向量库失败")
         raise HTTPException(status_code=500, detail="重建失败，请查看服务日志")

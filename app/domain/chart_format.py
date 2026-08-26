@@ -1,10 +1,8 @@
-"""命盘文本格式化与出生日期反推。
-
-R9 拆分自 bazi_engine.py。"""
+"""命盘文本格式化与出生日期反推。"""
 from __future__ import annotations
 
-import datetime as _dt
-import re as _re
+import datetime
+import re
 from typing import Any
 
 from lunar_python import Lunar, Solar
@@ -12,6 +10,15 @@ from lunar_python import Lunar, Solar
 from app.domain.chart_builder import parse_gender
 from app.domain.models import BaziChart
 from app.domain.shensha_calc import _compute_shensha
+
+
+def _shensha_by_pillar(chart: BaziChart) -> dict[str, list[str]]:
+    """按柱分组神煞名称，供文本格式化复用。"""
+    ss = _compute_shensha(chart.pillars, parse_gender(chart.birth.gender))
+    grouped: dict[str, list[str]] = {}
+    for s in ss:
+        grouped.setdefault(s.get("pillar") or "全局", []).append(s["name"])
+    return grouped
 
 
 def format_chart_text(chart: BaziChart) -> str:
@@ -33,10 +40,7 @@ def format_chart_text(chart: BaziChart) -> str:
             f"副星: {', '.join(p.shishen_zhi) or '-'} | "
             f"星运: {p.changsheng or '-'} | 自坐: {p.zizuo or '-'} | 空亡: {p.xunkong or '-'}"
         )
-    lines += [
-        "",
-        "【空亡】",
-    ]
+    lines += ["", "【空亡】"]
     for p in chart.pillars:
         lines.append(f"  {p.name[0]}空: {p.xunkong}")
     lines += [
@@ -45,11 +49,8 @@ def format_chart_text(chart: BaziChart) -> str:
         f"  命宫: {chart.ming_gong} ({chart.ming_gong_nayin})",
         f"  身宫: {chart.shen_gong} ({chart.shen_gong_nayin})",
     ]
-    shensha_all = _compute_shensha(chart.pillars, parse_gender(chart.birth.gender))
-    if shensha_all:
-        shensha_by_pillar: dict[str, list[str]] = {}
-        for _s in shensha_all:
-            shensha_by_pillar.setdefault(_s.get("pillar") or "全局", []).append(_s["name"])
+    shensha_by_pillar = _shensha_by_pillar(chart)
+    if shensha_by_pillar:
         lines += ["", "【神煞（按柱）】"]
         for p in chart.pillars:
             names = shensha_by_pillar.get(p.name, [])
@@ -96,16 +97,22 @@ def format_analysis_text(chart: BaziChart, question: str = "整体运势") -> st
         "【口径说明】",
     ]
     lines += [f"  - {note}" for note in wx.notes]
-    # 神煞（按柱分组，与 _fact_block / format_chart_text 一致）
-    _ss = _compute_shensha(chart.pillars, parse_gender(chart.birth.gender))
-    _ss_by_p: dict[str, list[str]] = {}
-    for _s in _ss:
-        _ss_by_p.setdefault(_s.get("pillar") or "全局", []).append(_s["name"])
+    shensha_by_pillar = _shensha_by_pillar(chart)
     lines += ["", "【神煞（按柱）】"]
     for p in chart.pillars:
-        _names = _ss_by_p.get(p.name, [])
-        lines.append(f"  {p.name}: {'、'.join(_names) if _names else '—'}")
+        names = shensha_by_pillar.get(p.name, [])
+        lines.append(f"  {p.name}: {'、'.join(names) if names else '—'}")
     return "\n".join(lines)
+
+
+def _yun_extra_text(item) -> str:
+    """藏干/副星/星运/神煞 明细段（大运、流年共用）。"""
+    return (
+        f"藏干[{'、'.join(item.hidden_stems) or '—'}] "
+        f"副星[{'、'.join(item.shishen_zhi) or '—'}] "
+        f"星运[{item.changsheng or '—'}] "
+        f"神煞[{'、'.join(s['name'] for s in item.shensha) or '—'}]"
+    )
 
 
 def format_dayun_text(chart: BaziChart) -> str:
@@ -122,8 +129,7 @@ def format_dayun_text(chart: BaziChart) -> str:
     for item in chart.dayun:
         lines.append(
             f"  {item.ganzhi}({item.shishen_gan}) | {item.start_year}-{item.end_year} | {item.start_age}-{item.end_age}岁 "
-            f"藏干[{'、'.join(item.hidden_stems) or '—'}] 副星[{'、'.join(item.shishen_zhi) or '—'}] "
-            f"星运[{item.changsheng or '—'}] 神煞[{'、'.join(s['name'] for s in item.shensha) or '—'}]"
+            f"{_yun_extra_text(item)}"
         )
     lines += ["", "注: 大运由 lunar-python 起运算法生成，顺逆与起运时间已结构化保存。"]
     return "\n".join(lines)
@@ -131,28 +137,20 @@ def format_dayun_text(chart: BaziChart) -> str:
 
 def format_liunian_text(chart: BaziChart) -> str:
     """格式化流年文本（逐年干支/虚岁，并绑定所在大运）。"""
-    if chart.liunian:
-        start_year = chart.liunian[0].year
-    else:
-        start_year = _dt.date.today().year
+    start_year = chart.liunian[0].year if chart.liunian else datetime.date.today().year
     lines = [f"【流年推算】从 {start_year} 年起往后 {len(chart.liunian)} 年", ""]
     for item in chart.liunian:
         dy = f" | 所在大运: {item.dayun_ganzhi}" if item.dayun_ganzhi else ""
         lines.append(
             f"  {item.year}年: {item.ganzhi}({item.shishen_gan}) | {item.age}虚岁{dy} "
-            f"藏干[{'、'.join(item.hidden_stems) or '—'}] 副星[{'、'.join(item.shishen_zhi) or '—'}] "
-            f"星运[{item.changsheng or '—'}] 神煞[{'、'.join(s['name'] for s in item.shensha) or '—'}]"
+            f"{_yun_extra_text(item)}"
         )
     lines += ["", "注: 流年干支采用立春口径，并逐年绑定所在大运。"]
     return "\n".join(lines)
 
 
 _GAN_SEQ = "甲乙丙丁戊己庚辛壬癸"
-
-
 _ZHI_SEQ2 = "子丑寅卯辰巳午未申酉戌亥"
-
-
 _ZHI_MID_HOUR = {
     "子": 0, "丑": 2, "寅": 4, "卯": 6, "辰": 8, "巳": 10,
     "午": 12, "未": 14, "申": 16, "酉": 18, "戌": 20, "亥": 22,
@@ -162,7 +160,7 @@ _ZHI_MID_HOUR = {
 def _parse_pillars(pillars: str) -> tuple[str, str, str, str]:
     """把 '甲申庚午壬申甲辰' / '甲申 庚午 壬申 甲辰' / '甲申年庚午月...' 统一拆成四柱。"""
     s = (pillars or "").strip()
-    s = _re.sub(r"[\s/、，,年日月时\-]", "", s)
+    s = re.sub(r"[\s/、，,年日月时\-]", "", s)
     chars = [c for c in s if c in _GAN_SEQ or c in _ZHI_SEQ2]
     seq = "".join(chars)
     if len(seq) < 8:
@@ -190,14 +188,8 @@ def _day_gz_from_jdn(j: int) -> str:
 
 
 _REF = _jdn(2000, 1, 1)
-
-
 _REF_EC = Lunar.fromSolar(Solar.fromYmd(2000, 1, 1)).getEightChar().getDay()
-
-
 _DAY_OFF_G = (_GAN_SEQ.index(_REF_EC[0]) - _REF) % 10
-
-
 _DAY_OFF_Z = (_ZHI_SEQ2.index(_REF_EC[1]) - _REF) % 12
 
 
@@ -207,16 +199,12 @@ def find_birth_dates_from_pillars(
     max_years_back: int = 120,
     top_n: int = 3,
 ) -> list[dict[str, Any]]:
-    """根据四柱反推候选出生日期。
+    """根据四柱反推候选出生日期（日柱 60 天周期 + 年/月/时柱逐层过滤）。
 
-    用户只知道八字（如「甲申庚午壬申甲辰」）、不知道精确出生时间时，
-    用日柱 60 天周期 + 年/月/时柱逐层过滤，反推出少量候选出生日期，
-    由用户确认其一即可获得精确 birth_time 以排大运/流年/命宫。
-
-    Returns: [{"birth_time", "ganzhi", "shi_chen"}, ...] 按日期倒序，最多 top_n 个。
+    返回 [{"birth_time", "ganzhi", "shi_chen"}, ...] 按日期倒序，最多 top_n 个。
     """
     y_gz, m_gz, d_gz, t_gz = _parse_pillars(pillars)
-    today = _dt.date.today()
+    today = datetime.date.today()
     today_jdn = _jdn(*today.timetuple()[:3])
     min_jdn = _jdn(today.year - max_years_back, 1, 1)
 
@@ -270,19 +258,7 @@ def format_fact_context(chart: BaziChart) -> str:
 
 
 def extract_bazi_brief(chart_data: Any) -> str | None:
-    """从命盘 JSON（chart_data）中提取四柱干支摘要，如 '辛卯 丁酉 庚午 丙子'。
-
-    命例列表 / 收藏等接口需要把结构化排盘压成一行干支展示。该逻辑此前在
-    app.api.cases 与 app.db.schema 中各复制一份（字节一致），现已收敛到
-    domain 层作为单一实现，避免重复维护与漂移。
-
-    Args:
-        chart_data: 排盘结果字典，期望含 ``pillars`` 列表，每项含 ``ganzhi``
-            （[天干, 地支] 列表，或 "干支" 字符串）。
-
-    Returns:
-        四柱干支以空格拼接的串；结构不符或解析异常时返回 None。
-    """
+    """从命盘 JSON（chart_data）中提取四柱干支摘要，如 '辛卯 丁酉 庚午 丙子'。"""
     try:
         pillars = chart_data.get("pillars")
         if isinstance(pillars, list) and len(pillars) >= 4:

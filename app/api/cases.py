@@ -1,13 +1,7 @@
-"""命盘快照（命例）管理。
+"""命盘快照（命例）管理：cases 表（Bazi 结构）的增删改查与 JSON 导入导出。
 
-提供命例的增删改查、JSON 导入导出接口。
-命例数据库存储四柱、五行、大运、神煞等结构化排盘结果。
-
-数据表分工（最终确认）：
-- cases        : 命理库收录的八字信息（Web 端新建命例），Bazi 结构（name/birth_time/gender/chart_data）
-- chart_cases  : 用户反馈转换的结构化案例库（promote_to_case 写入）
-
-本模块的 Web 端新建命例接口（/cases）操作的是 cases 表。
+注意与 chart_cases 区分：chart_cases 是用户反馈转换的结构化案例库
+（promote_to_case 写入），本模块操作的是 Web 端新建命例的 cases 表。
 """
 from __future__ import annotations
 
@@ -27,27 +21,29 @@ from app.domain.bazi_engine import extract_bazi_brief
 
 router = APIRouter(prefix="/cases", tags=["Cases"])
 
+# PostgreSQL 不可用时回退到本地 JSON 文件存储
+_fallback_file = Path("./data/cases.json")
 
 _table_ready = False
 _pg_unavailable = False
-_fallback_file = Path("./data/cases.json")
+
+_CASE_COLS = "id, name, tags, birth_time, gender, bio, analysis, keypoints, domains, chart_data, created_at, updated_at"
+_INSERT_CASE_SQL = (
+    "INSERT INTO cases (id, name, tags, birth_time, gender, chart_data, bio, analysis, keypoints, domains) "
+    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
+)
 
 
 def _get_pool():
-    """复用 postgres_memory 模块级连接池（线程安全，懒创建）。"""
+    """复用 postgres_memory 模块级连接池（懒创建）。"""
     from app.memory.postgres_memory import _get_pool as _pg_get_pool
     return _pg_get_pool()
 
 
 def ensure_table():
-    """确保命例表（cases）存在（幂等，进程内只执行一次）。
+    """确保 cases 表存在（幂等，进程内只执行一次）；不可用返回 False 以回退本地存储。
 
-    本接口的命例数据落在 cases 表（命理库八字信息，Bazi 结构）。
-    cases 表的结构化定义在 app.db.user_data._ensure_tables 中创建，
-    这里直接复用，避免重复建表定义。
-
-    Returns:
-        True 表示 PostgreSQL 命例表可用；False 表示应使用本地 JSON fallback。
+    cases 表结构由 app.db.user_data._ensure_tables 统一创建，此处直接复用。
     """
     global _table_ready, _pg_unavailable
     if _table_ready:
@@ -56,7 +52,7 @@ def ensure_table():
         return False
     try:
         from app.db import user_data
-        user_data._ensure_tables()  # 确保 cases（Bazi）与 chart_cases（结构化）均已就绪
+        user_data._ensure_tables()
         _table_ready = True
         log.info("命例表（cases）已就绪")
         return True
@@ -126,34 +122,38 @@ def _build_chart_data(birth_time: str, gender: str) -> dict[str, Any]:
     return payload
 
 
+def _parse_chart(value) -> dict:
+    return value if isinstance(value, dict) else json.loads(value) if value else {}
+
+
+def _row_to_case(row, with_chart: bool = False) -> dict:
+    """将 cases 行（_CASE_COLS 列序）映射为 API 结构。"""
+    case = {
+        "id": str(row[0]),
+        "name": row[1],
+        "tags": row[2] or [],
+        "birthTime": row[3],
+        "gender": row[4],
+        "bio": row[5] or "",
+        "analysis": row[6] or "",
+        "keypoints": row[7] or "",
+        "domains": row[8] or [],
+        "createdAt": str(row[10]) if row[10] else "",
+        "updatedAt": str(row[11]) if row[11] else "",
+    }
+    if with_chart:
+        case["chartData"] = _parse_chart(row[9])
+    return case
+
+
 def _db_list_cases() -> list[dict[str, Any]]:
     """同步查询命例列表（handler 中经 asyncio.to_thread 调用）。"""
     with _get_pool().connection() as conn:
-        cur = conn.execute(
-            """
-            SELECT id, name, tags, birth_time, gender, bio, analysis, keypoints,
-                   domains, created_at, updated_at, chart_data
-            FROM cases ORDER BY updated_at DESC
-            """
-        )
-        result = []
-        for row in cur:
-            cd = row[11] if isinstance(row[11], dict) else json.loads(row[11]) if row[11] else {}
-            result.append({
-                "id": str(row[0]),
-                "name": row[1],
-                "tags": row[2] or [],
-                "birthTime": row[3],
-                "gender": row[4],
-                "bio": row[5] or "",
-                "analysis": row[6] or "",
-                "keypoints": row[7] or "",
-                "domains": row[8] or [],
-                "createdAt": str(row[9]) if row[9] else "",
-                "updatedAt": str(row[10]) if row[10] else "",
-                "bazi": extract_bazi_brief(cd),
-            })
-    return result
+        cur = conn.execute(f"SELECT {_CASE_COLS} FROM cases ORDER BY updated_at DESC")
+        return [
+            {**_row_to_case(row), "bazi": extract_bazi_brief(_parse_chart(row[9]))}
+            for row in cur
+        ]
 
 
 @router.get("", dependencies=[Depends(require_admin)])
@@ -181,16 +181,11 @@ async def list_cases():
         raise HTTPException(status_code=500, detail=client_error(e))
 
 
-def _db_create_case(name: str, tags: list, birth_time: str, gender: str, chart_data: dict[str, Any],
-                    bio: str, analysis: str, keypoints: str, domains: list) -> str:
+def _db_create_case(name, tags, birth_time, gender, chart_data, bio, analysis, keypoints, domains) -> str:
     """同步写入新命例，返回新 id。"""
     with _get_pool().connection() as conn:
         cur = conn.execute(
-            """
-            INSERT INTO cases (id, name, tags, birth_time, gender, chart_data, bio, analysis, keypoints, domains)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            RETURNING id
-            """,
+            _INSERT_CASE_SQL,
             (str(uuid.uuid4()), name, tags, birth_time, gender, json.dumps(chart_data),
              bio, analysis, keypoints, domains),
         )
@@ -200,11 +195,7 @@ def _db_create_case(name: str, tags: list, birth_time: str, gender: str, chart_d
 
 @router.post("", dependencies=[Depends(require_admin)])
 async def create_case(payload: dict):
-    """保存新命例（写入 cases 表）。
-
-    payload: { name, birth_time, gender, tags?, chart_data? }
-    若未提供 chart_data，后端自动排盘生成。
-    """
+    """保存新命例（写入 cases 表）；未提供 chart_data 时后端自动排盘生成。"""
     name = (payload.get("name") or "").strip()
     birth_time = (payload.get("birth_time") or "").strip()
     gender = (payload.get("gender") or "").strip()
@@ -219,8 +210,8 @@ async def create_case(payload: dict):
     chart_data = payload.get("chart_data") or await asyncio.to_thread(_build_chart_data, birth_time, gender)
 
     if not await asyncio.to_thread(ensure_table):
-        cases = _load_file_cases()
         case = _new_file_case(name, birth_time, gender, tags, chart_data)
+        cases = _load_file_cases()
         cases.append(case)
         _save_file_cases(cases)
         return {"id": case["id"], "status": "ok", "storage": "file"}
@@ -239,27 +230,9 @@ async def create_case(payload: dict):
 def _db_get_case(case_id: str) -> dict[str, Any] | None:
     """同步查询单个命例；不存在返回 None。"""
     with _get_pool().connection() as conn:
-        cur = conn.execute(
-            "SELECT id, name, tags, birth_time, gender, bio, analysis, keypoints, domains, chart_data, created_at, updated_at FROM cases WHERE id = %s",
-            (case_id,),
-        )
+        cur = conn.execute(f"SELECT {_CASE_COLS} FROM cases WHERE id = %s", (case_id,))
         row = cur.fetchone()
-    if not row:
-        return None
-    return {
-        "id": str(row[0]),
-        "name": row[1],
-        "tags": row[2] or [],
-        "birthTime": row[3],
-        "gender": row[4],
-        "bio": row[5] or "",
-        "analysis": row[6] or "",
-        "keypoints": row[7] or "",
-        "domains": row[8] or [],
-        "chartData": row[9] if isinstance(row[9], dict) else json.loads(row[9]),
-        "createdAt": str(row[10]) if row[10] else "",
-        "updatedAt": str(row[11]) if row[11] else "",
-    }
+    return _row_to_case(row, with_chart=True) if row else None
 
 
 @router.get("/{case_id}", dependencies=[Depends(require_admin)])
@@ -282,7 +255,7 @@ async def get_case(case_id: str):
         raise HTTPException(status_code=500, detail=client_error(e))
 
 
-def _db_update_case(case_id: str, payload: dict) -> None:
+def _db_update_case(case_id, payload):
     """同步执行命例更新 SQL；无更新字段时抛 ValueError。"""
     with _get_pool().connection() as conn:
         updates = []
@@ -293,15 +266,10 @@ def _db_update_case(case_id: str, payload: dict) -> None:
         if "tags" in payload:
             updates.append("tags = %s")
             params.append(payload["tags"])
-        if "bio" in payload:
-            updates.append("bio = %s")
-            params.append((payload["bio"] or "").strip())
-        if "analysis" in payload:
-            updates.append("analysis = %s")
-            params.append((payload["analysis"] or "").strip())
-        if "keypoints" in payload:
-            updates.append("keypoints = %s")
-            params.append((payload["keypoints"] or "").strip())
+        for field in ("bio", "analysis", "keypoints"):
+            if field in payload:
+                updates.append(f"{field} = %s")
+                params.append((payload[field] or "").strip())
         if "domains" in payload:
             updates.append("domains = %s")
             params.append(payload["domains"] or [])
@@ -318,7 +286,7 @@ def _db_update_case(case_id: str, payload: dict) -> None:
         updates.append("updated_at = NOW()")
         params.append(case_id)
         conn.execute(
-            "UPDATE cases SET {} WHERE id = %s".format(", ".join(updates)),
+            f"UPDATE cases SET {', '.join(updates)} WHERE id = %s",
             tuple(params),
         )
 
@@ -364,8 +332,7 @@ async def delete_case(case_id: str):
     """删除命例（cases 表）。"""
     if not await asyncio.to_thread(ensure_table):
         cases = _load_file_cases()
-        kept = [c for c in cases if c.get("id") != case_id]
-        _save_file_cases(kept)
+        _save_file_cases([c for c in cases if c.get("id") != case_id])
         return {"status": "ok", "storage": "file"}
     try:
         await asyncio.to_thread(_db_delete_case, case_id)
@@ -378,54 +345,30 @@ async def delete_case(case_id: str):
 def _db_export_cases() -> list[dict[str, Any]]:
     """同步导出全部命例。"""
     with _get_pool().connection() as conn:
-        cur = conn.execute(
-            "SELECT id, name, tags, birth_time, gender, bio, analysis, keypoints, domains, chart_data, created_at, updated_at FROM cases ORDER BY updated_at DESC"
-        )
-        cases = []
-        for row in cur:
-            chart_data = row[9] if isinstance(row[9], dict) else json.loads(row[9])
-            cases.append({
-                "id": str(row[0]),
-                "name": row[1],
-                "tags": row[2] or [],
-                "birthTime": row[3],
-                "gender": row[4],
-                "bio": row[5] or "",
-                "analysis": row[6] or "",
-                "keypoints": row[7] or "",
-                "domains": row[8] or [],
-                "chartData": chart_data,
-                "createdAt": str(row[10]) if row[10] else "",
-                "updatedAt": str(row[11]) if row[11] else "",
-            })
-    return cases
+        cur = conn.execute(f"SELECT {_CASE_COLS} FROM cases ORDER BY updated_at DESC")
+        return [_row_to_case(row, with_chart=True) for row in cur]
 
 
 @router.get("/export/json", dependencies=[Depends(require_admin)])
 async def export_cases_json():
-    """导出所有命例为 JSON 文件（cases 表，Bazi 结构）。"""
+    """导出所有命例为 JSON 文件（attachment）。"""
     if not await asyncio.to_thread(ensure_table):
         cases = _load_file_cases()
-        content = json.dumps({"version": 1, "exportedAt": datetime.now().isoformat(), "cases": cases}, ensure_ascii=False, indent=2)
-        return Response(
-            content=content,
-            media_type="application/json",
-            headers={"Content-Disposition": 'attachment; filename="xianzhi_cases.json"'},
-        )
-    try:
-        cases = await asyncio.to_thread(_db_export_cases)
-        content = json.dumps({"version": 1, "exportedAt": datetime.now().isoformat(), "cases": cases}, ensure_ascii=False, indent=2)
-        return Response(
-            content=content,
-            media_type="application/json",
-            headers={"Content-Disposition": 'attachment; filename="xianzhi_cases.json"'},
-        )
-    except Exception as e:
-        log.exception("导出命例失败")
-        raise HTTPException(status_code=500, detail=client_error(e))
+    else:
+        try:
+            cases = await asyncio.to_thread(_db_export_cases)
+        except Exception as e:
+            log.exception("导出命例失败")
+            raise HTTPException(status_code=500, detail=client_error(e))
+    content = json.dumps({"version": 1, "exportedAt": datetime.now().isoformat(), "cases": cases}, ensure_ascii=False, indent=2)
+    return Response(
+        content=content,
+        media_type="application/json",
+        headers={"Content-Disposition": 'attachment; filename="xianzhi_cases.json"'},
+    )
 
 
-def _db_import_cases(cases: list) -> tuple[int, int]:
+def _db_import_cases(cases) -> tuple[int, int]:
     """同步批量导入命例，返回 (inserted, skipped)。"""
     inserted = 0
     skipped = 0
@@ -437,26 +380,27 @@ def _db_import_cases(cases: list) -> tuple[int, int]:
                 if cur.fetchone():
                     skipped += 1
                     continue
-            name = (c.get("name") or "未命名命例").strip()
             birth_time = (c.get("birthTime") or c.get("birth_time") or "").strip()
             gender = (c.get("gender") or "").strip()
-            tags = c.get("tags") or []
-            bio = (c.get("bio") or "").strip()
-            analysis = (c.get("analysis") or "").strip()
-            keypoints = (c.get("keypoints") or "").strip()
-            domains = c.get("domains") or []
-            chart_data = c.get("chartData") or c.get("chart_data")
             if not birth_time or not gender:
                 continue
+            chart_data = c.get("chartData") or c.get("chart_data")
             if not chart_data:
                 chart_data = _build_chart_data(birth_time, gender)
             conn.execute(
-                """
-                INSERT INTO cases (id, name, tags, birth_time, gender, chart_data, bio, analysis, keypoints, domains)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                """,
-                (str(uuid.uuid4()), name, tags, birth_time, gender, json.dumps(chart_data),
-                 bio, analysis, keypoints, domains),
+                _INSERT_CASE_SQL,
+                (
+                    str(uuid.uuid4()),
+                    (c.get("name") or "未命名命例").strip(),
+                    c.get("tags") or [],
+                    birth_time,
+                    gender,
+                    json.dumps(chart_data),
+                    (c.get("bio") or "").strip(),
+                    (c.get("analysis") or "").strip(),
+                    (c.get("keypoints") or "").strip(),
+                    c.get("domains") or [],
+                ),
             )
             inserted += 1
     return inserted, skipped
@@ -464,20 +408,16 @@ def _db_import_cases(cases: list) -> tuple[int, int]:
 
 @router.post("/import/json", dependencies=[Depends(require_admin)])
 async def import_cases_json(payload: dict):
-    """从 JSON 导入命例（写入 cases 表，Bazi 结构）。
-
-    payload: { cases: [...] }
-    已存在相同 id 的命例会跳过，新增命例生成新 id。
-    """
+    """从 JSON 导入命例（相同 id 跳过，新增命例生成新 id）。"""
     cases = payload.get("cases") or []
     if not isinstance(cases, list):
         raise HTTPException(status_code=400, detail="cases 必须是数组")
 
-    inserted = 0
-    skipped = 0
     if not await asyncio.to_thread(ensure_table):
         existing = _load_file_cases()
         existing_ids = {c.get("id") for c in existing}
+        inserted = 0
+        skipped = 0
         for c in cases:
             cid = c.get("id")
             if cid and cid in existing_ids:
@@ -487,10 +427,8 @@ async def import_cases_json(payload: dict):
             gender = (c.get("gender") or "").strip()
             if not birth_time or not gender:
                 continue
-            name = (c.get("name") or "未命名命例").strip()
-            tags = c.get("tags") or []
             chart_data = c.get("chartData") or c.get("chart_data") or await asyncio.to_thread(_build_chart_data, birth_time, gender)
-            existing.append(_new_file_case(name, birth_time, gender, tags, chart_data))
+            existing.append(_new_file_case((c.get("name") or "未命名命例").strip(), birth_time, gender, c.get("tags") or [], chart_data))
             inserted += 1
         _save_file_cases(existing)
         return {"inserted": inserted, "skipped": skipped, "storage": "file"}

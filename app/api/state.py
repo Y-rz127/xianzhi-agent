@@ -1,10 +1,8 @@
 """共享运行时状态（兼容层）。
 
-R5 后真正的状态持有者为 app.api.context.AppContext（lifespan 内构造，
-挂到 app.state.app_context，HTTP handler 经依赖注入获取）。
-本模块仅保留旧函数签名做兼容转发，不再持有任何模块级可变全局；
-新代码请直接使用 app.api.context（AppContext / get_app_context /
-app_context_dependency）。
+真正状态持有者为 app.api.context.AppContext（lifespan 内构造，
+经 app.state.app_context 暴露）；本模块仅保留旧函数签名做兼容转发，
+新代码请直接使用 app.api.context（AppContext / get_app_context）。
 """
 from __future__ import annotations
 
@@ -49,5 +47,5 @@ def agent_pool_stats() -> dict:
 
 
 def workflow_backend() -> str:
-    """返回当前编排后端（R3 收敛后恒为 langgraph）。"""
+    """返回当前编排后端（LangGraph）。"""
     return AppContext.workflow_backend()

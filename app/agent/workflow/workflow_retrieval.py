@@ -149,7 +149,7 @@ def build_duxing_queries(
     worker: DomainWorker | None,
     user_text: str = "",
 ) -> tuple[list[str], str]:
-    """断事问题 query 构造：领域规则 + 个性化 + 命例 + 古籍 + 断法。"""
+    """断事问题 query 构造：用户原句 + 个性化 + 领域规则 + Worker 专属 + 古籍 + 断法。"""
     # 用户原句放首条：语义最自然，对 embedding 检索最友好
     queries: list[str] = []
     if user_text and user_text.strip():
@@ -169,7 +169,7 @@ def build_duxing_queries(
     ancient_q = _ANCIENT_QUERY_MAP.get(intent.domain)
     if ancient_q:
         queries.append(ancient_q)
-    # 4) 断法体系 query
+    # 3) 断法体系 query
     duanfa_q = _DUANFA_QUERY_MAP.get(intent.domain)
     if duanfa_q:
         queries.append(duanfa_q)

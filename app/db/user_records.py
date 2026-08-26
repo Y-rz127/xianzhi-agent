@@ -1,21 +1,13 @@
-"""命例收藏 / 塔罗记录 / 问题反馈 / 答案反馈与训练样本导出，按 user_id 隔离。
-
-R9 拆分自 user_data.py。"""
+"""命例收藏 / 塔罗记录 / 问题反馈 / 答案反馈与训练样本导出，按 user_id 隔离。"""
 from __future__ import annotations
 
 import json
 import uuid
-from datetime import datetime
 
 from app.core.logger import log
 from app.db.chart_store import add_chart_case, delete_chart_case
-from app.db.schema import (
-    _ensure_tables,
-    _safe_json,
-)
-from app.domain.bazi_engine import (
-    extract_bazi_brief,  # noqa: F401  (命盘摘要提取，重复定义已收敛至 domain 层)
-)
+from app.db.schema import _ensure_tables, _safe_json
+from app.domain.bazi_engine import extract_bazi_brief
 from app.memory.postgres_memory import _get_pool
 
 
@@ -38,14 +30,12 @@ def add_favorite(user_id: str, case_id: str) -> str:
 def list_favorites(user_id: str) -> list:
     """列出某用户收藏的命例。
 
-    主要联 cases 表（八字命例），同时兼容 chart_cases 表（Web端命例）。
-    返回格式以 cases 字段为主（title/source/question/analysis/domains/features），
-    chart_cases 的字段做兼容映射（name→title, chart_data→features 等）。
+    主联 cases 表（八字命例），并兼容联 chart_cases 表（Web 端命例，字段做映射）。
     """
     _ensure_tables()
     result = []
     with _get_pool().connection() as conn:
-        # 主查询：联 cases 表（命理库八字 / Web 端新建命例，Bazi 结构）
+        # 联 cases 表（八字命例）
         rows_cases = conn.execute(
             """
             SELECT f.case_id, c.name, c.tags, c.birth_time, c.gender, c.chart_data, f.created_at
@@ -70,7 +60,7 @@ def list_favorites(user_id: str) -> list:
                 "createdAt": str(r[6]) if r[6] else "",
             })
 
-        # 兼容查询：联 chart_cases 表（用户反馈转换的结构化案例库）
+        # 兼容联 chart_cases 表（用户反馈转换的结构化案例库）
         rows_chart = conn.execute(
             """
             SELECT f.case_id, c.title, c.source, c.question, c.analysis,
@@ -281,21 +271,7 @@ def list_answer_feedback(limit: int = 200, rating: str | None = None) -> list:
             params,
         ).fetchall()
         return [
-            {
-                "id": str(r[0]),
-                "user_id": r[1],
-                "conversation_id": r[2] or "",
-                "question": r[3] or "",
-                "answer": r[4] or "",
-                "rating": r[5],
-                "reason": r[6] or "",
-                "chart_snapshot": r[7] if not isinstance(r[7], str) else _safe_json(r[7]),
-                "created_at": str(r[8]) if r[8] else "",
-                "reviewed": bool(r[9]) if r[9] is not None else False,
-                "reviewed_by": r[10] or "",
-                "case_id": r[11] or "",
-                "user_nickname": r[12] if r[12] else None,
-            }
+            {**_answer_feedback_from_row(r), "user_nickname": r[12] if r[12] else None}
             for r in rows
         ]
 
@@ -361,20 +337,25 @@ def get_answer_feedback(fid: str) -> dict | None:
         ).fetchone()
         if not row:
             return None
-        return {
-            "id": str(row[0]),
-            "user_id": row[1],
-            "conversation_id": row[2] or "",
-            "question": row[3] or "",
-            "answer": row[4] or "",
-            "rating": row[5],
-            "reason": row[6] or "",
-            "chart_snapshot": row[7] if not isinstance(row[7], str) else _safe_json(row[7]),
-            "created_at": str(row[8]) if row[8] else "",
-            "reviewed": bool(row[9]) if row[9] is not None else False,
-            "reviewed_by": row[10] or "",
-            "case_id": row[11] or "",
-        }
+        return _answer_feedback_from_row(row)
+
+
+def _answer_feedback_from_row(r) -> dict:
+    """数据库行 → 回答反馈字典。"""
+    return {
+        "id": str(r[0]),
+        "user_id": r[1],
+        "conversation_id": r[2] or "",
+        "question": r[3] or "",
+        "answer": r[4] or "",
+        "rating": r[5],
+        "reason": r[6] or "",
+        "chart_snapshot": r[7] if not isinstance(r[7], str) else _safe_json(r[7]),
+        "created_at": str(r[8]) if r[8] else "",
+        "reviewed": bool(r[9]) if r[9] is not None else False,
+        "reviewed_by": r[10] or "",
+        "case_id": r[11] or "",
+    }
 
 
 def _first(*values, default=None):
@@ -443,11 +424,9 @@ def _refill_features_by_rechart(chart: dict, feats: dict) -> None:
 
 
 def promote_to_case(fid: str, reviewer: str = "") -> tuple[str, str] | None:
-    """将已审核的好评/差评回答转为结构化案例（写入 chart_cases 表）。
+    """将已审核的回答反馈转为结构化案例（写入 chart_cases 表）。
 
-    返回 (case_id, file_path) 或 None（失败时）。
-    幂等：若该反馈已转过案例（answer_feedback.case_id 已存在且对应行仍在），直接返回旧值，
-    避免重复 INSERT 造成 chart_cases 中产生重复案例。
+    返回 (case_id, case_id)；幂等：已转过案例时直接返回旧值，避免重复沉淀。
     """
     _ensure_tables()
     item = get_answer_feedback(fid)
@@ -466,12 +445,11 @@ def promote_to_case(fid: str, reviewer: str = "") -> tuple[str, str] | None:
     # 延迟导入避免 db -> rag 的循环依赖
     from app.rag.retrieval import detect_domain as _detect_domain
 
-    case_id = f"case_feedback_{fid[:8]}"
     chart = item.get("chart_snapshot") or {}
     features = _extract_case_features(chart)
     _refill_features_by_rechart(chart, features)
 
-    # 根据 question + answer 推断 domain
+    # 反馈未带领域时按 question + answer 推断
     detected_domain = _detect_domain(item["question"] + " " + item["answer"]) or "general"
     domains = chart.get("domains")
     if not domains or domains == ["general"]:
@@ -479,35 +457,19 @@ def promote_to_case(fid: str, reviewer: str = "") -> tuple[str, str] | None:
 
     is_positive = item["rating"] == "up"
     case_data = {
-        "id": case_id,
         "source": "用户反馈",
-        "type": "真实反馈案例",
         "title": f"用户反馈案例 - {item['question'][:30]}",
         "features": features,
         "domains": domains,
         "question": item["question"],
         "analysis": item["answer"],
-        "conclusion": "",
         "keywords": chart.get("keywords", []),
         "rating": 5 if is_positive else 2,
         "verified": is_positive,
-        "promoted_at": datetime.now().isoformat(),
         "promoted_by": reviewer,
-    }
-    # 写入数据库 chart_cases 表
-    cid = add_chart_case({
-        "title": case_data["title"],
-        "source": case_data["source"],
-        "question": case_data["question"],
-        "analysis": case_data["analysis"],
-        "domains": case_data["domains"],
-        "features": case_data["features"],
-        "rating": case_data["rating"],
-        "verified": case_data["verified"],
-        "keywords": case_data["keywords"],
-        "promoted_by": case_data["promoted_by"],
         "reason": item.get("reason", ""),
-    })
+    }
+    cid = add_chart_case(case_data)
     # 回填 answer_feedback.case_id，便于列表展示/幂等/取消
     try:
         with _get_pool().connection() as conn:

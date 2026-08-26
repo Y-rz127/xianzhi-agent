@@ -1,6 +1,6 @@
 """分节命理报告生成器。
 
-根据出生时间与性别，调用八字工具获取盘面信息，再由 LLM 生成结构化 Markdown 报告。
+调用八字工具获取盘面信息，再由 LLM 生成结构化 Markdown 报告。
 """
 from __future__ import annotations
 
@@ -25,8 +25,7 @@ SECTIONS = {
 
 DEFAULT_SECTIONS = list(SECTIONS.keys())
 
-# 报告缓存：避免"展示"和"导出PDF"两次调用产生不同内容（LLM temperature≠0 时不稳定）
-# 以 (birth_time, gender, sections) 为 key，TTL 1 小时
+# 报告缓存：保证"展示"和"导出PDF"两次调用内容一致（LLM temperature≠0 时不稳定）
 _REPORT_CACHE_TTL = 3600
 _REPORT_CACHE_MAX = 50
 _report_cache: dict[str, tuple[float, str]] = {}
@@ -34,13 +33,9 @@ _report_cache_lock = threading.Lock()
 
 # 报告生成为单次超大 prompt（排盘+分析+大运全文）+ thinking 的长调用，
 # 主模型默认 60s 超时不够（曾因此 APITimeoutError → 接口 500）。
-# OpenAI SDK 支持单请求级 timeout 覆盖，经 bind 传入 payload 生效
-# （注意：model_copy(update={"timeout"}) 不会重建底层客户端，改 timeout 无效）。
+# OpenAI SDK 支持请求级 timeout 覆盖，经 bind 传入 payload 生效
+# （model_copy(update={"timeout"}) 不会重建底层客户端，改 timeout 无效）。
 _REPORT_LLM_TIMEOUT = 300.0
-
-_SYSTEM_PROMPT = REPORT_SYSTEM_PROMPT
-
-_REPORT_PROMPT = REPORT_PROMPT_TEMPLATE
 
 
 def _report_cache_key(birth_time: str, gender: str, sections: list[str]) -> str:
@@ -104,7 +99,7 @@ def generate_full_report(
 
     sections_text = "\n".join([f"- {SECTIONS[s]}" for s in selected])
 
-    prompt = _REPORT_PROMPT.format(
+    prompt = REPORT_PROMPT_TEMPLATE.format(
         birth_time=birth_time,
         gender=gender,
         chart_text=chart_text,
@@ -113,11 +108,10 @@ def generate_full_report(
         sections_text=sections_text,
     )
 
-    messages = [SystemMessage(content=_SYSTEM_PROMPT), HumanMessage(content=prompt)]
+    messages = [SystemMessage(content=REPORT_SYSTEM_PROMPT), HumanMessage(content=prompt)]
     # 长超时副本：仅本次报告调用覆盖超时，不影响主模型其它调用
     response = chat_model.bind(timeout=_REPORT_LLM_TIMEOUT).invoke(messages)
     content = response.content or ""
 
-    # 写入缓存
     _set_cached_report(birth_time, gender, selected, content)
     return content

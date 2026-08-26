@@ -1,9 +1,7 @@
-"""用户账户存储（账号登录：昵称 + 密码，多端同步）。
+"""用户账户存储（昵称 + 密码登录，多端同步）。
 
-主存储为 PostgreSQL，复用 app.memory.postgres_memory 的模块级连接池。
-密码使用 pbkdf2_hmac 加盐哈希；登录后签发随机 token（存库，支持多端）。
-会话（chat/session）的 user 归属通过 conversation_id 编码 + session_metadata.user_id 实现，
-与此模块解耦。
+主存储为 PostgreSQL，复用 app.memory.postgres_memory 的模块级连接池；
+密码用 pbkdf2_hmac 加盐哈希，登录后签发随机 token 存库（支持多端）。
 """
 from __future__ import annotations
 
@@ -20,15 +18,15 @@ from app.memory.postgres_memory import _get_pool
 
 _TABLE_READY = False
 
-# get_by_token 的 last_active_at 刷新节流：聊天高频调用下每请求都 UPDATE
-# 造成写放大，进程内按 uid 记录上次刷新时间，_LAST_ACTIVE_FLUSH_INTERVAL 内不重复写
+# get_by_token 高频调用下每请求都 UPDATE last_active_at 会写放大，
+# 进程内按 uid 记录上次刷新时间，间隔内不重复写
 _LAST_ACTIVE_FLUSH_INTERVAL = 300  # 秒
 _last_active_flush: dict[str, float] = {}
 _last_active_lock = threading.Lock()
 
 
 def _should_flush_last_active(uid: str) -> bool:
-    """判断该用户是否需要刷新 last_active_at（进程内节流）。"""
+    """是否需要刷新该用户 last_active_at（进程内节流，避免聊天高频写放大）。"""
     now = time.time()
     with _last_active_lock:
         last = _last_active_flush.get(uid, 0)
@@ -46,7 +44,7 @@ def _hash_password(password: str, salt: str) -> str:
 
 
 def _ensure_table():
-    """惰性建表：首次调用时创建 users 表与索引（含兼容旧库的 wx_openid 列），之后直接返回。"""
+    """惰性建表：首次调用时创建 users 表与索引（兼容旧库补 wx_openid 列）。"""
     global _TABLE_READY
     if _TABLE_READY:
         return
@@ -90,8 +88,7 @@ def create_user(nickname: str, password: str) -> dict:
     token = secrets.token_hex(32)
     uid = str(uuid.uuid4())
     with _get_pool().connection() as conn:
-        # 昵称唯一性：先 SELECT 给出友好错误；并发注册同名时由 UNIQUE 约束兜底
-        # （SELECT-then-INSERT 存在竞态窗口，两个请求同时通过检查）
+        # SELECT-then-INSERT 存在竞态窗口，同昵称并发注册由下方 UNIQUE 约束兜底
         exists = conn.execute(
             "SELECT id FROM users WHERE nickname = %s", (nickname,)
         ).fetchone()
@@ -106,7 +103,7 @@ def create_user(nickname: str, password: str) -> dict:
                 (uid, nickname, password_hash, salt, token),
             )
         except Exception as e:
-            # 并发竞态撞 UNIQUE 约束 → 转换为与前置检查一致的 ValueError
+            # 并发撞 UNIQUE 约束 → 转换为与前置检查一致的 ValueError
             if getattr(e, "sqlstate", None) == "23505":
                 raise ValueError("该昵称已被占用") from e
             raise
@@ -150,40 +147,25 @@ def authenticate(nickname: str, password: str) -> Optional[dict]:
 
 
 def get_by_token(token: str) -> Optional[dict]:
-    """按登录 token 查询用户；token 为空或查询失败时返回 None。
-
-    流程：
-        1. 空值快速返回，避免无意义的数据库查询；
-        2. 确保 users 表已创建（惰性建表）；
-        3. 按 token 查询用户基本信息（id / nickname / avatar）；
-        4. 查到用户后，立即刷新 last_active_at，用于统计最近活跃时间；
-        5. 将数据库行转为公开用户字典（_public_user）后返回；
-        6. 任何异常均降级返回 None 并记录警告日志，保证调用方安全。
-    """
-    # 1. token 为空则无需查询
+    """按登录 token 查询用户；token 为空或查询/其他异常时返回 None。"""
     if not token:
         return None
-    # 2. 惰性建表
     _ensure_table()
     try:
         with _get_pool().connection() as conn:
-            # 3. 按 token 查询用户基本信息
             row = conn.execute(
                 "SELECT id, nickname, avatar FROM users WHERE token = %s", (token,)
             ).fetchone()
             if not row:
                 return None
-            # 4. 刷新最后活跃时间（进程内节流：高频聊天下避免每请求一次 UPDATE 写放大）
             if _should_flush_last_active(str(row[0])):
                 conn.execute(
                     "UPDATE users SET last_active_at = NOW() WHERE id = %s", (row[0],)
                 )
-            # 5. 转为公开用户字典返回
             return _public_user(
                 {"id": str(row[0]), "nickname": row[1], "avatar": row[2] or ""}
             )
     except Exception as e:
-        # 6. 异常降级：记录日志并返回 None
         log.warning("按 token 查用户失败: {}", e)
         return None
 
@@ -293,12 +275,11 @@ def create_or_get_by_wxopenid(wx_openid: str, nickname: str = None) -> dict:
             return _public_user(
                 {"id": str(uid), "nickname": nick, "avatar": avatar or "", "token": token}
             )
-        # 新用户：自动注册
         uid = str(uuid.uuid4())
         if not nickname or not nickname.strip():
             nickname = f"微信用户_{secrets.token_hex(3)}"
         nickname = nickname.strip()
-        # 确保昵称唯一
+        # 微信昵称可能撞名，加数字后缀保证唯一
         base_nick = nickname
         suffix = 1
         while True:
@@ -308,7 +289,7 @@ def create_or_get_by_wxopenid(wx_openid: str, nickname: str = None) -> dict:
             suffix += 1
             nickname = f"{base_nick}_{suffix}"
         salt = secrets.token_hex(16)
-        password_hash = _hash_password(secrets.token_hex(32), salt)  # 随机密码（微信登录不使用）
+        password_hash = _hash_password(secrets.token_hex(32), salt)  # 随机密码，微信登录不使用
         token = secrets.token_hex(32)
         conn.execute(
             """

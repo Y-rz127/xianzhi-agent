@@ -1,6 +1,4 @@
-"""八字命盘结构化数据模型（dataclass）。
-
-R9 拆分自 bazi_engine.py；BaziChart 为「命盘事实来源」。"""
+"""八字命盘结构化数据模型（dataclass）；BaziChart 为命盘事实来源。"""
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
@@ -87,7 +85,7 @@ class WuxingAnalysis:
     strength_score: float
     useful_hint: str
     notes: list[str]
-    special_pattern: str = ""   # 方案B：特殊格局类型，"专旺" / "从格" / 空串
+    special_pattern: str = ""   # 特殊格局类型："专旺" / "从格" / 空串
 
 
 @dataclass(frozen=True)

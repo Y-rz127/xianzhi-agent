@@ -9,6 +9,9 @@ from __future__ import annotations
 import re
 from typing import Optional
 
+# 中国城市经度映射（自动生成，见 app/domain/city_longitude.py）
+from app.domain.city_longitude import CITY_LONGITUDE
+
 # 从用户输入中尝试提取出生时间与性别（完整公历，如 "男 1992-05-03 14:30"）
 _BIRTH_INFO_RE = re.compile(
     r"(?P<gender>男|女)[^\d]*(?P<year>\d{4})[-年/](?P<month>\d{1,2})[-月/](?P<day>\d{1,2})[日\s]*(?P<hour>\d{1,2})[:：](?P<minute>\d{1,2})",
@@ -41,9 +44,6 @@ _YEAR_RE = re.compile(r"(?:19|20)\d{2}")
 # 八字选择解析用中文数字（"第一/选2/1" → 序号）
 _CN_NUM = {"一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5, "六": 6,
            "七": 7, "八": 8, "九": 9, "十": 10}
-
-# 中国城市经度映射（自动生成，见 app/domain/city_longitude.py）
-from app.domain.city_longitude import CITY_LONGITUDE
 
 
 def extract_birth_info(text: str):
@@ -160,7 +160,6 @@ def resolve_bazi_selection(text: str, pending: dict) -> Optional[str]:
     支持：①回复候选序号（"第一个"/"第2个"/"选2"/"1"）；②回复候选年份（"2004年"）。
     未匹配返回 None，交由 LLM 继续追问。
     """
-    import re as _re
     cands = pending.get("candidates") or []
     if not cands:
         return None
@@ -168,14 +167,14 @@ def resolve_bazi_selection(text: str, pending: dict) -> Optional[str]:
     for c in cands:
         bt = c.get("birth_time", "")
         y = bt[:4]
-        if y and _re.search(r"(?<!\d)" + y + r"(?!\d)", text):
+        if y and re.search(r"(?<!\d)" + y + r"(?!\d)", text):
             return bt
     # ② 序号：第N个 / 选N / 开头 N（支持中文数字 一二三…）
-    m = _re.search(r"第\s*([0-9]+|[" + "".join(_CN_NUM.keys()) + r"])", text)
+    m = re.search(r"第\s*([0-9]+|[" + "".join(_CN_NUM.keys()) + r"])", text)
     if not m:
-        m = _re.search(r"选\s*([0-9]+|[" + "".join(_CN_NUM.keys()) + r"])", text)
+        m = re.search(r"选\s*([0-9]+|[" + "".join(_CN_NUM.keys()) + r"])", text)
     if not m:
-        m = _re.match(r"\s*([0-9]+)", text)
+        m = re.match(r"\s*([0-9]+)", text)
     if m:
         tok = m.group(1)
         idx = _CN_NUM.get(tok, None)

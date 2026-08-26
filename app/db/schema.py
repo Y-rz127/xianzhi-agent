@@ -1,6 +1,4 @@
-"""用户私有数据：建表与共享工具（惰性建表 / 错误埋点 / JSON 容错）。
-
-R9 拆分自 user_data.py；user_data 门面重导出全部符号。"""
+"""用户私有数据共享工具：惰性建表 / 错误埋点 / JSON 容错。"""
 from __future__ import annotations
 
 import json
@@ -22,7 +20,7 @@ def _ensure_tables():
         _READY = True
         log.info("用户私有数据表已就绪")
     except Exception as e:
-        # 建表失败 → 后续 CRUD 全部不可用，必须错误级可见；_READY 保持 False 下次重试
+        # 建表失败会拖垮后续 CRUD，必须错误级可见；_READY 保持 False 下次重试
         log.error("用户私有数据表创建失败: {}", e)
         _record_error("user_data.ensure_tables")
 
@@ -177,8 +175,8 @@ def _do_ensure_tables():
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_chart_facts_confidence ON chart_facts(confidence)"
         )
-        # 命理库八字信息（Web 端新建命例）：cases 表（Bazi 结构）
-        # 新增 bio/analysis/keypoints/domains 用于承载命例解读文案（替代已废弃的 markdown 种子文档）
+        # 命理库八字命例（cases 表）：bio/analysis/keypoints/domains 承载解读文案，
+        # 替代已废弃的 markdown 种子文档
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS cases (
@@ -197,7 +195,7 @@ def _do_ensure_tables():
             )
             """
         )
-        # 对已经存在的 cases 表做在线迁移（新列不会破坏旧数据），必须在建索引前完成
+        # 对旧库中已存在的 cases 表做在线迁移（新增列不破坏旧数据），须在建索引前完成
         for col, col_type in [
             ("bio", "TEXT DEFAULT ''"),
             ("analysis", "TEXT DEFAULT ''"),
@@ -216,7 +214,6 @@ def _do_ensure_tables():
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_cases_updated ON cases(updated_at DESC)"
         )
-        # 用户反馈转换的结构化案例库：chart_cases 表
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS chart_cases (

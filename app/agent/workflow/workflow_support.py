@@ -37,7 +37,7 @@ def _parse_json(text: str) -> Any:
 
 def _dedupe_content(content: str) -> str:
     """检测并移除完全重复的内容（推理模型 think 块泄漏的兜底）。
-    委托给 app.utils.text_clean.dedupe_content 统一实现。
+    委托给 app.tools.text_clean.dedupe_content 统一实现。
     """
     return _dedupe_content_impl(content)
 
