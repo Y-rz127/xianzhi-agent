@@ -12,6 +12,7 @@ from typing import Optional
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from app.agent.birth_parse import (  # 解耦：生辰解析职责独立成模块
+    birth_place_to_longitude,
     detect_birth_signal,
     extract_birth_info,
     extract_birth_place,
@@ -84,6 +85,9 @@ class Xianzhi(ToolCallAgent):
         self._yun_sect = 1
         self._bazi_pending: Optional[dict] = None  # 八字待确认候选: {"pillars","gender","candidates"}
         self._birth_signal: bool = False  # 模糊生辰信号：精确正则没抓到但疑似在提供生辰
+        self._history_len = 0  # 本轮载入的历史消息数，_persist_history 据此只落盘新增消息
+        # MCP 工具签名缓存：None=尚未绑定；仅签名变化时才重新 bind_tools（见 think）
+        self._mcp_tool_signature: Optional[tuple] = None
         self._lock = asyncio.Lock()
 
     @property
@@ -116,8 +120,11 @@ class Xianzhi(ToolCallAgent):
         self.state = AgentState.IDLE
         self.current_step = 0
         self._current_step = 0
-        self._step_count = 0
         self.message_list = []
+        # 清理取消标志：取消只作用于"当前这一次执行"（WS 断开置位），
+        # 下一轮请求必须从头开始。workflow/闲聊路径不走 BaseAgent 的 worker，
+        # 不会经过其内部的 clear，故统一在此清理。
+        self._cancel_event.clear()
         self.final_answer = ""
         self._last_error = None
         self._sect = 2
@@ -139,7 +146,9 @@ class Xianzhi(ToolCallAgent):
         """
         try:
             birth_time = _normalize_birth_time(birth_time)
-            workflow_context = build_chart_context(birth_time, gender, sect, yun_sect, user_id)
+            # 出生地 → 经度 → 真太阳时校正（与 /chart API 行为一致，基准 120°E）
+            longitude = birth_place_to_longitude(birth_place)
+            workflow_context = build_chart_context(birth_time, gender, sect, yun_sect, user_id, longitude=longitude)
             chart = render_full_fact_context(workflow_context)
             self.chart_context = (
                 "【当前命盘上下文】\n"
@@ -151,8 +160,9 @@ class Xianzhi(ToolCallAgent):
             self._last_birth_info = {
                 "time": birth_time, "gender": gender, "sect": sect,
                 "yun_sect": yun_sect, "place": birth_place or "",
+                "longitude": longitude,
             }
-            log.info("已挂载命盘上下文: {} {} user={}", birth_time, gender, user_id)
+            log.info("已挂载命盘上下文: {} {} user={} longitude={}", birth_time, gender, user_id, longitude)
         except Exception as e:
             log.warning("挂载命盘上下文失败: {}", e)
             self.chart_context = ""
@@ -179,7 +189,9 @@ class Xianzhi(ToolCallAgent):
         if self._bazi_pending:
             bt = resolve_bazi_selection(text, self._bazi_pending)
             if bt:
-                self.set_chart_context(bt, self._bazi_pending["gender"], sect, yun_sect)
+                # 候选确认排盘时带上当初提供的出生地（真太阳时校正）
+                self.set_chart_context(bt, self._bazi_pending["gender"], sect, yun_sect,
+                                       birth_place=self._bazi_pending.get("place") or "")
                 self._bazi_pending = None
                 return True
         # 首次检测到八字：反推候选日期，交由 LLM 向用户确认
@@ -189,7 +201,10 @@ class Xianzhi(ToolCallAgent):
                 cands = find_birth_dates_from_pillars(pillars, gender, top_n=3)
             except Exception:
                 cands = []
-            self._bazi_pending = {"pillars": pillars, "gender": gender, "candidates": cands}
+            self._bazi_pending = {
+                "pillars": pillars, "gender": gender, "candidates": cands,
+                "place": extract_birth_place(text) or "",  # 出生地随候选保留，确认排盘时使用
+            }
             return True
         # 模糊生辰检测：精确正则没抓到但用户确实在提供生辰信息
         if detect_birth_signal(text):
@@ -235,10 +250,17 @@ class Xianzhi(ToolCallAgent):
 
         基类 think 后额外拦截 LLM 的工具调用：从排盘工具参数中提取 birth_time/gender
         （覆盖自然语言输入场景），并同步八字反推候选，供后续解析用户选择。
+
+        工具集按签名缓存：仅当 MCP 工具集合变化时才重新 bind_tools，
+        避免每个 ReAct 步骤都重建工具列表与绑定。
         """
         if mcp_manager.available:
-            self.available_tools = list(self._local_tools) + mcp_manager.get_tools()
-            self._llm_with_tools = self.chat_model.bind_tools(self.available_tools)
+            mcp_tools = mcp_manager.get_tools()
+            signature = tuple(t.name for t in mcp_tools)
+            if signature != self._mcp_tool_signature:
+                self.available_tools = list(self._local_tools) + mcp_tools
+                self._llm_with_tools = self.chat_model.bind_tools(self.available_tools)
+                self._mcp_tool_signature = signature
         result = super().think()
         # 拦截排盘工具调用，从参数中提取 birth_time/gender（覆盖自然语言输入场景）
         self._capture_birth_from_tool_calls()
@@ -319,6 +341,24 @@ class Xianzhi(ToolCallAgent):
         if summary and "年柱" in summary:
             yield "\n[回答] 命盘四柱关键信息（用于可视化展示）：\n【四柱】\n{}".format(summary)
 
+    def _final_answer_or_error(self) -> Optional[str]:
+        """从本轮执行状态提取最终回答（或错误兜底文案），无文本返回 None。
+
+        _filter_steps（同步路径）与 arun_stream（异步路径）共用，
+        统一"final → 错误兜底 → 无文本"三段式收尾口径（含 _dedupe_content 去重）。
+        """
+        final = (self.final_answer or "").strip()
+        if final:
+            return _dedupe_content(final)
+        if self.state == AgentState.ERROR or self._last_error:
+            err = (self._last_error or "未知错误").strip()
+            log.warning("[xianzhi] 终止于错误: {}", err)
+            return "分析过程中遇到错误：{}。请稍后重试。".format(err[:200])
+        # LLM 仅触发 do_terminate 等工具、无文本回答时，
+        # 前端已通过 /api/ai/xianzhi/chart 拿到结构化命盘数据
+        log.info("[xianzhi] 终止时无文本回答，仅返回工具结果")
+        return None
+
     def _filter_steps(self, src_iter):
         """包装原始流：内部消费 ReAct 步骤并写入日志，仅产出最终回答。
 
@@ -331,17 +371,9 @@ class Xianzhi(ToolCallAgent):
             # 步骤输出已通过 ReActAgent.step 内部的 log.info 记录
             # 这里无需再打，避免日志重复
             pass
-        final = (self.final_answer or "").strip()
+        final = self._final_answer_or_error()
         if final:
             yield final
-        elif self.state == AgentState.ERROR or self._last_error:
-            err = (self._last_error or "未知错误").strip()
-            log.warning("[xianzhi] 终止于错误: {}", err)
-            yield "分析过程中遇到错误：{}。请稍后重试。".format(err[:200])
-        else:
-            # LLM 仅触发 do_terminate 等工具、无文本回答时，
-            # 前端已通过 /api/ai/xianzhi/chart 拿到结构化命盘数据
-            log.info("[xianzhi] 终止时无文本回答，仅返回工具结果")
 
     def _run_workflow_once(self, user_prompt: str, history_snapshot=None, summary: str = "") -> str:
         """Run the chart-grounded workflow for one turn."""
@@ -372,9 +404,14 @@ class Xianzhi(ToolCallAgent):
 
     async def _aworkflow_stream(self, user_prompt: str):
         try:
+            # 客户端已断开（如 WS 关闭触发 request_cancel）则不再启动整条 LLM 链
+            if self._cancel_requested():
+                log.info("[xianzhi] workflow 执行前检测到取消，跳过本轮")
+                return
             self.state = AgentState.RUNNING
             history_snapshot = list(self.message_list)
-            summary = self._get_session_summary()
+            # 会话摘要来自 PG 同步查询，放线程池避免阻塞事件循环
+            summary = await asyncio.to_thread(self._get_session_summary)
             self.message_list.append(HumanMessage(content=user_prompt))
             answer = await asyncio.to_thread(self._run_workflow_once, user_prompt, history_snapshot, summary)
             self.final_answer = answer
@@ -387,7 +424,8 @@ class Xianzhi(ToolCallAgent):
             log.exception("Xianzhi workflow error")
             yield "分析过程遇到错误：{}。请稍后重试。".format(str(e)[:200])
         finally:
-            self.cleanup()
+            # cleanup 内含 PG 落盘（_persist_history），放线程池避免阻塞事件循环
+            await asyncio.to_thread(self.cleanup)
 
     def _is_chitchat(self, user_prompt: str) -> bool:
         """判断是否为闲聊场景（无命盘时短路 ReAct，避免无谓工具调用）。
@@ -451,8 +489,8 @@ class Xianzhi(ToolCallAgent):
             verbose: True=透传 ReAct 步骤（调试用），False=只输出最终回答
         """
         self.reset()
-        if not self.chart_context:
-            self.mount_chart_context(user_prompt, self._sect, self._yun_sect)
+        # 与 arun_stream 保持一致：无条件尝试挂载（用户中途更新生辰时覆盖旧盘）
+        self.mount_chart_context(user_prompt, self._sect, self._yun_sect)
         self._load_history()
         if self._workflow_context and not verbose:
             return self._workflow_stream(user_prompt)
@@ -479,8 +517,9 @@ class Xianzhi(ToolCallAgent):
             verbose: True=透传 ReAct 步骤（调试用），False=只输出最终回答
         """
         self.reset()
-        self.mount_chart_context(user_prompt, self._sect, self._yun_sect)
-        self._load_history()
+        # 挂载与历史载入含正则解析/排盘/PG IO，放线程池避免阻塞事件循环
+        await asyncio.to_thread(self.mount_chart_context, user_prompt, self._sect, self._yun_sect)
+        await asyncio.to_thread(self._load_history)
         if self._workflow_context and not verbose:
             async for chunk in self._aworkflow_stream(user_prompt):
                 yield chunk
@@ -491,7 +530,8 @@ class Xianzhi(ToolCallAgent):
                 reply = await asyncio.to_thread(self._chitchat_reply, user_prompt)
                 yield reply
             finally:
-                self.cleanup()
+                # cleanup 内含 PG 落盘（_persist_history），同样放线程池
+                await asyncio.to_thread(self.cleanup)
             return
         if verbose:
             async for chunk in super().arun_stream(user_prompt):
@@ -505,15 +545,9 @@ class Xianzhi(ToolCallAgent):
         # 正常模式：直接走 ReAct 工具循环，LLM 自行决定是否调 search_knowledge
         async for _ in super().arun_stream(user_prompt):
             pass
-        final = (self.final_answer or "").strip()
+        final = self._final_answer_or_error()
         if final:
-            yield _dedupe_content(final)
-        elif self.state == AgentState.ERROR or self._last_error:
-            err = (self._last_error or "未知错误").strip()
-            log.warning("[xianzhi] 终止于错误: {}", err)
-            yield "分析过程中遇到错误：{}。请稍后重试。".format(err[:200])
-        else:
-            log.info("[xianzhi] 终止时无文本回答，仅返回工具结果")
+            yield final
 
     def _load_history(self):
         history = self._memory.get(self._conversation_id)

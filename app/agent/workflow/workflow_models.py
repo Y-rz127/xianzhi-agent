@@ -54,9 +54,10 @@ class QuestionIntent:
 class WorkflowChartContext:
     """工作流用的命盘上下文容器。
 
-    保存原始输入（birth_time/gender/sect/yun_sect/user_id）与已排好的 BaziChart，
+    保存原始输入（birth_time/gender/sect/yun_sect/user_id/longitude）与已排好的 BaziChart，
     供 Supervisor/Worker/Reviewer 共享同一排盘事实，避免重复计算。
-    user_id 用于从命盘画像中加载历史断事知识。
+    user_id 用于从命盘画像中加载历史断事知识；
+    longitude 为出生地东经度数（0=未提供，不做真太阳时校正），合婚时透传给对方命盘。
     """
     birth_time: str
     gender: str
@@ -64,6 +65,7 @@ class WorkflowChartContext:
     yun_sect: int
     chart: BaziChart
     user_id: str = ""
+    longitude: float = 0.0
 
 
 @dataclass(frozen=True)

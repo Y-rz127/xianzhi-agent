@@ -44,22 +44,40 @@ class BaseAgent(ABC):
         self.current_step = 0
         self.message_list = []
         self._last_error = None
+        # 取消标志：客户端断开（如 WS 关闭）时置位，执行循环在每步之间检查并提前终止，
+        # 避免继续执行剩余 LLM 调用白烧 token
+        import threading
+        self._cancel_event = threading.Event()
+
+    def request_cancel(self):
+        """请求取消当前执行（线程安全）：下一次 step() 前生效。"""
+        self._cancel_event.set()
+
+    def _cancel_requested(self) -> bool:
+        return self._cancel_event.is_set()
+
+    def _should_stop(self) -> bool:
+        """统一停止条件：完成 / 出错 / 被取消。"""
+        return self.state in (AgentState.FINISHED, AgentState.ERROR) or self._cancel_requested()
 
     def run(self, user_prompt):
         """同步执行 Agent：在 max_steps 内循环 step() 收集结果，异常转 ERROR，finally 清理。"""
         self._validate(user_prompt)
         self.state = AgentState.RUNNING
+        self._cancel_event.clear()
         self.message_list.append(HumanMessage(content=_wrap_user_input(user_prompt)))
         results = []
         try:
             for i in range(self.max_steps):
-                if self.state == AgentState.FINISHED:
+                if self._should_stop():
                     break
                 self.current_step = i + 1
                 log.info("Executing step {}/{}", self.current_step, self.max_steps)
                 step_result = self.step()
                 results.append("Step {}: {}".format(self.current_step, step_result))
-            if self.current_step >= self.max_steps and self.state != AgentState.FINISHED:
+            if self._cancel_requested():
+                results.append("Terminated: Cancelled by client")
+            elif self.current_step >= self.max_steps and self.state not in (AgentState.FINISHED, AgentState.ERROR):
                 self.state = AgentState.FINISHED
                 results.append("Terminated: Reached max steps ({})".format(self.max_steps))
             return "\n".join(results)
@@ -85,10 +103,11 @@ class BaseAgent(ABC):
                 q.put(_SENTINEL)
                 return
             self.state = AgentState.RUNNING
+            self._cancel_event.clear()
             self.message_list.append(HumanMessage(content=_wrap_user_input(user_prompt)))
             try:
                 for i in range(self.max_steps):
-                    if self.state == AgentState.FINISHED:
+                    if self._should_stop():
                         break
                     self.current_step = i + 1
                     log.info("Executing step {}/{}", self.current_step, self.max_steps)
@@ -96,7 +115,9 @@ class BaseAgent(ABC):
                     # 步骤结果仅写入日志，不推给前端
                     log.info("Step {}: {}", self.current_step, step_result)
                     q.put(step_result)
-                if self.current_step >= self.max_steps and self.state != AgentState.FINISHED:
+                if self._cancel_requested():
+                    log.info("执行终止: 客户端已取消")
+                elif self.current_step >= self.max_steps and self.state not in (AgentState.FINISHED, AgentState.ERROR):
                     self.state = AgentState.FINISHED
                     log.info("执行结束: 达到最大步骤({})".format(self.max_steps))
                     q.put("__MAX_STEPS__")
@@ -136,18 +157,21 @@ class BaseAgent(ABC):
                 loop.call_soon_threadsafe(q.put_nowait, _SENTINEL)
                 return
             self.state = AgentState.RUNNING
+            self._cancel_event.clear()
             self.message_list.append(HumanMessage(content=_wrap_user_input(user_prompt)))
             try:
                 for i in range(self.max_steps):
-                    if self.state == AgentState.FINISHED:
+                    if self._should_stop():
                         break
                     self.current_step = i + 1
-                    log.info("Executing step {}/{}".format(self.current_step, self.max_steps))
+                    log.info("Executing step {}/{}", self.current_step, self.max_steps)
                     step_result = self.step()
                     # 步骤结果仅写入日志，不推给前端（前端只看最终回答）
                     log.info("Step {}: {}", self.current_step, step_result)
                     loop.call_soon_threadsafe(q.put_nowait, step_result)
-                if self.current_step >= self.max_steps and self.state != AgentState.FINISHED:
+                if self._cancel_requested():
+                    log.info("执行终止: 客户端已取消")
+                elif self.current_step >= self.max_steps and self.state not in (AgentState.FINISHED, AgentState.ERROR):
                     self.state = AgentState.FINISHED
                     log.info("执行结束: 达到最大步骤({})".format(self.max_steps))
                     loop.call_soon_threadsafe(q.put_nowait, "__MAX_STEPS__")

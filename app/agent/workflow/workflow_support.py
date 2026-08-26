@@ -133,7 +133,7 @@ def classify_question(text: str, today: _dt.date | None = None) -> QuestionInten
     )
 
 
-def build_chart_context(birth_time: str, gender: str, sect: int = 2, yun_sect: int = 1, user_id: str = "") -> WorkflowChartContext:
+def build_chart_context(birth_time: str, gender: str, sect: int = 2, yun_sect: int = 1, user_id: str = "", longitude: float = 0.0) -> WorkflowChartContext:
     """根据出生时间/性别/流派构造 WorkflowChartContext（大运 10 柱、流年 8 年）。
 
     Args:
@@ -142,10 +142,15 @@ def build_chart_context(birth_time: str, gender: str, sect: int = 2, yun_sect: i
         sect: 日柱计算流派（默认 2）
         yun_sect: 大运计算流派（默认 1）
         user_id: 用户 ID，用于从命盘画像加载历史断事知识
+        longitude: 出生地东经度数（0=未提供）。传入后做真太阳时校正（基准 120°E，每度差 4 分钟），
+            保证聊天路径与 /chart API 的排盘结果一致
     Returns:
         已排盘完成的 WorkflowChartContext
     """
-    chart = build_bazi_chart(birth_time, gender, sect=sect, yun_sect=yun_sect, dayun_count=10, liunian_years=8)
+    chart = build_bazi_chart(
+        birth_time, gender, sect=sect, yun_sect=yun_sect, dayun_count=10, liunian_years=8,
+        longitude=longitude or None,
+    )
     return WorkflowChartContext(
         birth_time=birth_time,
         gender=gender,
@@ -153,6 +158,7 @@ def build_chart_context(birth_time: str, gender: str, sect: int = 2, yun_sect: i
         yun_sect=yun_sect,
         chart=chart,
         user_id=user_id,
+        longitude=longitude,
     )
 
 

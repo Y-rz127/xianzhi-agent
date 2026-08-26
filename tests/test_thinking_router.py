@@ -11,7 +11,7 @@ from contextlib import contextmanager
 
 from app.core.thinking_router import (
     ThinkingRouter,
-    _thinking_override,
+    thinking_override,
     use_thinking,
 )
 
@@ -42,28 +42,28 @@ class _FakeModel:
 
 @contextmanager
 def _no_override():
-    token = _thinking_override.set(None)
+    token = thinking_override.set(None)
     try:
         yield
     finally:
-        _thinking_override.reset(token)
+        thinking_override.reset(token)
 
 
 def test_contextvar_resolution():
     # 未设置 → 回落 default
     with _no_override():
         r = ThinkingRouter(_FakeModel("m"), default_thinking=True)
-        assert r._pick().extra_body["enable_thinking"] is True
+        assert r.pick().extra_body["enable_thinking"] is True
         r2 = ThinkingRouter(_FakeModel("m"), default_thinking=False)
-        assert r2._pick().extra_body["enable_thinking"] is False
+        assert r2.pick().extra_body["enable_thinking"] is False
     # 显式 False
     with use_thinking(False):
         r = ThinkingRouter(_FakeModel("m"), default_thinking=True)
-        assert r._pick().extra_body["enable_thinking"] is False
+        assert r.pick().extra_body["enable_thinking"] is False
     # 显式 True
     with use_thinking(True):
         r = ThinkingRouter(_FakeModel("m"), default_thinking=False)
-        assert r._pick().extra_body["enable_thinking"] is True
+        assert r.pick().extra_body["enable_thinking"] is True
 
 
 def test_derived_copies_have_correct_flag():
@@ -102,7 +102,7 @@ def test_bind_tools_respects_switch():
 def test_switch_does_not_leak():
     r = ThinkingRouter(_FakeModel("m"), default_thinking=True)
     with use_thinking(False):
-        assert r._pick().extra_body["enable_thinking"] is False
+        assert r.pick().extra_body["enable_thinking"] is False
     # 退出上下文后回到 default
     with _no_override():
-        assert r._pick().extra_body["enable_thinking"] is True
+        assert r.pick().extra_body["enable_thinking"] is True

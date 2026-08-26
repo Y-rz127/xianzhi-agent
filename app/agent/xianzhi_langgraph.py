@@ -4,6 +4,7 @@
 节点逻辑均委托 XianzhiWorkflow 的既有方法，本模块只负责图结构与状态流转。
 langgraph 为硬依赖（requirements.txt）：导入失败会在 XianzhiWorkflow 构造期快速失败。
 """
+
 from __future__ import annotations
 
 from typing import Any, TypedDict
@@ -20,6 +21,7 @@ from app.core.logger import log
 
 class XianzhiGraphState(TypedDict, total=False):
     """LangGraph 工作流状态字典：各节点在 state 上读写，贯穿分类→扩盘→检索→生成→校验→修复。"""
+
     user_prompt: str
     chart_context: WorkflowChartContext
     history: list[Any]
@@ -58,7 +60,9 @@ def create_xianzhi_graph(workflow):
         if intent and getattr(intent, "domain", "") == "chitchat":
             log.info("[RAG] 闲聊意图，跳过知识检索")
             return {"knowledge": "（闲聊场景，无需命理知识检索）"}
-        knowledge = workflow._retrieve_rules(state["intent"], state["chart_context"], state.get("worker"), state["user_prompt"])
+        knowledge = workflow._retrieve_rules(
+            state["intent"], state["chart_context"], state.get("worker"), state["user_prompt"]
+        )
         log.info("[RAG] 检索完成，知识片段 {}字", len(knowledge))
         return {"knowledge": knowledge}
 
@@ -82,13 +86,14 @@ def create_xianzhi_graph(workflow):
         """校验节点：两层审核（正则快筛 + LLM 深审），通过则定稿，否则记录 issues。
 
         闲聊/题外话（intent.domain=chitchat）跳过 LLM 深审，仅依赖正则快筛，节省 1 次 LLM 调用。
+        needs_chart=False（纯理论/术语解释）时十神/神煞校验仅检测归属断言，不误杀纯术语解释。
         """
         raw = state.get("raw_answer", "")
         worker = state.get("worker")
         intent = state.get("intent")
         is_chitchat = bool(intent and getattr(intent, "domain", "") == "chitchat")
-        log.info("[Reviewer] 开始审核 {} Worker 产出 ({}字)...",
-                 getattr(worker, "label", "?"), len(raw))
+        needs_chart = bool(intent and getattr(intent, "needs_chart", True))
+        log.info("[Reviewer] 开始审核 {} Worker 产出 ({}字)...", getattr(worker, "label", "?"), len(raw))
         second_chart = getattr(intent, "second_chart", None)
         review = workflow._reviewer.review(
             raw,
@@ -99,11 +104,20 @@ def create_xianzhi_graph(workflow):
             user_prompt=state["user_prompt"],
             ctx=state["chart_context"],
             skip_llm=is_chitchat,
+            needs_chart=needs_chart,
         )
         if review.ok:
-            log.info("[Reviewer] {} Worker 产出通过审核 ✓ (source={})", getattr(worker, "label", "?"), review.source)
+            log.info(
+                "[Reviewer] {} Worker 产出通过审核 ✓ (source={})",
+                getattr(worker, "label", "?"),
+                review.source,
+            )
         else:
-            log.warning("[Reviewer] {} Worker 产出未通过审核 ✗ (source={})", getattr(worker, "label", "?"), review.source)
+            log.warning(
+                "[Reviewer] {} Worker 产出未通过审核 ✗ (source={})",
+                getattr(worker, "label", "?"),
+                review.source,
+            )
             for i, issue in enumerate(review.issues, 1):
                 log.warning("[Reviewer]   issue[{}]: {}", i, issue)
         return {"issues": review.issues, "final_answer": raw if review.ok else ""}
@@ -117,6 +131,7 @@ def create_xianzhi_graph(workflow):
 
         intent = state.get("intent")
         is_chitchat = bool(intent and getattr(intent, "domain", "") == "chitchat")
+        needs_chart = bool(intent and getattr(intent, "needs_chart", True))
         # 闲聊短路：check_node 已通过正则，repair 不会带来改善，直接返回原答案
         if is_chitchat:
             log.info("[Reflextion] 闲聊场景，跳过修复节点，直接返回原答案")
@@ -135,22 +150,33 @@ def create_xianzhi_graph(workflow):
             state.get("worker"),
         )
         repaired = workflow._invoke(messages)
-        log.info("[Reflextion] {} Worker 修复完成 ({}字)，二次审核中...",
-                 getattr(worker, "label", "?"), len(repaired))
+        log.info(
+            "[Reflextion] {} Worker 修复完成 ({}字)，二次审核中...",
+            getattr(worker, "label", "?"),
+            len(repaired),
+        )
         second_chart = getattr(state.get("intent"), "second_chart", None)
         # 修复后先走 regex 快筛（零 LLM 调用），通过则信任修复，不再全量 LLM 重审
         regex_issues = workflow._reviewer._regex_review(
-            repaired, state["chart_context"].chart,
-            state.get("knowledge", ""), workflow.check_facts,
+            repaired,
+            state["chart_context"].chart,
+            state.get("knowledge", ""),
+            workflow.check_facts,
             second_chart.chart if second_chart else None,
+            needs_chart,
         )
         if not regex_issues:
-            log.info("[Reflextion] {} Worker 修复后 regex 快筛通过 ✓（跳过 LLM 重审）",
-                     getattr(worker, "label", "?"))
+            log.info(
+                "[Reflextion] {} Worker 修复后 regex 快筛通过 ✓（跳过 LLM 重审）",
+                getattr(worker, "label", "?"),
+            )
             return {"final_answer": repaired, "issues": []}
         # regex 仍发现问题 → 才触发 LLM 深审
-        log.info("[Reflextion] {} Worker 修复后 regex 发现 {} 条问题，触发 LLM 深审",
-                 getattr(worker, "label", "?"), len(regex_issues))
+        log.info(
+            "[Reflextion] {} Worker 修复后 regex 发现 {} 条问题，触发 LLM 深审",
+            getattr(worker, "label", "?"),
+            len(regex_issues),
+        )
         repaired_review = workflow._reviewer.review(
             repaired,
             state["chart_context"].chart,
@@ -159,13 +185,17 @@ def create_xianzhi_graph(workflow):
             second_chart.chart if second_chart else None,
             user_prompt=state["user_prompt"],
             ctx=state["chart_context"],
+            needs_chart=needs_chart,
         )
         if repaired_review.ok:
             log.info("[Reflextion] {} Worker 修复后通过校验 ✓", getattr(worker, "label", "?"))
             return {"final_answer": repaired, "issues": []}
         # 修复后仍未通过：issues 仅写日志，不再硬拼到用户可见回复中（之前的「口径校验：...」调试信息会泄露给用户，已移除）
-        log.warning("[Reflextion] {} Worker 修复后仍未通过 ✗，降级返回 repaired (残留 {} 条 issue 仅记日志)",
-                    getattr(worker, "label", "?"), len(repaired_review.issues))
+        log.warning(
+            "[Reflextion] {} Worker 修复后仍未通过 ✗，降级返回 repaired (残留 {} 条 issue 仅记日志)",
+            getattr(worker, "label", "?"),
+            len(repaired_review.issues),
+        )
         for i, issue in enumerate(repaired_review.issues, 1):
             log.warning("[Reflextion]   残留issue[{}]: {}", i, issue)
         return {"final_answer": repaired, "issues": repaired_review.issues}
@@ -189,4 +219,3 @@ def create_xianzhi_graph(workflow):
     graph.add_conditional_edges("check", route_after_check, {"repair": "repair", "end": END})
     graph.add_edge("repair", END)
     return graph.compile()
-

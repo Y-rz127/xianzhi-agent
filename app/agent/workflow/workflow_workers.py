@@ -1,6 +1,7 @@
 """领域 Worker 注册表与 Reviewer 审核 Agent。
 
 R9 拆分自 xianzhi_workflow.py。"""
+
 from __future__ import annotations
 
 import re
@@ -282,9 +283,21 @@ class ReviewerWorker:
 
     # 合规红线关键词（命中即需人工提示，不直接拒答）
     COMPLIANCE_RISKS = (
-        "你的死期是", "你的寿命很", "何时死", "什么时候死", "堕胎择时", "择日堕胎",
-        "可以改运", "可以改命", "下诅咒", "下蛊", "用邪术",
-        "买彩票必中", "赌博必赢", "包赚", "稳赚不赔",
+        "你的死期是",
+        "你的寿命很",
+        "何时死",
+        "什么时候死",
+        "堕胎择时",
+        "择日堕胎",
+        "可以改运",
+        "可以改命",
+        "下诅咒",
+        "下蛊",
+        "用邪术",
+        "买彩票必中",
+        "赌博必赢",
+        "包赚",
+        "稳赚不赔",
     )
 
     # 古籍真实性校验：抽取回答中「《XXX》原文：...」标注
@@ -303,6 +316,7 @@ class ReviewerWorker:
         user_prompt: str = "",
         ctx: Any = None,
         skip_llm: bool = False,
+        needs_chart: bool = True,
     ) -> FactCheckResult:
         """两层审核：正则快筛 → LLM 深审。
 
@@ -314,11 +328,16 @@ class ReviewerWorker:
             second_chart: 合婚双盘时的对方命盘
             user_prompt: 原始用户问题（LLM 审核判断是否答非所问）
             ctx: WorkflowChartContext（LLM 审核构建事实上下文用）
+            skip_llm: 跳过 LLM 深审，仅依赖正则
+            needs_chart: 当前回答是否属于"绑定命盘分析"场景（命盘分析/合婚/流年大运推演等）。
+                True 时十神/神煞存在性严格校验；False（理论问答）时仅校验归属断言。
         """
         # === 第1层：正则快筛 ===
-        regex_issues = self._regex_review(answer, chart, knowledge, fact_checker, second_chart)
+        regex_issues = self._regex_review(answer, chart, knowledge, fact_checker, second_chart, needs_chart)
         if regex_issues:
-            log.info("[Reviewer] 正则快筛发现问题，跳过 LLM 审核（省 1 次调用）: {} 条 issue", len(regex_issues))
+            log.info(
+                "[Reviewer] 正则快筛发现问题，跳过 LLM 审核（省 1 次调用）: {} 条 issue", len(regex_issues)
+            )
             return FactCheckResult(ok=False, issues=regex_issues, source="regex")
 
         # === 短路：调用方声明跳过 LLM 深审（闲聊/题外话等无 LLM 深审价值的场景）===
@@ -332,15 +351,17 @@ class ReviewerWorker:
 
         return self._llm_review(answer, chart, knowledge, user_prompt, ctx, second_chart)
 
-    def _regex_review(self, answer, chart, knowledge, fact_checker, second_chart) -> list[str]:
+    def _regex_review(
+        self, answer, chart, knowledge, fact_checker, second_chart, needs_chart: bool
+    ) -> list[str]:
         """第1层：正则快筛（原有三重校验，零 LLM 调用）。"""
         issues: list[str] = []
 
-        # 1) 事实校验（四柱/大运/流年）
-        fact_result = fact_checker(answer, chart, second_chart)
+        # 1) 事实校验（四柱/大运/流年/十神/神煞）
+        fact_result = fact_checker(answer, chart, second_chart, needs_chart)
         issues.extend(fact_result.issues)
         if second_chart is not None:
-            fact_result2 = fact_checker(answer, second_chart, chart)
+            fact_result2 = fact_checker(answer, second_chart, chart, needs_chart)
             issues.extend(fact_result2.issues)
 
         # 2) 古籍真实性校验
@@ -353,7 +374,15 @@ class ReviewerWorker:
                 book_match = re.match(r"《([^》]{1,12})》", citation)
                 if book_match:
                     book = book_match.group(1)
-                    classic_books = {"渊海子平", "子平真诠", "滴天髓", "穷通宝鉴", "三命通会", "神峰通考", "千里命稿"}
+                    classic_books = {
+                        "渊海子平",
+                        "子平真诠",
+                        "滴天髓",
+                        "穷通宝鉴",
+                        "三命通会",
+                        "神峰通考",
+                        "千里命稿",
+                    }
                     if book not in cited_books and book not in classic_books:
                         issues.append(f"引用《{book}》原文未在检索结果中出现，疑似杜撰古籍")
 
@@ -392,12 +421,11 @@ class ReviewerWorker:
             passed = bool(data.get("pass", True))
             issues_raw = data.get("issues", [])
             issues = [str(i) for i in issues_raw if str(i).strip()] if isinstance(issues_raw, list) else []
-            source = "llm" if not passed else "llm"
             if not passed:
                 log.info("[Reviewer] LLM 深审发现问题: {} 条 issue", len(issues))
             else:
                 log.info("[Reviewer] LLM 深审通过 ✓")
-            return FactCheckResult(ok=passed, issues=issues, source=source)
+            return FactCheckResult(ok=passed, issues=issues, source="llm")
         except Exception as e:
             log.warning("[Reviewer] LLM 审核失败，降级为纯正则通过: {}", e)
             return FactCheckResult(ok=True, source="regex_fallback")

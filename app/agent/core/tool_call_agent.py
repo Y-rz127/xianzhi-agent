@@ -22,7 +22,14 @@ class ToolCallAgent(ReActAgent):
     def think(self):
         """调用 LLM（含工具绑定）决策下一步；过滤 <think> 推理块，返回是否需要调用工具。"""
         self._current_step += 1
-        if self.next_step_prompt and len(self.message_list) <= 2:
+        # 工具指引注入：本轮对话只在第一次 think 注入一次。
+        # 通过内容查重而非 len(message_list)<=2 判断——历史恢复后消息数不定，
+        # 固定阈值会导致"是否注入"随历史长度漂移（历史较长时首轮就不注入）。
+        # 注：_persist_history 落盘前会过滤掉这类占位消息，恢复的历史中不会出现重复。
+        if self.next_step_prompt and not any(
+            isinstance(m, HumanMessage) and m.content == self.next_step_prompt
+            for m in self.message_list
+        ):
             self.message_list.append(HumanMessage(content=self.next_step_prompt))
         messages = self._build_messages()
         try:

@@ -42,20 +42,27 @@ _YEAR_RE = re.compile(r"(?:19|20)\d{2}")
 _CN_NUM = {"一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5, "六": 6,
            "七": 7, "八": 8, "九": 9, "十": 10}
 
+# 中国城市经度映射（自动生成，见 app/domain/city_longitude.py）
+from app.domain.city_longitude import CITY_LONGITUDE
+
 
 def extract_birth_info(text: str):
     """从用户输入中提取出生时间和性别，返回 (birth_time, gender)。
 
     支持两种语序：性别在前（"男 1992-..."）或年份在前（"1992-... 男"）。
     未匹配返回 (None, None)。birth_time 标准化为 "YYYY-MM-DD HH:MM"。
+    月/日/时/分做范围校验（正则 1-2 位数字会放过 13 月/32 日/25 时等非法值）。
     """
     for pattern in (_BIRTH_INFO_RE, _BIRTH_INFO_RE2):
         m = pattern.search(text)
         if m:
             d = m.groupdict()
+            month, day = int(d["month"]), int(d["day"])
+            hour, minute = int(d["hour"]), int(d["minute"])
+            if not (1 <= month <= 12 and 1 <= day <= 31 and 0 <= hour <= 23 and 0 <= minute <= 59):
+                continue  # 数值越界（如 1992-13-45），视为非出生信息，尝试下一模式
             birth_time = "{}-{:02d}-{:02d} {:02d}:{:02d}".format(
-                int(d["year"]), int(d["month"]), int(d["day"]),
-                int(d["hour"]), int(d["minute"]),
+                int(d["year"]), month, day, hour, minute,
             )
             return birth_time, d["gender"]
     return None, None
@@ -75,6 +82,33 @@ def extract_birth_place(text: str) -> Optional[str]:
     if not place or any(ch.isdigit() for ch in place):
         return None
     return place
+
+
+def birth_place_to_longitude(place: Optional[str]) -> float:
+    """把出生地文本解析为东经度数（用于真太阳时校正），无法识别返回 0（不校正）。
+
+    匹配优先级：
+    1. 省级行政区划词后的城市段（"四川省成都市" → "成都"）；
+    2. 从左到右的后缀子串，最长优先（"四川成都" → "成都"、"呼和浩特" → "呼和浩特"）。
+    城市经度数据见 app/domain/city_longitude.py（与前端 shared/utils/region-data.ts 同源）。
+    """
+    if not place:
+        return 0.0
+    p = re.sub(r"\s+", "", str(place).strip())
+    if not p:
+        return 0.0
+    candidates = []
+    # 优先：行政区划词后的最后一段（城市段）
+    parts = re.split(r"省|自治区|特别行政区|自治州", p)
+    if len(parts) > 1 and parts[-1]:
+        candidates.append(parts[-1])
+    # 兜底：后缀子串最长优先
+    candidates.extend(p[i:] for i in range(len(p)))
+    for seg in candidates:
+        key = seg.replace("市", "")
+        if key in CITY_LONGITUDE:
+            return CITY_LONGITUDE[key]
+    return 0.0
 
 
 def extract_pillars(text: str):
@@ -130,11 +164,11 @@ def resolve_bazi_selection(text: str, pending: dict) -> Optional[str]:
     cands = pending.get("candidates") or []
     if not cands:
         return None
-    # ① 年份命中
+    # ① 年份命中（带数字边界："2004年" 命中，但 "2004" 不会误命中 "12004年"）
     for c in cands:
         bt = c.get("birth_time", "")
         y = bt[:4]
-        if y and (y in text or _re.search(r"(?<!\d)" + y + r"(?!\d)", text)):
+        if y and _re.search(r"(?<!\d)" + y + r"(?!\d)", text):
             return bt
     # ② 序号：第N个 / 选N / 开头 N（支持中文数字 一二三…）
     m = _re.search(r"第\s*([0-9]+|[" + "".join(_CN_NUM.keys()) + r"])", text)

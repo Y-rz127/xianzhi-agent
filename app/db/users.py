@@ -8,7 +8,10 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import secrets
+import threading
+import time
 import uuid
 from typing import Optional
 
@@ -16,6 +19,23 @@ from app.core.logger import log
 from app.memory.postgres_memory import _get_pool
 
 _TABLE_READY = False
+
+# get_by_token 的 last_active_at 刷新节流：聊天高频调用下每请求都 UPDATE
+# 造成写放大，进程内按 uid 记录上次刷新时间，_LAST_ACTIVE_FLUSH_INTERVAL 内不重复写
+_LAST_ACTIVE_FLUSH_INTERVAL = 300  # 秒
+_last_active_flush: dict[str, float] = {}
+_last_active_lock = threading.Lock()
+
+
+def _should_flush_last_active(uid: str) -> bool:
+    """判断该用户是否需要刷新 last_active_at（进程内节流）。"""
+    now = time.time()
+    with _last_active_lock:
+        last = _last_active_flush.get(uid, 0)
+        if now - last < _LAST_ACTIVE_FLUSH_INTERVAL:
+            return False
+        _last_active_flush[uid] = now
+        return True
 
 
 def _hash_password(password: str, salt: str) -> str:
@@ -70,19 +90,26 @@ def create_user(nickname: str, password: str) -> dict:
     token = secrets.token_hex(32)
     uid = str(uuid.uuid4())
     with _get_pool().connection() as conn:
-        # 昵称唯一性
+        # 昵称唯一性：先 SELECT 给出友好错误；并发注册同名时由 UNIQUE 约束兜底
+        # （SELECT-then-INSERT 存在竞态窗口，两个请求同时通过检查）
         exists = conn.execute(
             "SELECT id FROM users WHERE nickname = %s", (nickname,)
         ).fetchone()
         if exists:
             raise ValueError("该昵称已被占用")
-        conn.execute(
-            """
-            INSERT INTO users (id, nickname, password_hash, password_salt, token, token_created_at)
-            VALUES (%s, %s, %s, %s, %s, NOW())
-            """,
-            (uid, nickname, password_hash, salt, token),
-        )
+        try:
+            conn.execute(
+                """
+                INSERT INTO users (id, nickname, password_hash, password_salt, token, token_created_at)
+                VALUES (%s, %s, %s, %s, %s, NOW())
+                """,
+                (uid, nickname, password_hash, salt, token),
+            )
+        except Exception as e:
+            # 并发竞态撞 UNIQUE 约束 → 转换为与前置检查一致的 ValueError
+            if getattr(e, "sqlstate", None) == "23505":
+                raise ValueError("该昵称已被占用") from e
+            raise
     return _public_user(
         {
             "id": uid,
@@ -107,7 +134,8 @@ def authenticate(nickname: str, password: str) -> Optional[dict]:
         if not row:
             return None
         uid, nick, avatar, pw_hash, pw_salt, token = row
-        if _hash_password(password, pw_salt) != pw_hash:
+        # 常数时间比较，防时序侧信道
+        if not hmac.compare_digest(_hash_password(password, pw_salt), pw_hash):
             return None
         if not token:
             token = secrets.token_hex(32)
@@ -119,7 +147,6 @@ def authenticate(nickname: str, password: str) -> Optional[dict]:
         return _public_user(
             {"id": str(uid), "nickname": nick, "avatar": avatar or "", "token": token}
         )
-    return None
 
 
 def get_by_token(token: str) -> Optional[dict]:
@@ -146,10 +173,11 @@ def get_by_token(token: str) -> Optional[dict]:
             ).fetchone()
             if not row:
                 return None
-            # 4. 刷新最后活跃时间
-            conn.execute(
-                "UPDATE users SET last_active_at = NOW() WHERE id = %s", (row[0],)
-            )
+            # 4. 刷新最后活跃时间（进程内节流：高频聊天下避免每请求一次 UPDATE 写放大）
+            if _should_flush_last_active(str(row[0])):
+                conn.execute(
+                    "UPDATE users SET last_active_at = NOW() WHERE id = %s", (row[0],)
+                )
             # 5. 转为公开用户字典返回
             return _public_user(
                 {"id": str(row[0]), "nickname": row[1], "avatar": row[2] or ""}

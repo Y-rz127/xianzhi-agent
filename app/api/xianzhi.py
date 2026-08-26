@@ -83,7 +83,7 @@ async def _safe_ws_send(websocket: WebSocket, data: dict) -> bool:
     try:
         await websocket.send_json(data)
         return True
-    except (WebSocketDisconnect, RuntimeError, Exception):
+    except Exception:
         return False
 
 
@@ -94,6 +94,11 @@ async def ws_chat_with_xianzhi(websocket: WebSocket):
     try:
         while True:
             data = await websocket.receive_json()
+            # 客户端可能发非对象 JSON（如数组），校验避免 .get 抛 AttributeError 断连
+            if not isinstance(data, dict):
+                if not await _safe_ws_send(websocket, {"type": "error", "data": "消息格式错误：应为 JSON 对象"}):
+                    break
+                continue
             message = data.get("message", "")
             conversation_id = data.get("conversation_id", "default")
             birth_time = data.get("birth_time")
@@ -128,6 +133,9 @@ async def ws_chat_with_xianzhi(websocket: WebSocket):
                         if not await _safe_ws_send(websocket, {"type": "message", "data": chunk}):
                             client_alive = False
                             log.info("客户端已断开，停止流式发送")
+                            # 请求取消：让 agent 执行循环在当前步骤后停止，
+                            # 不再继续剩余的 LLM 调用（省 token + 省时延）
+                            agent.request_cancel()
                             break
                 except Exception as e:
                     log.exception("WebSocket stream error")
@@ -205,22 +213,43 @@ async def list_my_sessions(token: str = Query(None)):
     return await repo.get_session_info(prefix="mp-xianzhi", user_id=user["id"])
 
 
+async def _check_session_access(session_id: str, token: str | None):
+    """会话归属校验：user_id 非空的会话仅限本人 token 访问（防越权枚举）。
+
+    - 游客会话（session_metadata.user_id 为空，如 PC web 无登录场景）放行；
+    - 有归属会话：token 无效或与归属用户不一致 → 403。
+      （小程序端 get/del 请求自动携带 token query，正常用户不受影响）
+    """
+    owner = await repo.get_session_owner(session_id)
+    if not owner:
+        return
+    user = await repo.get_by_token(token) if token else None
+    if not user or user["id"] != owner:
+        raise HTTPException(status_code=403, detail="无权访问该会话")
+
+
 @router.delete("/sessions/{session_id}")
-async def delete_xianzhi_session(session_id: str):
-    """删除先知会话（含消息记录）。"""
+async def delete_xianzhi_session(session_id: str, token: str = Query(None)):
+    """删除先知会话（含消息记录）。有归属的会话需本人 token。"""
+    await _check_session_access(session_id, token)
     await repo.delete_session(session_id)
     return {"status": "ok"}
 
 
 @router.get("/sessions/{session_id}/messages")
-async def get_xianzhi_session_messages(session_id: str):
-    """获取会话的完整消息记录。"""
+async def get_xianzhi_session_messages(session_id: str, token: str = Query(None)):
+    """获取会话的完整消息记录。有归属的会话需本人 token。"""
+    await _check_session_access(session_id, token)
     return await repo.get_messages(session_id)
 
 
 @router.get("/sessions/{session_id}/birth-info")
-async def get_xianzhi_session_birth_info(session_id: str):
-    """从会话历史中的排盘工具调用提取出生信息，供前端恢复命盘上下文。"""
+async def get_xianzhi_session_birth_info(session_id: str, token: str = Query(None)):
+    """从会话历史中的排盘工具调用提取出生信息，供前端恢复命盘上下文。
+
+    出生信息属敏感个人数据，有归属的会话需本人 token。
+    """
+    await _check_session_access(session_id, token)
     info = await repo.get_birth_info_from_session(session_id)
     return info or {"time": None, "gender": None}
 

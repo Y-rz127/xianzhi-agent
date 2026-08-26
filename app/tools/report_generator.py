@@ -32,6 +32,12 @@ _REPORT_CACHE_MAX = 50
 _report_cache: dict[str, tuple[float, str]] = {}
 _report_cache_lock = threading.Lock()
 
+# 报告生成为单次超大 prompt（排盘+分析+大运全文）+ thinking 的长调用，
+# 主模型默认 60s 超时不够（曾因此 APITimeoutError → 接口 500）。
+# OpenAI SDK 支持单请求级 timeout 覆盖，经 bind 传入 payload 生效
+# （注意：model_copy(update={"timeout"}) 不会重建底层客户端，改 timeout 无效）。
+_REPORT_LLM_TIMEOUT = 300.0
+
 _SYSTEM_PROMPT = REPORT_SYSTEM_PROMPT
 
 _REPORT_PROMPT = REPORT_PROMPT_TEMPLATE
@@ -108,7 +114,8 @@ def generate_full_report(
     )
 
     messages = [SystemMessage(content=_SYSTEM_PROMPT), HumanMessage(content=prompt)]
-    response = chat_model.invoke(messages)
+    # 长超时副本：仅本次报告调用覆盖超时，不影响主模型其它调用
+    response = chat_model.bind(timeout=_REPORT_LLM_TIMEOUT).invoke(messages)
     content = response.content or ""
 
     # 写入缓存

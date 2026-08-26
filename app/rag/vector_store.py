@@ -630,13 +630,18 @@ class KnowledgeBase:
         scored = [(d, s, _keyword_overlap(query, d.page_content) * _DOC_TYPE_WEIGHT.get(
             d.metadata.get("doc_type", ""), 1.0)) for d, s in scored]
         scored.sort(key=lambda x: -x[2])
-        # 最低相关性阈值：覆盖率 < 0.25 的视为不相关，直接丢弃
-        # （短 query 约 5 个 2-gram，0.25 要求至少命中 1-2 个核心词组，过滤擦边命中模板库的噪音 chunk）
+        # 最低相关性阈值：覆盖率 < 0.25 的视为不相关。
+        # 但全部候选低于阈值时不返回空——按既定规则兜底返回 top-1
+        # （长尾 query 仍能拿到最相关的知识，而非无知识可用），
+        # 仅当距离阈值过滤（上一段）已剔除全部候选时才返回空。
         _MIN_OVERLAP = 0.25
-        scored = [item for item in scored if item[2] >= _MIN_OVERLAP]
-        top = scored[:k]
-        log.info("[rerank] query={} 候选数={} 选取前{}条={}",
-                  query[:30], len(scored), k if len(scored)!=0 else 0,
+        filtered = [item for item in scored if item[2] >= _MIN_OVERLAP]
+        fallback = not filtered and bool(scored)
+        if fallback:
+            filtered = scored[:1]
+        top = filtered[:k]
+        log.info("[rerank] query={} 候选数={} 兜底={} 选取前{}条={}",
+                  query[:30], len(scored), fallback, len(top),
                   [(round(o, 3), d.metadata.get("doc_type", "?"), d.page_content[:18]) for d, s, o in top])
         return [d for d, _, _ in top]
 

@@ -36,6 +36,8 @@ from app.tools.web_search import search_tools
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # 后台初始化 task 的强引用（asyncio 只持弱引用，防被 GC 中断）
+    _bg_init_tasks: list[asyncio.Task] = []
     # 0. 运行时目录（R8：原 config 导入期 mkdir 改为启动时显式创建）
     ensure_dirs()
 
@@ -171,7 +173,8 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             log.warning("命例表初始化失败（可能已存在）: {}", e)
 
-    asyncio.create_task(_bg_init())
+    # 保存引用：asyncio.create_task 只持弱引用，不保存可能被 GC 中断后台初始化
+    _bg_init_tasks.append(asyncio.create_task(_bg_init()))
 
     log.info("先知智能体启动完成 | 端口 {} | 本地工具 {} 个", settings.app_port, len(local_tools))
 

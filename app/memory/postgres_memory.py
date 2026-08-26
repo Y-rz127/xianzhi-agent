@@ -149,21 +149,48 @@ class PostgresChatMemory:
             sync_connection=conn,
         )
 
+    # get() 只拉最近 N 条历史：_load_history 载入后还会按 2000 token 截断，
+    # 全量拉取长会话时每轮对话重复传输全部历史，IO 放大明显
+    _GET_HISTORY_LIMIT = 60
+
     def get(self, conversation_id: str) -> List[BaseMessage]:
-        """从 PostgreSQL 读取会话全部历史消息（失败返回空列表）。"""
+        """从 PostgreSQL 读取会话最近历史消息（失败返回空列表）。
+
+        只取最近 _GET_HISTORY_LIMIT 条（DESC 取再反转为时间正序），
+        单条消息反序列化失败跳过（防个别脏数据丢整段历史）。
+        """
         try:
+            session_uuid = self._to_uuid(conversation_id)
             with _get_pool().connection() as conn:
-                return self._history(conversation_id, conn).messages
+                cur = conn.execute(
+                    f"SELECT message FROM {self.table_name} WHERE session_id = %s "
+                    f"ORDER BY created_at DESC LIMIT {self._GET_HISTORY_LIMIT}",
+                    (session_uuid,),
+                )
+                rows = cur.fetchall()
         except Exception as e:
             log.error("读取PG记忆失败 {} : {}", conversation_id, e)
             _record_error("memory.get")
             return []
+        from langchain_core.messages import messages_from_dict
+
+        msgs = []
+        for row in rows:
+            try:
+                raw = row[0]
+                if isinstance(raw, str):
+                    import json as _json
+                    raw = _json.loads(raw)
+                msgs.extend(messages_from_dict([raw]))
+            except Exception:
+                continue  # 脏消息跳过，不影响其余历史
+        return list(reversed(msgs))
 
     def add(self, conversation_id: str, messages: List[BaseMessage]):
         """写入消息并持久化会话元数据（UUID 映射、模块、user_id）。"""
         try:
             session_uuid = self._to_uuid(conversation_id)
-            global _session_uuid_map
+            # 注：_session_uuid_map 仅做下标赋值，无需 global 声明
             _session_uuid_map[session_uuid] = conversation_id
             # 持久化 UUID -> conversation_id 映射
             module = _extract_module(conversation_id)
@@ -317,12 +344,15 @@ def _extract_user_id(conversation_id: str) -> str:
 
 
 def get_session_info(prefix: str = "", user_id: str = None) -> list:
-    """获取所有会话信息（用于前端会话列表），按 prefix 过滤。
+    """获取所有会话信息（用于前端会话列表），按 prefix/user_id 过滤。
 
     单条 SQL 完成聚合 + 最后一条消息提取：
     - 聚合子查询算首末时间与消息数；
     - DISTINCT ON 子查询取每个会话最新一条消息（配合 session_id+created_at 索引），
-      替代原来的逐组相关子查询，消除 N+1 放大。
+      替代原来的逐组相关子查询，消除 N+1 放大；
+    - module/user_id 过滤下推 SQL（原来 prefix 在 Python 侧过滤，全表聚合后丢弃），
+      LIMIT 兜底防止极端库拖垮接口。
+    Python 侧仅保留 sm 缺失（旧数据）时的内存映射兜底过滤。
     """
     try:
         _ensure_schema()
@@ -351,11 +381,19 @@ def get_session_info(prefix: str = "", user_id: str = None) -> list:
                 ) last ON last.session_id = agg.session_id
                 LEFT JOIN session_metadata sm ON sm.session_id = agg.session_id
             """
-            params = []
+            conditions = []
+            params: list = []
             if user_id:
-                sql += " WHERE sm.user_id = %s"
+                conditions.append("sm.user_id = %s")
                 params.append(user_id)
-            sql += " ORDER BY agg.last_time DESC"
+            elif prefix:
+                # prefix 下推：优先匹配 sm.module；sm 缺失的旧行留在结果里，
+                # 由下方 Python 兜底（内存映射推 module 后再过滤）
+                conditions.append("(sm.module = %s OR sm.conversation_id IS NULL)")
+                params.append(prefix)
+            if conditions:
+                sql += " WHERE " + " AND ".join(conditions)
+            sql += " ORDER BY agg.last_time DESC LIMIT 500"
             cur = conn.execute(sql, params)
             rows = cur.fetchall()
         sessions = []
@@ -417,6 +455,26 @@ def _resolve_session_uuid(session_id: str) -> str:
         log.warning("解析 session_uuid 失败，回退确定性 UUID: {}", e)
         _record_error("memory.resolve_session_uuid")
     return PostgresChatMemory._to_uuid(session_id)
+
+
+def get_session_owner(session_id: str) -> str:
+    """获取会话归属用户 ID（session_metadata.user_id）。
+
+    游客会话/旧格式会话无归属，返回空串。
+    供 API 层做会话越权校验：user_id 非空的会话仅限本人 token 访问。
+    查询失败时返回空串（放行），避免 DB 抖动直接打断正常用户，
+    越权防护在 DB 正常时仍然生效。
+    """
+    try:
+        with _get_pool().connection() as conn:
+            row = conn.execute(
+                "SELECT user_id FROM session_metadata WHERE conversation_id = %s",
+                (session_id,),
+            ).fetchone()
+        return (row[0] or "") if row else ""
+    except Exception as e:
+        log.warning("查询会话归属失败 {} : {}", session_id, e)
+        return ""
 
 
 def delete_session(session_id: str):

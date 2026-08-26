@@ -7,6 +7,7 @@ R9 拆分：意图/模型/Worker 注册表/Reviewer 已拆至
 
 本模块保留 Supervisor（XianzhiWorkflow）与全部原公共符号重导出，既有 import 无需改动。
 """
+
 from __future__ import annotations
 
 import datetime as _dt
@@ -87,7 +88,12 @@ class XianzhiWorkflow:
     - Reviewer（ReviewerWorker）：独立交叉校验
     """
 
-    def __init__(self, chat_model: BaseChatModel, decompose_model: BaseChatModel | None = None, reviewer_model: BaseChatModel | None = None):
+    def __init__(
+        self,
+        chat_model: BaseChatModel,
+        decompose_model: BaseChatModel | None = None,
+        reviewer_model: BaseChatModel | None = None,
+    ):
         self.chat_model = chat_model
         self._decompose_model = decompose_model or chat_model
         self._reviewer = ReviewerWorker(reviewer_model or chat_model)
@@ -149,7 +155,9 @@ class XianzhiWorkflow:
             if "明年" in user_prompt:
                 years.append(today.year + 1)
             years = sorted(set(years))
-            wants_report = any(w in user_prompt for w in ("完整报告", "详细报告", "全面分析", "完整分析", "从头到尾"))
+            wants_report = any(
+                w in user_prompt for w in ("完整报告", "详细报告", "全面分析", "完整分析", "从头到尾")
+            )
             intent = QuestionIntent(
                 domain=domain,
                 label=DOMAIN_LABELS.get(domain, "综合咨询"),
@@ -202,14 +210,18 @@ class XianzhiWorkflow:
             if ob and og:
                 try:
                     from app.domain.time_parse import _normalize_birth_time
+
                     ob_n = _normalize_birth_time(ob)
                     # 避免把用户自己的盘当成对方盘
                     if ob_n != chart_context.birth_time:
-                        other_ctx = build_chart_context(ob_n, og, chart_context.sect, chart_context.yun_sect)
+                        # 经度透传：对方命盘与用户命盘使用同一出生地做真太阳时校正
+                        other_ctx = build_chart_context(
+                            ob_n, og, chart_context.sect, chart_context.yun_sect,
+                            longitude=chart_context.longitude,
+                        )
                         basis = self._build_match_basis(chart_context, other_ctx)
                         intent = replace(intent, second_chart=other_ctx, match_basis=basis)
-                        log.info("[match] 已解析对方命盘 {} {}，合婚基础数据{}字",
-                                 ob_n, og, len(basis))
+                        log.info("[match] 已解析对方命盘 {} {}，合婚基础数据{}字", ob_n, og, len(basis))
                     else:
                         log.info("[match] 解析出的对方命盘与用户自身盘相同，跳过")
                 except Exception as e:
@@ -219,13 +231,15 @@ class XianzhiWorkflow:
         # 思考模式：闲聊（intent.domain=="chitchat"）关闭，其他路径开启；
         # 由 use_thinking 写入 contextvar，图内 generate/repair 节点的 chat_model.invoke 自动读取。
         with use_thinking(intent.domain != "chitchat"):
-            result = self._graph.invoke({
-                "user_prompt": user_prompt,
-                "chart_context": chart_context,
-                "history": history or [],
-                "intent": intent,
-                "summary": summary,
-            })
+            result = self._graph.invoke(
+                {
+                    "user_prompt": user_prompt,
+                    "chart_context": chart_context,
+                    "history": history or [],
+                    "intent": intent,
+                    "summary": summary,
+                }
+            )
         final = (result.get("final_answer") or "").strip()
         if not final:
             # 图各节点均保证非空 final_answer（_invoke 对空产出有兜底文案），
@@ -236,7 +250,9 @@ class XianzhiWorkflow:
 
     # ---- 解耦：以下检索/合婚职责已抽离至 app.agent.workflow.workflow_retrieval（纯函数模块） ----
     # 保留瘦委托方法，LangGraph 图节点仍以 workflow.<method> 方式调用，行为不变。
-    def _extend_chart_if_needed(self, ctx: WorkflowChartContext, intent: QuestionIntent) -> WorkflowChartContext:
+    def _extend_chart_if_needed(
+        self, ctx: WorkflowChartContext, intent: QuestionIntent
+    ) -> WorkflowChartContext:
         return extend_chart_if_needed(ctx, intent)
 
     def _parse_other_birth(self, text: str) -> tuple[str, str]:
@@ -245,8 +261,13 @@ class XianzhiWorkflow:
     def _build_match_basis(self, self_ctx: WorkflowChartContext, other_ctx: WorkflowChartContext) -> str:
         return build_match_basis(self_ctx, other_ctx)
 
-    def _retrieve_rules(self, intent: QuestionIntent, ctx: WorkflowChartContext,
-                        worker: DomainWorker | None = None, user_text: str = "") -> str:
+    def _retrieve_rules(
+        self,
+        intent: QuestionIntent,
+        ctx: WorkflowChartContext,
+        worker: DomainWorker | None = None,
+        user_text: str = "",
+    ) -> str:
         return retrieve_rules(intent, ctx, worker, user_text)
 
     # ---- 解耦：消息装配 / 事实校验职责已抽离至 app.agent.workflow.workflow_messages（纯函数模块） ----
@@ -260,5 +281,5 @@ class XianzhiWorkflow:
     def _invoke(self, messages):
         return invoke(self.chat_model, messages)
 
-    def check_facts(self, answer, chart, other_chart=None):
-        return check_facts(answer, chart, other_chart)
+    def check_facts(self, answer, chart, other_chart=None, needs_chart=True):
+        return check_facts(answer, chart, other_chart, needs_chart)

@@ -328,11 +328,20 @@ def compact_facts(chart: BaziChart, intent: QuestionIntent) -> str:
     return facts
 
 
-def check_facts(answer: str, chart: BaziChart, other_chart: BaziChart | None = None) -> FactCheckResult:
-    """校验回答中的四柱/大运/流年是否与系统排盘一致。
+def check_facts(
+    answer: str,
+    chart: BaziChart,
+    other_chart: BaziChart | None = None,
+    needs_chart: bool = True,
+) -> FactCheckResult:
+    """校验回答中的四柱/大运/流年/十神/神煞是否与系统排盘一致。
 
-    other_chart 为合婚双盘时的对方命盘：同一干支若出现在任一张合法盘上即视为正确，
-    避免把回答中对「对方/自己」各自正确的陈述误判为对方盘错误。
+    Args:
+        other_chart: 合婚双盘时的对方命盘，同一干支若出现在任一张合法盘上即视为正确。
+        needs_chart: 当前回答是否属于"绑定命盘分析"场景（命盘分析/合婚/流年大运推演等）。
+            - True（默认）：严格校验十神/神煞的存在性与柱位归属，禁止凭空捏造
+            - False（理论/术语解释场景）：仅校验**归属断言**（"你命盘有X""年柱X"等绑定命盘的表述），
+              纯术语解释（"红鸾主喜庆""正财代表求财"）不受限，避免误杀理论问答。
     """
     issues: list[str] = []
     year_to_gz: dict[int, str] = {item.year: item.ganzhi for item in chart.liunian}
@@ -374,89 +383,66 @@ def check_facts(answer: str, chart: BaziChart, other_chart: BaziChart | None = N
             if stated not in expected_set:
                 issues.append(f"{name}应为{primary[name]}，回答写成了{stated}")
 
-    # 十神事实校验：回答中提及的十神组合必须与排盘事实一致
-    # 收集排盘中实际存在的十神集合（主星+副星）
-    actual_shishen: set[str] = set()
-    for p in chart.pillars:
-        if p.shishen_gan and p.shishen_gan != "日主":
-            actual_shishen.add(p.shishen_gan)
-        for s in p.shishen_zhi:
-            if s:
-                actual_shishen.add(s)
-    if other_chart is not None:
-        for p in other_chart.pillars:
-            if p.shishen_gan and p.shishen_gan != "日主":
-                actual_shishen.add(p.shishen_gan)
-            for s in p.shishen_zhi:
-                if s:
-                    actual_shishen.add(s)
+    # 十神事实校验 + 神煞事实校验
+    # 核心原则：
+    #   needs_chart=True（绑定命盘分析）→ 严格，任何十神/神煞组合断言、归属断言都校验
+    #   needs_chart=False（理论问答）   → 宽松，仅当回答出现「绑定命盘的归属断言」时才校验，
+    #                                     纯术语解释（"红鸾主喜庆""正财主求财"）放行
+    #
+    # 归属断言的正则锚点：出现"你命盘/命中/八字/四柱/原局/局中/年柱/月柱/日柱/时柱"等
+    #  + 紧随其后出现的十神/神煞名，即视为在对命盘做归属断言。
 
-    # 检测"偏正财都有"/"正偏财同现"等表述，当排盘事实中只有一种财星时记问题
-    _WEALTH_PAIRS = [
-        ("偏正财都有", "偏财", "正财"),
-        ("正偏财同现", "正财", "偏财"),
-        ("偏正财同现", "偏财", "正财"),
-        ("正偏财都有", "正财", "偏财"),
-        ("偏正财混杂", "偏财", "正财"),
-        ("正偏财混杂", "正财", "偏财"),
-        ("财星混杂", "偏财", "正财"),
+    # NOTE: "大运""流年"不列入锚点。check_facts 中 actual_shensha_all / actual_shishen
+    #       仅收集了 chart.pillars（原盘四柱）的静态事实。大运/流年是动态岁运，
+    #       其十神神煞不在原盘事实里，用作锚点会产生系统性误杀（如"大运带桃花"）。
+    _ASSERT_ANCHORS = (
+        "你命盘",
+        "你的命盘",
+        "命中",
+        "命里",
+        "命带",
+        "命有",
+        "八字",
+        "四柱",
+        "原局",
+        "局中",
+        "盘里",
+        "盘中",
+        "命局",
+        "命宫",
+        "身带",
+        "身有",
+        "年柱",
+        "月柱",
+        "日柱",
+        "时柱",
+        "年支",
+        "月支",
+        "日支",
+        "时支",
+        "年干",
+        "月干",
+        "日干",
+        "时干",
+    )
+    _SHISHEN_NAMES = [
+        "正财",
+        "偏财",
+        "正官",
+        "七杀",
+        "偏印",
+        "正印",
+        "食神",
+        "伤官",
+        "比肩",
+        "劫财",
+        "日主",
+        "禄神",
     ]
-    for phrase, need_a, need_b in _WEALTH_PAIRS:
-        if phrase in answer:
-            has_a = need_a in actual_shishen
-            has_b = need_b in actual_shishen
-            if not (has_a and has_b):
-                missing = need_a if not has_a else need_b
-                issues.append(f"排盘事实中无{missing}，回答却说「{phrase}」，与十神事实不符")
-
-    # 检测"官杀混杂"等表述，当排盘事实中只有一种官杀时记问题
-    _OFFICER_PAIRS = [
-        ("官杀混杂", "正官", "七杀"),
-        ("杀官混杂", "七杀", "正官"),
-    ]
-    for phrase, need_a, need_b in _OFFICER_PAIRS:
-        if phrase in answer:
-            has_a = need_a in actual_shishen
-            has_b = need_b in actual_shishen
-            if not (has_a and has_b):
-                missing = need_a if not has_a else need_b
-                issues.append(f"排盘事实中无{missing}，回答却说「{phrase}」，与十神事实不符")
-
-    # 检测"印星混杂"等表述
-    _SEAL_PAIRS = [
-        ("印星混杂", "正印", "偏印"),
-        ("正偏印同现", "正印", "偏印"),
-        ("偏正印同现", "偏印", "正印"),
-        ("枭印同现", "偏印", "正印"),
-    ]
-    for phrase, need_a, need_b in _SEAL_PAIRS:
-        if phrase in answer:
-            has_a = need_a in actual_shishen
-            has_b = need_b in actual_shishen
-            if not (has_a and has_b):
-                missing = need_a if not has_a else need_b
-                issues.append(f"排盘事实中无{missing}，回答却说「{phrase}」，与十神事实不符")
-
-    # 神煞事实校验：回答中提及的神煞必须与排盘事实一致
-    # 收集排盘中实际存在的神煞集合（按柱分组，通过 _compute_shensha 计算）
-    actual_shensha_by_pillar: dict[str, set[str]] = {}
-    actual_shensha_all: set[str] = set()
-    for chart_src in [chart] + ([other_chart] if other_chart else []):
-        shensha_list = _compute_shensha(chart_src.pillars, parse_gender(chart_src.birth.gender))
-        for s in shensha_list:
-            name = s.get("name", "")
-            pillar = s.get("pillar", "")
-            if name:
-                actual_shensha_all.add(name)
-                if pillar:
-                    actual_shensha_by_pillar.setdefault(pillar, set()).add(name)
-
-    # 常见神煞名称列表（用于从回答文本中提取提及的神煞）
     _SHENSHA_NAMES = [
         "天乙贵人",
         "太极贵人",
         "文昌贵人",
-        "禄神",
         "羊刃",
         "飞刃",
         "学堂",
@@ -513,25 +499,242 @@ def check_facts(answer: str, chart: BaziChart, other_chart: BaziChart | None = N
         "童子煞",
         "空亡",
     ]
-    # 检测回答中提及了排盘中不存在的神煞
-    for name in _SHENSHA_NAMES:
-        if name in answer and name not in actual_shensha_all:
-            issues.append(f"排盘事实中无「{name}」，回答却提及，与神煞事实不符")
 
-    # 检测回答中将某柱神煞错误归属到另一柱
+    # 收集排盘中实际存在的十神集合（主星+副星，含合婚双盘）
+    actual_shishen: set[str] = set()
+    for chart_src in [chart] + ([other_chart] if other_chart else []):
+        for p in chart_src.pillars:
+            if p.shishen_gan and p.shishen_gan != "日主":
+                actual_shishen.add(p.shishen_gan)
+            for s in p.shishen_zhi:
+                if s:
+                    actual_shishen.add(s)
+
+    # 收集排盘中实际存在的神煞集合（按柱分组，含合婚双盘）
+    actual_shensha_by_pillar: dict[str, set[str]] = {}
+    actual_shensha_all: set[str] = set()
+    for chart_src in [chart] + ([other_chart] if other_chart else []):
+        shensha_list = _compute_shensha(chart_src.pillars, parse_gender(chart_src.birth.gender))
+        for s in shensha_list:
+            name = s.get("name", "")
+            pillar = s.get("pillar", "")
+            if name:
+                actual_shensha_all.add(name)
+                if pillar:
+                    actual_shensha_by_pillar.setdefault(pillar, set()).add(name)
+
+    _SENT_SPLIT = re.compile(r"[。；;！!？?\n\r]")
+    _NEG_TOKENS = (
+        "没见",
+        "没有",
+        "不带",
+        "不含",
+        "未见",
+        "并无",
+        "毫无",
+        "不存在",
+        "没",
+        "不",
+        "无",
+        "未",
+        "非",
+        "否",
+    )
+    # 动态岁运语境标识：出现即认为在讲外部流年/大运，而非原盘静态断言
+    _DYNAMIC_CTX = re.compile(r"\d{4}|大运|流年|岁运|年运|运上|流月|流日")
+    # "桃花年""红鸾运"等约定俗成 → 目标词后紧接年/运/月 视为动态流年讨论
+    _DYNA_SUFFIX = re.compile(r"[年运月令日限]")
+    # 正向归属暗示词：只有这些词在目标词附近，才认为是在"断言命盘拥有 X"
+    _OWNERSHIP_HINTS = (
+        "有",
+        "带",
+        "含",
+        "透",
+        "藏",
+        "坐",
+        "落",
+        "居",
+        "入命",
+        "入盘",
+        "出现",
+        "存在",
+        "透出",
+        "显现",
+        "见",
+        "配",
+    )
+
+    def _sentence_has_negative_between(sent: str, a_pos: int, b_pos: int) -> bool:
+        """判断 sent 中 a_pos 与 b_pos 之间（含边界附近±2）是否存在否定词。"""
+        lo, hi = sorted([a_pos, b_pos])
+        lo = max(0, lo - 2)
+        hi = min(len(sent), hi + 2)
+        seg = sent[lo:hi]
+        return any(tok in seg for tok in _NEG_TOKENS)
+
+    def _sentence_is_theory_definition(sent: str, target_word: str) -> bool:
+        """判断该句是否是在做纯理论定义/区别解释，而非命盘断言。"""
+        for anchor in _ASSERT_ANCHORS:
+            if anchor in sent:
+                return False
+        theory_markers = (
+            "主",
+            "代表",
+            "是指",
+            "是",
+            "为",
+            "含义",
+            "意思",
+            "解释",
+            "区别",
+            "指",
+            "属于",
+            "象征",
+            "表示",
+            "掌管",
+            "管",
+            "分类",
+            "分为",
+            "有真假",
+            "有内",
+            "有墙",
+            "说明",
+            "意味着",
+            "一般",
+            "通常",
+            "传统",
+        )
+        t_pos = sent.find(target_word)
+        tail = sent[t_pos:]
+        return any(m in tail for m in theory_markers)
+
+    def _sentence_in_dynamic_context(sent: str, target_word: str, t_pos: int) -> bool:
+        """判断目标词是否出现在动态岁运语境中（不是原盘断言）。"""
+        if _DYNAMIC_CTX.search(sent):
+            return True
+        after_pos = t_pos + len(target_word)
+        if after_pos < len(sent):
+            nc = sent[after_pos : after_pos + 1]
+            if _DYNA_SUFFIX.search(nc):
+                return True
+        return False
+
+    def _ownership_hint_nearby(sent: str, t_pos: int, target_word: str) -> bool:
+        """目标词附近是否有"有/带/含/透/藏..."等归属暗示。"""
+        win = sent[max(0, t_pos - 8) : min(len(sent), t_pos + len(target_word) + 8)]
+        return any(h in win for h in _OWNERSHIP_HINTS)
+
+    def _sentence_asserts_positive(sent: str, target_word: str) -> bool:
+        """检查单句：该句是否在「肯定地断言命盘带有 target_word」。
+
+        返回 True 仅当满足：
+        A) 句中有原盘锚点（非大运流年）+ 锚点与 target_word 之间无否定词；或
+        B) needs_chart=True 且：①非动态岁运语境 ②非否定 ③非理论定义
+           ④目标词附近存在归属暗示（有/带/透/藏...）。
+        """
+        t_pos = sent.find(target_word)
+        if t_pos < 0:
+            return False
+        # A) 锚点 + 目标词 路径（锚点已不含大运/流年）
+        for anchor in _ASSERT_ANCHORS:
+            a_pos = sent.find(anchor)
+            if a_pos < 0:
+                continue
+            if not _sentence_has_negative_between(sent, a_pos, t_pos):
+                return True
+        # B) needs_chart=True 无锚点路径：绑定命盘分析但句中没说盘/柱
+        if needs_chart:
+            # 动态岁运语境（大运/流年/年份数字/X年X运）→ 不是原盘断言
+            if _sentence_in_dynamic_context(sent, target_word, t_pos):
+                return False
+            # 否定词在目标词附近
+            wide_lo = max(0, t_pos - 6)
+            wide_hi = min(len(sent), t_pos + len(target_word) + 6)
+            if any(tok in sent[wide_lo:wide_hi] for tok in _NEG_TOKENS):
+                return False
+            # 理论定义？
+            if _sentence_is_theory_definition(sent, target_word):
+                return False
+            # 必须有归属暗示，否则只是随口提及（如"遇到桃花年别急上头"中不是在说命盘带桃花）
+            if not _ownership_hint_nearby(sent, t_pos, target_word):
+                return False
+            return True
+        return False
+
+    def _answer_makes_binding_assertion(target_word: str) -> bool:
+        """判断回答是否在**肯定地断言**命盘事实层面带有 target_word（十神/神煞）。
+
+        必须排除：
+        - 否定句（没见/没有/不带/无/未/非 等，锚点与目标词之间出现）
+        - 纯理论定义句（XX主XX/XX代表XX，且句中无锚点）
+        """
+        if target_word not in answer:
+            return False
+        for sent in _SENT_SPLIT.split(answer):
+            if target_word not in sent:
+                continue
+            if _sentence_asserts_positive(sent, target_word):
+                return True
+        return False
+
+    # ===== 十神：组合断言校验 =====
+    _SHISHEN_PAIRS = [
+        ("偏正财都有", "偏财", "正财"),
+        ("正偏财同现", "正财", "偏财"),
+        ("偏正财同现", "偏财", "正财"),
+        ("正偏财都有", "正财", "偏财"),
+        ("偏正财混杂", "偏财", "正财"),
+        ("正偏财混杂", "正财", "偏财"),
+        ("财星混杂", "偏财", "正财"),
+        ("官杀混杂", "正官", "七杀"),
+        ("杀官混杂", "七杀", "正官"),
+        ("印星混杂", "正印", "偏印"),
+        ("正偏印同现", "正印", "偏印"),
+        ("偏正印同现", "偏印", "正印"),
+        ("枭印同现", "偏印", "正印"),
+    ]
+    for phrase, need_a, need_b in _SHISHEN_PAIRS:
+        if _answer_makes_binding_assertion(phrase):
+            has_a = need_a in actual_shishen
+            has_b = need_b in actual_shishen
+            if not (has_a and has_b):
+                missing = need_a if not has_a else need_b
+                issues.append(f"排盘事实中无{missing}，回答却说「{phrase}」，与十神事实不符")
+
+    # ===== 十神：单个归属断言校验 =====
+    for name in _SHISHEN_NAMES:
+        if name == "日主":
+            continue
+        if _answer_makes_binding_assertion(name) and name not in actual_shishen:
+            issues.append(f"排盘事实中无「{name}」，回答却断言命盘带有，与十神事实不符")
+
+    # ===== 神煞：存在性断言校验 =====
+    for name in _SHENSHA_NAMES:
+        if _answer_makes_binding_assertion(name) and name not in actual_shensha_all:
+            issues.append(f"排盘事实中无「{name}」，回答却断言命盘带有，与神煞事实不符")
+
+    # ===== 神煞：柱位归属断言校验 =====
+    _pillar_names = [p.name for p in chart.pillars]
     for name in actual_shensha_all:
-        for p in chart.pillars:
-            if name in actual_shensha_by_pillar.get(p.name, set()):
-                # 该神煞确实属于此柱，检查回答是否将其错误归属
-                pass
-            else:
-                # 该神煞不属于此柱，检查回答是否说"某柱有XX"
-                pattern = re.compile(rf"{p.name}[^。；;，,、\n]{{0,6}}{re.escape(name)}")
-                if pattern.search(answer):
-                    # 找到该神煞实际属于哪个柱
-                    actual_pillar = (
-                        "、".join(pn for pn, ss in actual_shensha_by_pillar.items() if name in ss) or "无"
-                    )
-                    issues.append(f"「{name}」属于{actual_pillar}，回答却关联到{p.name}，与神煞事实不符")
+        if name not in answer:
+            continue
+        for sent in _SENT_SPLIT.split(answer):
+            if name not in sent:
+                continue
+            for pn in _pillar_names:
+                if name in actual_shensha_by_pillar.get(pn, set()):
+                    continue
+                if pn not in sent:
+                    continue
+                # 排除否定：如"日柱没有金舆"不算错误归属断言
+                a_pos, t_pos = sent.find(pn), sent.find(name)
+                if _sentence_has_negative_between(sent, a_pos, t_pos):
+                    continue
+                actual_pillar = (
+                    "、".join(p for p in _pillar_names if name in actual_shensha_by_pillar.get(p, set()))
+                    or "无"
+                )
+                issues.append(f"「{name}」属于{actual_pillar}，回答却关联到{pn}，与神煞事实不符")
+                break
 
     return FactCheckResult(ok=not issues, issues=issues)

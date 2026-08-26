@@ -79,6 +79,7 @@ upsert_chart_profile = _async(user_data.upsert_chart_profile)
 
 # ===== 会话记忆（app.memory.postgres_memory 模块级函数） =====
 get_session_info = _async(postgres_memory.get_session_info)
+get_session_owner = _async(postgres_memory.get_session_owner)
 get_messages = _async(postgres_memory.get_messages)
 delete_session = _async(postgres_memory.delete_session)
 get_birth_info_from_session = _async(postgres_memory.get_birth_info_from_session)

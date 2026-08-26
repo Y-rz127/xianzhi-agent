@@ -11,6 +11,7 @@ ReAct 工具路径（app/tools/rag_search.py）与 workflow 路径（app/agent/x
 from __future__ import annotations
 
 import concurrent.futures
+import threading
 
 from app.core.logger import log
 from app.rag.vector_store import get_knowledge_base
@@ -276,6 +277,22 @@ def detect_theory_topic(text: str) -> tuple[str, str] | None:
 # 统一 query 构造与检索执行
 # ============================================================
 
+# 模块级可复用检索线程池：检索调用频繁（每次对话多 query 并发），
+# 复用避免每次创建/销毁线程池的开销；懒创建 + 锁保护并发初始化
+_search_pool: "concurrent.futures.ThreadPoolExecutor | None" = None
+_search_pool_lock = threading.Lock()
+
+
+def _get_search_pool() -> "concurrent.futures.ThreadPoolExecutor":
+    global _search_pool
+    with _search_pool_lock:
+        if _search_pool is None:
+            _search_pool = concurrent.futures.ThreadPoolExecutor(
+                max_workers=8, thread_name_prefix="rag-search"
+            )
+        return _search_pool
+
+
 def expand_knowledge_queries(query: str, limit: int = 4) -> list[str]:
     """把用户问题扩展为一小组领域感知检索词（ReAct 工具路径使用）。
 
@@ -314,7 +331,8 @@ def retrieve_for_context(
     ReAct 工具路径与 workflow 路径均经此入口，去重/截断口径单一实现，
     两侧差异仅以参数表达（max_docs / max_chars_per_chunk / verbose）。
 
-    - 每条 query 取 top-1 最相关 chunk
+    - 每条 query 优先取 top-1 最相关 chunk；top-1 与已选结果重复时，
+      依次尝试次优结果（results[1:]），全部重复才放弃该 query
     - 去重键：(来源文件, 内容前120字)
     - 控量：单 chunk 截断 ≤ max_chars_per_chunk，最多 max_docs 条
     """
@@ -322,20 +340,21 @@ def retrieve_for_context(
     # 串行时单条慢查询/空命中会线性拖垮全部；并发后整体耗时≈最慢一条，空命中不再累加。
     # search() 已用锁保护缓存（_cache_lock / _init_lock），线程安全；
     # 结果按原始 query 顺序归并，跨 query 去重口径与串行一致。
+    # 线程池复用模块级实例，避免每次检索的创建/销毁开销。
     kb = get_knowledge_base()
+    ex = _get_search_pool()
     order: dict[object, int] = {}
-    with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(queries), 8)) as ex:
-        for i, q in enumerate(queries):
-            order[ex.submit(kb.search, q)] = i
-        raw: dict[int, list] = {}
-        for fut in concurrent.futures.as_completed(order):
-            i = order[fut]
-            try:
-                raw[i] = fut.result()
-            except Exception as e:  # 单条失败不影响其它 query
-                if verbose:
-                    log.warning("[检索] query={} 检索异常: {}", queries[i], e)
-                raw[i] = []
+    for i, q in enumerate(queries):
+        order[ex.submit(kb.search, q)] = i
+    raw: dict[int, list] = {}
+    for fut in concurrent.futures.as_completed(order):
+        i = order[fut]
+        try:
+            raw[i] = fut.result()
+        except Exception as e:  # 单条失败不影响其它 query
+            if verbose:
+                log.warning("[检索] query={} 检索异常: {}", queries[i], e)
+            raw[i] = []
 
     docs = []
     seen = set()
@@ -346,14 +365,20 @@ def retrieve_for_context(
             if verbose:
                 log.info("[检索] [{}/{}] query={} 无匹配", idx, len(queries), q)
             continue
-        doc = results[0]  # top-1
-        key = (doc.metadata.get("source", ""), doc.page_content[:120])
-        if key in seen:
+        # 依次尝试 top-1、次优结果，取第一条未选过的 chunk
+        # （top-1 与其它 query 重复时不直接丢弃该 query，避免浪费一次 embedding+检索）
+        doc = None
+        for cand in results:
+            key = (cand.metadata.get("source", ""), cand.page_content[:120])
+            if key not in seen:
+                doc = cand
+                break
             dedup_count += 1
+        if doc is None:
             if verbose:
-                log.info("[检索] [{}/{}] query={} top-1 chunk 重复，跳过", idx, len(queries), q)
+                log.info("[检索] [{}/{}] query={} 全部候选 chunk 重复，跳过", idx, len(queries), q)
             continue
-        seen.add(key)
+        seen.add((doc.metadata.get("source", ""), doc.page_content[:120]))
         # 单 chunk 截断兜底
         if len(doc.page_content) > max_chars_per_chunk:
             from langchain_core.documents import Document as _Doc
@@ -370,16 +395,3 @@ def retrieve_for_context(
         log.info("[检索] 汇总: {}条query → {}条有效结果(并发检索), 去重跳过{}条chunk",
                  len(queries), len(docs), dedup_count)
     return docs
-
-
-def search_deduped(
-    queries: list[str],
-    max_docs: int = 4,
-    max_chars_per_query: int = 600,
-):
-    """兼容别名：等价于 retrieve_for_context（保留原参数名）。"""
-    return retrieve_for_context(
-        queries,
-        max_docs=max_docs,
-        max_chars_per_chunk=max_chars_per_query,
-    )
