@@ -38,11 +38,12 @@ def format_chart_text(chart: BaziChart) -> str:
         lines.append(
             f"    藏干: {', '.join(p.hidden_stems) or '-'} | "
             f"副星: {', '.join(p.shishen_zhi) or '-'} | "
-            f"星运: {p.changsheng or '-'} | 自坐: {p.zizuo or '-'} | 空亡: {p.xunkong or '-'}"
+            f"星运: {p.changsheng or '-'} | 自坐: {p.zizuo or '-'} | 旬空: {p.xunkong or '-'}"
         )
-    lines += ["", "【空亡】"]
+    lines += ["", "【旬空口诀】"]
     for p in chart.pillars:
-        lines.append(f"  {p.name[0]}空: {p.xunkong}")
+        lines.append(f"  {p.name[0]}柱旬空: {p.xunkong}")
+    lines.append("  注: 旬空口诀为本柱干支所在旬的空亡字，不等于本柱落空；哪柱当真落空以【神煞（按柱）】的空亡标记为准")
     lines += [
         "",
         "【命宫/身宫】",
