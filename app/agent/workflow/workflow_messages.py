@@ -43,6 +43,9 @@ from app.domain.bazi_engine import (
 )
 from app.tools.text_clean import clean_think_tags
 
+# 工作流生成/修复产出长文本（含思维链），60s 默认超时不够，单独放宽
+_WORKFLOW_LLM_TIMEOUT = 180.0
+
 
 def build_messages(
     user_prompt: str,
@@ -167,10 +170,13 @@ def build_repair_messages(
 
 
 def invoke(chat_model, messages: list[BaseMessage]) -> str:
-    """调用 LLM 生成回答，过滤 <think> 推理过程并去重。"""
-    response = chat_model.invoke(messages)
+    """调用 LLM 生成回答，过滤  thinking 推理过程并去重。
+
+    工作流 generate/repair 产出为长文本（含思维链），60s 默认超时频繁触发
+    ReadTimeout，故单独放宽（与 report_generator 的 300s 同思路）。
+    """
+    response = chat_model.bind(timeout=_WORKFLOW_LLM_TIMEOUT).invoke(messages)
     content = (getattr(response, "content", "") or "").strip()
-    # 过滤 reasoning model 的 <think>...</think> 推理过程，避免重复显示
     content = clean_think_tags(content)
     if not content:
         return "我先看盘面，当前信息足够排盘，但模型没有生成有效解读。你可以换一个更具体的问题继续问。"
