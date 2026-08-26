@@ -168,7 +168,7 @@ WORKERS: dict[str, DomainWorker] = {
         domain="chitchat",
         label="闲聊问候",
         expertise_prompt="",
-        length_rule="闲聊1-3句，≤150字，像朋友聊天自然回应。",
+        length_rule="闲聊1-3句，≤150字；先正面接住用户说的话，有问题直接答、有倾诉先接住；不绕弯子、不铺垫、不靠寒暄和反问凑字数，语气平和稳重。",
         skip_facts=True,
     ),
     "personality": DomainWorker(
