@@ -365,20 +365,16 @@ def retrieve_for_context(
             if verbose:
                 log.info("[检索] [{}/{}] query={} 无匹配", idx, len(queries), q)
             continue
-        # 依次尝试 top-1、次优结果，取第一条未选过的 chunk
-        # （top-1 与其它 query 重复时不直接丢弃该 query，避免浪费一次 embedding+检索）
-        doc = None
-        for cand in results:
-            key = (cand.metadata.get("source", ""), cand.page_content[:120])
-            if key not in seen:
-                doc = cand
-                break
+        # 只取 top-1 最相关 chunk；与已选结果重复则丢弃该 query
+        # （次优候选往往相关性下降，强行选用会引入噪音知识）
+        doc = results[0]
+        key = (doc.metadata.get("source", ""), doc.page_content[:120])
+        if key in seen:
             dedup_count += 1
-        if doc is None:
             if verbose:
-                log.info("[检索] [{}/{}] query={} 全部候选 chunk 重复，跳过", idx, len(queries), q)
+                log.info("[检索] [{}/{}] query={} top-1与已选结果重复，跳过", idx, len(queries), q)
             continue
-        seen.add((doc.metadata.get("source", ""), doc.page_content[:120]))
+        seen.add(key)
         # 单 chunk 截断兜底
         if len(doc.page_content) > max_chars_per_chunk:
             from langchain_core.documents import Document as _Doc

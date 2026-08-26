@@ -90,16 +90,9 @@ def retrieve_rules(
             f"{domain_kw} {q}" if domain_kw and len(q) < 8 else q
             for q in intent.queries
         ]
-        # theory 领域走精准单概念路线，不再追加 extra_queries / DOMAIN_RULE_QUERIES
-        # （理论 worker 无 extra_queries，DOMAIN_RULE_QUERIES["theory"] 是泛化 query "术语白话 对照表..."，
-        #  会污染回答：固定命中术语白话对照表 chunk）
-        if intent.domain != "theory":
-            # 追加领域专属 query 补充（LLM 拆解可能太泛，领域 query 含核心术语）
-            if worker and worker.extra_queries:
-                queries.append(worker.extra_queries[0])
-            domain_rules = DOMAIN_RULE_QUERIES.get(intent.domain)
-            if domain_rules:
-                queries.append(domain_rules[0])
+        # 不追加 extra_queries / DOMAIN_RULE_QUERIES：固定领域检索词对同领域任何问题
+        # 都命中同样片段（与具体问题无关），只会挤占 query 名额并引入噪音；
+        # 检索质量交给 LLM 拆解的自适应 query（theory 领域同理，见 build_theory_queries）
         queries = queries[:4]
         log.info("[workflow检索] LLM拆解路径 queries={} (共{}条)",
                  queries, len(queries))
