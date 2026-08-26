@@ -3,6 +3,7 @@
 基于 ToolCallAgent，拥有自主规划能力，可直接使用。
 工具集 = 本地工具（八字/搜索/终止）+ MCP 工具（高德地图）。
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -49,10 +50,26 @@ class Xianzhi(ToolCallAgent):
     """先知智能体"""
 
     # 排盘工具名集合：调用这些工具时，从参数中提取 birth_time/gender
-    _BAZI_TOOLS = {"bazi_chart", "bazi_full", "bazi_analysis", "bazi_dayun", "bazi_liunian", "bazi_liuyue", "bazi_liuri"}
+    _BAZI_TOOLS = {
+        "bazi_chart",
+        "bazi_full",
+        "bazi_analysis",
+        "bazi_dayun",
+        "bazi_liunian",
+        "bazi_liuyue",
+        "bazi_liuri",
+    }
 
-    def __init__(self, chat_model, local_tools, memory=None, conversation_id="xianzhi-default", max_steps=None,
-                 decompose_model=None, reviewer_model=None):
+    def __init__(
+        self,
+        chat_model,
+        local_tools,
+        memory=None,
+        conversation_id="xianzhi-default",
+        max_steps=None,
+        decompose_model=None,
+        reviewer_model=None,
+    ):
         super().__init__(
             name="Xianzhi",
             chat_model=chat_model,
@@ -85,10 +102,7 @@ class Xianzhi(ToolCallAgent):
         return self._lock
 
     def set_conversation_id(self, conversation_id):
-        new_id = (
-            conversation_id if conversation_id and conversation_id.strip()
-            else "xianzhi-default"
-        )
+        new_id = conversation_id if conversation_id and conversation_id.strip() else "xianzhi-default"
         # 切换会话时清空命盘上下文，避免跨会话污染
         if new_id != self._conversation_id:
             self.chart_context = ""
@@ -121,7 +135,15 @@ class Xianzhi(ToolCallAgent):
         self._history_len = 0
         # _bazi_pending 不再重置：交给 mount_chart_context / set_conversation_id 管理生命周期
 
-    def set_chart_context(self, birth_time: str, gender: str, sect: int = 2, yun_sect: int = 1, user_id: str = "", birth_place: str = ""):
+    def set_chart_context(
+        self,
+        birth_time: str,
+        gender: str,
+        sect: int = 2,
+        yun_sect: int = 1,
+        user_id: str = "",
+        birth_place: str = "",
+    ):
         """挂载命盘上下文：外部（API/会话恢复）直接设置，AI 回答基于该盘面。
 
         出生时间支持公历(YYYY-MM-DD HH:MM)、公历+时辰、农历、农历节日等格式；
@@ -130,7 +152,9 @@ class Xianzhi(ToolCallAgent):
         try:
             birth_time = _normalize_birth_time(birth_time)
             longitude = birth_place_to_longitude(birth_place)
-            workflow_context = build_chart_context(birth_time, gender, sect, yun_sect, user_id, longitude=longitude)
+            workflow_context = build_chart_context(
+                birth_time, gender, sect, yun_sect, user_id, longitude=longitude
+            )
             chart = render_full_fact_context(workflow_context)
             self.chart_context = (
                 "【当前命盘上下文】\n"
@@ -140,8 +164,11 @@ class Xianzhi(ToolCallAgent):
             )
             self._workflow_context = workflow_context
             self._last_birth_info = {
-                "time": birth_time, "gender": gender, "sect": sect,
-                "yun_sect": yun_sect, "place": birth_place or "",
+                "time": birth_time,
+                "gender": gender,
+                "sect": sect,
+                "yun_sect": yun_sect,
+                "place": birth_place or "",
                 "longitude": longitude,
             }
             log.info("已挂载命盘上下文: {} {} user={} longitude={}", birth_time, gender, user_id, longitude)
@@ -165,15 +192,22 @@ class Xianzhi(ToolCallAgent):
         self._birth_signal = False  # 每轮重置
         birth_time, gender = extract_birth_info(text)
         if birth_time and gender:
-            self.set_chart_context(birth_time, gender, sect, yun_sect, birth_place=extract_birth_place(text) or "")
+            self.set_chart_context(
+                birth_time, gender, sect, yun_sect, birth_place=extract_birth_place(text) or ""
+            )
             return True
         # 已有待确认八字候选：尝试把本轮输入解析为用户的选择
         if self._bazi_pending:
             bt = resolve_bazi_selection(text, self._bazi_pending)
             if bt:
                 # 候选确认排盘时带上当初提供的出生地（真太阳时校正）
-                self.set_chart_context(bt, self._bazi_pending["gender"], sect, yun_sect,
-                                       birth_place=self._bazi_pending.get("place") or "")
+                self.set_chart_context(
+                    bt,
+                    self._bazi_pending["gender"],
+                    sect,
+                    yun_sect,
+                    birth_place=self._bazi_pending.get("place") or "",
+                )
                 self._bazi_pending = None
                 return True
         # 首次检测到八字：反推候选日期，交由 LLM 向用户确认
@@ -184,7 +218,9 @@ class Xianzhi(ToolCallAgent):
             except Exception:
                 cands = []
             self._bazi_pending = {
-                "pillars": pillars, "gender": gender, "candidates": cands,
+                "pillars": pillars,
+                "gender": gender,
+                "candidates": cands,
                 "place": extract_birth_place(text) or "",  # 出生地随候选保留，确认排盘时使用
             }
             return True
@@ -205,10 +241,13 @@ class Xianzhi(ToolCallAgent):
             if self._bazi_pending:
                 cands = self._bazi_pending.get("candidates") or []
                 block = "\n\n【待确认八字】用户提供了八字 {}（{}），已反推以下候选出生日期：\n".format(
-                    self._bazi_pending.get("pillars"), self._bazi_pending.get("gender"))
+                    self._bazi_pending.get("pillars"), self._bazi_pending.get("gender")
+                )
                 if cands:
                     for i, c in enumerate(cands, 1):
-                        block += "  {}. {}（{}，{}）\n".format(i, c.get("birth_time"), c.get("ganzhi"), c.get("shi_chen"))
+                        block += "  {}. {}（{}，{}）\n".format(
+                            i, c.get("birth_time"), c.get("ganzhi"), c.get("shi_chen")
+                        )
                     block += "请直接向用户展示以上候选，请其确认实际出生日期（回复序号『第一个』或具体年份『2004年』均可）。待用户确认后，用对应 birth_time 调用排盘工具，不要自行猜测日期排盘。\n"
                 else:
                     block += "  未能反推出候选日期，请直接向用户说明并索取精确出生时间或确认八字是否有误。\n"
@@ -339,7 +378,7 @@ class Xianzhi(ToolCallAgent):
         if self.state == AgentState.ERROR or self._last_error:
             err = (self._last_error or "未知错误").strip()
             log.warning("[xianzhi] 终止于错误: {}", err)
-            return "分析过程中遇到错误：{}。请稍后重试。".format(err[:200])
+            return "分析过程中遇到错误，请稍后重试。"
         # LLM 仅触发 do_terminate 等工具、无文本回答时，
         # 前端已通过 /api/ai/xianzhi/chart 拿到结构化命盘数据
         log.info("[xianzhi] 终止时无文本回答，仅返回工具结果")
@@ -374,7 +413,7 @@ class Xianzhi(ToolCallAgent):
             self.state = AgentState.ERROR
             self._last_error = str(e)
             log.exception("Xianzhi workflow error")
-            yield "分析过程遇到错误：{}。请稍后重试。".format(str(e)[:200])
+            yield "分析过程遇到错误，请稍后重试。"
         finally:
             self.cleanup()
 
@@ -398,7 +437,7 @@ class Xianzhi(ToolCallAgent):
             self.state = AgentState.ERROR
             self._last_error = str(e)
             log.exception("Xianzhi workflow error")
-            yield "分析过程遇到错误：{}。请稍后重试。".format(str(e)[:200])
+            yield "分析过程遇到错误，请稍后重试。"
         finally:
             # cleanup 内含 PG 落盘（_persist_history），放线程池避免阻塞事件循环
             await asyncio.to_thread(self.cleanup)
@@ -428,18 +467,19 @@ class Xianzhi(ToolCallAgent):
             self.state = AgentState.RUNNING
             self.message_list.append(HumanMessage(content=user_prompt))
             try:
-                history_ctx = "\n".join(
-                    f"{m.__class__.__name__.replace('Message','')}: {str(getattr(m,'content',''))[:180]}"
-                    for m in self.message_list[-6:]
-                    if str(getattr(m, "content", "")).strip()
-                ) or "（无）"
+                history_ctx = (
+                    "\n".join(
+                        f"{m.__class__.__name__.replace('Message', '')}: {str(getattr(m, 'content', ''))[:180]}"
+                        for m in self.message_list[-6:]
+                        if str(getattr(m, "content", "")).strip()
+                    )
+                    or "（无）"
+                )
                 messages = [
                     SystemMessage(content=CHITCHAT_SYSTEM),
-                    HumanMessage(content=(
-                        f"【最近对话】\n{history_ctx}\n\n"
-                        f"【用户说】\n{user_prompt}\n\n"
-                        "请自然回应。"
-                    )),
+                    HumanMessage(
+                        content=(f"【最近对话】\n{history_ctx}\n\n【用户说】\n{user_prompt}\n\n请自然回应。")
+                    ),
                 ]
                 response = self.chat_model.invoke(messages)
                 content = (getattr(response, "content", "") or "").strip()
@@ -467,11 +507,13 @@ class Xianzhi(ToolCallAgent):
             return self._workflow_stream(user_prompt)
         # 闲聊短路：无命盘 + 闲聊意图 → 直接调一次 LLM，不走 ReAct 工具循环
         if not verbose and self._is_chitchat(user_prompt):
+
             def _chitchat_gen():
                 try:
                     yield self._chitchat_reply(user_prompt)
                 finally:
                     self.cleanup()
+
             return _chitchat_gen()
         # 走 BaseAgent.run_stream（绕开 ToolCallAgent.run_stream 的二次 reset，避免历史被清空）
         base_stream = BaseAgent.run_stream(self, user_prompt)
@@ -521,7 +563,7 @@ class Xianzhi(ToolCallAgent):
             for msg in reversed(history):
                 content = msg.content if hasattr(msg, "content") else str(msg)
                 # 中文场景下 1 字符 ≈ 1.5 token（英文≈0.25），取折中系数
-                cn_chars = sum(1 for c in content if '\u4e00' <= c <= '\u9fff')
+                cn_chars = sum(1 for c in content if "\u4e00" <= c <= "\u9fff")
                 en_chars = len(content) - cn_chars
                 token_count = int(cn_chars * 1.5 + en_chars * 0.25)
                 if total_tokens + token_count <= max_tokens:
@@ -537,15 +579,20 @@ class Xianzhi(ToolCallAgent):
         同时过滤掉 next_step_prompt 占位消息（tool_call_agent.think 注入的 HumanMessage），
         防止历史会话恢复时把"工具指引"内容当作用户消息显示在左边。
         """
-        new_messages = self.message_list[self._history_len:]
+        new_messages = self.message_list[self._history_len :]
         if new_messages:
             # 过滤 next_step_prompt 注入的 HumanMessage（其内容以工具调度模板开头）
             filtered = [
-                m for m in new_messages
-                if not (m.__class__.__name__ == "HumanMessage"
-                        and isinstance(getattr(m, "content", ""), str)
-                        and ("根据用户需求选最合适的工具，复杂任务分解多步" in m.content
-                             or "你是先知，按以下顺序自主规划与调工具完成任务" in m.content))
+                m
+                for m in new_messages
+                if not (
+                    m.__class__.__name__ == "HumanMessage"
+                    and isinstance(getattr(m, "content", ""), str)
+                    and (
+                        "根据用户需求选最合适的工具，复杂任务分解多步" in m.content
+                        or "你是先知，按以下顺序自主规划与调工具完成任务" in m.content
+                    )
+                )
             ]
             if filtered:
                 self._memory.add(self._conversation_id, filtered)
@@ -579,7 +626,8 @@ class Xianzhi(ToolCallAgent):
             recent = self.message_list[-12:]
             recent_text = "\n".join(
                 f"{m.__class__.__name__.replace('Message', '')}: {str(getattr(m, 'content', ''))[:300]}"
-                for m in recent if str(getattr(m, "content", "")).strip()
+                for m in recent
+                if str(getattr(m, "content", "")).strip()
             )
 
             # ---- 后台线程：执行 LLM 摘要与落库 ----
@@ -594,26 +642,32 @@ class Xianzhi(ToolCallAgent):
                         "你是一个会话摘要助手。请根据【旧摘要】和【最近对话】，生成不超过 600 字的增量摘要。\n"
                         "只保留以下事实，忽略闲聊、问候、天气、发牢骚、流水账、长文本等非命理内容：\n"
                         "- 用户身份/人生事件：年龄、职业、婚姻、健康、已确认的断事结论；\n"
-                        "- 用户对之前分析的修正或反馈（如\"上次说我身弱不对\"）——必须保留，避免重复旧错；\n"
-                        "- 待确认事项（如\"用户给了八字但未确认出生日期\"）。\n"
+                        '- 用户对之前分析的修正或反馈（如"上次说我身弱不对"）——必须保留，避免重复旧错；\n'
+                        '- 待确认事项（如"用户给了八字但未确认出生日期"）。\n'
                         "合并同类项，丢弃过时或冗余信息，保持简洁。\n\n"
                         f"【旧摘要】\n{old_summary or '（无）'}\n\n"
                         f"【最近对话】\n{recent_text}\n\n"
                         "请输出新摘要（不超过 600 字）："
                     )
                     log.info("[摘要] 会话 {} 开始生成摘要...", self._conversation_id)
-                    resp = self.chat_model.invoke([
-                        SystemMessage(content="你是会话摘要助手，只输出摘要文本，不输出任何解释。"),
-                        HumanMessage(content=prompt),
-                    ])
+                    resp = self.chat_model.invoke(
+                        [
+                            SystemMessage(content="你是会话摘要助手，只输出摘要文本，不输出任何解释。"),
+                            HumanMessage(content=prompt),
+                        ]
+                    )
                     new_summary = (getattr(resp, "content", "") or "").strip()
                     if new_summary and len(new_summary) > 10:
                         # 确保不超过 600 字
                         if len(new_summary) > 600:
                             new_summary = new_summary[:600]
                         self._memory.save_summary(self._conversation_id, new_summary, msg_count)
-                        log.info("[摘要] 会话 {} 已生成摘要 ({}字, 消息数={})",
-                                 self._conversation_id, len(new_summary), msg_count)
+                        log.info(
+                            "[摘要] 会话 {} 已生成摘要 ({}字, 消息数={})",
+                            self._conversation_id,
+                            len(new_summary),
+                            msg_count,
+                        )
                 except Exception as e:
                     log.warning("会话摘要生成失败（后台线程）: {}", e)
 

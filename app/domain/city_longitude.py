@@ -2,7 +2,7 @@
 
 用于真太阳时校正：出生地城市名 -> 东经度数。
 区县继承所属城市经度（同市经度差对真太阳时无实质影响），故仅保留城市级。
-数据源变更后请重新运行 scripts/gen_city_longitude.py。
+数据源变更后请重新运行 shared/utils/gen_city_longitude.py。
 """
 
 CITY_LONGITUDE: dict[str, float] = {
