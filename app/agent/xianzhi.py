@@ -478,7 +478,7 @@ class Xianzhi(ToolCallAgent):
                 messages = [
                     SystemMessage(content=CHITCHAT_SYSTEM),
                     HumanMessage(
-                        content=(f"【最近对话】\n{history_ctx}\n\n【用户说】\n{user_prompt}\n\n请自然回应。")
+                        content=(f"【最近对话】\n{history_ctx}\n\n【用户说】\n{user_prompt}\n\n请正面回应，简短直接。")
                     ),
                 ]
                 response = self.chat_model.invoke(messages)
