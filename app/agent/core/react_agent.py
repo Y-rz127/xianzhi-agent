@@ -12,13 +12,11 @@ class ReActAgent(BaseAgent):
     final_answer = ""
 
     def step(self):
-        """执行一轮 ReAct：think() 决策；无需工具则结束，否则 act()+observe()。"""
         should_act = self.think()
-        # think() 中若发生异常，子类会将 state 置为 ERROR，此处不覆盖
+        # think() 异常时子类已置 ERROR，此处不覆盖
         if self.state == AgentState.ERROR:
             return self.final_answer or "(执行出错)"
         if not should_act:
-            # 没有工具调用 = LLM 已给出最终答案，标记完成避免空转
             self.state = AgentState.FINISHED
             return self.final_answer or "(无工具调用，直接回答)"
         act_result = self.act()
@@ -27,7 +25,7 @@ class ReActAgent(BaseAgent):
 
     @abstractmethod
     def think(self):
-        """思考并决定下一步是否需要调用工具；返回 True 表示需要 act()。"""
+        """决策是否调用工具；返回 True 表示需要 act()。"""
         raise NotImplementedError
 
     @abstractmethod
@@ -36,6 +34,5 @@ class ReActAgent(BaseAgent):
         raise NotImplementedError
 
     def observe(self, act_result):
-        """记录工具执行结果日志（供调试追溯）。"""
         if act_result:
             log.info("[观察] {}", act_result[:200])

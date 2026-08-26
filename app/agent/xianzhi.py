@@ -23,9 +23,9 @@ from app.agent.core.base_agent import AgentState, BaseAgent
 from app.agent.core.tool_call_agent import ToolCallAgent
 from app.agent.prompts import (
     CHITCHAT_SYSTEM,
-    ORACLE_BASE_SYSTEM,
-    REACT_FACT_GUARDRAILS,
-    REACT_NEXT_STEP_PROMPT,
+    ORACLE_BASE_SYSTEM as SYSTEM_PROMPT,
+    REACT_FACT_GUARDRAILS as FACT_GUARDRAILS,
+    REACT_NEXT_STEP_PROMPT as NEXT_STEP_PROMPT,
 )
 from app.agent.workflow.xianzhi_workflow import (
     WorkflowChartContext,
@@ -44,17 +44,6 @@ from app.tools.bazi import _normalize_birth_time
 from app.tools.mcp_client import mcp_manager
 from app.tools.text_clean import clean_think_tags
 
-# 生辰解析正则与提取函数已抽离至 app/agent/birth_parse.py（解耦单一职责模块）
-
-
-# 系统提示词：定义先知角色（八字命理师傅）的人设、行为准则与输出风格
-SYSTEM_PROMPT = ORACLE_BASE_SYSTEM
-
-# ReAct 单步提示词：引导 Agent 在每一步选择合适工具或直接回答
-NEXT_STEP_PROMPT = REACT_NEXT_STEP_PROMPT
-
-# 事实护栏提示词：约束 Agent 必须基于命盘上下文推理，禁止无凭据断言
-FACT_GUARDRAILS = REACT_FACT_GUARDRAILS
 
 class Xianzhi(ToolCallAgent):
     """先知智能体"""
@@ -133,20 +122,13 @@ class Xianzhi(ToolCallAgent):
         # _bazi_pending 不再重置：交给 mount_chart_context / set_conversation_id 管理生命周期
 
     def set_chart_context(self, birth_time: str, gender: str, sect: int = 2, yun_sect: int = 1, user_id: str = "", birth_place: str = ""):
-        """由外部直接设置当前命盘上下文，AI 回答将基于该盘面。
+        """挂载命盘上下文：外部（API/会话恢复）直接设置，AI 回答基于该盘面。
 
-        Args:
-            birth_time: 出生时间，支持公历(YYYY-MM-DD HH:MM)、公历+时辰(YYYY-MM-DD 辰时)、
-                       农历(农历1990年四月廿六 14:30)、农历节日(2004年端午节 辰时) 等格式
-            gender: 性别，男 或 女
-            sect: 日柱计算流派，1=按日期精确，2=按日期精确2（默认）
-            yun_sect: 大运计算流派，1=按天数和时辰数（默认），2=按分钟数
-            user_id: 用户 ID，用于从命盘画像加载历史断事知识
-            birth_place: 出生地（城市名），用于真太阳时校正；无则空字符串
+        出生时间支持公历(YYYY-MM-DD HH:MM)、公历+时辰、农历、农历节日等格式；
+        birth_place 为出生地城市名，用于真太阳时校正（与 /chart API 行为一致）。
         """
         try:
             birth_time = _normalize_birth_time(birth_time)
-            # 出生地 → 经度 → 真太阳时校正（与 /chart API 行为一致，基准 120°E）
             longitude = birth_place_to_longitude(birth_place)
             workflow_context = build_chart_context(birth_time, gender, sect, yun_sect, user_id, longitude=longitude)
             chart = render_full_fact_context(workflow_context)
@@ -360,28 +342,18 @@ class Xianzhi(ToolCallAgent):
         return None
 
     def _filter_steps(self, src_iter):
-        """包装原始流：内部消费 ReAct 步骤并写入日志，仅产出最终回答。
-
-        - 内部所有 Step/工具输出/观察都只走 `log.info`，不外发
-        - 仅当 LLM 在某一步选择不再调用工具（即真正回答用户）时，
-          把 final_answer 推给前端
-        - 若 LLM 终止时无文本（如直接 do_terminate 且无正文），给出兜底提示
-        """
+        """内部消费 ReAct 步骤（仅写日志不外发），只产出最终回答。"""
         for _ in src_iter:
-            # 步骤输出已通过 ReActAgent.step 内部的 log.info 记录
-            # 这里无需再打，避免日志重复
             pass
         final = self._final_answer_or_error()
         if final:
             yield final
 
     def _run_workflow_once(self, user_prompt: str, history_snapshot=None, summary: str = "") -> str:
-        """Run the chart-grounded workflow for one turn."""
         if not self._workflow_context:
             raise RuntimeError("workflow context is not mounted")
         history = list(history_snapshot) if history_snapshot is not None else list(self.message_list)
-        answer = self._workflow.answer(user_prompt, self._workflow_context, history, summary)
-        return answer
+        return self._workflow.answer(user_prompt, self._workflow_context, history, summary)
 
     def _workflow_stream(self, user_prompt: str):
         try:
@@ -482,12 +454,7 @@ class Xianzhi(ToolCallAgent):
                 return "我刚才走神了，你再说一遍？"
 
     def run_stream(self, user_prompt, verbose: bool = False):
-        """同步流式执行。
-
-        Args:
-            user_prompt: 用户输入
-            verbose: True=透传 ReAct 步骤（调试用），False=只输出最终回答
-        """
+        """同步流式执行；verbose=True 透传 ReAct 步骤（调试用），False 只输出最终回答。"""
         self.reset()
         # 与 arun_stream 保持一致：无条件尝试挂载（用户中途更新生辰时覆盖旧盘）
         self.mount_chart_context(user_prompt, self._sect, self._yun_sect)
@@ -502,20 +469,14 @@ class Xianzhi(ToolCallAgent):
                 finally:
                     self.cleanup()
             return _chitchat_gen()
-        # 直接调用 BaseAgent.run_stream（绕开 ToolCallAgent.run_stream 的二次 reset，
-        # 避免历史被清空；同时让 step 输出走 BaseAgent 的日志逻辑）
+        # 走 BaseAgent.run_stream（绕开 ToolCallAgent.run_stream 的二次 reset，避免历史被清空）
         base_stream = BaseAgent.run_stream(self, user_prompt)
         if verbose:
             return self._finalize_stream(base_stream)
         return self._filter_steps(base_stream)
 
     async def arun_stream(self, user_prompt, verbose: bool = False):
-        """异步流式执行。
-
-        Args:
-            user_prompt: 用户输入
-            verbose: True=透传 ReAct 步骤（调试用），False=只输出最终回答
-        """
+        """异步流式执行；verbose=True 透传 ReAct 步骤，False 只输出最终回答。"""
         self.reset()
         # 挂载与历史载入含正则解析/排盘/PG IO，放线程池避免阻塞事件循环
         await asyncio.to_thread(self.mount_chart_context, user_prompt, self._sect, self._yun_sect)
@@ -542,7 +503,7 @@ class Xianzhi(ToolCallAgent):
                 if summary and "年柱" in summary:
                     yield "\n[回答] 命盘四柱关键信息（用于可视化展示）：\n【四柱】\n{}".format(summary)
             return
-        # 正常模式：直接走 ReAct 工具循环，LLM 自行决定是否调 search_knowledge
+        # 正常模式：走 ReAct 工具循环，LLM 自行决定是否调 search_knowledge
         async for _ in super().arun_stream(user_prompt):
             pass
         final = self._final_answer_or_error()
@@ -678,11 +639,7 @@ def create_xianzhi_agent(
     decompose_model=None,
     reviewer_model=None,
 ) -> "Xianzhi":
-    """构造先知智能体的工厂函数（集中化入口，等价于直接 new Xianzhi）。
-
-    会话池（app.api.context）统一经此创建有状态的每会话实例，避免构造参数散落。
-    本函数不做额外逻辑，仅透传参数给 ``Xianzhi.__init__``，便于后续统一加默认/校验。
-    """
+    """构造先知智能体（会话池统一入口，透传参数给 Xianzhi）。"""
     return Xianzhi(
         chat_model=chat_model,
         local_tools=local_tools,

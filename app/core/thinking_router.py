@@ -31,16 +31,6 @@ from typing import Any, Iterator, Optional
 thinking_override: ContextVar[Optional[bool]] = ContextVar("thinking_override", default=None)
 
 
-def set_thinking(on: bool):
-    """显式设置本次调用的思考开关，返回 token 供 reset_thinking 复位。"""
-    return thinking_override.set(on)
-
-
-def reset_thinking(token) -> None:
-    """复位 set_thinking 设置的开关（务必在 finally 中调用）。"""
-    thinking_override.reset(token)
-
-
 @contextmanager
 def use_thinking(on: bool) -> Iterator[None]:
     """上下文管理器：进入时关/开思考，退出时复位，避免开关泄漏到后续调用。

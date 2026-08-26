@@ -12,7 +12,6 @@ from app.tools.text_clean import clean_think_tags
 class ToolCallAgent(ReActAgent):
     """工具调用代理（对应 Java ToolCallAgent）：绑定 LLM 工具，实现 think/act/observe。"""
     def __init__(self, name, chat_model, tools, system_prompt="", next_step_prompt="", max_steps=5):
-        """初始化并绑定工具集（chat_model.bind_tools），记录工具列表与执行计数。"""
         super().__init__(name, chat_model, system_prompt, next_step_prompt, max_steps)
         self.available_tools = tools
         self._llm_with_tools = chat_model.bind_tools(tools) if tools else chat_model
@@ -20,12 +19,8 @@ class ToolCallAgent(ReActAgent):
         self._current_step = 0
 
     def think(self):
-        """调用 LLM（含工具绑定）决策下一步；过滤 <think> 推理块，返回是否需要调用工具。"""
         self._current_step += 1
-        # 工具指引注入：本轮对话只在第一次 think 注入一次。
-        # 通过内容查重而非 len(message_list)<=2 判断——历史恢复后消息数不定，
-        # 固定阈值会导致"是否注入"随历史长度漂移（历史较长时首轮就不注入）。
-        # 注：_persist_history 落盘前会过滤掉这类占位消息，恢复的历史中不会出现重复。
+        # 工具指引只注入一次：按内容查重而非消息数判断（历史恢复后消息数不定，固定阈值会漂移）
         if self.next_step_prompt and not any(
             isinstance(m, HumanMessage) and m.content == self.next_step_prompt
             for m in self.message_list
@@ -34,7 +29,7 @@ class ToolCallAgent(ReActAgent):
         messages = self._build_messages()
         try:
             ai_msg = self._llm_with_tools.invoke(messages)
-            # 过滤 reasoning model 的 <think>...</think> 推理过程
+            # 过滤推理模型的 thinking 推理块，避免泄漏到回答
             raw_content = ai_msg.content or ""
             cleaned = clean_think_tags(raw_content)
             if cleaned:
@@ -49,13 +44,11 @@ class ToolCallAgent(ReActAgent):
         except Exception as e:
             log.exception("{} 思考过程遇到问题", self.name)
             self.message_list.append(AIMessage(content="处理时遇到错误: {}".format(e)))
-            # 标记错误状态，让上层（Xianzhi 流式过滤）能识别并把错误推给前端
             self._last_error = str(e)
             self.state = AgentState.ERROR
             return False
 
     def act(self):
-        """执行 LLM 决策出的工具调用列表：查工具、invoke、写入 ToolMessage；do_terminate 则标记完成。"""
         last_msg = self.message_list[-1]
         tool_calls = getattr(last_msg, "tool_calls", None) or []
         if not tool_calls:
@@ -85,7 +78,6 @@ class ToolCallAgent(ReActAgent):
         return "\n".join(results)
 
     def observe(self, act_result):
-        """根据工具执行结果类型记录结构化观察日志（排盘/搜索/抓取等）。"""
         if not act_result:
             return
         if "do_terminate" in act_result:
@@ -102,14 +94,12 @@ class ToolCallAgent(ReActAgent):
             log.info("[观察] 工具执行完成")
 
     def _find_tool(self, name):
-        """按工具名在可用工具集中线性查找对应 BaseTool，找不到返回 None。"""
         for t in self.available_tools:
             if t.name == name:
                 return t
         return None
 
     def _build_messages(self):
-        """组装发给 LLM 的消息：system prompt（如有）+ 完整对话历史。"""
         msgs = []
         if self.system_prompt:
             msgs.append(SystemMessage(content=self.system_prompt))

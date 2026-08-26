@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 
 from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
 from sse_starlette.sse import EventSourceResponse
@@ -16,12 +17,20 @@ router = APIRouter(prefix="/xianzhi", tags=["Xianzhi"])
 
 
 def _mount_chart_context(agent, birth_time: str | None, gender: str | None, sect: int = 2, yun_sect: int = 1, user_id: str = "", birth_place: str = ""):
-    """如果提供了出生信息，直接挂载到该会话 Agent 上下文。"""
     if birth_time and gender:
         try:
             agent.set_chart_context(birth_time, gender, sect, yun_sect, user_id, birth_place=birth_place)
         except Exception as e:
             log.warning("通过 API 挂载命盘上下文失败: {}", e)
+
+
+def _chart_context_payload(agent) -> dict:
+    """从 Agent 提取出生信息 payload（SSE 需 JSON 序列化，WS 直接传 dict）。"""
+    bi = agent._last_birth_info or {}
+    payload = {"birth_time": bi.get("time"), "gender": bi.get("gender")}
+    if bi.get("place"):
+        payload["birth_place"] = bi["place"]
+    return payload
 
 
 @router.get("/chat")
@@ -61,14 +70,9 @@ async def chat_with_xianzhi(
                     yield {"event": "message", "data": chunk}
                 # 流结束后，如果后端从工具调用中提取到出生信息，通知前端（覆盖自然语言输入场景）
                 if agent._last_birth_info:
-                    bi = agent._last_birth_info
-                    import json as _json
-                    payload = {"birth_time": bi.get("time"), "gender": bi.get("gender")}
-                    if bi.get("place"):
-                        payload["birth_place"] = bi["place"]
                     yield {
                         "event": "chart_context",
-                        "data": _json.dumps(payload),
+                        "data": json.dumps(_chart_context_payload(agent)),
                     }
                 yield {"event": "message", "data": "[DONE]"}
             except Exception as e:
