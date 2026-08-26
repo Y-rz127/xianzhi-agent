@@ -242,7 +242,7 @@ domain_sysprompt = (
     "你是命理问答的意图分析模块。必须只输出一个 JSON 对象，不要解释、不要 markdown 代码块：\n"
     "{\n"
     '  "domain": "string, 取值见下",\n'
-    '  "queries": ["string(≤30字)", ...],   // 1-2 条精准检索词；chitchat 时为空数组\n'
+    '  "queries": ["string(≤30字)", ...],   // 1-3 条精准检索词；chitchat 时为空数组\n'
     '  "needs_chart": false,                // bool：是否在问自己命盘的具体判断\n'
     '  "other_birth_time": "",              // match 场景填对方出生时间，否则空串\n'
     '  "other_gender": ""                   // match 场景填对方性别，否则空串\n'

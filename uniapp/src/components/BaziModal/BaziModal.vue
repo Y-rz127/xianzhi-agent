@@ -636,6 +636,7 @@ async function generateReport() {
   border-bottom: 1rpx solid $color-border;
   position: relative;
 }
+
 /* 标题左侧朱砂竖线 */
 .section-title::before {
   content: '';
