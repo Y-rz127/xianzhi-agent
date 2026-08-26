@@ -3,6 +3,7 @@
 以 (出生时间, 性别, sect, yun_sect) 为 key，缓存排盘结果，避免重复计算。
 使用 LRU 策略，默认最多缓存 200 条命例。
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -24,14 +25,16 @@ class BaziCache:
         self._misses = 0
         self._lock = threading.Lock()
 
-    def _make_key(self, birth_time: str, gender: str, sect: int = 2, yun_sect: int = 1, tool: str = "") -> str:
+    def make_key(self, birth_time: str, gender: str, sect: int = 2, yun_sect: int = 1, tool: str = "") -> str:
         """生成缓存 key。"""
         raw = f"{birth_time}|{gender}|{sect}|{yun_sect}|{tool}"
         return hashlib.md5(raw.encode()).hexdigest()
 
-    def get(self, birth_time: str, gender: str, sect: int = 2, yun_sect: int = 1, tool: str = "") -> Any | None:
+    def get(
+        self, birth_time: str, gender: str, sect: int = 2, yun_sect: int = 1, tool: str = ""
+    ) -> Any | None:
         """获取缓存结果。"""
-        key = self._make_key(birth_time, gender, sect, yun_sect, tool)
+        key = self.make_key(birth_time, gender, sect, yun_sect, tool)
         with self._lock:
             if key in self._cache:
                 ts, val = self._cache[key]
@@ -42,9 +45,11 @@ class BaziCache:
             self._misses += 1
             return None
 
-    def set(self, birth_time: str, gender: str, result: Any, sect: int = 2, yun_sect: int = 1, tool: str = ""):
+    def set(
+        self, birth_time: str, gender: str, result: Any, sect: int = 2, yun_sect: int = 1, tool: str = ""
+    ):
         """写入缓存。"""
-        key = self._make_key(birth_time, gender, sect, yun_sect, tool)
+        key = self.make_key(birth_time, gender, sect, yun_sect, tool)
         with self._lock:
             self._cache[key] = (time.time(), result)
             while len(self._cache) > self._max_size:
