@@ -4,6 +4,7 @@
 从 app/agent/xianzhi_workflow.py 抽离（解耦：把"消息装配 + 事实校验"这一单一职责独立成模块），
 行为与原内联实现完全一致。
 """
+
 from __future__ import annotations
 
 import datetime as _dt
@@ -102,6 +103,7 @@ def get_chart_facts_text(ctx: WorkflowChartContext) -> str:
         return ""
     try:
         from app.db import user_data
+
         profile = user_data.get_chart_profile(
             getattr(ctx, "user_id", "") or "",
             ctx.birth_time,
@@ -146,16 +148,23 @@ def build_repair_messages(
         sys_content += "\n" + preamble + "\n" + worker.expertise_prompt
     return [
         SystemMessage(content=sys_content),
-        HumanMessage(content=(
-            f"【用户问题】\n{_wrap_user_input(user_prompt)}\n\n"
-            f"【原回答】\n{raw_answer}\n\n"
-            f"【发现的问题】\n" + "\n".join(f"- {issue}" for issue in checked.issues) + "\n\n"
-            + (f"【正确排盘事实】\n{facts}\n\n" if facts else "")
-            + (f"【合婚基础数据（系统规则）】\n{getattr(intent, 'match_basis', '')}\n\n"
-               if getattr(intent, "match_basis", "") else "")
-            + f"【可用规则】\n{knowledge}\n\n"
-            "请输出修正后的最终回答。"
-        )),
+        HumanMessage(
+            content=(
+                f"【用户问题】\n{_wrap_user_input(user_prompt)}\n\n"
+                f"【原回答】\n{raw_answer}\n\n"
+                f"【发现的问题】\n"
+                + "\n".join(f"- {issue}" for issue in checked.issues)
+                + "\n\n"
+                + (f"【正确排盘事实】\n{facts}\n\n" if facts else "")
+                + (
+                    f"【合婚基础数据（系统规则）】\n{getattr(intent, 'match_basis', '')}\n\n"
+                    if getattr(intent, "match_basis", "")
+                    else ""
+                )
+                + f"【可用规则】\n{knowledge}\n\n"
+                "请输出修正后的最终回答。"
+            )
+        ),
     ]
 
 
@@ -251,8 +260,7 @@ def fact_block(chart: BaziChart, intent: QuestionIntent) -> str:
     for _s in shensha_all:
         shensha_by_pillar.setdefault(_s.get("pillar") or "全局", []).append(_s["name"])
     shensha_line = "；".join(
-        f"{p.name}:{'、'.join(shensha_by_pillar.get(p.name, [])) or '—'}"
-        for p in chart.pillars
+        f"{p.name}:{'、'.join(shensha_by_pillar.get(p.name, [])) or '—'}" for p in chart.pillars
     )
     dayun_lines = [
         f"{item.ganzhi}({item.shishen_gan}) {item.start_year}-{item.end_year} {item.start_age}-{item.end_age}岁 "
@@ -278,6 +286,7 @@ def fact_block(chart: BaziChart, intent: QuestionIntent) -> str:
     current_age = ""
     try:
         import re as _re
+
         m = _re.search(r"(\d{4})-(\d{1,2})-(\d{1,2})", birth_str)
         if m:
             by, bm, bd = int(m.group(1)), int(m.group(2)), int(m.group(3))
@@ -285,26 +294,28 @@ def fact_block(chart: BaziChart, intent: QuestionIntent) -> str:
             current_age = f"; 当前周岁: {age}岁"
     except Exception:
         pass
-    return "\n".join([
-        f"当前日期: {today.year}年{today.month}月{today.day}日{current_age}",
-        f"出生: {chart.birth.solar}; 性别: {chart.birth.gender}; 农历: {chart.birth.lunar}; 生肖: {chart.birth.shengxiao}",
-        f"四柱: {pillars}",
-        f"四柱详述:\n{pillar_detail}",
-        f"神煞（按柱）: {shensha_line}",
-        f"日主: {chart.wuxing.day_master}({chart.wuxing.day_master_wuxing}); 强弱: {chart.wuxing.strength}; 分数: {chart.wuxing.strength_score}",
-        f"特殊格局: {chart.wuxing.special_pattern or '无'}",
-        f"五行权重: {chart.wuxing.counts}; 最旺: {chart.wuxing.strongest}; 最弱: {chart.wuxing.weakest}",
-        f"用神提示: {chart.wuxing.useful_hint}",
-        f"十神结构: {chart.analysis.ten_gods}; 透干: {chart.analysis.exposed_stems or '-'}; 通根: {chart.analysis.rooted_stems or '-'}",
-        f"天干关系: {gan_relation_line}",
-        f"地支关系: 合={chart.analysis.combinations or '-'}; 冲={chart.analysis.clashes or '-'}; 害={chart.analysis.harms or '-'}; 刑={chart.analysis.punishments or '-'}; 三合/三会/破={chart.analysis.three_assemblies or '-'}",
-        f"调候: 月令{chart.analysis.season}; {chart.analysis.adjustment}",
-        f"判断置信度: {chart.analysis.confidence}",
-        f"起运: {chart.start_yun['startDate']} 起; {chart.start_yun['direction']}; 起运年龄 {chart.start_yun['startYear']}年{chart.start_yun['startMonth']}月{chart.start_yun['startDay']}日",
-        "大运: " + "；".join(dayun_lines),
-        "相关流年: " + ("；".join(liunian_lines) if liunian_lines else "未指定"),
-        "口径: " + "；".join(chart.warnings),
-    ])
+    return "\n".join(
+        [
+            f"当前日期: {today.year}年{today.month}月{today.day}日{current_age}",
+            f"出生: {chart.birth.solar}; 性别: {chart.birth.gender}; 农历: {chart.birth.lunar}; 生肖: {chart.birth.shengxiao}",
+            f"四柱: {pillars}",
+            f"四柱详述:\n{pillar_detail}",
+            f"神煞（按柱）: {shensha_line}",
+            f"日主: {chart.wuxing.day_master}({chart.wuxing.day_master_wuxing}); 强弱: {chart.wuxing.strength}; 分数: {chart.wuxing.strength_score}",
+            f"特殊格局: {chart.wuxing.special_pattern or '无'}",
+            f"五行权重: {chart.wuxing.counts}; 最旺: {chart.wuxing.strongest}; 最弱: {chart.wuxing.weakest}",
+            f"用神提示: {chart.wuxing.useful_hint}",
+            f"十神结构: {chart.analysis.ten_gods}; 透干: {chart.analysis.exposed_stems or '-'}; 通根: {chart.analysis.rooted_stems or '-'}",
+            f"天干关系: {gan_relation_line}",
+            f"地支关系: 合={chart.analysis.combinations or '-'}; 冲={chart.analysis.clashes or '-'}; 害={chart.analysis.harms or '-'}; 刑={chart.analysis.punishments or '-'}; 三合/三会/破={chart.analysis.three_assemblies or '-'}",
+            f"调候: 月令{chart.analysis.season}; {chart.analysis.adjustment}",
+            f"判断置信度: {chart.analysis.confidence}",
+            f"起运: {chart.start_yun['startDate']} 起; {chart.start_yun['direction']}; 起运年龄 {chart.start_yun['startYear']}年{chart.start_yun['startMonth']}月{chart.start_yun['startDay']}日",
+            "大运: " + "；".join(dayun_lines),
+            "相关流年: " + ("；".join(liunian_lines) if liunian_lines else "未指定"),
+            "口径: " + "；".join(chart.warnings),
+        ]
+    )
 
 
 def compact_facts(chart: BaziChart, intent: QuestionIntent) -> str:
@@ -362,5 +373,165 @@ def check_facts(answer: str, chart: BaziChart, other_chart: BaziChart | None = N
             stated = match.group("ganzhi")
             if stated not in expected_set:
                 issues.append(f"{name}应为{primary[name]}，回答写成了{stated}")
+
+    # 十神事实校验：回答中提及的十神组合必须与排盘事实一致
+    # 收集排盘中实际存在的十神集合（主星+副星）
+    actual_shishen: set[str] = set()
+    for p in chart.pillars:
+        if p.shishen_gan and p.shishen_gan != "日主":
+            actual_shishen.add(p.shishen_gan)
+        for s in p.shishen_zhi:
+            if s:
+                actual_shishen.add(s)
+    if other_chart is not None:
+        for p in other_chart.pillars:
+            if p.shishen_gan and p.shishen_gan != "日主":
+                actual_shishen.add(p.shishen_gan)
+            for s in p.shishen_zhi:
+                if s:
+                    actual_shishen.add(s)
+
+    # 检测"偏正财都有"/"正偏财同现"等表述，当排盘事实中只有一种财星时记问题
+    _WEALTH_PAIRS = [
+        ("偏正财都有", "偏财", "正财"),
+        ("正偏财同现", "正财", "偏财"),
+        ("偏正财同现", "偏财", "正财"),
+        ("正偏财都有", "正财", "偏财"),
+        ("偏正财混杂", "偏财", "正财"),
+        ("正偏财混杂", "正财", "偏财"),
+        ("财星混杂", "偏财", "正财"),
+    ]
+    for phrase, need_a, need_b in _WEALTH_PAIRS:
+        if phrase in answer:
+            has_a = need_a in actual_shishen
+            has_b = need_b in actual_shishen
+            if not (has_a and has_b):
+                missing = need_a if not has_a else need_b
+                issues.append(f"排盘事实中无{missing}，回答却说「{phrase}」，与十神事实不符")
+
+    # 检测"官杀混杂"等表述，当排盘事实中只有一种官杀时记问题
+    _OFFICER_PAIRS = [
+        ("官杀混杂", "正官", "七杀"),
+        ("杀官混杂", "七杀", "正官"),
+    ]
+    for phrase, need_a, need_b in _OFFICER_PAIRS:
+        if phrase in answer:
+            has_a = need_a in actual_shishen
+            has_b = need_b in actual_shishen
+            if not (has_a and has_b):
+                missing = need_a if not has_a else need_b
+                issues.append(f"排盘事实中无{missing}，回答却说「{phrase}」，与十神事实不符")
+
+    # 检测"印星混杂"等表述
+    _SEAL_PAIRS = [
+        ("印星混杂", "正印", "偏印"),
+        ("正偏印同现", "正印", "偏印"),
+        ("偏正印同现", "偏印", "正印"),
+        ("枭印同现", "偏印", "正印"),
+    ]
+    for phrase, need_a, need_b in _SEAL_PAIRS:
+        if phrase in answer:
+            has_a = need_a in actual_shishen
+            has_b = need_b in actual_shishen
+            if not (has_a and has_b):
+                missing = need_a if not has_a else need_b
+                issues.append(f"排盘事实中无{missing}，回答却说「{phrase}」，与十神事实不符")
+
+    # 神煞事实校验：回答中提及的神煞必须与排盘事实一致
+    # 收集排盘中实际存在的神煞集合（按柱分组，通过 _compute_shensha 计算）
+    actual_shensha_by_pillar: dict[str, set[str]] = {}
+    actual_shensha_all: set[str] = set()
+    for chart_src in [chart] + ([other_chart] if other_chart else []):
+        shensha_list = _compute_shensha(chart_src.pillars, parse_gender(chart_src.birth.gender))
+        for s in shensha_list:
+            name = s.get("name", "")
+            pillar = s.get("pillar", "")
+            if name:
+                actual_shensha_all.add(name)
+                if pillar:
+                    actual_shensha_by_pillar.setdefault(pillar, set()).add(name)
+
+    # 常见神煞名称列表（用于从回答文本中提取提及的神煞）
+    _SHENSHA_NAMES = [
+        "天乙贵人",
+        "太极贵人",
+        "文昌贵人",
+        "禄神",
+        "羊刃",
+        "飞刃",
+        "学堂",
+        "正学堂",
+        "词馆",
+        "正词馆",
+        "金舆",
+        "福星贵人",
+        "天厨贵人",
+        "国印贵人",
+        "流霞",
+        "红艳煞",
+        "天德贵人",
+        "月德贵人",
+        "天德合",
+        "月德合",
+        "德秀贵人",
+        "天医",
+        "华盖",
+        "桃花",
+        "驿马",
+        "将星",
+        "劫煞",
+        "亡神",
+        "灾煞",
+        "吊客",
+        "病符",
+        "红鸾",
+        "天喜",
+        "孤辰",
+        "寡宿",
+        "丧门",
+        "披麻",
+        "血刃",
+        "勾绞煞",
+        "元辰",
+        "天罗",
+        "地网",
+        "魁罡",
+        "十恶大败",
+        "十灵日",
+        "八专日",
+        "九丑日",
+        "阴差阳错",
+        "孤鸾煞",
+        "六秀日",
+        "天赦日",
+        "金神",
+        "天转日",
+        "地转日",
+        "四废日",
+        "拱禄",
+        "三奇贵人",
+        "童子煞",
+        "空亡",
+    ]
+    # 检测回答中提及了排盘中不存在的神煞
+    for name in _SHENSHA_NAMES:
+        if name in answer and name not in actual_shensha_all:
+            issues.append(f"排盘事实中无「{name}」，回答却提及，与神煞事实不符")
+
+    # 检测回答中将某柱神煞错误归属到另一柱
+    for name in actual_shensha_all:
+        for p in chart.pillars:
+            if name in actual_shensha_by_pillar.get(p.name, set()):
+                # 该神煞确实属于此柱，检查回答是否将其错误归属
+                pass
+            else:
+                # 该神煞不属于此柱，检查回答是否说"某柱有XX"
+                pattern = re.compile(rf"{p.name}[^。；;，,、\n]{{0,6}}{re.escape(name)}")
+                if pattern.search(answer):
+                    # 找到该神煞实际属于哪个柱
+                    actual_pillar = (
+                        "、".join(pn for pn, ss in actual_shensha_by_pillar.items() if name in ss) or "无"
+                    )
+                    issues.append(f"「{name}」属于{actual_pillar}，回答却关联到{p.name}，与神煞事实不符")
 
     return FactCheckResult(ok=not issues, issues=issues)

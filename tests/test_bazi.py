@@ -46,9 +46,11 @@ def test_structured_chart_matches_golden_cases(case):
     assert {k: chart.start_yun[k] for k in expected["start_yun"]} == expected["start_yun"]
     assert [
         [d.ganzhi, d.start_year, d.end_year, d.start_age, d.end_age]
-        for d in chart.dayun[:len(expected["dayun"])]
+        for d in chart.dayun[: len(expected["dayun"])]
     ] == expected["dayun"]
-    assert [[item.year, item.ganzhi, item.age, item.dayun_ganzhi] for item in chart.liunian] == expected["liunian"]
+    assert [[item.year, item.ganzhi, item.age, item.dayun_ganzhi] for item in chart.liunian] == expected[
+        "liunian"
+    ]
     for snippet in expected["warning_contains"]:
         assert any(snippet in warning for warning in chart.warnings)
 
@@ -86,7 +88,9 @@ def test_api_payload_is_structured_without_text_parsing():
 
 def test_legacy_tools_still_return_readable_text():
     chart_text = bazi_chart.invoke({"birth_time": "1990-05-20 14:30", "gender": MALE})
-    analysis_text = bazi_analysis.invoke({"birth_time": "1990-05-20 14:30", "gender": MALE, "question": "事业"})
+    analysis_text = bazi_analysis.invoke(
+        {"birth_time": "1990-05-20 14:30", "gender": MALE, "question": "事业"}
+    )
     dayun_text = bazi_dayun.invoke({"birth_time": "1990-05-20 14:30", "gender": MALE, "count": 4})
     liunian_text = bazi_liunian.invoke({"birth_time": "1990-05-20 14:30", "gender": MALE, "years": 1})
 
@@ -181,9 +185,7 @@ def test_yuede_guiren_only_checks_stems_not_hidden():
 
     # 修复前：4 个（每柱都被误报）
     # 修复后：0 个（四柱天干无甲）
-    assert yuede == [], (
-        f"月德贵人不应在藏干甲上误报，实际命中: {[s['pillar'] for s in yuede]}"
-    )
+    assert yuede == [], f"月德贵人不应在藏干甲上误报，实际命中: {[s['pillar'] for s in yuede]}"
     for s in ss:
         assert "见甲" not in s["description"] or "藏" in s["description"] or s["name"] != "月德贵人"
 
@@ -206,12 +208,19 @@ def test_yuede_guiren_detects_when_stem_present():
     assert "藏" not in yuede[0]["description"], "天干直接透出，不应使用藏干话术"
 
 
-def _make_pillar_with_nayin(name: str, ganzhi: str, gan: str, zhi: str,
-                            hidden: list[str], nayin: str) -> Pillar:
+def _make_pillar_with_nayin(
+    name: str, ganzhi: str, gan: str, zhi: str, hidden: list[str], nayin: str
+) -> Pillar:
     """支持设置 nayin 的 Pillar 工厂（用于学堂/词馆之类的纳音相关神煞）。"""
     return Pillar(
-        name=name, ganzhi=ganzhi, gan=gan, zhi=zhi,
-        gan_wuxing="", zhi_wuxing="", nayin=nayin, xunkong="",
+        name=name,
+        ganzhi=ganzhi,
+        gan=gan,
+        zhi=zhi,
+        gan_wuxing="",
+        zhi_wuxing="",
+        nayin=nayin,
+        xunkong="",
         hidden_stems=hidden,
     )
 
@@ -239,9 +248,7 @@ def test_zheng_ciguan_supersedes_ciguan_when_both_match():
 
     # 修复前：词馆=月/日/时柱、正词馆=月/日/时柱（重复 6 张）
     # 修复后：词馆=[]、正词馆=月/日/时柱（互斥，仅 3 张）
-    assert ciguan == [], (
-        f"同柱命中正词馆时应不再报词馆，实际词馆命中: {ciguan}"
-    )
+    assert ciguan == [], f"同柱命中正词馆时应不再报词馆，实际词馆命中: {ciguan}"
     zheng_pillars = [s["pillar"] for s in zheng_ciguan]
     assert set(zheng_pillars) == {"日柱", "月柱", "时柱"}, (
         f"正词馆期望落在月/日/时三柱，实际: {zheng_pillars}"
@@ -249,22 +256,25 @@ def test_zheng_ciguan_supersedes_ciguan_when_both_match():
 
 
 def test_ciguan_fires_when_only_branch_matches():
-    """正向回归：当某柱仅地支命中词馆（而非干支完全匹配正词馆）时，词馆仍应正常触发。"""
+    """正向回归：当某柱仅地支命中词馆（而非干支完全匹配正词馆）时，词馆仍应正常触发。
+
+    以截图查法一（禄命法）为准：
+      年纳音为水命见其他三支有"亥"为词馆，见"癸亥"为正词馆。
+    """
     pillars = [
         _make_pillar_with_nayin("年柱", "癸亥", "癸", "亥", ["壬", "甲", "戊"], "大海水"),
         _make_pillar_with_nayin("月柱", "戊申", "戊", "申", ["戊", "庚", "壬"], "大海水"),
         _make_pillar_with_nayin("日柱", "己亥", "己", "亥", ["己", "甲", "壬"], "大海水"),
         _make_pillar_with_nayin("时柱", "甲寅", "甲", "寅", ["甲", "丙", "戊"], "大海水"),
     ]
-    # 年纳音=水：
-    #   词馆地支=亥、申     → 月柱(申)词馆、日柱(亥)词馆、时柱? 不对，时柱寅不在集合里
-    #   正词馆=癸亥
-    #   实际：月柱 → 词馆(申)；日柱 → 词馆(亥)；时柱 → 学堂(寅, 水命学堂=申 不命中 → 不出)
+    # 年纳音=水（大海水）：
+    #   词馆地支=亥（查法一：水命→亥）     → 月柱(申)不命中、日柱(亥)命中
+    #   正词馆=癸亥                       → 无癸亥柱，正词馆为空
     ss = _compute_shensha(pillars)
     ciguan = sorted([s["pillar"] for s in ss if s["name"] == "词馆"])
     zheng = sorted([s["pillar"] for s in ss if s["name"] == "正词馆"])
-    # 词馆应同时覆盖到月柱(申)和日柱(亥)
-    assert ciguan == ["日柱", "月柱"], f"词馆应仅月柱+日柱，实际: {ciguan}"
+    # 词馆应仅覆盖到日柱(亥)，月柱(申)不在水命词馆地支范围内
+    assert ciguan == ["日柱"], f"词馆应仅日柱(亥)，实际: {ciguan}"
     assert zheng == [], f"无癸亥柱，正词馆应为空，实际: {zheng}"
 
 
@@ -289,9 +299,7 @@ def test_xueren_includes_month_pillar_when_self_mapping():
     # 亥月在 XUE_REN 里是自映射（亥→亥），月柱本身就是命中点
     # 修复前：['年柱', '时柱']（漏掉月柱）
     # 修复后：['年柱', '月柱', '时柱']（月柱一并计入）
-    assert set(xueren) == {"年柱", "月柱", "时柱"}, (
-        f"亥月见亥，月柱地支=亥 必须命中血刃，实际: {xueren}"
-    )
+    assert set(xueren) == {"年柱", "月柱", "时柱"}, f"亥月见亥，月柱地支=亥 必须命中血刃，实际: {xueren}"
 
 
 def test_tianchu_guiren_dict_fixed_bing_ding_not_chen_you():
@@ -334,9 +342,7 @@ def test_tianchu_guiren_dict_fixed_bing_ding_not_chen_you():
     ss_bing = _compute_shensha(pillars_bing_si)
     tc_bing = sorted([s["pillar"] for s in ss_bing if s["name"] == "天厨贵人"])
     # 日柱地支=巳 → 丙人见巳命中（年干甲也配巳，去重后只标日柱 1 次）
-    assert tc_bing == ["日柱"], (
-        f"丙巳日柱·丙人见巳→应在日柱命中；实际: {tc_bing}"
-    )
+    assert tc_bing == ["日柱"], f"丙巳日柱·丙人见巳→应在日柱命中；实际: {tc_bing}"
 
     # --- 丁见午：原字典"丁: 酉"会让丁日柱见午不命中，必须改为午 ---
     pillars_ding_wu = [
@@ -349,9 +355,7 @@ def test_tianchu_guiren_dict_fixed_bing_ding_not_chen_you():
     tc_ding = sorted([s["pillar"] for s in ss_ding if s["name"] == "天厨贵人"])
     # 年干丁 + 日干丁 都配午，时支=午→时柱命中；丙时干配巳，不命中任何柱（时支=午 ≠ 巳）
     # 因 key 去重，命中只标时柱 1 次
-    assert tc_ding == ["时柱"], (
-        f"丁人见午 + 丙时干（支午非巳）→ 应仅时柱命中；实际: {tc_ding}"
-    )
+    assert tc_ding == ["时柱"], f"丁人见午 + 丙时干（支午非巳）→ 应仅时柱命中；实际: {tc_ding}"
 
 
 def test_sanqi_guiren_renzhong_hits_on_mdh_match():
@@ -567,12 +571,14 @@ def test_xueren_other_months_unaffected():
 
 def test_bazi_tools_accept_lunar_hehun_and_full():
     """liuyue/hehun/bazi_full 工具入口回归（其余工具入口已在 test_all_bazi_tools_accept_lunar 中）。"""
-    hehun = bazi_hehun.invoke({
-        "birth_time_a": LUNAR_BIRTH,
-        "gender_a": MALE,
-        "birth_time_b": "农历1992年六月初八 10:00",
-        "gender_b": "女",
-    })
+    hehun = bazi_hehun.invoke(
+        {
+            "birth_time_a": LUNAR_BIRTH,
+            "gender_a": MALE,
+            "birth_time_b": "农历1992年六月初八 10:00",
+            "gender_b": "女",
+        }
+    )
     assert "合婚" in hehun and "失败" not in hehun
 
     full = bazi_full.invoke({"birth_time": LUNAR_BIRTH, "gender": MALE})
@@ -596,11 +602,16 @@ _RES, _SAME, _OUT, _WEALTH, _OFF = "金", "水", "木", "火", "土"
 def test_classify_strength_five_levels_buckets():
     """_classify_strength 五档分档阈值正确。"""
     cases = [
-        (11.26, "极旺"), (8.0, "极旺"), (7.0, "极旺"),
-        (3.0, "偏旺"), (2.2, "偏旺"),
+        (11.26, "极旺"),
+        (8.0, "极旺"),
+        (7.0, "极旺"),
+        (3.0, "偏旺"),
+        (2.2, "偏旺"),
         (0.0, "中和"),
-        (-1.2, "偏弱"), (-3.0, "偏弱"),
-        (-7.0, "极弱"), (-8.0, "极弱"),
+        (-1.2, "偏弱"),
+        (-3.0, "偏弱"),
+        (-7.0, "极弱"),
+        (-8.0, "极弱"),
     ]
     for score, expect in cases:
         strength, _ = _classify_strength(score, _WX, _RES, _SAME, _OUT, _WEALTH, _OFF)
@@ -639,8 +650,15 @@ _SP = [("癸", "亥"), ("癸", "亥"), ("癸", "亥"), ("癸", "亥")]
 def test_detect_special_pattern_guihai_x4_zhuanwang_runcan():
     """癸亥×4（score≈11.26）应判为专旺格·润下格，而非仅标极旺。"""
     sp = _detect_special_pattern(
-        _SP, {"金": 0.0, "木": 1.38, "水": 12.02, "火": 0.0, "土": 0.0},
-        "水", "癸", 11.26, "金", "木", "火", "土",
+        _SP,
+        {"金": 0.0, "木": 1.38, "水": 12.02, "火": 0.0, "土": 0.0},
+        "水",
+        "癸",
+        11.26,
+        "金",
+        "木",
+        "火",
+        "土",
     )
     assert sp["is_special"] is True
     assert sp["kind"] == "专旺"
@@ -668,8 +686,15 @@ def test_detect_special_pattern_fake_cong_has_root():
     """日主坐禄（亥）有根 → 假从/不从，不判从格（沿用 A 基础档）。"""
     fake_root = [("壬", "亥"), ("壬", "亥"), ("壬", "亥"), ("壬", "亥")]
     sp = _detect_special_pattern(
-        fake_root, {"金": 0.0, "木": 0.5, "水": 0.2, "火": 0.5, "土": 10.0},
-        "水", "壬", -8.43, "金", "木", "火", "土",
+        fake_root,
+        {"金": 0.0, "木": 0.5, "水": 0.2, "火": 0.5, "土": 10.0},
+        "水",
+        "壬",
+        -8.43,
+        "金",
+        "木",
+        "火",
+        "土",
     )
     assert sp["is_special"] is False
     assert sp["kind"] == ""
@@ -683,11 +708,19 @@ def test_detect_special_pattern_fake_cong_has_root():
 def _full_pillar(name: str, ganzhi: str, gan: str, zhi: str, hidden: list[str]) -> Pillar:
     """完整的 Pillar 工厂（覆盖 frozen dataclass 的全部 13 字段）。"""
     return Pillar(
-        name=name, ganzhi=ganzhi, gan=gan, zhi=zhi,
-        gan_wuxing="", zhi_wuxing="", nayin="", xunkong="",
+        name=name,
+        ganzhi=ganzhi,
+        gan=gan,
+        zhi=zhi,
+        gan_wuxing="",
+        zhi_wuxing="",
+        nayin="",
+        xunkong="",
         hidden_stems=hidden,
-        shishen_gan="", shishen_zhi=[],
-        changsheng="", zizuo="",
+        shishen_gan="",
+        shishen_zhi=[],
+        changsheng="",
+        zizuo="",
     )
 
 
@@ -706,8 +739,9 @@ def test_shensha_zaisha_fires_on_pillar_with_target_branch():
     ss = _compute_shensha(pillars)
     zaisha = [s for s in ss if s["name"] == "灾煞"]
     assert zaisha, "灾煞 应该在结果中（之前因 dead code 漏掉）"
-    assert any(s["pillar"] == "月柱" for s in zaisha), \
+    assert any(s["pillar"] == "月柱" for s in zaisha), (
         f"灾煞 应该挂在月柱（zhi=午），实际为: {[s['pillar'] for s in zaisha]}"
+    )
 
 
 def test_shensha_diaoke_bingfu_dead_code_fixed():
@@ -728,8 +762,7 @@ def test_shensha_diaoke_bingfu_dead_code_fixed():
     # 吊客应出现在月柱（zhi=卯）
     diaoke = [s for s in ss if s["name"] == "吊客"]
     assert diaoke, "吊客 应该扫到月柱（zhi=卯）；回归后不应再是死代码"
-    assert any(s["pillar"] == "月柱" for s in diaoke), \
-        f"吊客 应在月柱，实际: {[s['pillar'] for s in diaoke]}"
+    assert any(s["pillar"] == "月柱" for s in diaoke), f"吊客 应在月柱，实际: {[s['pillar'] for s in diaoke]}"
     # 病符：年巳 → 病符=辰，四柱无辰，预期不出现（合理）
     bingfu = [s for s in ss if s["name"] == "病符"]
     assert bingfu == [], f"病符 预期 not-found，实际: {bingfu}"
@@ -751,8 +784,9 @@ def test_tiande_he_zhi_target_fires_when_month_zhi_is_branch_mao_wu_you_zi():
     ]
     ss = _compute_shensha(pillars)
     tdh = [s for s in ss if s["name"] == "天德合"]
-    assert any(s["pillar"] == "时柱" for s in tdh), \
+    assert any(s["pillar"] == "时柱" for s in tdh), (
         f"卯月→天德合=巳，应在时柱命中；实际: {[s['pillar'] for s in tdh]}"
+    )
 
     # 子月查申：时柱地支=申 → 命中
     pillars = [
@@ -763,8 +797,9 @@ def test_tiande_he_zhi_target_fires_when_month_zhi_is_branch_mao_wu_you_zi():
     ]
     ss = _compute_shensha(pillars)
     tdh = [s for s in ss if s["name"] == "天德合"]
-    assert any(s["pillar"] == "时柱" for s in tdh), \
+    assert any(s["pillar"] == "时柱" for s in tdh), (
         f"子月→天德合=申，应在时柱命中；实际: {[s['pillar'] for s in tdh]}"
+    )
 
     # 酉月查亥：时柱地支=亥 → 命中
     pillars = [
@@ -775,8 +810,9 @@ def test_tiande_he_zhi_target_fires_when_month_zhi_is_branch_mao_wu_you_zi():
     ]
     ss = _compute_shensha(pillars)
     tdh = [s for s in ss if s["name"] == "天德合"]
-    assert any(s["pillar"] == "时柱" for s in tdh), \
+    assert any(s["pillar"] == "时柱" for s in tdh), (
         f"酉月→天德合=亥，应在时柱命中；实际: {[s['pillar'] for s in tdh]}"
+    )
 
 
 def test_tiande_he_gan_target_fires_when_month_zhi_is_other_branches():
@@ -790,6 +826,6 @@ def test_tiande_he_gan_target_fires_when_month_zhi_is_other_branches():
     ]
     ss = _compute_shensha(pillars)
     tdh = [s for s in ss if s["name"] == "天德合"]
-    assert any(s["pillar"] == "月柱" for s in tdh), \
+    assert any(s["pillar"] == "月柱" for s in tdh), (
         f"寅月→天德合=壬，应在月柱命中；实际: {[s['pillar'] for s in tdh]}"
-
+    )

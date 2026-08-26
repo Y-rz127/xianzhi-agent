@@ -1,10 +1,16 @@
 """先知智能体 - 应用入口（对应 Java AiAgentApplication）。"""
+
 from __future__ import annotations
 
 import os
 import time
 from contextlib import asynccontextmanager
+import asyncio
+import threading
 
+# 1. LLM（直连 DashScope，不经系统代理）
+import httpx
+from app.core.thinking_router import ThinkingRouter
 import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -22,6 +28,11 @@ from app.tarot.tarot_app import TarotApp
 from app.tools.bazi import bazi_analysis, bazi_chart, bazi_dayun, bazi_tools
 from app.tools.mcp_client import mcp_manager
 
+# 3. 本地工具（含 RAG 检索）
+from app.tools.rag_search import rag_tools
+from app.tools.terminate import terminate_tools
+from app.tools.web_search import search_tools
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -31,23 +42,22 @@ async def lifespan(app: FastAPI):
     # 安全基线显式告警（R10）：API_KEYS 未配置时管理端点无鉴权，
     # 生产环境必须配置；另多 worker 时内存限流/会话池为进程级状态，一并提示。
     if not settings.api_keys.strip():
-        log.warning("API_KEYS 未配置：管理类端点（admin/rag/observability/cases）无鉴权，仅限开发环境，生产必须配置")
+        log.warning(
+            "API_KEYS 未配置：管理类端点（admin/rag/observability/cases）无鉴权，仅限开发环境，生产必须配置"
+        )
     _workers = int(os.environ.get("WORKERS") or 1)
     if _workers > 1:
-        log.warning("多 worker 模式（WORKERS={}）：内存限流/会话 Agent 池/八字缓存为进程级状态，进程间相互独立（限流上限按 worker 数线性放宽）；横向扩容/跨副本限流需外置 Redis", _workers)
+        log.warning(
+            "多 worker 模式（WORKERS={}）：内存限流/会话 Agent 池/八字缓存为进程级状态，进程间相互独立（限流上限按 worker 数线性放宽）；横向扩容/跨副本限流需外置 Redis",
+            _workers,
+        )
 
     # 0.1 LangSmith 可观测性（最早初始化）
     init_observability()
 
-    import asyncio
-    import threading
-
-    # 1. LLM（直连 DashScope，不经系统代理）
-    import httpx
-
-    from app.core.thinking_router import ThinkingRouter
-    _http = httpx.Client(trust_env=False)
-    _raw_chat_model = ChatOpenAI(
+    # 答案生成模型
+    http = httpx.Client(trust_env=False)
+    raw_chat_model = ChatOpenAI(
         model=settings.dashscope_model,
         base_url=settings.dashscope_url,
         api_key=settings.dashscope_api_key,
@@ -55,43 +65,50 @@ async def lifespan(app: FastAPI):
         timeout=settings.llm_timeout,
         max_retries=settings.llm_max_retries,
         extra_body={"enable_thinking": settings.llm_enable_thinking},
-        http_client=_http,
+        http_client=http,
     )
+
     # 思考模式中间件：闲聊由调用方用 use_thinking(False) 关闭，其他路径默认开启。
     # 底层 ChatOpenAI 在构造期已派生 ON/OFF 两份副本，运行时按 contextvar 透明切换。
-    chat_model = ThinkingRouter(_raw_chat_model, default_thinking=settings.llm_enable_thinking)
+    chat_model = ThinkingRouter(raw_chat_model, default_thinking=settings.llm_enable_thinking)
+
     # 意图拆解模型（轻量快速，留空则复用主模型）
-    _decompose_http = httpx.Client(trust_env=False) if settings.decompose_model else None
-    decompose_model = ChatOpenAI(
-        model=settings.decompose_model or settings.dashscope_model,
-        base_url=settings.dashscope_url,
-        api_key=settings.dashscope_api_key,
-        temperature=0.1,
-        timeout=30.0,
-        max_retries=settings.llm_max_retries,
-        extra_body={"enable_thinking": False},
-        http_client=_decompose_http,
-    ) if settings.decompose_model else chat_model
+    decompose_http = httpx.Client(trust_env=False) if settings.decompose_model else None
+    decompose_model = (
+        ChatOpenAI(
+            model=settings.decompose_model or settings.dashscope_model,
+            base_url=settings.dashscope_url,
+            api_key=settings.dashscope_api_key,
+            temperature=0.1,
+            timeout=30.0,
+            max_retries=settings.llm_max_retries,
+            extra_body={"enable_thinking": False},
+            http_client=decompose_http,
+        )
+        if settings.decompose_model
+        else chat_model
+    )
+
     # Reviewer 审核模型（独立实例，留空则复用主模型）
-    _reviewer_http = httpx.Client(trust_env=False) if settings.reviewer_model else None
-    reviewer_model = ChatOpenAI(
-        model=settings.reviewer_model or settings.dashscope_model,
-        base_url=settings.dashscope_url,
-        api_key=settings.dashscope_api_key,
-        temperature=0.1,
-        timeout=60.0,
-        max_retries=settings.llm_max_retries,
-        extra_body={"enable_thinking": False},
-        http_client=_reviewer_http,
-    ) if settings.reviewer_model else chat_model
+    reviewer_http = httpx.Client(trust_env=False) if settings.reviewer_model else None
+    reviewer_model = (
+        ChatOpenAI(
+            model=settings.reviewer_model or settings.dashscope_model,
+            base_url=settings.dashscope_url,
+            api_key=settings.dashscope_api_key,
+            temperature=0.1,
+            timeout=60.0,
+            max_retries=settings.llm_max_retries,
+            extra_body={"enable_thinking": False},
+            http_client=reviewer_http,
+        )
+        if settings.reviewer_model
+        else chat_model
+    )
 
     # 2. 记忆（数据库不可达时降级，不阻断端口监听）
     memory = create_chat_memory()
 
-    # 3. 本地工具（含 RAG 检索）
-    from app.tools.rag_search import rag_tools
-    from app.tools.terminate import terminate_tools
-    from app.tools.web_search import search_tools
     local_tools = bazi_tools + search_tools + terminate_tools + rag_tools
 
     # 4. 塔罗占卜
@@ -149,6 +166,7 @@ async def lifespan(app: FastAPI):
             log.warning("缓存预热线程启动失败（跳过预热）: {}", e)
         try:
             from app.api.cases import ensure_table
+
             ensure_table()
         except Exception as e:
             log.warning("命例表初始化失败（可能已存在）: {}", e)
@@ -168,6 +186,7 @@ async def lifespan(app: FastAPI):
     # 清理资源：关闭 PG 连接池（cases 已复用 postgres_memory 的连接池）
     try:
         from app.memory.postgres_memory import close_global_conn
+
         close_global_conn()
     except Exception as e:
         log.warning("关闭 PG 连接池失败: {}", e)
@@ -175,22 +194,24 @@ async def lifespan(app: FastAPI):
     # 关闭 RAG 指纹持久化连接池
     try:
         from app.rag.vector_store import close_fp_pool
+
         close_fp_pool()
     except Exception as e:
         log.warning("关闭 RAG 指纹连接池失败: {}", e)
 
     # 关闭 LLM 客户端 httpx 连接池（仅关闭独立实例，复用主模型的不再单独关闭）
-    for _client in (_decompose_http, _reviewer_http):
+    for _client in (decompose_http, reviewer_http):
         try:
             if _client is not None:
                 _client.close()
         except Exception:
             pass
     try:
-        _http.close()
+        http.close()
     except Exception:
         pass
 
+    # 7. 关闭 MCP 服务
     try:
         await mcp_manager.stop()
     except Exception:
@@ -238,7 +259,11 @@ async def security_headers_middleware(request, call_next):
 async def metrics_middleware(request: Request, call_next):
     """记录 API 请求指标，跳过静态资源与健康检查路径。"""
     path = request.url.path
-    if path.startswith("/assets/") or path.startswith("/static/") or path in ("/health", "/api/health", "/api/ai/health"):
+    if (
+        path.startswith("/assets/")
+        or path.startswith("/static/")
+        or path in ("/health", "/api/health", "/api/ai/health")
+    ):
         return await call_next(request)
 
     start = time.perf_counter()
@@ -271,7 +296,9 @@ if __name__ == "__main__":
     #   否则 APP_PORT=8123 会被无视、回退到 80，导致前端（localhost:8123）连接被拒。
     # - 仍可用 PORT / APP_PORT 进程环境变量覆盖。
     _in_container = os.path.exists("/.dockerenv") or os.environ.get("KUBERNETES_SERVICE_HOST") is not None
-    port = int(os.environ.get("PORT") or os.environ.get("APP_PORT") or (80 if _in_container else settings.app_port))
+    port = int(
+        os.environ.get("PORT") or os.environ.get("APP_PORT") or (80 if _in_container else settings.app_port)
+    )
     # R10 部署加固：WORKERS 环境变量控制多进程（默认 1）。多核利用以此为开关；
     # 进程级状态（内存限流/会话池/缓存）的影响已在 lifespan 启动告警中显式提示，
     # 跨副本共享限流/会话亲和需后续外置 Redis 后再扩容。

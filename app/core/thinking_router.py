@@ -20,6 +20,7 @@
 
 线程/协程安全：contextvar 天然按请求任务隔离，无需额外锁。
 """
+
 from __future__ import annotations
 
 from contextlib import contextmanager
@@ -27,17 +28,17 @@ from contextvars import ContextVar
 from typing import Any, Iterator, Optional
 
 # None = 未显式设置，回落到 default_thinking
-_thinking_override: ContextVar[Optional[bool]] = ContextVar("thinking_override", default=None)
+thinking_override: ContextVar[Optional[bool]] = ContextVar("thinking_override", default=None)
 
 
 def set_thinking(on: bool):
     """显式设置本次调用的思考开关，返回 token 供 reset_thinking 复位。"""
-    return _thinking_override.set(on)
+    return thinking_override.set(on)
 
 
 def reset_thinking(token) -> None:
     """复位 set_thinking 设置的开关（务必在 finally 中调用）。"""
-    _thinking_override.reset(token)
+    thinking_override.reset(token)
 
 
 @contextmanager
@@ -49,11 +50,11 @@ def use_thinking(on: bool) -> Iterator[None]:
         with use_thinking(False):   # 闲聊
             return self._chitchat_reply(user_prompt)
     """
-    token = _thinking_override.set(on)
+    token = thinking_override.set(on)
     try:
         yield
     finally:
-        _thinking_override.reset(token)
+        thinking_override.reset(token)
 
 
 class ThinkingRouter:
@@ -83,23 +84,23 @@ class ThinkingRouter:
         self._default = default_thinking
 
     # ---- 开关解析 ----
-    def _pick(self) -> Any:
-        v = _thinking_override.get()
+    def pick(self) -> Any:
+        v = thinking_override.get()
         on = self._default if v is None else v
         return self._on if on else self._off
 
     # ---- Runnable 接口转发 ----
     def invoke(self, input: Any, config: Any = None, **kwargs: Any) -> Any:
-        return self._pick().invoke(input, config=config, **kwargs)
+        return self.pick().invoke(input, config=config, **kwargs)
 
     async def ainvoke(self, input: Any, config: Any = None, **kwargs: Any) -> Any:
-        return await self._pick().ainvoke(input, config=config, **kwargs)
+        return await self.pick().ainvoke(input, config=config, **kwargs)
 
     def stream(self, input: Any, config: Any = None, **kwargs: Any) -> Any:
-        return self._pick().stream(input, config=config, **kwargs)
+        return self.pick().stream(input, config=config, **kwargs)
 
     async def astream(self, input: Any, config: Any = None, **kwargs: Any) -> Any:
-        return self._pick().astream(input, config=config, **kwargs)
+        return await self.pick().astream(input, config=config, **kwargs)
 
     def bind_tools(self, tools: Any, **kwargs: Any) -> "ThinkingRouter":
         return ThinkingRouter(

@@ -68,7 +68,8 @@
                   :key="i"
                   :class="['bt-fu', isShishen(s) && 'bt-fu-click']"
                   @tap="showShishenInfo(s)"
-                >{{ s }}</text>
+                >{{ s }}
+                </text>
               </view>
             </view>
             <!-- 星运 -->
