@@ -1,11 +1,11 @@
 // R11 共享 API 层：数据模型/文本解析器/端点常量与小程序端共用，统一在仓库根 shared/api 维护
 export type {
-  AnswerFeedbackPayload, BaziCandidate, ChartAnalysis, ChartCase, ChartData,
+  AnswerFeedbackPayload, AsrRequest, AsrResponse, BaziCandidate, ChartAnalysis, ChartCase, ChartData,
   ChatOptions, ChatSession, DayunItem, LiuNianItem, Pillar, SessionBirthInfo,
   SessionMessage, ShenshaItem, WuxingItem,
 } from "@shared/api"
 export { EP, parseDayun, parsePillars, parseShensha, parseWuxing } from "@shared/api"
-import type { AnswerFeedbackPayload, BaziCandidate, BaziProfile, ChartCase, ChartData, ChatOptions, ChatSession, FavoriteCase, SessionBirthInfo, SessionMessage, TarotRecord } from "@shared/api"
+import type { AnswerFeedbackPayload, AsrRequest, AsrResponse, BaziCandidate, BaziProfile, ChartCase, ChartData, ChatOptions, ChatSession, FavoriteCase, SessionBirthInfo, SessionMessage, TarotRecord } from "@shared/api"
 import { EP } from "@shared/api"
 
 const API_BASE = import.meta.env.VITE_API_BASE
@@ -619,6 +619,20 @@ export async function adminLogin(username: string, password: string): Promise<{ 
   if (!res.ok) {
     const err = await res.json().catch(() => ({}))
     throw new Error(err.detail || "登录失败")
+  }
+  return await res.json()
+}
+
+/** 语音转文字 */
+export async function transcribeAudio(payload: AsrRequest): Promise<AsrResponse> {
+  const res = await apiFetch(`${API_BASE}${EP.ASR_TRANSCRIBE}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.detail || err.error || "语音识别失败")
   }
   return await res.json()
 }

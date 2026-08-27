@@ -175,16 +175,28 @@
 
       <div class="input-area">
         <div class="input-wrap">
-          <textarea id="chat-input" name="chat-input" aria-label="消息输入" v-model="input" @keydown="handleKeydown" :placeholder="placeholderText" :disabled="loading" rows="1"></textarea>
+          <textarea id="chat-input" name="chat-input" aria-label="消息输入" v-model="input" @keydown="handleKeydown" :placeholder="placeholderText" :disabled="loading || transcribing" rows="1"></textarea>
           <div class="input-actions">
-            <button class="btn send-btn" @click="send" :disabled="loading || !input.trim()" aria-label="发送">
+            <button
+              class="btn voice-btn"
+              :class="{ recording: isRecording, transcribing: transcribing }"
+              :disabled="loading || !voiceSupported"
+              @click="toggleVoice"
+              :aria-label="isRecording ? '停止录音' : '语音输入'"
+              title="语音输入"
+            >
+              <span v-if="isRecording">●</span>
+              <span v-else-if="transcribing">识别中</span>
+              <span v-else>🎙</span>
+            </button>
+            <button class="btn send-btn" @click="send" :disabled="loading || transcribing || !input.trim()" aria-label="发送">
               <span v-if="!loading">发送</span>
               <span v-else>推演中</span>
               <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polyline points="22 2 15 22 11 13 2 9 22 2"/></svg>
             </button>
           </div>
         </div>
-        <div class="input-hint">按 Enter 发送 · Shift+Enter 换行</div>
+        <div class="input-hint">按 Enter 发送 · Shift+Enter 换行 · 点击 🎙 语音输入</div>
       </div>
     </div>
 
@@ -248,7 +260,7 @@
 <script setup lang="ts">
 defineOptions({ name: 'Xianzhi' })
 import { ref, nextTick, computed, onMounted, onActivated, onUnmounted } from "vue"
-import { chatWithXianzhi, downloadReport, parsePillars, parseWuxing, parseDayun, parseShensha, fetchSessions, deleteSession as deleteSessionApi, getSessionMessages, getSessionBirthInfo, fetchChartCases, createChartCase, deleteChartCase, getChart, submitAnswerFeedback, type ChatSession, type SessionMessage, type ChartCase, type ChartData, type SSECallbacks } from "../api"
+import { chatWithXianzhi, downloadReport, parsePillars, parseWuxing, parseDayun, parseShensha, fetchSessions, deleteSession as deleteSessionApi, getSessionMessages, getSessionBirthInfo, fetchChartCases, createChartCase, deleteChartCase, getChart, submitAnswerFeedback, transcribeAudio, type ChatSession, type SessionMessage, type ChartCase, type ChartData, type SSECallbacks } from "../api"
 import { matchCityByName } from "../utils/region-data"
 import BaziCard from "../components/BaziCard.vue"
 import WuxingChart from "../components/WuxingChart.vue"
@@ -261,6 +273,10 @@ interface BirthInfo { time: string; gender: string }
 const messages = ref<SessionMessage[]>([])
 const input = ref("")
 const loading = ref(false)
+const isRecording = ref(false)
+const transcribing = ref(false)
+const mediaRecorder = ref<MediaRecorder | null>(null)
+const audioChunks = ref<Blob[]>([])
 const messagesEl = ref<HTMLElement | null>(null)
 const lastBirthInfo = ref<BirthInfo | null>(null)
 const chartData = ref<ChartData | null>(null)
@@ -670,6 +686,75 @@ const send = () => {
   } as SSECallbacks, opts)
 }
 
+const hasVoiceSupport = () => typeof navigator !== "undefined" && !!navigator.mediaDevices?.getUserMedia
+const voiceSupported = computed(hasVoiceSupport)
+
+async function toggleVoice() {
+  if (transcribing.value) return
+  if (isRecording.value) {
+    stopRecording()
+    return
+  }
+  if (!hasVoiceSupport()) {
+    alert("当前浏览器不支持语音输入")
+    return
+  }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+    audioChunks.value = []
+    const recorder = new MediaRecorder(stream, { mimeType: "audio/webm" })
+    mediaRecorder.value = recorder
+    recorder.ondataavailable = (e) => {
+      if (e.data.size > 0) audioChunks.value.push(e.data)
+    }
+    recorder.onstop = () => {
+      stream.getTracks().forEach((t) => t.stop())
+      handleVoiceStop()
+    }
+    recorder.onerror = () => {
+      stream.getTracks().forEach((t) => t.stop())
+      isRecording.value = false
+    }
+    recorder.start(200)
+    isRecording.value = true
+  } catch (err) {
+    alert("无法访问麦克风，请检查权限")
+  }
+}
+
+function stopRecording() {
+  if (mediaRecorder.value && mediaRecorder.value.state !== "inactive") {
+    mediaRecorder.value.stop()
+  }
+  isRecording.value = false
+}
+
+async function handleVoiceStop() {
+  if (audioChunks.value.length === 0) return
+  const blob = new Blob(audioChunks.value, { type: "audio/webm" })
+  if (blob.size > 10 * 1024 * 1024) {
+    alert("录音超过 10MB，请分段输入")
+    return
+  }
+  const reader = new FileReader()
+  reader.readAsDataURL(blob)
+  reader.onloadend = async () => {
+    const dataUrl = reader.result as string
+    const base64 = dataUrl.split(",")[1] || ""
+    transcribing.value = true
+    try {
+      const { text } = await transcribeAudio({ audio: base64, format: "webm" })
+      input.value = (input.value + " " + text).trim()
+      if (text.trim()) send()
+    } catch (err: any) {
+      alert(err.message || "语音识别失败")
+    } finally {
+      transcribing.value = false
+      audioChunks.value = []
+    }
+  }
+}
+
 const checkMobile = () => {
   isMobile.value = window.innerWidth <= 768
 }
@@ -864,9 +949,13 @@ textarea::placeholder { color: var(--text-muted); }
 textarea:focus { background: rgba(255,255,255,0.05); }
 textarea:disabled { opacity: 0.5; cursor: not-allowed; }
 
-.input-actions { flex-shrink: 0; }
+.input-actions { flex-shrink: 0; display: flex; gap: 8px; align-items: center; }
 .send-btn { padding: 12px 20px; font-size: 14px; font-weight: 600; }
 .send-btn:disabled { opacity: 0.5; }
+.voice-btn { padding: 12px 14px; font-size: 18px; background: transparent; border: 1px solid var(--border); color: var(--text); border-radius: 8px; }
+.voice-btn:hover { border-color: var(--accent); color: var(--accent); }
+.voice-btn.recording { border-color: #e74c3c; color: #e74c3c; }
+.voice-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
 .input-hint { text-align: center; font-size: 11px; color: var(--text-muted); margin-top: 8px; }
 
