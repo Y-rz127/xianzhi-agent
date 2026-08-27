@@ -317,7 +317,7 @@ export async function getSessionBirthInfo(id: string): Promise<SessionBirthInfo>
 
 // ========== 塔罗占卜 ==========
 
-export type TarotSpread = "daily" | "three_card" | "relationship"
+export type TarotSpread = "daily" | "three_card" | "relationship" | "decision" | "celtic_cross"
 
 export interface TarotDrawnCard {
   name: string
@@ -389,6 +389,18 @@ export function interpretTarotWS(
   }
   ws.onerror = () => cb.onError?.("连接错误")
   return ws
+}
+
+export interface LiuYaoLine { index: number; value: number; yang: boolean; moving: boolean; symbol: string }
+export interface LiuYaoResult {
+  method: string; createdAt: string; lines: LiuYaoLine[]; movingLines: number[]; summary: string
+  original: { name: string; upper: { name: string; symbol: string }; lower: { name: string; symbol: string } }
+  changed: { name: string; upper: { name: string; symbol: string }; lower: { name: string; symbol: string } } | null
+}
+export async function castLiuYao(method: "coins" | "numbers" | "time", numbers?: number[]): Promise<LiuYaoResult> {
+  const res = await apiFetch(`${API_BASE}/ai/liuyao/cast`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ method, numbers }) })
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || "起卦失败")
+  return res.json()
 }
 
 // ========== 管理后台：用户管理 ==========

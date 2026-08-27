@@ -1424,8 +1424,22 @@ messages.value.push({
   color: $color-ink;
   box-sizing: border-box;
   overflow: hidden;
-  box-shadow: $shadow-sm;
+  box-shadow: 0 2rpx 6rpx rgba(0, 0, 0, 0.04);
+  /* 深色字压白底：灰度抗锯齿让笔画边缘更锐利，避免发虚 */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
+/* 统一助手 rich-text 与用户气泡字号：MarkdownRender 默认 28rpx，这里让气泡正文统一为 32rpx */
+.msg-text :deep(.md-render) {
+  font-size: 32rpx;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+/* 标题层级始终大于正文 32rpx，避免 h3/h4 小于正文显得错乱 */
+.msg-text :deep(.md-render) .md-h1,
+.msg-text :deep(.md-render) .md-h2 { font-size: 38rpx; }
+.msg-text :deep(.md-render) .md-h3 { font-size: 34rpx; }
+.msg-text :deep(.md-render) .md-h4 { font-size: 32rpx; }
 .msg.user .msg-text {
   /* 多行文字从左开始排列（与 AI 消息一致），气泡仍右贴齐 */
   text-align: left;
@@ -1433,6 +1447,8 @@ messages.value.push({
   border-radius: 28rpx 8rpx 28rpx 28rpx;
   color: $color-bg;
   border: none;
+  /* 浅色字压深底：改回亚像素抗锯齿，避免文字被磨得过细 */
+  -webkit-font-smoothing: auto;
 }
 .msg-text.thinking { opacity: 0.7; }
 .typing { color: $color-ink-light; }

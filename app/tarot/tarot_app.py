@@ -213,7 +213,7 @@ assert len(DECK) == 78, f"牌组数量错误: {len(DECK)}"
 
 # 牌阵定义
 
-SpreadKey = Literal["daily", "three_card", "relationship"]
+SpreadKey = Literal["daily", "three_card", "relationship", "decision", "celtic_cross"]
 
 SPREADS: dict[str, dict] = {
     "daily": {
@@ -233,6 +233,18 @@ SPREADS: dict[str, dict] = {
         "desc": "三张牌，解读人际缘分",
         "count": 3,
         "positions": ["你自己", "对方", "关系"],
+    },
+    "decision": {
+        "name": "二择一决策阵",
+        "desc": "五张牌看清现状与两条路径的可能性",
+        "count": 5,
+        "positions": ["当下核心", "选项 A", "选项 A 走向", "选项 B", "选项 B 走向"],
+    },
+    "celtic_cross": {
+        "name": "凯尔特十字",
+        "desc": "十张牌全面梳理问题、阻力与发展方向",
+        "count": 10,
+        "positions": ["现状", "挑战", "显意识", "潜意识", "过去", "近期未来", "你的状态", "环境影响", "希望与担忧", "结果趋势"],
     },
 }
 
