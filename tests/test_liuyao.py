@@ -1,4 +1,4 @@
-from app.liuyao.liuyao_app import cast
+from app.sub_app.liuyao.liuyao_app import cast
 
 
 def test_number_cast_returns_complete_hexagram():

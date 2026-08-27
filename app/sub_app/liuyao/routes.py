@@ -1,3 +1,4 @@
+"""六爻占卜相关接口。"""
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
@@ -5,7 +6,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.agent.prompts import LIUYAO_SYSTEM_PROMPT
 from app.api.context import get_app_context
-from app.liuyao.liuyao_app import cast
+from app.sub_app.liuyao.liuyao_app import cast
 
 router = APIRouter(prefix="/liuyao", tags=["LiuYao"])
 

@@ -10,15 +10,15 @@ from app.api.auth import router as auth_router
 from app.api.cases import router as cases_router
 from app.api.favorites import router as favorites_router
 from app.api.feedback import router as feedback_router
-from app.api.liuyao import router as liuyao_router
 from app.api.me import router as me_router
 from app.api.observability import router as observability_router
 from app.api.profiles import router as profiles_router
 from app.api.rag import mgmt_router as rag_mgmt_router
-from app.api.tarot import router as tarot_router
 from app.api.tarot_records import router as tarot_records_router
-from app.api.tools import router as tools_router
 from app.api.xianzhi import router as xianzhi_router
+from app.sub_app.hehun.routes import router as hehun_router
+from app.sub_app.liuyao.routes import router as liuyao_router
+from app.sub_app.tarot.routes import router as tarot_router
 
 router = APIRouter(prefix="/ai", tags=["AI"])
 router.include_router(auth_router)
@@ -28,7 +28,7 @@ router.include_router(xianzhi_router)
 router.include_router(tarot_router)
 router.include_router(liuyao_router)
 router.include_router(rag_mgmt_router)
-router.include_router(tools_router)
+router.include_router(hehun_router)
 router.include_router(observability_router)
 router.include_router(profiles_router)
 router.include_router(favorites_router)

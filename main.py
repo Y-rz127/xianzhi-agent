@@ -22,7 +22,7 @@ from app.core.security import ApiKeyAuthMiddleware, RateLimitMiddleware
 from app.core.thinking_router import ThinkingRouter
 from app.memory import create_chat_memory
 from app.rag.vector_store import get_knowledge_base
-from app.tarot.tarot_app import TarotApp
+from app.sub_app.tarot.tarot_app import TarotApp
 from app.tools.bazi import bazi_analysis, bazi_chart, bazi_dayun, bazi_tools
 from app.tools.mcp_client import mcp_manager
 from app.tools.rag_search import rag_tools
