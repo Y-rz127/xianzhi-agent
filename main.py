@@ -178,9 +178,9 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         log.warning("关闭 PG 连接池失败: {}", e)
     try:
-        from app.rag.vector_store import close_fp_pool
+        from app.rag.fingerprint import close_pool
 
-        close_fp_pool()
+        close_pool()
     except Exception as e:
         log.warning("关闭 RAG 指纹连接池失败: {}", e)
 

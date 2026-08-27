@@ -17,6 +17,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from app.api.common import client_error
 from app.api.deps import require_admin
 from app.core.logger import log
+from app.db.pool import get_pool
 from app.domain.bazi_engine import extract_bazi_brief
 
 router = APIRouter(prefix="/cases", tags=["Cases"])
@@ -34,16 +35,10 @@ _INSERT_CASE_SQL = (
 )
 
 
-def _get_pool():
-    """复用 postgres_memory 模块级连接池（懒创建）。"""
-    from app.memory.postgres_memory import _get_pool as _pg_get_pool
-    return _pg_get_pool()
-
-
 def ensure_table():
     """确保 cases 表存在（幂等，进程内只执行一次）；不可用返回 False 以回退本地存储。
 
-    cases 表结构由 app.db.user_data._ensure_tables 统一创建，此处直接复用。
+    cases 表结构由 app.db.schema._ensure_tables 统一创建，此处直接复用。
     """
     global _table_ready, _pg_unavailable
     if _table_ready:
@@ -51,8 +46,8 @@ def ensure_table():
     if _pg_unavailable:
         return False
     try:
-        from app.db import user_data
-        user_data._ensure_tables()
+        from app.db.schema import _ensure_tables
+        _ensure_tables()
         _table_ready = True
         log.info("命例表（cases）已就绪")
         return True
@@ -148,7 +143,7 @@ def _row_to_case(row, with_chart: bool = False) -> dict:
 
 def _db_list_cases() -> list[dict[str, Any]]:
     """同步查询命例列表（handler 中经 asyncio.to_thread 调用）。"""
-    with _get_pool().connection() as conn:
+    with get_pool().connection() as conn:
         cur = conn.execute(f"SELECT {_CASE_COLS} FROM cases ORDER BY updated_at DESC")
         return [
             {**_row_to_case(row), "bazi": extract_bazi_brief(_parse_chart(row[9]))}
@@ -183,7 +178,7 @@ async def list_cases():
 
 def _db_create_case(name, tags, birth_time, gender, chart_data, bio, analysis, keypoints, domains) -> str:
     """同步写入新命例，返回新 id。"""
-    with _get_pool().connection() as conn:
+    with get_pool().connection() as conn:
         cur = conn.execute(
             _INSERT_CASE_SQL,
             (str(uuid.uuid4()), name, tags, birth_time, gender, json.dumps(chart_data),
@@ -229,7 +224,7 @@ async def create_case(payload: dict):
 
 def _db_get_case(case_id: str) -> dict[str, Any] | None:
     """同步查询单个命例；不存在返回 None。"""
-    with _get_pool().connection() as conn:
+    with get_pool().connection() as conn:
         cur = conn.execute(f"SELECT {_CASE_COLS} FROM cases WHERE id = %s", (case_id,))
         row = cur.fetchone()
     return _row_to_case(row, with_chart=True) if row else None
@@ -257,7 +252,7 @@ async def get_case(case_id: str):
 
 def _db_update_case(case_id, payload):
     """同步执行命例更新 SQL；无更新字段时抛 ValueError。"""
-    with _get_pool().connection() as conn:
+    with get_pool().connection() as conn:
         updates = []
         params = []
         if "name" in payload:
@@ -323,7 +318,7 @@ async def update_case(case_id: str, payload: dict):
 
 
 def _db_delete_case(case_id: str) -> None:
-    with _get_pool().connection() as conn:
+    with get_pool().connection() as conn:
         conn.execute("DELETE FROM cases WHERE id = %s", (case_id,))
 
 
@@ -344,7 +339,7 @@ async def delete_case(case_id: str):
 
 def _db_export_cases() -> list[dict[str, Any]]:
     """同步导出全部命例。"""
-    with _get_pool().connection() as conn:
+    with get_pool().connection() as conn:
         cur = conn.execute(f"SELECT {_CASE_COLS} FROM cases ORDER BY updated_at DESC")
         return [_row_to_case(row, with_chart=True) for row in cur]
 
@@ -372,7 +367,7 @@ def _db_import_cases(cases) -> tuple[int, int]:
     """同步批量导入命例，返回 (inserted, skipped)。"""
     inserted = 0
     skipped = 0
-    with _get_pool().connection() as conn:
+    with get_pool().connection() as conn:
         for c in cases:
             cid = c.get("id")
             if cid:

@@ -7,8 +7,9 @@ import re
 import uuid
 
 from app.core.logger import log
+from app.db.pool import get_pool
 from app.db.schema import _ensure_tables, _record_error, _safe_json
-from app.memory.postgres_memory import _get_pool
+from app.domain.tables import GAN_WUXING
 
 
 def _chart_hash(birth_time: str, gender: str) -> str:
@@ -25,7 +26,7 @@ def upsert_chart_profile(
     """创建或更新命盘画像，返回 profile id。"""
     _ensure_tables()
     ch = _chart_hash(birth_time, gender)
-    with _get_pool().connection() as conn:
+    with get_pool().connection() as conn:
         row = conn.execute(
             "SELECT id, interaction_count FROM chart_profiles WHERE user_id = %s AND chart_hash = %s",
             (user_id, ch),
@@ -83,7 +84,7 @@ def get_chart_profile(user_id: str, birth_time: str, gender: str) -> dict | None
     """获取指定命盘的画像。"""
     _ensure_tables()
     ch = _chart_hash(birth_time, gender)
-    with _get_pool().connection() as conn:
+    with get_pool().connection() as conn:
         row = conn.execute(
             f"""
             SELECT {_PROFILE_COLUMNS}
@@ -98,7 +99,7 @@ def get_chart_profile(user_id: str, birth_time: str, gender: str) -> dict | None
 def list_chart_profiles_by_user(user_id: str) -> list:
     """列出某用户所有命盘的画像。"""
     _ensure_tables()
-    with _get_pool().connection() as conn:
+    with get_pool().connection() as conn:
         rows = conn.execute(
             f"""
             SELECT {_PROFILE_COLUMNS}
@@ -137,7 +138,7 @@ def update_chart_profile_stats(
         return False
     sets.append("updated_at = NOW()")
     params.extend([user_id, ch])
-    with _get_pool().connection() as conn:
+    with get_pool().connection() as conn:
         cur = conn.execute(
             f"UPDATE chart_profiles SET {', '.join(sets)} WHERE user_id = %s AND chart_hash = %s",
             tuple(params),
@@ -159,7 +160,7 @@ def add_chart_fact(
     """添加一条断事知识记录。"""
     _ensure_tables()
     fid = str(uuid.uuid4())
-    with _get_pool().connection() as conn:
+    with get_pool().connection() as conn:
         conn.execute(
             """
             INSERT INTO chart_facts
@@ -186,7 +187,7 @@ def get_chart_facts(
     if confidence:
         where += " AND confidence = %s"
         params.append(confidence)
-    with _get_pool().connection() as conn:
+    with get_pool().connection() as conn:
         rows = conn.execute(
             f"""
             SELECT id, chart_profile_id, user_id, conversation_id, question,
@@ -228,7 +229,7 @@ def get_chart_facts_for_llm(
     _ensure_tables()
     verified: list[str] = []
     disputed: list[str] = []
-    with _get_pool().connection() as conn:
+    with get_pool().connection() as conn:
         rows = conn.execute(
             """
             SELECT question, answer_snippet, fact_summary, confidence, reason
@@ -268,7 +269,7 @@ def add_chart_case(data: dict) -> str:
     """添加一条结构化案例到 chart_cases 表（用户反馈转换的案例）。"""
     _ensure_tables()
     cid = str(uuid.uuid4())
-    with _get_pool().connection() as conn:
+    with get_pool().connection() as conn:
         conn.execute(
             """
             INSERT INTO chart_cases
@@ -296,7 +297,7 @@ def add_chart_case(data: dict) -> str:
 def delete_chart_case(cid: str) -> bool:
     """删除 chart_cases 表中一条结构化案例（取消案例沉淀用）。返回是否存在并删除。"""
     _ensure_tables()
-    with _get_pool().connection() as conn:
+    with get_pool().connection() as conn:
         cur = conn.execute(
             "DELETE FROM chart_cases WHERE id = %s",
             (cid,),
@@ -314,7 +315,7 @@ def search_chart_cases(domain: str = "", min_rating: int = 4, limit: int = 200) 
         params.append(domain)
     params.append(limit)
     try:
-        with _get_pool().connection() as conn:
+        with get_pool().connection() as conn:
             rows = conn.execute(
                 f"""
                 SELECT id, title, source, question, analysis, domains, features, rating, verified, keywords
@@ -342,15 +343,8 @@ def search_chart_cases(domain: str = "", min_rating: int = 4, limit: int = 200) 
             ]
     except Exception as e:
         log.error("从 chart_cases 读取失败: {}", e)
-        _record_error("user_data.read_chart_cases")
+        _record_error("chart_store.read_chart_cases")
         return []
-
-
-_GAN_WUXING = {
-    "甲": "木", "乙": "木", "丙": "火", "丁": "火",
-    "戊": "土", "己": "土", "庚": "金", "辛": "金",
-    "壬": "水", "癸": "水",
-}
 
 
 def _extract_bazi_features(chart_data: dict | None) -> dict:
@@ -367,7 +361,7 @@ def _extract_bazi_features(chart_data: dict | None) -> dict:
             day_gan = pillars[2].get("gan") if isinstance(pillars[2], dict) else None
             if day_gan:
                 feats["day_master"] = day_gan
-                feats["day_master_wuxing"] = _GAN_WUXING.get(day_gan, "")
+                feats["day_master_wuxing"] = GAN_WUXING.get(day_gan, "")
         analysis_text = chart_data.get("analysisText") or ""
         if analysis_text:
             m = re.search(r"【日主强弱】\s*(\S+)", analysis_text)
@@ -386,7 +380,7 @@ def search_cases_for_rag(limit: int = 200) -> list[dict]:
     """
     _ensure_tables()
     try:
-        with _get_pool().connection() as conn:
+        with get_pool().connection() as conn:
             rows = conn.execute(
                 """
                 SELECT id, name, tags, bio, analysis, keypoints, domains, chart_data
@@ -427,5 +421,5 @@ def search_cases_for_rag(limit: int = 200) -> list[dict]:
         return records
     except Exception as e:
         log.error("从 cases 读取命例失败: {}", e)
-        _record_error("user_data.read_cases")
+        _record_error("chart_store.read_cases")
         return []

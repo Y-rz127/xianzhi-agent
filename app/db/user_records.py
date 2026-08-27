@@ -6,16 +6,16 @@ import uuid
 
 from app.core.logger import log
 from app.db.chart_store import add_chart_case, delete_chart_case
+from app.db.pool import get_pool
 from app.db.schema import _ensure_tables, _safe_json
 from app.domain.bazi_engine import extract_bazi_brief
-from app.memory.postgres_memory import _get_pool
 
 
 def add_favorite(user_id: str, case_id: str) -> str:
     """添加命例收藏（user_id+case_id 唯一，重复收藏不报错），返回收藏记录 id。"""
     _ensure_tables()
     fid = str(uuid.uuid4())
-    with _get_pool().connection() as conn:
+    with get_pool().connection() as conn:
         conn.execute(
             """
             INSERT INTO chart_favorites (id, user_id, case_id)
@@ -34,7 +34,7 @@ def list_favorites(user_id: str) -> list:
     """
     _ensure_tables()
     result = []
-    with _get_pool().connection() as conn:
+    with get_pool().connection() as conn:
         # 联 cases 表（八字命例）
         rows_cases = conn.execute(
             """
@@ -92,7 +92,7 @@ def list_favorites(user_id: str) -> list:
 def remove_favorite(user_id: str, case_id: str) -> bool:
     """取消收藏；返回是否成功删除。"""
     _ensure_tables()
-    with _get_pool().connection() as conn:
+    with get_pool().connection() as conn:
         cur = conn.execute(
             "DELETE FROM chart_favorites WHERE user_id = %s AND case_id = %s",
             (user_id, case_id),
@@ -103,7 +103,7 @@ def remove_favorite(user_id: str, case_id: str) -> bool:
 def is_favorite(user_id: str, case_id: str) -> bool:
     """判断某命例是否已被该用户收藏。"""
     _ensure_tables()
-    with _get_pool().connection() as conn:
+    with get_pool().connection() as conn:
         row = conn.execute(
             "SELECT 1 FROM chart_favorites WHERE user_id = %s AND case_id = %s",
             (user_id, case_id),
@@ -115,7 +115,7 @@ def add_tarot_record(user_id: str, spread: str, question: str, cards: list, inte
     """保存一次塔罗占卜记录，返回记录 id。"""
     _ensure_tables()
     rid = str(uuid.uuid4())
-    with _get_pool().connection() as conn:
+    with get_pool().connection() as conn:
         conn.execute(
             """
             INSERT INTO tarot_records (id, user_id, spread, question, cards, interpretation)
@@ -136,7 +136,7 @@ def add_tarot_record(user_id: str, spread: str, question: str, cards: list, inte
 def list_tarot_records(user_id: str, limit: int = 50) -> list:
     """列出某用户的塔罗记录（默认最近 50 条，倒序）。"""
     _ensure_tables()
-    with _get_pool().connection() as conn:
+    with get_pool().connection() as conn:
         rows = conn.execute(
             """
             SELECT id, spread, question, cards, interpretation, created_at
@@ -160,7 +160,7 @@ def list_tarot_records(user_id: str, limit: int = 50) -> list:
 def delete_tarot_record(user_id: str, rid: str) -> bool:
     """删除一条塔罗记录；返回是否成功删除。"""
     _ensure_tables()
-    with _get_pool().connection() as conn:
+    with get_pool().connection() as conn:
         cur = conn.execute(
             "DELETE FROM tarot_records WHERE user_id = %s AND id = %s", (user_id, rid)
         )
@@ -171,7 +171,7 @@ def add_feedback(user_id: str | None, content: str, contact: str = "") -> str:
     """保存用户问题反馈（user_id 可空，表示匿名），返回反馈 id。"""
     _ensure_tables()
     fid = str(uuid.uuid4())
-    with _get_pool().connection() as conn:
+    with get_pool().connection() as conn:
         conn.execute(
             "INSERT INTO feedback (id, user_id, content, contact) VALUES (%s, %s, %s, %s)",
             (fid, user_id, content, contact or ""),
@@ -182,7 +182,7 @@ def add_feedback(user_id: str | None, content: str, contact: str = "") -> str:
 def list_feedback(limit: int = 200) -> list:
     """列出反馈（联表获取昵称），默认最近 200 条倒序。"""
     _ensure_tables()
-    with _get_pool().connection() as conn:
+    with get_pool().connection() as conn:
         rows = conn.execute(
             """
             SELECT f.id, f.user_id, f.content, f.contact, f.created_at,
@@ -209,7 +209,7 @@ def list_feedback(limit: int = 200) -> list:
 def delete_feedback(fid: str) -> bool:
     """删除一条反馈；返回是否成功删除。"""
     _ensure_tables()
-    with _get_pool().connection() as conn:
+    with get_pool().connection() as conn:
         result = conn.execute(
             "DELETE FROM feedback WHERE id = %s", (fid,)
         )
@@ -230,7 +230,7 @@ def add_answer_feedback(
     if rating not in {"up", "down"}:
         raise ValueError("rating 必须是 up 或 down")
     fid = str(uuid.uuid4())
-    with _get_pool().connection() as conn:
+    with get_pool().connection() as conn:
         conn.execute(
             """
             INSERT INTO answer_feedback
@@ -256,7 +256,7 @@ def list_answer_feedback(limit: int = 200, rating: str | None = None) -> list:
     _ensure_tables()
     where = "WHERE af.rating = %s" if rating in {"up", "down"} else ""
     params = (rating, limit) if where else (limit,)
-    with _get_pool().connection() as conn:
+    with get_pool().connection() as conn:
         rows = conn.execute(
             f"""
             SELECT af.id, af.user_id, af.conversation_id, af.question, af.answer,
@@ -315,7 +315,7 @@ def export_sft_samples(limit: int = 1000, rating: str = "up") -> list[dict]:
 def mark_answer_reviewed(fid: str, reviewer: str = "") -> bool:
     """标记回答反馈为已审核。"""
     _ensure_tables()
-    with _get_pool().connection() as conn:
+    with get_pool().connection() as conn:
         cur = conn.execute(
             "UPDATE answer_feedback SET reviewed = TRUE, reviewed_by = %s WHERE id = %s",
             (reviewer, fid),
@@ -326,7 +326,7 @@ def mark_answer_reviewed(fid: str, reviewer: str = "") -> bool:
 def get_answer_feedback(fid: str) -> dict | None:
     """查询单条回答反馈。"""
     _ensure_tables()
-    with _get_pool().connection() as conn:
+    with get_pool().connection() as conn:
         row = conn.execute(
             """
             SELECT id, user_id, conversation_id, question, answer,
@@ -472,7 +472,7 @@ def promote_to_case(fid: str, reviewer: str = "") -> tuple[str, str] | None:
     cid = add_chart_case(case_data)
     # 回填 answer_feedback.case_id，便于列表展示/幂等/取消
     try:
-        with _get_pool().connection() as conn:
+        with get_pool().connection() as conn:
             conn.execute(
                 "UPDATE answer_feedback SET case_id = %s WHERE id = %s",
                 (cid, fid),
@@ -496,7 +496,7 @@ def unpromote_answer_to_case(fid: str) -> bool:
     if not case_id:
         return False
     deleted = delete_chart_case(case_id)
-    with _get_pool().connection() as conn:
+    with get_pool().connection() as conn:
         conn.execute(
             "UPDATE answer_feedback SET case_id = NULL WHERE id = %s",
             (fid,),
@@ -514,7 +514,7 @@ def export_dpo_samples(limit: int = 500) -> list[dict]:
     用于 DPO 训练：chosen = up 回答, rejected = down 回答。
     """
     _ensure_tables()
-    with _get_pool().connection() as conn:
+    with get_pool().connection() as conn:
         rows = conn.execute(
             f"""
             SELECT question, rating, answer, chart_snapshot

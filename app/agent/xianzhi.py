@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import asyncio
-import threading
 from typing import Optional
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
@@ -31,7 +30,6 @@ from app.agent.prompts import (
 from app.agent.workflow.xianzhi_workflow import (
     WorkflowChartContext,
     XianzhiWorkflow,
-    _dedupe_content,
     build_chart_context,
     classify_question,
     render_full_fact_context,
@@ -41,24 +39,16 @@ from app.core.logger import log
 from app.core.thinking_router import use_thinking
 from app.domain.bazi_engine import find_birth_dates_from_pillars
 from app.memory import create_chat_memory
-from app.tools.bazi import _normalize_birth_time
+from app.tools.bazi import BAZI_BIRTH_TOOLS, _normalize_birth_time
 from app.tools.mcp_client import mcp_manager
-from app.tools.text_clean import clean_think_tags
+from app.tools.text_clean import clean_think_tags, dedupe_content
 
 
 class Xianzhi(ToolCallAgent):
     """先知智能体"""
 
     # 排盘工具名集合：调用这些工具时，从参数中提取 birth_time/gender
-    _BAZI_TOOLS = {
-        "bazi_chart",
-        "bazi_full",
-        "bazi_analysis",
-        "bazi_dayun",
-        "bazi_liunian",
-        "bazi_liuyue",
-        "bazi_liuri",
-    }
+    _BAZI_TOOLS = BAZI_BIRTH_TOOLS
 
     def __init__(
         self,
@@ -374,7 +364,7 @@ class Xianzhi(ToolCallAgent):
         """
         final = (self.final_answer or "").strip()
         if final:
-            return _dedupe_content(final)
+            return dedupe_content(final)
         if self.state == AgentState.ERROR or self._last_error:
             err = (self._last_error or "未知错误").strip()
             log.warning("[xianzhi] 终止于错误: {}", err)
@@ -398,17 +388,21 @@ class Xianzhi(ToolCallAgent):
         history = list(history_snapshot) if history_snapshot is not None else list(self.message_list)
         return self._workflow.answer(user_prompt, self._workflow_context, history, summary)
 
+    def _execute_workflow(self, user_prompt: str, history_snapshot, summary: str) -> str:
+        """执行一轮 workflow 并更新 agent 状态，返回回答文本（同步/异步路径共用）。"""
+        self.state = AgentState.RUNNING
+        self.message_list.append(HumanMessage(content=user_prompt))
+        answer = self._run_workflow_once(user_prompt, history_snapshot, summary)
+        self.final_answer = answer
+        self.message_list.append(AIMessage(content=answer))
+        self.state = AgentState.FINISHED
+        return answer
+
     def _workflow_stream(self, user_prompt: str):
         try:
-            self.state = AgentState.RUNNING
             history_snapshot = list(self.message_list)
             summary = self._get_session_summary()
-            self.message_list.append(HumanMessage(content=user_prompt))
-            answer = self._run_workflow_once(user_prompt, history_snapshot, summary)
-            self.final_answer = answer
-            self.message_list.append(AIMessage(content=answer))
-            self.state = AgentState.FINISHED
-            yield answer
+            yield self._execute_workflow(user_prompt, history_snapshot, summary)
         except Exception as e:
             self.state = AgentState.ERROR
             self._last_error = str(e)
@@ -423,15 +417,10 @@ class Xianzhi(ToolCallAgent):
             if self._cancel_requested():
                 log.info("[xianzhi] workflow 执行前检测到取消，跳过本轮")
                 return
-            self.state = AgentState.RUNNING
             history_snapshot = list(self.message_list)
             # 会话摘要来自 PG 同步查询，放线程池避免阻塞事件循环
             summary = await asyncio.to_thread(self._get_session_summary)
-            self.message_list.append(HumanMessage(content=user_prompt))
-            answer = await asyncio.to_thread(self._run_workflow_once, user_prompt, history_snapshot, summary)
-            self.final_answer = answer
-            self.message_list.append(AIMessage(content=answer))
-            self.state = AgentState.FINISHED
+            answer = await asyncio.to_thread(self._execute_workflow, user_prompt, history_snapshot, summary)
             yield answer
         except Exception as e:
             self.state = AgentState.ERROR
@@ -484,7 +473,7 @@ class Xianzhi(ToolCallAgent):
                 response = self.chat_model.invoke(messages)
                 content = (getattr(response, "content", "") or "").strip()
                 content = clean_think_tags(content)
-                content = _dedupe_content(content) if content else ""
+                content = dedupe_content(content) if content else ""
                 if not content:
                     content = "嗯，我在听，你继续说。"
                 self.final_answer = content
@@ -596,8 +585,10 @@ class Xianzhi(ToolCallAgent):
             ]
             if filtered:
                 self._memory.add(self._conversation_id, filtered)
-        # 每 6 轮对话（一问一答=1轮，约12条消息）触发摘要（异步，不阻塞主流程）
-        self._maybe_summarize()
+        # 每 6 轮对话（一问一答=1轮，约12条消息）触发摘要（异步线程，不阻塞主流程）
+        from app.memory.summarizer import maybe_summarize
+
+        maybe_summarize(self._memory, self.chat_model, self._conversation_id, self.message_list)
 
     def _get_session_summary(self) -> str:
         """从会话元数据中获取历史摘要。"""
@@ -606,74 +597,6 @@ class Xianzhi(ToolCallAgent):
         except Exception as e:
             log.warning("获取会话摘要失败: {}", e)
             return ""
-
-    def _maybe_summarize(self):
-        """每 6 轮对话触发一次增量摘要（一问一答=1轮，约12条消息；后台线程异步，不阻塞当次请求）。
-
-        阈值判断与数据快照在主线程完成（线程安全）；
-        LLM 调用与落库放进 daemon 线程，避免拖慢用户响应。
-        摘要上限 600 字，增量累积：旧摘要 + 最近 12 条（约6轮）消息 → 新摘要。
-        """
-        try:
-            msg_count = self._memory.get_message_count(self._conversation_id)
-            last_summary_count = self._memory.get_last_summary_count(self._conversation_id)
-            new_since_last = msg_count - last_summary_count
-            if new_since_last < 12:
-                return
-
-            # ---- 主线程：先取线程安全所需的快照（避免线程内读共享状态）----
-            old_summary = self._get_session_summary()
-            recent = self.message_list[-12:]
-            recent_text = "\n".join(
-                f"{m.__class__.__name__.replace('Message', '')}: {str(getattr(m, 'content', ''))[:300]}"
-                for m in recent
-                if str(getattr(m, "content", "")).strip()
-            )
-
-            # ---- 后台线程：执行 LLM 摘要与落库 ----
-            def _run():
-                """调用摘要模型，基于旧摘要与最近对话生成不超过 600 字的增量摘要。
-
-                只保留身份/人生事件、对前次分析的修正、待确认事项；丢弃闲聊与非命理内容，
-                以缓解长会话的上下文膨胀。
-                """
-                try:
-                    prompt = (
-                        "你是一个会话摘要助手。请根据【旧摘要】和【最近对话】，生成不超过 600 字的增量摘要。\n"
-                        "只保留以下事实，忽略闲聊、问候、天气、发牢骚、流水账、长文本等非命理内容：\n"
-                        "- 用户身份/人生事件：年龄、职业、婚姻、健康、已确认的断事结论；\n"
-                        '- 用户对之前分析的修正或反馈（如"上次说我身弱不对"）——必须保留，避免重复旧错；\n'
-                        '- 待确认事项（如"用户给了八字但未确认出生日期"）。\n'
-                        "合并同类项，丢弃过时或冗余信息，保持简洁。\n\n"
-                        f"【旧摘要】\n{old_summary or '（无）'}\n\n"
-                        f"【最近对话】\n{recent_text}\n\n"
-                        "请输出新摘要（不超过 600 字）："
-                    )
-                    log.info("[摘要] 会话 {} 开始生成摘要...", self._conversation_id)
-                    resp = self.chat_model.invoke(
-                        [
-                            SystemMessage(content="你是会话摘要助手，只输出摘要文本，不输出任何解释。"),
-                            HumanMessage(content=prompt),
-                        ]
-                    )
-                    new_summary = (getattr(resp, "content", "") or "").strip()
-                    if new_summary and len(new_summary) > 10:
-                        # 确保不超过 600 字
-                        if len(new_summary) > 600:
-                            new_summary = new_summary[:600]
-                        self._memory.save_summary(self._conversation_id, new_summary, msg_count)
-                        log.info(
-                            "[摘要] 会话 {} 已生成摘要 ({}字, 消息数={})",
-                            self._conversation_id,
-                            len(new_summary),
-                            msg_count,
-                        )
-                except Exception as e:
-                    log.warning("会话摘要生成失败（后台线程）: {}", e)
-
-            threading.Thread(target=_run, daemon=True).start()
-        except Exception as e:
-            log.warning("会话摘要触发失败: {}", e)
 
     def cleanup(self):
         # 持久化失败不应阻断状态重置，否则实例永久卡死在 RUNNING

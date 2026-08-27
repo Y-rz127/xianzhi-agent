@@ -9,7 +9,7 @@ import re
 
 from lunar_python import Lunar, Solar
 
-from app.domain.bazi_engine import parse_birth
+from app.domain.chart_builder import parse_birth
 
 # 传统时辰（地支）→ 小时映射，子时跨 23-1 点按早子时处理
 _ZHI_HOUR = {

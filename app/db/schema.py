@@ -5,7 +5,7 @@ import json
 
 from app.core.logger import log
 from app.core.observability import record_error as _record_error  # 统一实现，消除跨模块重复定义
-from app.memory.postgres_memory import _get_pool
+from app.db.pool import get_pool
 
 _READY = False
 
@@ -22,11 +22,11 @@ def _ensure_tables():
     except Exception as e:
         # 建表失败会拖垮后续 CRUD，必须错误级可见；_READY 保持 False 下次重试
         log.error("用户私有数据表创建失败: {}", e)
-        _record_error("user_data.ensure_tables")
+        _record_error("schema.ensure_tables")
 
 
 def _do_ensure_tables():
-    with _get_pool().connection() as conn:
+    with get_pool().connection() as conn:
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS bazi_profiles (

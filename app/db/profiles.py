@@ -5,15 +5,15 @@ import json
 import uuid
 from typing import Optional
 
+from app.db.pool import get_pool
 from app.db.schema import _ensure_tables
-from app.memory.postgres_memory import _get_pool
 
 
 def create_profile(user_id: str, data: dict) -> str:
     """创建一条八字档案，返回新记录 id。"""
     _ensure_tables()
     pid = str(uuid.uuid4())
-    with _get_pool().connection() as conn:
+    with get_pool().connection() as conn:
         conn.execute(
             """
             INSERT INTO bazi_profiles
@@ -38,7 +38,7 @@ def create_profile(user_id: str, data: dict) -> str:
 def list_profiles(user_id: str) -> list:
     """列出某用户全部八字档案（按创建时间倒序）。"""
     _ensure_tables()
-    with _get_pool().connection() as conn:
+    with get_pool().connection() as conn:
         rows = conn.execute(
             """
             SELECT id, name, relation, birth_time, gender, sect, yun_sect, chart_data, created_at
@@ -52,7 +52,7 @@ def list_profiles(user_id: str) -> list:
 def get_profile(user_id: str, pid: str) -> Optional[dict]:
     """查询单条八字档案；不属于该用户或不存在时返回 None。"""
     _ensure_tables()
-    with _get_pool().connection() as conn:
+    with get_pool().connection() as conn:
         row = conn.execute(
             """
             SELECT id, name, relation, birth_time, gender, sect, yun_sect, chart_data, created_at
@@ -66,7 +66,7 @@ def get_profile(user_id: str, pid: str) -> Optional[dict]:
 def update_profile(user_id: str, pid: str, data: dict) -> bool:
     """更新八字档案字段；返回是否命中并修改了记录。"""
     _ensure_tables()
-    with _get_pool().connection() as conn:
+    with get_pool().connection() as conn:
         cur = conn.execute(
             """
             UPDATE bazi_profiles SET
@@ -92,7 +92,7 @@ def update_profile(user_id: str, pid: str, data: dict) -> bool:
 def delete_profile(user_id: str, pid: str) -> bool:
     """删除八字档案；返回是否成功删除。"""
     _ensure_tables()
-    with _get_pool().connection() as conn:
+    with get_pool().connection() as conn:
         cur = conn.execute(
             "DELETE FROM bazi_profiles WHERE user_id = %s AND id = %s", (user_id, pid)
         )

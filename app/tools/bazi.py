@@ -34,6 +34,19 @@ from app.domain.time_parse import (
 )
 from app.tools.cache import bazi_cache
 
+# 携带 birth_time/gender 参数的排盘工具名：agent 会话内出生信息提取与
+# 会话历史回溯（app.agent.xianzhi / app.memory.postgres_memory）共用同源常量，
+# 避免名单在多处重复维护而漂移。bazi_hehun 参数为 *_a/*_b 不再此列。
+BAZI_BIRTH_TOOLS = frozenset({
+    "bazi_chart",
+    "bazi_full",
+    "bazi_analysis",
+    "bazi_dayun",
+    "bazi_liunian",
+    "bazi_liuyue",
+    "bazi_liuri",
+})
+
 # 节日 → 农历月日（用于把"春节/端午/中秋"等转成农历日期；冬至按节气单独处理）
 _FESTIVAL_MAP = {
     "春节": ("正", "初一"), "元旦": ("正", "初一"),

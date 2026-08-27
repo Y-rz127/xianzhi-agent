@@ -14,7 +14,7 @@ import uuid
 from typing import Optional
 
 from app.core.logger import log
-from app.memory.postgres_memory import _get_pool
+from app.db.pool import get_pool
 
 _TABLE_READY = False
 
@@ -49,7 +49,7 @@ def _ensure_table():
     if _TABLE_READY:
         return
     try:
-        with _get_pool().connection() as conn:
+        with get_pool().connection() as conn:
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS users (
@@ -87,7 +87,7 @@ def create_user(nickname: str, password: str) -> dict:
     password_hash = _hash_password(password, salt)
     token = secrets.token_hex(32)
     uid = str(uuid.uuid4())
-    with _get_pool().connection() as conn:
+    with get_pool().connection() as conn:
         # SELECT-then-INSERT 存在竞态窗口，同昵称并发注册由下方 UNIQUE 约束兜底
         exists = conn.execute(
             "SELECT id FROM users WHERE nickname = %s", (nickname,)
@@ -123,7 +123,7 @@ def authenticate(nickname: str, password: str) -> Optional[dict]:
     """校验昵称+密码；成功返回含 token 的用户字典，失败返回 None。"""
     nickname = (nickname or "").strip()
     _ensure_table()
-    with _get_pool().connection() as conn:
+    with get_pool().connection() as conn:
         row = conn.execute(
             "SELECT id, nickname, avatar, password_hash, password_salt, token FROM users WHERE nickname = %s",
             (nickname,),
@@ -152,7 +152,7 @@ def get_by_token(token: str) -> Optional[dict]:
         return None
     _ensure_table()
     try:
-        with _get_pool().connection() as conn:
+        with get_pool().connection() as conn:
             row = conn.execute(
                 "SELECT id, nickname, avatar FROM users WHERE token = %s", (token,)
             ).fetchone()
@@ -174,7 +174,7 @@ def get_by_id(uid: str) -> Optional[dict]:
     """按用户 id 查询公开用户字典；失败返回 None。"""
     _ensure_table()
     try:
-        with _get_pool().connection() as conn:
+        with get_pool().connection() as conn:
             row = conn.execute(
                 "SELECT id, nickname, avatar FROM users WHERE id = %s", (uid,)
             ).fetchone()
@@ -214,7 +214,7 @@ def update_user(uid: str, nickname: str = None, avatar: str = None, password: st
     if not sets:
         raise ValueError("没有可更新的字段")
     params.append(uid)
-    with _get_pool().connection() as conn:
+    with get_pool().connection() as conn:
         if nickname is not None:
             dup = conn.execute(
                 "SELECT id FROM users WHERE nickname = %s AND id <> %s", (nickname, uid)
@@ -230,7 +230,7 @@ def update_user(uid: str, nickname: str = None, avatar: str = None, password: st
 def list_users(limit: int = 200, offset: int = 0) -> list:
     """管理后台：列出用户（含统计）。"""
     _ensure_table()
-    with _get_pool().connection() as conn:
+    with get_pool().connection() as conn:
         rows = conn.execute(
             """
             SELECT id, nickname, avatar, created_at, last_active_at
@@ -253,7 +253,7 @@ def list_users(limit: int = 200, offset: int = 0) -> list:
 def count_users() -> int:
     """返回用户总数。"""
     _ensure_table()
-    with _get_pool().connection() as conn:
+    with get_pool().connection() as conn:
         row = conn.execute("SELECT COUNT(*) FROM users").fetchone()
         return int(row[0]) if row else 0
 
@@ -261,7 +261,7 @@ def count_users() -> int:
 def create_or_get_by_wxopenid(wx_openid: str, nickname: str = None) -> dict:
     """微信登录：按 openid 查找用户，不存在则自动注册（生成随机昵称）。返回含 token 的用户字典。"""
     _ensure_table()
-    with _get_pool().connection() as conn:
+    with get_pool().connection() as conn:
         row = conn.execute(
             "SELECT id, nickname, avatar FROM users WHERE wx_openid = %s", (wx_openid,)
         ).fetchone()

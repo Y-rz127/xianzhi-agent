@@ -18,38 +18,11 @@ from langchain_core.messages import BaseMessage, messages_from_dict
 from app.core.config import settings
 from app.core.logger import log
 from app.core.observability import record_error as _record_error
+from app.db.pool import close_pool as _close_pg_pool, get_pool as _get_pool
 
-# 模块级连接池（懒创建，线程安全）
-_pg_pool = None
-_pool_lock = threading.Lock()
+# 会话 schema 初始化状态（仅 memory 层会话表；业务表统一由 app.db.schema 负责）
+_schema_lock = threading.Lock()
 _schema_ready = False
-
-
-def _check_connection(conn) -> bool:
-    """借出连接前探活：失败则丢弃重建（服务端超时断开的死连接不可外借）。"""
-    try:
-        conn.execute("SELECT 1")
-        return True
-    except Exception as e:  # noqa: BLE001 - 任何异常都视为连接不可用
-        log.warning("连接池健康检查失败，丢弃该连接: {}", e)
-        return False
-
-
-def _get_pool():
-    global _pg_pool
-    with _pool_lock:  # 双重检查，避免并发重复建池
-        if _pg_pool is None:
-            from psycopg_pool import ConnectionPool
-            _pg_pool = ConnectionPool(
-                settings.pg_dsn(),
-                min_size=1,
-                max_size=5,
-                kwargs={"autocommit": True},
-                check=_check_connection,  # 借出前探活，避免借到被服务端断开的死连接
-                max_lifetime=1800,  # 空闲连接 30 分钟主动回收，降低踩到 PG 空闲超时的概率
-                open=True,
-            )
-        return _pg_pool
 
 
 def _ensure_schema():
@@ -58,7 +31,7 @@ def _ensure_schema():
     if _schema_ready:
         return
     pool = _get_pool()  # 先取池（内部自锁），避免嵌套持锁
-    with _pool_lock:
+    with _schema_lock:
         if _schema_ready:
             return
         try:
@@ -94,16 +67,9 @@ def _ensure_schema():
 
 def close_global_conn():
     """关闭模块级连接池（应用退出时调用）。"""
-    global _pg_pool, _schema_ready
-    with _pool_lock:
-        if _pg_pool is not None:
-            try:
-                _pg_pool.close()
-            except Exception:
-                pass
-            finally:
-                _pg_pool = None
-                _schema_ready = False
+    global _schema_ready
+    _close_pg_pool()
+    _schema_ready = False
 
 
 class PostgresChatMemory:
@@ -500,19 +466,16 @@ def get_messages(session_id: str) -> list:
         return []
 
 
-# 排盘工具名集合（与 app.agent.xianzhi._BAZI_TOOLS 保持一致）
-_BAZI_TOOL_NAMES = {
-    "bazi_chart", "bazi_analysis", "bazi_dayun", "bazi_liunian",
-    "bazi_liuyue", "bazi_liuri", "bazi_hehun", "bazi_full",
-}
-
-
 def get_birth_info_from_session(session_id: str) -> dict | None:
     """从会话历史中的排盘工具调用参数提取出生信息。
 
     用户可能用农历/节日/时辰等自然语言输入（如"2004年端午节 辰时 男"），
     前端正则无法提取；这里从 AIMessage 的 tool_calls 中取 LLM 已解析的标准 birth_time/gender。
     """
+    # 排盘工具名单复用 app.tools.bazi.BAZI_BIRTH_TOOLS（含 birth_time 参数的工具全集），
+    # 不再本地维护一份拷贝，避免与 agent 层名单漂移
+    from app.tools.bazi import BAZI_BIRTH_TOOLS
+
     try:
         session_uuid = _resolve_session_uuid(session_id)
         with _get_pool().connection() as conn:
@@ -529,7 +492,7 @@ def get_birth_info_from_session(session_id: str) -> dict | None:
             for tc in tool_calls:
                 name = tc.get("name", "")
                 args = tc.get("args", {}) or {}
-                if name in _BAZI_TOOL_NAMES:
+                if name in BAZI_BIRTH_TOOLS:
                     bt = args.get("birth_time")
                     gd = args.get("gender")
                     if bt and gd:

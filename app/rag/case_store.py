@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 
 from app.core.logger import log
 from app.domain.bazi_engine import BaziChart
-from app.rag.vector_store import _keyword_overlap
+from app.rag.relevance import keyword_overlap
 
 
 @dataclass(frozen=True)
@@ -43,11 +43,11 @@ def _to_record(item: dict, *, content_key: str, default_source: str, default_rat
 def _read_db_cases() -> list[CaseRecord]:
     """从 PostgreSQL 读取相似命例：cases（命理库八字命例）+ chart_cases（用户反馈结构化案例）。"""
     try:
-        from app.db import user_data
+        from app.db.chart_store import search_cases_for_rag, search_chart_cases
         records = [_to_record(item, content_key="content", default_source="cases", default_rating=5)
-                   for item in user_data.search_cases_for_rag(limit=200)]
+                   for item in search_cases_for_rag(limit=200)]
         records += [_to_record(item, content_key="analysis", default_source="chart_cases", default_rating=4)
-                    for item in user_data.search_chart_cases(limit=200)]
+                    for item in search_chart_cases(limit=200)]
         return [r for r in records if r is not None]
     except Exception as e:
         log.warning("从 DB 加载案例失败: {}", e)
@@ -74,7 +74,7 @@ class CaseLibrary:
         strength = chart.wuxing.strength or ""
         scored: list[tuple[float, CaseRecord]] = []
         for record in records:
-            score = _keyword_overlap(question, record.title + "\n" + record.content) * 3
+            score = keyword_overlap(question, record.title + "\n" + record.content) * 3
             if record.question_domain == domain:
                 score += 1.5
             elif record.question_domain == "general":

@@ -122,16 +122,16 @@ def get_chart_facts_text(ctx: WorkflowChartContext) -> str:
     if not ctx.birth_time or not ctx.gender:
         return ""
     try:
-        from app.db import user_data
+        from app.db.chart_store import get_chart_facts_for_llm, get_chart_profile
 
-        profile = user_data.get_chart_profile(
+        profile = get_chart_profile(
             getattr(ctx, "user_id", "") or "",
             ctx.birth_time,
             ctx.gender,
         )
         if not profile:
             return ""
-        verified, disputed = user_data.get_chart_facts_for_llm(profile["id"], limit=6)
+        verified, disputed = get_chart_facts_for_llm(profile["id"], limit=6)
         lines = []
         if verified:
             lines.append("【已验证断事】以下均为用户确认过的历史事实，可直接引用：")

@@ -1,358 +1,43 @@
-"""RAG 向量知识库管理：加载命理知识 markdown，切分、向量化、入库并提供检索。
+"""向量库管理：构建/加载知识索引并提供检索接口（含 TTL 缓存与 rerank）。
 
 - chroma：本地嵌入式（兜底使用，开箱即用）
 - postgres：PostgreSQL + pgvector（默认）
 
-Embedding 优先阿里云 DashScope text-embedding-v2，不可用时按配置回退本地 HuggingFace。
-
-成本控制：
-- 文档指纹（源文件内容 hash + embedding 模型 + 向量库类型）持久化到本地与 PG，
-  指纹未变时直接加载已有索引，零 embedding API 调用；
-- 检索结果带 TTL 的 LRU 缓存，同一 query 短期内不重复检索。
+嵌入模型、文档切分、指纹持久化分别在 embeddings.py / knowledge.py / fingerprint.py，
+本模块只负责"索引的生命周期与检索外观"。
 """
+
 from __future__ import annotations
 
-import hashlib
-import json
-import re
 import threading
 import time
 from collections import OrderedDict
-from pathlib import Path
 
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
-from langchain_text_splitters import RecursiveCharacterTextSplitter, MarkdownHeaderTextSplitter
 
 from app.core.config import settings
 from app.core.logger import log
+from app.rag.embeddings import _select_embeddings
+from app.rag.fingerprint import is_up_to_date, load as _load_fingerprint, save as _save_fingerprint
+from app.rag.knowledge import (
+    CHUNK_OVERLAP,
+    CHUNK_SIZE,
+    DOC_TYPE_WEIGHT,
+    META_VERSION,
+    docs_hash,
+    load_knowledge_docs,
+    split_chunks,
+)
+from app.rag.relevance import keyword_overlap
 
-KNOWLEDGE_DIR = Path(__file__).parent / "knowledge_docs"
-_FINGERPRINT_FILE = "knowledge_fingerprint.json"
 _SEARCH_CACHE_MAX = 200
-
-# 切分参数纳入文档指纹，变更后自动重建索引，避免新旧 chunk 混用
-CHUNK_SIZE = 600
-CHUNK_OVERLAP = 120
-# 元数据版本：chunk metadata 结构变更时递增，触发向量库重建（如新增 doc_type 字段）
-_META_VERSION = 2
-
-
-class BatchEmbeddings(Embeddings):
-    """把大批量 embed_documents 拆成小批次，规避 DashScope 单次 ≤20 条限制。"""
-
-    def __init__(self, wrapped: Embeddings, batch_size: int = 20):
-        self._wrapped = wrapped
-        self._batch_size = batch_size
-
-    def embed_documents(self, texts: list[str]) -> list[list[float]]:
-        result: list[list[float]] = []
-        for i in range(0, len(texts), self._batch_size):
-            result.extend(self._wrapped.embed_documents(texts[i:i + self._batch_size]))
-        return result
-
-    def embed_query(self, text: str) -> list[float]:
-        return self._wrapped.embed_query(text)
-
-
-def get_embeddings() -> Embeddings:
-    """DashScope 文本嵌入模型（批量调用包一层 BatchEmbeddings）。"""
-    from langchain_community.embeddings import DashScopeEmbeddings
-    return BatchEmbeddings(DashScopeEmbeddings(
-        model=settings.embedding_model,
-        max_retries=3,
-        dashscope_api_key=settings.embedding_api_key,
-    ))
-
-
-def _get_local_embeddings() -> Embeddings:
-    """本地 HuggingFace embedding（DashScope 不可用时的回退）。"""
-    try:
-        from langchain_community.embeddings import HuggingFaceEmbeddings
-    except ImportError as e:
-        raise RuntimeError(
-            "本地 embedding 回退 sentence-transformers") from e
-    return HuggingFaceEmbeddings(model_name=settings.embedding_local_model)
-
-
-def _select_embeddings() -> tuple[Embeddings, str]:
-    """选择可用 embedding，返回 (embeddings, embedding_id)。
-
-    优先 DashScope；实测调用失败且允许回退时切换本地模型。
-    embedding_id 参与文档指纹，换模型后指纹不匹配会自动重建索引，
-    保证查询向量与入库向量来自同一模型。
-    """
-    dashscope = get_embeddings()
-    try:
-        dashscope.embed_query("ping")
-        return dashscope, "dashscope:{}".format(settings.embedding_model)
-    except Exception as e:
-        if not settings.embedding_local_fallback:
-            raise
-        log.warning(
-            "DashScope embedding 不可用（{}），回退本地模型 {}",
-            e, settings.embedding_local_model,
-        )
-        local = _get_local_embeddings()
-        local.embed_query("ping")  # 触发模型下载/加载，不可用则抛错
-        return local, "local:{}".format(settings.embedding_local_model)
-
-
-# 文档类型 → rerank 权重：断法/规则卡优先，模板库降权（密集术语清单易虚高命中）
-_DOC_TYPE_WEIGHT = {
-    "rule": 1.15,       # 断法类（XX断法.md / 规则卡.md），领域知识核心
-    "theory": 1.0,      # 基础理论类（01~08 前缀）
-    "classic": 1.0,     # 古籍类
-    "case": 0.95,       # 命例案例库
-    "ref": 0.9,         # 术语白话对照表
-    "process": 0.8,     # 标准分析流程
-    "template": 0.7,    # 问答模板库（全局前置约束密集术语清单，易虚高命中）
-}
-
-
-def _infer_doc_type(source: str) -> str:
-    """根据知识库文件名推断文档类型，用于 rerank 加权。"""
-    name = source.lower()
-    if name.startswith("古籍"):
-        return "classic"
-    # 断法/规则卡类：文件名含断法关键词，或序号 ≥10 的实战断事文档
-    _RULE_KEYWORDS = ("断法", "规则卡", "格局", "官非", "性格", "贫富", "男女命", "流月流日")
-    if any(kw in name for kw in _RULE_KEYWORDS):
-        return "rule"
-    if "模板库" in name:
-        return "template"
-    if "术语" in name:
-        return "ref"
-    if "命例" in name or "案例" in name:
-        return "case"
-    if "流程" in name:
-        return "process"
-    return "theory"
-
-
-def _load_knowledge_docs() -> list[Document]:
-    """加载 knowledge_docs 目录下全部 markdown 文档。"""
-    docs: list[Document] = []
-    if not KNOWLEDGE_DIR.exists():
-        log.warning("知识库目录不存在: {}", KNOWLEDGE_DIR)
-        return docs
-    for md in sorted(KNOWLEDGE_DIR.glob("*.md")):
-        text = md.read_text(encoding="utf-8")
-        doc_type = _infer_doc_type(md.name)
-        docs.append(Document(page_content=text, metadata={
-            "source": md.name, "doc_type": doc_type,
-        }))
-    log.info("加载命理知识文档 {} 篇", len(docs))
-    return docs
-
-
-def _split_chunks(docs: list[Document]) -> list[Document]:
-    """两阶段切分：先按 markdown 标题（一/二级）切片，再递归字符切分到 ≤600 字。
-
-    阶段一 MarkdownHeaderTextSplitter：只切到二级标题，避免三级碎片过细稀释主题；
-    该版本仅暴露 split_text（入参为字符串），返回的 Document 只带标题层级元数据、
-    不含原 source/doc_type，需手动合并补回。
-    阶段二 RecursiveCharacterTextSplitter：中文分隔符优先
-    （段落→换行→句号→分号→逗号→空格→硬切），仅在单个小节内部拼装，跨小节语义不混杂。
-    每个 chunk 前置 [文档标题｜一级标题｜二级标题] 上下文，兼容 retrieval 的前缀对齐逻辑。
-    """
-    header_splitter = MarkdownHeaderTextSplitter(
-        headers_to_split_on=[("#", "一级标题"), ("##", "二级标题")],
-        strip_headers=True,
-    )
-    header_docs: list[Document] = []
-    for doc in docs:
-        for piece in header_splitter.split_text(doc.page_content):
-            merged = {**doc.metadata, **piece.metadata}  # 保留 source/doc_type + 注入标题层级
-            header_docs.append(Document(page_content=piece.page_content, metadata=merged))
-    header_docs = [d for d in header_docs if d.page_content.strip()]
-    splitter = RecursiveCharacterTextSplitter(
-        chunk_size=CHUNK_SIZE,
-        chunk_overlap=CHUNK_OVERLAP,
-        separators=["\n\n", "\n", "。", "；", "，", " ", ""],
-    )
-    chunks = splitter.split_documents(header_docs)
-    # 注入标题上下文：文档标题置首 + 章节层级（与 retrieval 检索前缀对齐）
-    for chunk in chunks:
-        md = chunk.metadata
-        source = md.get("source", "")
-        title = source.replace(".md", "")
-        if "_" in title:
-            title = title.split("_", 1)[-1]  # 去掉序号前缀，如 "11_婚恋关系规则卡" → "婚恋关系规则卡"
-        parts = [title]
-        for h in (md.get("一级标题"), md.get("二级标题")):
-            if h and h not in parts:  # 去重：文档标题常与 # 一级标题同名
-                parts.append(h)
-        chunk.page_content = "[" + "｜".join(parts) + "]\n" + chunk.page_content
-    log.info("切分为 {} 个知识片段（两阶段：标题切片→递归切分）", len(chunks))
-    return chunks
-
-
-def _bigrams(s: str) -> set[str]:
-    """提取字符级 2-gram（去空白），用于轻量相关性打分。"""
-    s = re.sub(r"\s+", "", s or "")
-    return {s[i:i + 2] for i in range(len(s) - 1)}
-
-
-def _keyword_overlap(query: str, text: str) -> float:
-    """query 对 text 的 2-gram 覆盖率：query 中有多少比例的 2-gram 出现在 text 中。
-
-    相比 Jaccard（len(bq & bt) / len(bq | bt)），覆盖率不受 text 长度惩罚：
-    350 字 chunk 有 ~349 个 2-gram，query 只有 4 个，Jaccard 全命中也仅 0.01；
-    覆盖率全命中则为 1.0，能真实反映 query 与 chunk 的相关性。
-    """
-    bq, bt = _bigrams(query), _bigrams(text)
-    if not bq or not bt:
-        return 0.0
-    return len(bq & bt) / len(bq)
-
-
-def _docs_hash() -> str:
-    """对知识库全部源文件内容计算哈希。"""
-    h = hashlib.sha256()
-    if KNOWLEDGE_DIR.exists():
-        for md in sorted(KNOWLEDGE_DIR.glob("*.md")):
-            h.update(md.name.encode("utf-8"))
-            h.update(md.read_bytes())
-    return h.hexdigest()
-
-
-def _fingerprint_path() -> Path:
-    return settings.vector_db_dir / _FINGERPRINT_FILE
-
-
-# 指纹持久化到 PostgreSQL：容器重启会重置本地文件系统，原指纹文件丢失会导致每次启动
-# 误判"需全量重建"，进而重复 embedding 全部知识片段（约 761 个）。PG 中向量索引本身
-# 已持久，只要指纹存活，重启即可直接复用现成索引、零 embedding。本地文件保留为兜底
-# （首次迁移 / PG 不可用降级）。
-_fp_pool = None
-_fp_lock = threading.Lock()
-
-
-def _fp_pool_get():
-    global _fp_pool
-    if _fp_pool is None:
-        with _fp_lock:
-            if _fp_pool is None:
-                from psycopg_pool import ConnectionPool
-
-                def _check(c):
-                    try:
-                        c.execute("SELECT 1")
-                        return True
-                    except Exception:
-                        return False
-
-                _fp_pool = ConnectionPool(
-                    settings.pg_dsn(),
-                    min_size=1,
-                    max_size=2,
-                    kwargs={"autocommit": True},
-                    check=_check,
-                    max_lifetime=1800,
-                    open=True,
-                )
-    return _fp_pool
-
-
-def close_fp_pool() -> None:
-    """应用关闭时显式关闭指纹连接池，避免连接泄漏。"""
-    global _fp_pool
-    with _fp_lock:
-        if _fp_pool is not None:
-            try:
-                _fp_pool.close()
-            except Exception as e:
-                log.warning("关闭 RAG 指纹连接池失败: {}", e)
-            finally:
-                _fp_pool = None
-
-
-def _fp_ensure_table(conn) -> None:
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS rag_fingerprint ("
-        " id smallint PRIMARY KEY DEFAULT 1,"
-        " data jsonb NOT NULL,"
-        " updated_at timestamptz DEFAULT now())"
-    )
-
-
-def _load_fingerprint_pg() -> dict | None:
-    try:
-        pool = _fp_pool_get()
-        with pool.connection() as conn:
-            _fp_ensure_table(conn)
-            row = conn.execute("SELECT data FROM rag_fingerprint WHERE id=1").fetchone()
-            if row and row[0] is not None:
-                return row[0] if isinstance(row[0], dict) else json.loads(row[0])
-    except Exception as e:
-        log.warning("PG 指纹读取失败，回退本地文件: {}", e)
-    return None
-
-
-def _save_fingerprint_pg(data: dict) -> None:
-    try:
-        pool = _fp_pool_get()
-        with pool.connection() as conn:
-            _fp_ensure_table(conn)
-            conn.execute(
-                "INSERT INTO rag_fingerprint (id, data, updated_at) "
-                "VALUES (1, %(data)s::jsonb, now()) "
-                "ON CONFLICT (id) DO UPDATE SET data=%(data)s::jsonb, updated_at=now()",
-                {"data": json.dumps(data, ensure_ascii=False)},
-            )
-    except Exception as e:
-        log.warning("PG 指纹写入失败（不影响启动，下次从本地文件恢复）: {}", e)
-
-
-def _load_fingerprint() -> dict | None:
-    fp = _load_fingerprint_pg()  # 优先 PG：容器重启后本地文件会被清空
-    if fp:
-        return fp
-    p = _fingerprint_path()  # 回退本地文件（兼容首次迁移 / PG 不可用降级）
-    if not p.exists():
-        return None
-    try:
-        return json.loads(p.read_text(encoding="utf-8"))
-    except Exception:
-        return None
-
-
-def _save_fingerprint(docs_hash: str, embedding_id: str, store_type: str,
-                      chunk_size: int, chunk_overlap: int, meta_version: int = 0) -> None:
-    data = {
-        "docs_hash": docs_hash,
-        "embedding_id": embedding_id,
-        "store_type": store_type,
-        "chunk_size": chunk_size,
-        "chunk_overlap": chunk_overlap,
-        "meta_version": meta_version,
-        "updated_at": time.time(),
-    }
-    p = _fingerprint_path()
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    _save_fingerprint_pg(data)  # 同时持久化到 PG，避免容器重启后丢失
-
-
-def _is_up_to_date(docs_hash: str, embedding_id: str, store_type: str,
-                   chunk_size: int, chunk_overlap: int, meta_version: int = 0) -> bool:
-    fp = _load_fingerprint()
-    if not fp:
-        return False
-    return (
-        fp.get("docs_hash") == docs_hash
-        and fp.get("embedding_id") == embedding_id
-        and fp.get("store_type") == store_type
-        and fp.get("chunk_size") == chunk_size
-        and fp.get("chunk_overlap") == chunk_overlap
-        and fp.get("meta_version", 0) == meta_version
-    )
 
 
 def _build_chroma(chunks: list[Document], embeddings: Embeddings):
     """Chroma 本地持久化向量库（全量重建）。"""
     from langchain_chroma import Chroma
+
     store = Chroma.from_documents(
         documents=chunks,
         embedding=embeddings,
@@ -366,6 +51,7 @@ def _build_chroma(chunks: list[Document], embeddings: Embeddings):
 def _load_chroma(embeddings: Embeddings):
     """加载已有 Chroma 索引（指纹一致时调用，零 embedding 调用）。"""
     from langchain_chroma import Chroma
+
     store = Chroma(
         collection_name="xianzhi_knowledge",
         embedding_function=embeddings,
@@ -387,6 +73,7 @@ def _build_postgres(chunks: list[Document], embeddings: Embeddings):
     pre_delete_collection=True 保证重建时以最新文档覆盖。
     """
     from langchain_postgres import PGVector
+
     store = PGVector.from_documents(
         documents=chunks,
         embedding=embeddings,
@@ -402,6 +89,7 @@ def _build_postgres(chunks: list[Document], embeddings: Embeddings):
 def _load_postgres(embeddings: Embeddings):
     """加载已有 pgvector 索引（指纹一致时调用）。"""
     from langchain_postgres import PGVector
+
     store = PGVector(
         embeddings=embeddings,
         collection_name=settings.postgres_collection,
@@ -434,10 +122,10 @@ def _build_vector_store(embeddings: Embeddings, embedding_id: str, force: bool =
     指纹记录实际生效类型，下次启动优先按其直接复用索引，避免对不可用后端反复重试、每次全量重建。
     当配置切回高优先级后端（如 postgres 恢复可用）时会自动触发全量重建，无需手动 force。
     """
-    docs = _load_knowledge_docs()
+    docs = load_knowledge_docs()
     if not docs:
         return None, ""
-    docs_hash = _docs_hash()
+    docs_hash_val = docs_hash()
     configured_type = settings.vector_store_type.lower()
 
     # 指纹中记录的实际生效类型：优先用它判断"索引是否可复用"，跳过对已不可用后端的重试
@@ -450,8 +138,11 @@ def _build_vector_store(embeddings: Embeddings, embedding_id: str, force: bool =
     backend_recovered = bool(fp) and _priority.get(configured_type, 1) > _priority.get(effective_type, 1)
 
     # 指纹未变且未触发后端恢复 → 直接加载已有索引，零 embedding API 调用
-    if not force and not backend_recovered and _is_up_to_date(docs_hash, embedding_id, effective_type,
-                                    CHUNK_SIZE, CHUNK_OVERLAP, _META_VERSION):
+    if (
+        not force
+        and not backend_recovered
+        and is_up_to_date(docs_hash_val, embedding_id, effective_type, CHUNK_SIZE, CHUNK_OVERLAP, META_VERSION)
+    ):
         log.info("RAG 文档指纹未变，复用已有向量索引 (store_type={})", effective_type)
         try:
             if effective_type == "postgres":
@@ -461,9 +152,9 @@ def _build_vector_store(embeddings: Embeddings, embedding_id: str, force: bool =
             log.warning("已有索引加载失败，将全量重建: {}", e)
 
     log.info("RAG 文档指纹变更或首次构建，开始全量重建向量库 (configured_type={})", configured_type)
-    chunks = _split_chunks(docs)
+    chunks = split_chunks(docs)
     store, actual_type = _rebuild_store(chunks, embeddings, configured_type)
-    _save_fingerprint(docs_hash, embedding_id, actual_type, CHUNK_SIZE, CHUNK_OVERLAP, _META_VERSION)
+    _save_fingerprint(docs_hash_val, embedding_id, actual_type, CHUNK_SIZE, CHUNK_OVERLAP, META_VERSION)
     return store, actual_type
 
 
@@ -484,9 +175,6 @@ class KnowledgeBase:
 
     def init(self, force: bool = False) -> bool:
         """初始化向量库（失败不阻断主流程）。
-
-        内部根据文档指纹（源文件 hash + embedding 模型 + 向量库类型）
-        决定复用已有索引还是全量重建。
 
         Args:
             force: True 时无视指纹强制全量重建（管理接口"重建索引"使用）。
@@ -523,8 +211,7 @@ class KnowledgeBase:
             # 索引变化后旧缓存失效
             with self._cache_lock:
                 self._search_cache.clear()
-            log.info("RAG 知识库初始化完成 (store_type={}, embedding={})",
-                     self._store_type, embedding_id)
+            log.info("RAG 知识库初始化完成 (store_type={}, embedding={})", self._store_type, embedding_id)
             return True
         except Exception as e:
             log.warning("RAG 知识库初始化失败: {}", e)
@@ -590,16 +277,28 @@ class KnowledgeBase:
         if not scored:
             return []
         # rerank：关键词覆盖率 × 文档类型权重（断法优先、模板库降权），避免密集术语清单虚高命中
-        scored = [(d, s, _keyword_overlap(query, d.page_content) * _DOC_TYPE_WEIGHT.get(
-            d.metadata.get("doc_type", ""), 1.0)) for d, s in scored]
+        scored = [
+            (
+                d,
+                s,
+                keyword_overlap(query, d.page_content)
+                * DOC_TYPE_WEIGHT.get(d.metadata.get("doc_type", ""), 1.0),
+            )
+            for d, s in scored
+        ]
         scored.sort(key=lambda x: -x[2])
         # 最低相关性阈值：覆盖率 < 0.25 的视为不相关，直接丢弃（宁缺毋滥，不兜底返回，
         # 避免无关知识片段进入 prompt 引入噪音）
         _MIN_OVERLAP = 0.25
         top = [item for item in scored if item[2] >= _MIN_OVERLAP][:k]
-        log.info("[rerank] query={} 候选数={} 阈值{}以上={}条={}",
-                  query[:30], len(scored), _MIN_OVERLAP, len(top),
-                  [(round(o, 3), d.metadata.get("doc_type", "?"), d.page_content[:18]) for d, s, o in top])
+        log.info(
+            "[rerank] query={} 候选数={} 阈值{}以上={}条={}",
+            query[:30],
+            len(scored),
+            _MIN_OVERLAP,
+            len(top),
+            [(round(o, 3), d.metadata.get("doc_type", "?"), d.page_content[:18]) for d, s, o in top],
+        )
         return [d for d, _, _ in top]
 
     def search_as_text(self, query: str) -> str:
@@ -609,7 +308,9 @@ class KnowledgeBase:
             return "（未检索到相关知识）"
         parts = []
         for i, d in enumerate(docs, 1):
-            parts.append("[片段{}] (来源:{}):\n{}".format(i, d.metadata.get("source", "未知"), d.page_content))
+            parts.append(
+                "[片段{}] (来源:{}):\n{}".format(i, d.metadata.get("source", "未知"), d.page_content)
+            )
         return "\n\n".join(parts)
 
 
