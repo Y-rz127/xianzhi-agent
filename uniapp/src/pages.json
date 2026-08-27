@@ -23,6 +23,10 @@
       }
     },
     {
+      "path": "pages/liuyao/index",
+      "style": { "navigationStyle": "custom", "navigationBarTitleText": "六爻算卦" }
+    },
+    {
       "path": "pages/settings/index",
       "style": { "navigationBarTitleText": "" }
     },

@@ -4,6 +4,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from app.api.admin_accounts import router as admin_accounts_router
+from app.api.asr import router as asr_router
 from app.api.admin_users import router as admin_users_router
 from app.api.auth import router as auth_router
 from app.api.cases import router as cases_router
@@ -21,6 +22,7 @@ from app.api.xianzhi import router as xianzhi_router
 
 router = APIRouter(prefix="/ai", tags=["AI"])
 router.include_router(auth_router)
+router.include_router(asr_router)
 router.include_router(cases_router, prefix="/xianzhi")
 router.include_router(xianzhi_router)
 router.include_router(tarot_router)

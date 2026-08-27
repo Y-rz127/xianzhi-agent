@@ -136,6 +136,11 @@
           @focus="onInputFocus"
         />
       </view>
+      <view :class="['voice-btn', (thinking || voiceBusy) && 'disabled']" @tap="toggleVoice">
+        <text v-if="!recording && !voiceBusy" class="voice-text">🎤</text>
+        <text v-else-if="recording" class="voice-text recording-pulse">●</text>
+        <text v-else class="voice-text busy-bounce">⏳</text>
+      </view>
       <view
         :class="['send-btn', (thinking || !inputText.trim()) && 'disabled']"
         @tap="onSend"
@@ -164,7 +169,16 @@
 
     <!-- 历史会话抽屉 -->
     <view v-if="showHistoryDrawer" class="drawer-mask" @tap="closeHistoryDrawer">
-      <view class="drawer-panel" @tap.stop :style="{ paddingTop: (statusBarHeight + 10) + 'px' }">
+      <view class="drawer-panel" @tap.stop :style="{ paddingTop: (statusBarHeight + 10) + 'px', width: drawerWidth + 'rpx' }">
+        <!-- 拖拽手柄 -->
+        <view class="drawer-resize-handle"
+          @touchstart.stop.prevent="onResizeStart"
+          @touchmove.stop.prevent="onResizeMove"
+          @touchend.stop.prevent="onResizeEnd"
+          @mousedown.stop.prevent="onResizeStart"
+        >
+          <view class="resize-indicator"></view>
+        </view>
         <!-- 用户区：头像 + 昵称 -->
         <view class="drawer-profile" @tap="goMine">
           <view class="drawer-avatar">{{ avatarText }}</view>
@@ -172,8 +186,11 @@
             <text class="drawer-nickname">{{ nickname }}</text>
             <text class="drawer-profile-sub">{{ isLoggedIn() ? '我的档案 ›' : '点击登录 ›' }}</text>
           </view>
+          <view class="drawer-settings-btn" :style="{ top: (statusBarHeight - 45) + 'px' }" @tap.stop="goSettings">
+            <text class="dq-icon">⚙</text>
+          </view>
         </view>
-        <!-- 快捷功能：合婚 / 塔罗 / 设置 -->
+        <!-- 快捷功能：合婚 / 塔罗 / 六爻 -->
         <view class="drawer-quick">
           <view class="drawer-quick-btn" @tap="goHehun">
             <text class="dq-icon">合</text><text>合婚</text>
@@ -181,8 +198,8 @@
           <view class="drawer-quick-btn" @tap="goTarot">
             <text class="dq-icon">塔</text><text>塔罗</text>
           </view>
-          <view class="drawer-quick-btn" @tap="goSettings">
-            <text class="dq-icon">⚙</text><text>设置</text>
+          <view class="drawer-quick-btn" @tap="goLiuYao">
+            <text class="dq-icon">卦</text><text>六爻</text>
           </view>
         </view>
         <view class="drawer-header">
@@ -302,6 +319,7 @@ import {
   fetchSessions, fetchMySessions, deleteSession as deleteSessionApi, getSessionMessages,
   getSessionBirthInfo,
   submitAnswerFeedback,
+  transcribeAudio,
   type ChartData, type ChatSession,
 } from '@/api'
 import { getLocalDateString } from '@/utils/datetimePicker'
@@ -310,6 +328,26 @@ import { regionData, matchCityByName, type City } from '@/utils/region-data'
 
 interface Message { role: 'user' | 'assistant'; content: string }
 interface BirthInfo { time: string; gender: string }
+
+const recording = ref(false)
+const voiceBusy = ref(false)
+const recorder = uni.getRecorderManager()
+function audioAsDataUri(filePath: string): Promise<string> {
+  return new Promise((resolve, reject) => uni.getFileSystemManager().readFile({ filePath, encoding: 'base64', success: (res: any) => resolve(`data:audio/mpeg;base64,${res.data}`), fail: reject }))
+}
+async function toggleVoice() {
+  if (thinking.value || voiceBusy.value) return
+  if (recording.value) { recorder.stop(); return }
+  recording.value = true
+  recorder.start({ duration: 60000, sampleRate: 16000, numberOfChannels: 1, format: 'mp3' })
+}
+recorder.onStop(async (res) => {
+  recording.value = false; voiceBusy.value = true
+  try { const data = await transcribeAudio(await audioAsDataUri(res.tempFilePath), 'mp3'); inputText.value = inputText.value ? `${inputText.value}${data.text}` : data.text; uni.showToast({ title: '语音已转为文字', icon: 'none' }) }
+  catch (e: any) { uni.showToast({ title: e?.message || '语音识别失败', icon: 'none' }) }
+  finally { voiceBusy.value = false }
+})
+recorder.onError(() => { recording.value = false; voiceBusy.value = false; uni.showToast({ title: '录音不可用，请检查授权', icon: 'none' }) })
 
 // 十二时辰 → HH:MM（用于把后端返回的"辰时"等标准化为 time picker 友好的格式）
 const ZHI_HOUR_MAP: Record<string, string> = {
@@ -485,6 +523,30 @@ const conversationId = ref(genConversationId())
 const showHistoryDrawer = ref(false)
 const historySessions = ref<ChatSession[]>([])
 const historyLoading = ref(false)
+const drawerWidth = ref(560)
+let isResizing = false
+let resizeStartX = 0
+let resizeStartWidth = 0
+
+function onResizeStart(e: any) {
+  isResizing = true
+  const clientX = e.touches ? e.touches[0].clientX : e.clientX
+  resizeStartX = clientX
+  resizeStartWidth = drawerWidth.value
+}
+
+function onResizeMove(e: any) {
+  if (!isResizing) return
+  const clientX = e.touches ? e.touches[0].clientX : e.clientX
+  const deltaX = clientX - resizeStartX
+  let newWidth = resizeStartWidth + deltaX * 2
+  newWidth = Math.max(400, Math.min(newWidth, uni.getSystemInfoSync().windowWidth * 1.8))
+  drawerWidth.value = Math.round(newWidth)
+}
+
+function onResizeEnd() {
+  isResizing = false
+}
 
 async function loadHistorySessions() {
   historyLoading.value = true
@@ -621,6 +683,13 @@ onMounted(() => {
     vv.addEventListener('resize', updateH5KeyboardHeight)
   }
   // #endif
+
+  // #ifdef H5
+  if (typeof window !== 'undefined') {
+    window.addEventListener('mousemove', onResizeMove)
+    window.addEventListener('mouseup', onResizeEnd)
+  }
+  // #endif
 })
 onBeforeUnmount(() => {
   // #ifdef MP-WEIXIN
@@ -629,6 +698,10 @@ onBeforeUnmount(() => {
   // #ifdef H5
   if (_visualViewportHandler && typeof window !== 'undefined' && (window as any).visualViewport) {
     (window as any).visualViewport.removeEventListener('resize', _visualViewportHandler)
+  }
+  if (typeof window !== 'undefined') {
+    window.removeEventListener('mousemove', onResizeMove)
+    window.removeEventListener('mouseup', onResizeEnd)
   }
   // #endif
 })
@@ -717,6 +790,7 @@ function onTimeChange(e: any) { birthTime.value = e.detail.value }
 function goDisclaimer() { uni.navigateTo({ url: '/pages/legal/disclaimer' }) }
 function goSettings() { uni.navigateTo({ url: '/pages/settings/index' }) }
 function goTarot() { uni.navigateTo({ url: '/pages/tarot/index' }) }
+function goLiuYao() { uni.navigateTo({ url: '/pages/liuyao/index' }) }
 function goMine() {
   uni.navigateTo({ url: isLoggedIn() ? '/pages/mine/index' : '/pages/login/index' })
 }
@@ -1580,18 +1654,68 @@ messages.value.push({
 }
 .send-btn {
   flex-shrink: 0;
-  width: 80rpx;
-  height: 80rpx;
-  line-height: 80rpx;
-  text-align: center;
-  background: $color-primary;
+  width: 72rpx;
+  height: 72rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #fff;
   border-radius: 50%;
-  border: 1rpx solid $color-primary;
+  transition: all 0.2s ease;
 }
-.send-btn.disabled { opacity: 0.5; }
-.send-icon {
-  color: $color-bg;
+.send-btn:active:not(.disabled) {
+  transform: scale(0.92);
+  background: #f0f0f0;
+}
+.send-btn.disabled {
+  opacity: 0.3;
+  pointer-events: none;
+}
+.voice-btn {
+  flex-shrink: 0;
+  width: 72rpx;
+  height: 72rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+}
+.voice-btn:active:not(.disabled) {
+  transform: scale(0.9);
+}
+.voice-btn.disabled {
+  opacity: 0.3;
+  pointer-events: none;
+}
+.voice-text {
+  font-size: 48rpx;
+  line-height: 1;
+  opacity: 0.7;
+}
+.recording-pulse {
+  color: #ff4757;
+  font-size: 28rpx;
+  animation: voicePulse 1s ease-in-out infinite;
+}
+.busy-bounce {
   font-size: 32rpx;
+  animation: voiceBounce 0.8s ease-in-out infinite;
+}
+@keyframes voicePulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(0.85); }
+}
+@keyframes voiceBounce {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-4rpx); }
+}
+.send-icon {
+  display: inline-block;
+  color: #333;
+  font-size: 52rpx;
+  line-height: 1;
+  font-weight: 500;
+  transform: scale(1.2);
 }
 
 /* ============ 历史会话抽屉 ============ */
@@ -1604,14 +1728,51 @@ messages.value.push({
 .drawer-panel {
   position: fixed;
   top: 0; left: 0; bottom: 0;
-  width: 80%;
-  max-width: 600rpx;
   background: $color-bg-warm;
   display: flex;
   flex-direction: column;
   overflow: hidden; /* 关键：约束子元素，否则 scroll-view 拿不到确定高度、无法滚动 */
   z-index: 1001;
   box-shadow: 4rpx 0 24rpx rgba(0, 0, 0, 0.15);
+  transition: width .15s ease-out;
+}
+.drawer-resize-handle {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 24rpx;
+  cursor: ew-resize;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+  touch-action: none;
+}
+.resize-indicator {
+  width: 6rpx;
+  height: 80rpx;
+  background: linear-gradient(180deg,
+    transparent 0%,
+    rgba(212, 175, 55, 0.3) 20%,
+    rgba(212, 175, 55, 0.6) 50%,
+    rgba(212, 175, 55, 0.3) 80%,
+    transparent 100%
+  );
+  border-radius: 3rpx;
+  transition: all .2s ease;
+}
+.drawer-resize-handle:hover .resize-indicator,
+.drawer-resize-handle:active .resize-indicator {
+  background: linear-gradient(180deg,
+    transparent 0%,
+    rgba(212, 175, 55, 0.5) 20%,
+    rgba(212, 175, 55, 0.9) 50%,
+    rgba(212, 175, 55, 0.5) 80%,
+    transparent 100%
+  );
+  width: 8rpx;
+  height: 120rpx;
 }
 .drawer-header {
   display: flex;
@@ -1703,10 +1864,25 @@ messages.value.push({
 
 /* 抽屉用户区 + 快捷功能 */
 .drawer-profile {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 20rpx;
   padding: 24rpx 32rpx 20rpx;
+}
+.drawer-settings-btn {
+  position: absolute;
+  right: 24rpx;
+  width: 68rpx;
+  height: 68rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.drawer-settings-btn .dq-icon {
+  width: 52rpx;
+  height: 52rpx;
+  font-size: 28rpx;
 }
 .drawer-avatar {
   width: 88rpx;

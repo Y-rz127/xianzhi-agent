@@ -23,6 +23,17 @@ function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Respons
 
 export { apiFetch }
 
+export async function transcribeAudio(audio: string, format = "webm"): Promise<{ text: string; model: string }> {
+  const response = await apiFetch(`${API_BASE}/asr/transcribe`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ audio, format }),
+  })
+  const data = await response.json()
+  if (!response.ok) throw new Error(data.detail || data.message || "语音识别失败")
+  return data
+}
+
 function withApiKey(url: string): string {
   const sep = url.includes("?") ? "&" : "?"
   return `${url}${sep}api_key=${encodeURIComponent(API_KEY)}`
@@ -51,7 +62,7 @@ export function connectSSE(path: string, params: Record<string, string | undefin
     try {
       const data = JSON.parse((e as MessageEvent).data)
       if (data?.birth_time && data?.gender) cb.onChartContext?.(data.birth_time, data.gender, data.birth_place)
-    } catch {}
+    } catch { }
   })
   // 监听后端自定义 error 事件（如 event: error）
   es.addEventListener("error", (e) => {
@@ -214,7 +225,7 @@ export async function deleteSession(type: "xianzhi", id: string): Promise<void> 
   if (!id) return
   try {
     await apiFetch(`${API_BASE}${EP.SESSIONS}/${id}`, { method: "DELETE" })
-  } catch {}
+  } catch { }
 }
 
 export interface RagDoc { filename: string; size: number; modified: string }
@@ -401,6 +412,12 @@ export async function castLiuYao(method: "coins" | "numbers" | "time", numbers?:
   const res = await apiFetch(`${API_BASE}/ai/liuyao/cast`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ method, numbers }) })
   if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || "起卦失败")
   return res.json()
+}
+export async function interpretLiuYao(question: string, result: LiuYaoResult): Promise<string> {
+  const res = await apiFetch(`${API_BASE}/ai/liuyao/interpret`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ question, result }) })
+  const data = await res.json()
+  if (!res.ok) throw new Error(data.detail || "解读失败")
+  return data.interpretation
 }
 
 // ========== 管理后台：用户管理 ==========

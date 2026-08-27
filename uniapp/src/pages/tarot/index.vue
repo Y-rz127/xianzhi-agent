@@ -100,7 +100,7 @@
 
         <!-- 翻牌提示 -->
         <view v-if="!allFlipped" class="flip-hint">
-          <text class="flip-hint-text">点击牌背翻开</text>
+          <text class="flip-hint-text">任意点一张牌，它会成为当前的第 {{ cards.filter(c => c.flipped).length + 1 }} 张</text>
         </view>
 
         <!-- 获取 AI 详细解读按钮 -->
@@ -159,7 +159,7 @@ interface DrawnCard {
   flipping: boolean
 }
 
-const selectedSpread = ref<'daily' | 'three_card' | 'relationship'>('daily')
+const selectedSpread = ref<'daily' | 'three_card' | 'relationship' | 'decision' | 'celtic_cross'>('daily')
 const question = ref('')
 const drawn = ref(false)
 const drawing = ref(false)
@@ -177,11 +177,15 @@ const spreads = [
   { key: 'daily' as const, name: '每日一牌', desc: '看今日运势指引', icon: '☀' },
   { key: 'three_card' as const, name: '过去现在未来', desc: '梳理时间脉络', icon: '✦' },
   { key: 'relationship' as const, name: '关系牌阵', desc: '解读人际缘分', icon: '♥' },
+  { key: 'decision' as const, name: '二择一', desc: '比较两条行动路径', icon: '⚖' },
+  { key: 'celtic_cross' as const, name: '凯尔特十字', desc: '十张牌全面梳理', icon: '✦' },
 ]
 
 const positions = computed(() => {
   if (selectedSpread.value === 'three_card') return ['过去', '现在', '未来']
   if (selectedSpread.value === 'relationship') return ['你自己', '对方', '关系']
+  if (selectedSpread.value === 'decision') return ['当下核心', '选项 A', 'A 的走向', '选项 B', 'B 的走向']
+  if (selectedSpread.value === 'celtic_cross') return ['现状', '挑战', '显意识', '潜意识', '过去', '近期未来', '你的状态', '环境影响', '希望与担忧', '结果趋势']
   return ['今日指引']
 })
 
@@ -194,9 +198,13 @@ try {
   statusBarHeight.value = sysInfo.statusBarHeight || 20
 } catch {}
 
-function onSelectSpread(key: 'daily' | 'three_card' | 'relationship') {
+function onSelectSpread(key: typeof selectedSpread.value) {
   if (drawing.value || interpreting.value) return
   selectedSpread.value = key
+  drawn.value = false
+  cards.value = []
+  interpretation.value = ''
+  question.value = ''
 }
 
 function scrollToBottom() {
@@ -238,7 +246,7 @@ function onDivine() {
   })
 }
 
-function onFlipCard(c: DrawnCard, _i: number) {
+function onFlipCard(c: DrawnCard, index: number) {
   if (c.flipped || c.flipping) return
   c.flipping = true
   setTimeout(() => {

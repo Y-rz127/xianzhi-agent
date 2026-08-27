@@ -85,6 +85,13 @@ function post<T = any>(url: string, data?: any): Promise<T> {
   return request<T>({ url: withToken(url), method: 'POST', data, header: { 'Content-Type': 'application/json' } })
 }
 
+export const transcribeAudio = (audio: string, format = 'mp3') =>
+  post<{ text: string; model: string }>('/ai/asr/transcribe', { audio, format })
+
+export interface LiuYaoResult { method: string; createdAt: string; lines: Array<{ index: number; value: number; yang: boolean; moving: boolean }>; movingLines: number[]; summary: string; original: { name: string; upper: { name: string; symbol: string }; lower: { name: string; symbol: string } }; changed: { name: string; upper: { name: string; symbol: string }; lower: { name: string; symbol: string } } | null }
+export const castLiuYao = (method: 'coins' | 'numbers' | 'time', numbers?: number[]) => post<LiuYaoResult>('/ai/liuyao/cast', { method, numbers })
+export const interpretLiuYao = (question: string, result: LiuYaoResult) => post<{ interpretation: string }>('/ai/liuyao/interpret', { question, result })
+
 function put<T = any>(url: string, data?: any): Promise<T> {
   return request<T>({ url: withToken(url), method: 'PUT', data, header: { 'Content-Type': 'application/json' } })
 }

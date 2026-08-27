@@ -177,10 +177,22 @@
         <div class="input-wrap">
           <textarea id="chat-input" name="chat-input" aria-label="消息输入" v-model="input" @keydown="handleKeydown" :placeholder="placeholderText" :disabled="loading" rows="1"></textarea>
           <div class="input-actions">
+            <button
+              class="btn voice-btn"
+              :class="{ recording: isRecording, processing: isProcessingVoice }"
+              @click="toggleVoiceRecording"
+              :disabled="loading || isProcessingVoice"
+              :aria-label="isRecording ? '停止录音' : '语音输入'"
+              :title="isRecording ? '停止录音' : '语音输入'"
+            >
+              <span v-if="!isRecording && !isProcessingVoice">🎤</span>
+              <span v-else-if="isRecording" class="recording-icon">●</span>
+              <span v-else class="processing-icon">⏳</span>
+            </button>
             <button class="btn send-btn" @click="send" :disabled="loading || !input.trim()" aria-label="发送">
               <span v-if="!loading">发送</span>
               <span v-else>推演中</span>
-              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polyline points="22 2 15 22 11 13 2 9 22 2"/></svg>
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="11"/><polyline points="22 2 15 22 11 13 2 9 22 2"/></svg>
             </button>
           </div>
         </div>
@@ -248,7 +260,7 @@
 <script setup lang="ts">
 defineOptions({ name: 'Xianzhi' })
 import { ref, nextTick, computed, onMounted, onActivated, onUnmounted } from "vue"
-import { chatWithXianzhi, downloadReport, parsePillars, parseWuxing, parseDayun, parseShensha, fetchSessions, deleteSession as deleteSessionApi, getSessionMessages, getSessionBirthInfo, fetchChartCases, createChartCase, deleteChartCase, getChart, submitAnswerFeedback, type ChatSession, type SessionMessage, type ChartCase, type ChartData, type SSECallbacks } from "../api"
+import { chatWithXianzhi, downloadReport, parsePillars, parseWuxing, parseDayun, parseShensha, fetchSessions, deleteSession as deleteSessionApi, getSessionMessages, getSessionBirthInfo, fetchChartCases, createChartCase, deleteChartCase, getChart, submitAnswerFeedback, transcribeAudio, type ChatSession, type SessionMessage, type ChartCase, type ChartData, type SSECallbacks } from "../api"
 import { matchCityByName } from "../utils/region-data"
 import BaziCard from "../components/BaziCard.vue"
 import WuxingChart from "../components/WuxingChart.vue"
@@ -261,6 +273,11 @@ interface BirthInfo { time: string; gender: string }
 const messages = ref<SessionMessage[]>([])
 const input = ref("")
 const loading = ref(false)
+const isRecording = ref(false)
+const isProcessingVoice = ref(false)
+let mediaRecorder: MediaRecorder | null = null
+let audioStream: MediaStream | null = null
+let audioChunks: Blob[] = []
 const messagesEl = ref<HTMLElement | null>(null)
 const lastBirthInfo = ref<BirthInfo | null>(null)
 const chartData = ref<ChartData | null>(null)
@@ -296,6 +313,53 @@ const visibleMessages = computed(() => {
 
 const currentExamples = ["男，1990-05-20 14:30，排盘并分析事业", "女，1995-08-15 08:00，看近五年运势", "什么是七杀？有什么含义？", "用神怎么取？"]
 const placeholderText = "说说你的出生时间，或直接请教命理问题…"
+
+const toggleVoiceRecording = async () => {
+  if (isProcessingVoice.value) return
+  if (isRecording.value) {
+    mediaRecorder?.stop()
+    return
+  }
+  if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
+    window.alert("当前浏览器不支持语音输入")
+    return
+  }
+  try {
+    audioStream = await navigator.mediaDevices.getUserMedia({ audio: true })
+    const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus") ? "audio/webm;codecs=opus" : "audio/webm"
+    mediaRecorder = new MediaRecorder(audioStream, { mimeType })
+    audioChunks = []
+    mediaRecorder.ondataavailable = (event) => { if (event.data.size > 0) audioChunks.push(event.data) }
+    mediaRecorder.onstop = async () => {
+      isRecording.value = false
+      isProcessingVoice.value = true
+      try {
+        const blob = new Blob(audioChunks, { type: mimeType })
+        const base64 = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader()
+          reader.onloadend = () => resolve(String(reader.result))
+          reader.onerror = () => reject(new Error("读取录音失败"))
+          reader.readAsDataURL(blob)
+        })
+        const result = await transcribeAudio(base64, "webm")
+        input.value = input.value ? `${input.value}${result.text}` : result.text
+      } catch (error) {
+        window.alert(error instanceof Error ? error.message : "语音识别失败")
+      } finally {
+        isProcessingVoice.value = false
+        audioStream?.getTracks().forEach(track => track.stop())
+        audioStream = null
+        mediaRecorder = null
+      }
+    }
+    mediaRecorder.start()
+    isRecording.value = true
+  } catch {
+    audioStream?.getTracks().forEach(track => track.stop())
+    audioStream = null
+    window.alert("无法访问麦克风，请检查浏览器权限")
+  }
+}
 
 const lastAssistantMsg = computed(() => {
   for (let i = messages.value.length - 1; i >= 0; i--) {
@@ -684,6 +748,8 @@ onActivated(() => {
   loadSessions(); loadChartCases()
 })
 onUnmounted(() => {
+  if (mediaRecorder && mediaRecorder.state !== "inactive") mediaRecorder.stop()
+  audioStream?.getTracks().forEach(track => track.stop())
   window.removeEventListener("resize", checkMobile)
   window.removeEventListener("app-sidebar-state", onAppSidebarState)
   window.removeEventListener("xianzhi-new-session", newSession)
@@ -865,7 +931,14 @@ textarea:focus { background: rgba(255,255,255,0.05); }
 textarea:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .input-actions { flex-shrink: 0; }
+.voice-btn { width: 48px; min-width: 48px; padding: 10px; font-size: 26px; line-height: 1; }
+.voice-btn.recording { color: #ff4757; background: rgba(255,71,87,0.15); border-color: rgba(255,71,87,0.4); }
+.voice-btn.processing { opacity: 0.6; cursor: wait; }
+.recording-icon { display: inline-block; font-size: 16px; animation: recording-pulse 1s ease-in-out infinite; }
+.processing-icon { display: inline-block; font-size: 16px; animation: bounce 0.8s ease-in-out infinite; }
+@keyframes recording-pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.5; transform: scale(0.85); } }
 .send-btn { padding: 12px 20px; font-size: 14px; font-weight: 600; }
+.send-btn svg { flex-shrink: 0; }
 .send-btn:disabled { opacity: 0.5; }
 
 .input-hint { text-align: center; font-size: 11px; color: var(--text-muted); margin-top: 8px; }

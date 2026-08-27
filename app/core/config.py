@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     )
     dashscope_api_key: str = Field(default="", alias="DASHSCOPE_API_KEY")
     dashscope_model: str = Field(default="qwen-plus", alias="DASHSCOPE_MODEL")
+    asr_model: str = Field(default="qwen-audio-3.0-asr-flash", alias="ASR_MODEL")
     # 意图拆解/Reviewer 审核模型（轻量独立实例，留空则复用主模型）
     decompose_model: str = Field(default="", alias="DECOMPOSE_MODEL")
     reviewer_model: str = Field(default="", alias="REVIEWER_MODEL")

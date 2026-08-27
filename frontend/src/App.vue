@@ -5,7 +5,14 @@
       <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
     </button>
     <div class="sidebar-mask" v-if="sidebarOpen && isMobile" @click="sidebarOpen = false"></div>
-    <aside class="sidebar" :class="{ 'open': sidebarOpen, 'collapsed': sidebarCollapsed }">
+    <aside class="sidebar" :class="{ 'open': sidebarOpen, 'collapsed': sidebarCollapsed }" :style="{ width: sidebarWidth + 'px' }">
+      <!-- 拖拽手柄 -->
+      <div class="sidebar-resize-handle"
+        @mousedown.stop.prevent="onResizeStart"
+        :class="{ resizing: isResizing }"
+      >
+        <div class="resize-indicator"></div>
+      </div>
       <div class="logo">
         <div class="logo-icon animate-pulse-glow">
           <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -116,6 +123,32 @@ import CommandPalette from "./components/CommandPalette.vue"
 const sidebarCollapsed = ref(false)
 const sidebarOpen = ref(true)
 const isMobile = ref(false)
+const sidebarWidth = ref(288)
+const isResizing = ref(false)
+let resizeStartX = 0
+let resizeStartWidth = 288
+
+function onResizeStart(e: MouseEvent) {
+  isResizing.value = true
+  resizeStartX = e.clientX
+  resizeStartWidth = sidebarWidth.value
+  document.addEventListener('mousemove', onResizeMove)
+  document.addEventListener('mouseup', onResizeEnd)
+}
+
+function onResizeMove(e: MouseEvent) {
+  if (!isResizing.value) return
+  const deltaX = e.clientX - resizeStartX
+  let newWidth = resizeStartWidth + deltaX
+  newWidth = Math.max(200, Math.min(newWidth, window.innerWidth * 0.6))
+  sidebarWidth.value = Math.round(newWidth)
+}
+
+function onResizeEnd() {
+  isResizing.value = false
+  document.removeEventListener('mousemove', onResizeMove)
+  document.removeEventListener('mouseup', onResizeEnd)
+}
 
 const appSidebarOpen = () => isMobile.value ? sidebarOpen.value : !sidebarCollapsed.value
 
@@ -160,6 +193,8 @@ onMounted(() => {
 onUnmounted(() => {
   window.removeEventListener("resize", checkMobile)
   window.removeEventListener("app-toggle-sidebar", onAppToggleSidebar)
+  document.removeEventListener('mousemove', onResizeMove)
+  document.removeEventListener('mouseup', onResizeEnd)
 })
 </script>
 
@@ -188,15 +223,54 @@ onUnmounted(() => {
   background: rgba(0,0,0,0.65); z-index: 90;
 }
 .sidebar {
-  width: 288px; display: flex; flex-direction: column; padding: 24px 12px;
+  display: flex; flex-direction: column; padding: 24px 12px;
   background: linear-gradient(180deg, rgba(10,15,26,0.96) 0%, rgba(6,10,18,0.98) 100%);
   border-right: 1px solid var(--border); backdrop-filter: blur(16px);
   box-shadow: 4px 0 30px rgba(0,0,0,0.35);
-  transition: width 0.35s ease, transform 0.35s ease;
+  transition: width 0.2s ease-out, transform 0.35s ease;
   overflow-y: auto;
   min-height: 0;
+  position: relative;
 }
-.sidebar.collapsed { width: 72px; }
+.sidebar.collapsed { width: 72px !important; }
+.sidebar-resize-handle {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  cursor: ew-resize;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+  transition: all 0.2s ease;
+}
+.resize-indicator {
+  width: 3px;
+  height: 60px;
+  background: linear-gradient(180deg,
+    transparent 0%,
+    rgba(212, 175, 55, 0.25) 20%,
+    rgba(212, 175, 55, 0.5) 50%,
+    rgba(212, 175, 55, 0.25) 80%,
+    transparent 100%
+  );
+  border-radius: 2px;
+  transition: all 0.2s ease;
+}
+.sidebar-resize-handle:hover .resize-indicator,
+.sidebar-resize-handle.resizing .resize-indicator {
+  background: linear-gradient(180deg,
+    transparent 0%,
+    rgba(212, 175, 55, 0.45) 20%,
+    rgba(212, 175, 55, 0.8) 50%,
+    rgba(212, 175, 55, 0.45) 80%,
+    transparent 100%
+  );
+  width: 4px;
+  height: 90px;
+}
 .logo {
   display: flex; align-items: center; gap: 14px; padding: 0 0 24px;
   border-bottom: 1px solid var(--border);

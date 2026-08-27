@@ -20,6 +20,7 @@
       "android": {
         "permissions": [
           "<uses-permission android:name=\"android.permission.INTERNET\"/>"
+          ,"<uses-permission android:name=\"android.permission.RECORD_AUDIO\"/>"
         ]
       },
       "ios": {},
@@ -34,6 +35,11 @@
       "es6": true,
       "postcss": true,
       "minified": true
+    },
+    "permission": {
+      "scope.record": {
+        "desc": "用于将您的语音问题转换为文字后发送给先知"
+      }
     },
     "usingComponents": true
   },
