@@ -82,7 +82,7 @@
           <view
             v-for="(c, i) in cards"
             :key="i"
-            :class="['drawn-card', c.isReversed && 'is-reversed', c.flipped ? 'flipped' : 'facedown', c.flipping && 'flipping']"
+            :class="['drawn-card', c.flipped ? 'flipped' : 'facedown', c.flipping && 'flipping']"
             @tap="onFlipCard(c, i)"
           >
             <view class="card-face">
@@ -563,11 +563,6 @@ function saveRecord() {
 .drawn-card.flipping {
   transform: rotateY(180deg);
 }
-/* 逆位：把牌面本身再旋转 180° */
-.drawn-card.flipped.is-reversed .card-face {
-  transform: rotate(180deg);
-}
-
 .card-face,
 .card-back {
   position: absolute;

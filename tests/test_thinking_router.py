@@ -5,9 +5,11 @@
 2. ThinkingRouter 在构造期派生 ON/OFF 两份副本，各自 extra_body.enable_thinking 正确。
 3. invoke / bind_tools 后 invoke 都按当前开关挑选对应副本（闲聊走 OFF、其它走 ON）。
 """
+
 from __future__ import annotations
 
 from contextlib import contextmanager
+import asyncio
 
 from app.core.thinking_router import (
     ThinkingRouter,
@@ -38,6 +40,13 @@ class _FakeModel:
 
     def invoke(self, messages, config=None, **kwargs):
         return {"content": f"{self.name}:thinking={self.extra_body.get('enable_thinking')}"}
+
+    def astream(self, messages, config=None, **kwargs):
+        async def chunks():
+            yield "first"
+            yield "second"
+
+        return chunks()
 
 
 @contextmanager
@@ -81,7 +90,7 @@ def test_invoke_respects_switch():
     with use_thinking(False):  # 闲聊
         out = r.invoke([{"role": "user", "content": "你好"}])
         assert out["content"].endswith("thinking=False")
-    with use_thinking(True):   # 其它
+    with use_thinking(True):  # 其它
         out = r.invoke([{"role": "user", "content": "我今年事业运如何"}])
         assert out["content"].endswith("thinking=True")
 
@@ -106,3 +115,11 @@ def test_switch_does_not_leak():
     # 退出上下文后回到 default
     with _no_override():
         assert r.pick().extra_body["enable_thinking"] is True
+
+
+def test_astream_forwards_async_chunks():
+    async def collect():
+        router = ThinkingRouter(_FakeModel("m"))
+        return [chunk async for chunk in router.astream([])]
+
+    assert asyncio.run(collect()) == ["first", "second"]

@@ -90,7 +90,8 @@ class ThinkingRouter:
         return self.pick().stream(input, config=config, **kwargs)
 
     async def astream(self, input: Any, config: Any = None, **kwargs: Any) -> Any:
-        return await self.pick().astream(input, config=config, **kwargs)
+        async for chunk in self.pick().astream(input, config=config, **kwargs):
+            yield chunk
 
     def bind_tools(self, tools: Any, **kwargs: Any) -> "ThinkingRouter":
         return ThinkingRouter(
