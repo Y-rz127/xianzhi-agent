@@ -26,6 +26,8 @@ export const EP = {
   FEEDBACK: '/ai/feedback',
   FEEDBACK_ANSWER: '/ai/feedback/answer',
   ME: '/ai/me',
+  ASR_TRANSCRIBE: '/ai/asr/transcribe',
+  LIUYAO_DIVINE: '/ai/liuyao/divine',
   AUTH_REGISTER: '/ai/auth/register',
   AUTH_LOGIN: '/ai/auth/login',
   AUTH_WX_LOGIN: '/ai/auth/wx-login',

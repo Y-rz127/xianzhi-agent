@@ -35,7 +35,13 @@
       "postcss": true,
       "minified": true
     },
-    "usingComponents": true
+    "usingComponents": true,
+    "permission": {
+      "scope.record": {
+        "desc": "用于语音输入识别您的问题"
+      }
+    },
+    "requiredPrivateInfos": []
   },
   "h5": {
     "title": "先知",

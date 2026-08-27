@@ -165,8 +165,10 @@ export function chatWithXianzhiWS(message: string, opts: XianzhiChatOptions) {
 export interface TarotDrawCallbacks { onCards: (cards: any[]) => void; onError: (err: string) => void }
 export interface TarotInterpretCallbacks { onMessage: (chunk: string) => void; onDone: () => void; onError: (err: string) => void }
 
+export type TarotSpreadKey = 'daily' | 'three_card' | 'relationship' | 'choice' | 'celtic_cross'
+
 /** 塔罗抽牌 */
-export function drawTarotCards(spread: 'daily' | 'three_card' | 'relationship', cb: TarotDrawCallbacks) {
+export function drawTarotCards(spread: TarotSpreadKey, cb: TarotDrawCallbacks) {
   try { wx.closeSocket() } catch {}
   currentTarotActive = false
   const myId = ++wsConnId
@@ -210,7 +212,7 @@ export function drawTarotCards(spread: 'daily' | 'three_card' | 'relationship', 
 }
 
 /** 塔罗解读 */
-export function interpretTarotWS(opts: { spread: 'daily' | 'three_card' | 'relationship'; question?: string; cards: any[] }, cb: TarotInterpretCallbacks) {
+export function interpretTarotWS(opts: { spread: TarotSpreadKey; question?: string; cards: any[] }, cb: TarotInterpretCallbacks) {
   try { wx.closeSocket() } catch {}
   currentTarotActive = false
   const myId = ++wsConnId

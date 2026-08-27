@@ -22,6 +22,7 @@ from app.core.security import ApiKeyAuthMiddleware, RateLimitMiddleware
 from app.core.thinking_router import ThinkingRouter
 from app.memory import create_chat_memory
 from app.rag.vector_store import get_knowledge_base
+from app.liuyao.liuyao_app import LiuyaoApp
 from app.tarot.tarot_app import TarotApp
 from app.tools.bazi import bazi_analysis, bazi_chart, bazi_dayun, bazi_tools
 from app.tools.mcp_client import mcp_manager
@@ -102,6 +103,7 @@ async def lifespan(app: FastAPI):
 
     local_tools = bazi_tools + search_tools + terminate_tools + rag_tools
     tarot_app = TarotApp(chat_model=chat_model)
+    liuyao_app = LiuyaoApp(chat_model=chat_model)
 
     # Xianzhi 按会话池化，首次请求时按需创建实例；HTTP handler 经依赖注入获取，WS 经模块级 get_app_context()
     app_ctx = AppContext(
@@ -109,6 +111,7 @@ async def lifespan(app: FastAPI):
         local_tools=local_tools,
         memory=memory,
         tarot_app=tarot_app,
+        liuyao_app=liuyao_app,
         decompose_model=decompose_model,
         reviewer_model=reviewer_model,
     )

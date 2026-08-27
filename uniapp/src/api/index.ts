@@ -15,8 +15,8 @@ export type {
 export type { SessionBirthInfo as BirthInfo } from '@shared/api'
 export { parseDayun, parsePillars, parseShensha, parseWuxing } from '@shared/api'
 import type {
-  AnswerFeedbackPayload, BaziProfile, ChartCase, ChartData, ChatSession,
-  FavoriteCase, HehunParams, SessionMessage, TarotCard, TarotRecord, XzUser,
+  AnswerFeedbackPayload, AsrRequest, AsrResponse, BaziProfile, ChartCase, ChartData, ChatSession,
+  FavoriteCase, HehunParams, LiuyaoRequest, LiuyaoResponse, SessionMessage, TarotCard, TarotRecord, XzUser,
 } from '@shared/api'
 import type { SessionBirthInfo } from '@shared/api'
 import { EP, profileBody } from '@shared/api'
@@ -312,3 +312,13 @@ export const submitFeedback = (content: string, contact?: string) =>
 
 export const submitAnswerFeedback = (payload: AnswerFeedbackPayload) =>
   post<{ id: string }>(EP.FEEDBACK_ANSWER, payload)
+
+/* ============ 六爻 ============ */
+
+export const liuyaoDivine = (payload: LiuyaoRequest): Promise<LiuyaoResponse> =>
+  post<LiuyaoResponse>(EP.LIUYAO_DIVINE, payload)
+
+/* ============ 语音转文字 ============ */
+
+export const transcribeAudio = (payload: AsrRequest): Promise<AsrResponse> =>
+  post<AsrResponse>(EP.ASR_TRANSCRIBE, payload)

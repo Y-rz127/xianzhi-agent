@@ -196,6 +196,49 @@ export interface HehunParams {
   longitudeB?: number
 }
 
+/* ============ 六爻 ============ */
+
+export interface LiuyaoRequest {
+  method: 'coin' | 'number' | 'time'
+  question?: string
+  numbers?: number[]
+}
+
+export interface LiuyaoResult {
+  primary_gua: string
+  changed_gua: string
+  lower_trigram: string
+  upper_trigram: string
+  changing_positions: number[]
+  changing_yao_names: string[]
+  primary_text: string
+  changed_text: string
+  lines: number[]
+  line_kinds: string[]
+}
+
+export interface LiuyaoResponse {
+  success: boolean
+  data?: {
+    method: string
+    question: string
+    result: LiuyaoResult
+    interpretation: string
+  }
+  error?: string
+}
+
+/* ============ ASR 语音转文字 ============ */
+
+export interface AsrRequest {
+  audio: string
+  format?: string
+}
+
+export interface AsrResponse {
+  text: string
+}
+
 /* ============ 聊天参数 ============ */
 
 export interface ChatOptions {

@@ -89,7 +89,7 @@
               <text class="card-emblem">{{ c.emblem }}</text>
               <text class="card-name">{{ c.isReversed ? '逆位' : '正位' }} {{ c.name }}</text>
               <text class="card-name-en">{{ c.nameEn }}</text>
-              <text class="card-pos">{{ positions[i] }}</text>
+              <text class="card-pos">{{ c.pos }}</text>
             </view>
             <view class="card-back">
               <view class="card-back-pattern"></view>
@@ -157,9 +157,12 @@ interface DrawnCard {
   meaning: string
   flipped: boolean
   flipping: boolean
+  filled?: boolean
+  pos?: string
 }
 
-const selectedSpread = ref<'daily' | 'three_card' | 'relationship'>('daily')
+type SpreadKey = 'daily' | 'three_card' | 'relationship' | 'choice' | 'celtic_cross'
+const selectedSpread = ref<SpreadKey>('daily')
 const question = ref('')
 const drawn = ref(false)
 const drawing = ref(false)
@@ -167,6 +170,10 @@ const interpreting = ref(false)
 const cards = ref<DrawnCard[]>([])
 const interpretation = ref('')
 const scrollTop = ref(0)
+
+// 后端一次返回全部洗牌结果，但用户可点击任意卡背；点击顺序决定这张牌对应第几个牌位
+const drawnCards = ref<any[]>([])
+const nextCardIndex = ref(0)
 
 // 切走 tab / 页面隐藏时关闭 WS，避免 socket 累积超过小程序 5 个上限
 onHide(() => { closeAllWS() })
@@ -177,15 +184,22 @@ const spreads = [
   { key: 'daily' as const, name: '每日一牌', desc: '看今日运势指引', icon: '☀' },
   { key: 'three_card' as const, name: '过去现在未来', desc: '梳理时间脉络', icon: '✦' },
   { key: 'relationship' as const, name: '关系牌阵', desc: '解读人际缘分', icon: '♥' },
+  { key: 'choice' as const, name: '二择一', desc: '两种选择对比', icon: '⚖' },
+  { key: 'celtic_cross' as const, name: '凯尔特十字', desc: '经典十张牌阵', icon: '✠' },
 ]
 
 const positions = computed(() => {
-  if (selectedSpread.value === 'three_card') return ['过去', '现在', '未来']
-  if (selectedSpread.value === 'relationship') return ['你自己', '对方', '关系']
-  return ['今日指引']
+  const map: Record<SpreadKey, string[]> = {
+    daily: ['今日指引'],
+    three_card: ['过去', '现在', '未来'],
+    relationship: ['你自己', '对方', '关系'],
+    choice: ['当前处境', '选择 A 走向', '选择 B 走向', '内心倾向', '建议'],
+    celtic_cross: ['现状', '阻碍/助力', '潜意识', '过去', '未来', '自我', '环境影响', '希望/恐惧', '外部指引', '最终结果'],
+  }
+  return map[selectedSpread.value] || ['今日指引']
 })
 
-const allFlipped = computed(() => drawn.value && cards.value.length > 0 && cards.value.every(c => c.flipped))
+const allFlipped = computed(() => drawn.value && cards.value.length > 0 && nextCardIndex.value === cards.value.length)
 
 // 状态栏高度
 const statusBarHeight = ref(20)
@@ -194,7 +208,7 @@ try {
   statusBarHeight.value = sysInfo.statusBarHeight || 20
 } catch {}
 
-function onSelectSpread(key: 'daily' | 'three_card' | 'relationship') {
+function onSelectSpread(key: SpreadKey) {
   if (drawing.value || interpreting.value) return
   selectedSpread.value = key
 }
@@ -205,26 +219,34 @@ function scrollToBottom() {
   })
 }
 
-/** 阶段一：抽牌（不调用 LLM） */
+/** 阶段一：抽牌（不调用 LLM）。
+ * 后端返回全部洗牌结果，但前端先以卡背占位；用户点击任意卡背后，
+ * 按点击顺序依次把第 N 张牌分配给该卡位。
+ */
 function onDivine() {
   if (drawing.value) return
   drawn.value = true
   drawing.value = true
   cards.value = []
+  drawnCards.value = []
+  nextCardIndex.value = 0
   interpretation.value = ''
 
   drawTarotCards(selectedSpread.value, {
     onCards: (data: any[]) => {
-      cards.value = data.map((c) => ({
-        name: c.name,
-        nameEn: c.nameEn,
-        emblem: c.emblem,
-        arcana: c.arcana,
-        suit: c.suit,
-        isReversed: c.isReversed,
-        meaning: c.meaning,
+      drawnCards.value = data
+      cards.value = data.map(() => ({
+        name: '',
+        nameEn: '',
+        emblem: '',
+        arcana: '',
+        suit: '',
+        isReversed: false,
+        meaning: '',
         flipped: false,
         flipping: false,
+        filled: false,
+        pos: '',
       }))
       drawing.value = false
       scrollToBottom()
@@ -239,8 +261,18 @@ function onDivine() {
 }
 
 function onFlipCard(c: DrawnCard, _i: number) {
-  if (c.flipped || c.flipping) return
-  c.flipping = true
+  if (c.flipped || c.flipping || c.filled || nextCardIndex.value >= drawnCards.value.length) return
+  const idx = nextCardIndex.value
+  const data = drawnCards.value[idx]
+  if (!data) return
+  Object.assign(c, {
+    ...data,
+    filled: true,
+    pos: positions.value[idx] || '',
+    flipped: false,
+    flipping: true,
+  })
+  nextCardIndex.value = idx + 1
   setTimeout(() => {
     c.flipped = true
     c.flipping = false
@@ -255,8 +287,12 @@ function onInterpret() {
   interpreting.value = true
   interpretation.value = ''
 
-  // 回传抽到的牌组
-  const payload = cards.value.map((c) => ({
+  // 按牌位顺序回传（c.pos 对应 positions 中的标签）
+  const ordered = positions.value
+    .map((p) => cards.value.find((c) => c.filled && c.pos === p))
+    .filter(Boolean) as DrawnCard[]
+
+  const payload = ordered.map((c) => ({
     name: c.name,
     nameEn: c.nameEn,
     emblem: c.emblem,
@@ -295,6 +331,8 @@ function resetDivine() {
   if (drawing.value || interpreting.value) return
   drawn.value = false
   cards.value = []
+  drawnCards.value = []
+  nextCardIndex.value = 0
   interpretation.value = ''
 }
 
@@ -302,7 +340,10 @@ function resetDivine() {
 function saveRecord() {
   if (!isLoggedIn()) return
   if (!interpretation.value) return
-  const payload = cards.value.map((c) => ({
+  const ordered = positions.value
+    .map((p) => cards.value.find((c) => c.filled && c.pos === p))
+    .filter(Boolean) as DrawnCard[]
+  const payload = ordered.map((c) => ({
     name: c.name,
     nameEn: c.nameEn,
     emblem: c.emblem,

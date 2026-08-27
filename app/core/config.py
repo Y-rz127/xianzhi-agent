@@ -27,6 +27,10 @@ class Settings(BaseSettings):
     llm_timeout: float = Field(default=60.0, alias="LLM_TIMEOUT")
     llm_max_retries: int = Field(default=2, alias="LLM_MAX_RETRIES")
 
+    # ASR 语音识别（小程序语音输入）
+    asr_model: str = Field(default="qwen-audio-3.0-asr-flash", alias="ASR_MODEL")
+    asr_format: str = Field(default="wav", alias="ASR_FORMAT")
+
     # 服务
     app_port: int = Field(default=8123, alias="APP_PORT")
     debug: bool = Field(default=False, alias="DEBUG")

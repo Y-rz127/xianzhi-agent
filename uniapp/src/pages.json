@@ -23,6 +23,13 @@
       }
     },
     {
+      "path": "pages/liuyao/index",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "六爻"
+      }
+    },
+    {
       "path": "pages/settings/index",
       "style": { "navigationBarTitleText": "" }
     },

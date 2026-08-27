@@ -137,6 +137,15 @@
         />
       </view>
       <view
+        class="voice-btn"
+        :class="{ recording: recording || transcribing }"
+        @touchstart.prevent="startVoiceRecord"
+        @touchend.prevent="stopVoiceRecord"
+        @touchcancel.prevent="stopVoiceRecord"
+      >
+        <text class="voice-icon">{{ recording ? '●' : transcribing ? '···' : '🎙' }}</text>
+      </view>
+      <view
         :class="['send-btn', (thinking || !inputText.trim()) && 'disabled']"
         @tap="onSend"
       >
@@ -173,13 +182,16 @@
             <text class="drawer-profile-sub">{{ isLoggedIn() ? '我的档案 ›' : '点击登录 ›' }}</text>
           </view>
         </view>
-        <!-- 快捷功能：合婚 / 塔罗 / 设置 -->
+        <!-- 快捷功能：合婚 / 塔罗 / 六爻 / 设置 -->
         <view class="drawer-quick">
           <view class="drawer-quick-btn" @tap="goHehun">
             <text class="dq-icon">合</text><text>合婚</text>
           </view>
           <view class="drawer-quick-btn" @tap="goTarot">
             <text class="dq-icon">塔</text><text>塔罗</text>
+          </view>
+          <view class="drawer-quick-btn" @tap="goLiuyao">
+            <text class="dq-icon">爻</text><text>六爻</text>
           </view>
           <view class="drawer-quick-btn" @tap="goSettings">
             <text class="dq-icon">⚙</text><text>设置</text>
@@ -302,6 +314,7 @@ import {
   fetchSessions, fetchMySessions, deleteSession as deleteSessionApi, getSessionMessages,
   getSessionBirthInfo,
   submitAnswerFeedback,
+  transcribeAudio,
   type ChartData, type ChatSession,
 } from '@/api'
 import { getLocalDateString } from '@/utils/datetimePicker'
@@ -448,6 +461,10 @@ function confirmRegionPicker() {
 }
 const inputText = ref('')
 const thinking = ref(false)
+const recording = ref(false)
+const transcribing = ref(false)
+const recordTimer = ref<any>(null)
+let recorderManager: any = null
 const feedbackState = ref<Record<string, 'up' | 'down' | 'saved'>>({})
 const feedbackReasons = ref<Record<string, string>>({})
 const feedbackReasonOptions = ['分析具体', '结论符合', '事实有误', '太笼统', '风格不喜欢']
@@ -717,6 +734,7 @@ function onTimeChange(e: any) { birthTime.value = e.detail.value }
 function goDisclaimer() { uni.navigateTo({ url: '/pages/legal/disclaimer' }) }
 function goSettings() { uni.navigateTo({ url: '/pages/settings/index' }) }
 function goTarot() { uni.navigateTo({ url: '/pages/tarot/index' }) }
+function goLiuyao() { uni.navigateTo({ url: '/pages/liuyao/index' }) }
 function goMine() {
   uni.navigateTo({ url: isLoggedIn() ? '/pages/mine/index' : '/pages/login/index' })
 }
@@ -889,6 +907,94 @@ function downloadPdfReport() {
   const time = birthTimeFull.value || lastBirthInfo.value?.time
   const g = gender.value || lastBirthInfo.value?.gender
   if (time && g) downloadReport(time, g)
+}
+
+async function startVoiceRecord() {
+  if (transcribing.value) return
+  const record = uni.getRecorderManager ? uni.getRecorderManager() : null
+  if (!record) {
+    uni.showToast({ title: '当前环境不支持录音', icon: 'none' })
+    return
+  }
+  recorderManager = record
+  recording.value = true
+
+  record.onStop((res: any) => {
+    if (!res?.tempFilePath) {
+      recording.value = false
+      return
+    }
+    // 限制录音时长，避免 Base64 过大
+    if ((res.duration || 0) > 60000) {
+      uni.showToast({ title: '录音超过 60 秒，请分段输入', icon: 'none' })
+      recording.value = false
+      return
+    }
+    onRecordStop(res.tempFilePath)
+  })
+
+  record.onError((err: any) => {
+    recording.value = false
+    uni.showToast({ title: '录音失败：' + (err.message || err), icon: 'none' })
+  })
+
+  try {
+    record.start({ format: 'wav', sampleRate: 16000, numberOfChannels: 1, encodeBitRate: 16000 })
+    // 最长 60 秒自动停止
+    recordTimer.value = setTimeout(() => {
+      if (recording.value) stopVoiceRecord()
+    }, 60000)
+  } catch (err: any) {
+    recording.value = false
+    uni.showToast({ title: '无法启动录音：' + err.message, icon: 'none' })
+  }
+}
+
+function stopVoiceRecord() {
+  if (recordTimer.value) {
+    clearTimeout(recordTimer.value)
+    recordTimer.value = null
+  }
+  if (recording.value && recorderManager) {
+    try {
+      recorderManager.stop()
+    } catch {}
+  }
+}
+
+async function onRecordStop(filePath: string) {
+  recording.value = false
+  transcribing.value = true
+  uni.showLoading({ title: '识别中...' })
+  try {
+    const base64 = await fileToBase64(filePath)
+    const { text } = await transcribeAudio({ audio: base64, format: 'wav' })
+    inputText.value = (inputText.value + ' ' + text).trim()
+    if (text.trim()) {
+      onSend()
+    }
+  } catch (err: any) {
+    uni.showToast({ title: err.message || '语音识别失败', icon: 'none' })
+  } finally {
+    transcribing.value = false
+    uni.hideLoading()
+  }
+}
+
+function fileToBase64(filePath: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    if (uni.getFileSystemManager) {
+      uni.getFileSystemManager().readFile({
+        filePath,
+        encoding: 'base64',
+        success: (res: any) => resolve(String(res.data)),
+        fail: (err: any) => reject(err),
+      })
+    } else {
+      // H5 兜底：无法读取本地文件路径
+      reject(new Error('当前环境不支持读取录音文件'))
+    }
+  })
 }
 
 function onSend() {
@@ -1577,6 +1683,25 @@ messages.value.push({
   color: $color-bg;
   font-size: 32rpx;
 }
+.voice-btn {
+  flex-shrink: 0;
+  width: 80rpx;
+  height: 80rpx;
+  line-height: 80rpx;
+  text-align: center;
+  background: $color-bg-warm;
+  border: 1rpx solid $color-border;
+  border-radius: 50%;
+}
+.voice-btn.recording {
+  background: $color-primary;
+  border-color: $color-primary;
+}
+.voice-icon {
+  color: $color-ink;
+  font-size: 36rpx;
+}
+.voice-btn.recording .voice-icon { color: $color-bg; }
 
 /* ============ 历史会话抽屉 ============ */
 .drawer-mask {

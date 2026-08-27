@@ -37,6 +37,7 @@ class AppContext:
     local_tools: Any
     memory: Any
     tarot_app: Any = None
+    liuyao_app: Any = None
     decompose_model: Any = None
     reviewer_model: Any = None
     # conversation_id -> (agent, lock)
