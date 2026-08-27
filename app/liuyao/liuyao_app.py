@@ -34,7 +34,8 @@ def _hexagram(lines: list[dict]) -> dict:
     bits = "".join("1" if line["yang"] else "0" for line in lines)
     lower = TRIGRAMS[bits[:3]][0]
     upper = TRIGRAMS[bits[3:]][0]
-    name = HEXAGRAMS[upper][TRIGRAM_ORDER.index(lower)]
+    # HEXAGRAMS 按 [下卦][上卦] 编排（"乾"行即内卦为乾的八卦）
+    name = HEXAGRAMS[lower][TRIGRAM_ORDER.index(upper)]
     return {"name": name, "upper": {"name": upper, "symbol": TRIGRAMS[bits[3:]][2]},
             "lower": {"name": lower, "symbol": TRIGRAMS[bits[:3]][2]}}
 

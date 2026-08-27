@@ -1659,6 +1659,8 @@ messages.value.push({
   display: flex;
   align-items: center;
   justify-content: center;
+  /* 与输入框水平对齐（input-bar 为 flex-end，这里单独让按钮垂直居中） */
+  align-self: center;
   background: #fff;
   border-radius: 50%;
   transition: all 0.2s ease;
@@ -1678,6 +1680,8 @@ messages.value.push({
   display: flex;
   align-items: center;
   justify-content: center;
+  /* 与输入框水平对齐（input-bar 为 flex-end，这里单独让按钮垂直居中） */
+  align-self: center;
   transition: all 0.2s ease;
 }
 .voice-btn:active:not(.disabled) {

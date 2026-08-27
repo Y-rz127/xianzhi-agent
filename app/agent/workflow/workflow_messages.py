@@ -46,6 +46,25 @@ from app.tools.text_clean import clean_think_tags
 # 工作流生成/修复产出长文本（含思维链），60s 默认超时不够，单独放宽
 _WORKFLOW_LLM_TIMEOUT = 180.0
 
+# 防御：剥离模型回显的用户输入边界标记（防止 LLM 把 "--- USER INPUT BEGIN/END ---" 原样当作回答输出）
+_USER_INPUT_BOUNDARY_RE = re.compile(
+    r"---\s*USER\s+INPUT\s+BEGIN\s*---[\s\S]*?---\s*USER\s+INPUT\s+END\s*---"
+)
+
+
+def _strip_user_input_boundary(content: str) -> str:
+    """移除回答里回显的 ```--- USER INPUT BEGIN/END ---``` 边界块及其包裹的复述内容。
+
+    用户输入被 _wrap_user_input 包上边界标记以防指令注入；若模型把整段标记连同
+    用户原话一并当回答输出，这里一次性剥掉，保证用户永远看不到内部标记。
+    """
+    if not content:
+        return content
+    cleaned = _USER_INPUT_BOUNDARY_RE.sub("", content)
+    # 清理剥离后可能残留的多余空行
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
+    return cleaned
+
 
 def build_messages(
     user_prompt: str,
@@ -178,6 +197,7 @@ def invoke(chat_model, messages: list[BaseMessage]) -> str:
     response = chat_model.bind(timeout=_WORKFLOW_LLM_TIMEOUT).invoke(messages)
     content = (getattr(response, "content", "") or "").strip()
     content = clean_think_tags(content)
+    content = _strip_user_input_boundary(content)
     if not content:
         return "我先看盘面，当前信息足够排盘，但模型没有生成有效解读。你可以换一个更具体的问题继续问。"
     return _dedupe_content(content)
