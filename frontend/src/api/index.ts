@@ -15,10 +15,21 @@ const API_BASE = import.meta.env.VITE_API_BASE
 // 兜底值仅供本地开发（后端 API_KEYS 为空时鉴权关闭，不影响使用）。
 const API_KEY = import.meta.env.VITE_API_KEY || "xianzhi-yrz-admin"
 
-function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+function friendlyNetworkError(error: unknown): Error {
+  if (error instanceof TypeError && /failed to fetch|networkerror|load failed/i.test(error.message)) {
+    return new Error("暂时无法连接服务器，请稍后重试")
+  }
+  return error instanceof Error ? error : new Error("网络请求失败，请稍后重试")
+}
+
+async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const headers = new Headers(init?.headers)
   headers.set("X-API-Key", API_KEY)
-  return fetch(input, { ...init, headers })
+  try {
+    return await fetch(input, { ...init, headers })
+  } catch (error) {
+    throw friendlyNetworkError(error)
+  }
 }
 
 export { apiFetch }
@@ -640,7 +651,7 @@ export async function deleteAdminAccount(account_id: string): Promise<void> {
 
 /** 管理员登录 */
 export async function adminLogin(username: string, password: string): Promise<{ id: string; username: string; nickname: string }> {
-  const res = await fetch(`${API_BASE}/ai/admin/accounts/login`, {
+  const res = await apiFetch(`${API_BASE}/ai/admin/accounts/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ username, password }),
