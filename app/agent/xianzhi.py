@@ -41,7 +41,7 @@ from app.domain.bazi_engine import find_birth_dates_from_pillars
 from app.memory import create_chat_memory
 from app.tools.bazi import BAZI_BIRTH_TOOLS, _normalize_birth_time
 from app.tools.mcp_client import mcp_manager
-from app.tools.text_clean import clean_think_tags, dedupe_content
+from app.tools.text_clean import clean_think_tags, dedupe_content, strip_user_input_boundary
 
 
 class Xianzhi(ToolCallAgent):
@@ -473,6 +473,9 @@ class Xianzhi(ToolCallAgent):
                 response = self.chat_model.invoke(messages)
                 content = (getattr(response, "content", "") or "").strip()
                 content = clean_think_tags(content)
+                # 闲聊路径同样可能被模型回显 "--- USER INPUT BEGIN/END ---" 边界标记，
+                # 与 Workflow 路径统一走 strip_user_input_boundary，防止内部标记泄漏给用户
+                content = strip_user_input_boundary(content)
                 content = dedupe_content(content) if content else ""
                 if not content:
                     content = "嗯，我在听，你继续说。"

@@ -6,7 +6,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, Tool
 from app.agent.core.base_agent import AgentState
 from app.agent.core.react_agent import ReActAgent
 from app.core.logger import log
-from app.tools.text_clean import clean_think_tags
+from app.tools.text_clean import clean_think_tags, strip_user_input_boundary
 
 
 class ToolCallAgent(ReActAgent):
@@ -32,6 +32,9 @@ class ToolCallAgent(ReActAgent):
             # 过滤推理模型的 thinking 推理块，避免泄漏到回答
             raw_content = ai_msg.content or ""
             cleaned = clean_think_tags(raw_content)
+            # 本路径同样可能被模型回显 "--- USER INPUT BEGIN/END ---" 边界标记，
+            # 统一走 strip_user_input_boundary 防内部标记泄漏（与 Workflow / 闲聊路径一致）
+            cleaned = strip_user_input_boundary(cleaned) if cleaned else ""
             if cleaned:
                 ai_msg.content = cleaned
             self.final_answer = cleaned or raw_content

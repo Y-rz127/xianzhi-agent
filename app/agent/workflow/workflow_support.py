@@ -1,6 +1,7 @@
 """工作流支撑工具：容错 JSON 解析、命理信号正则、意图分类、命盘上下文构建。
 
 R9 拆分自 xianzhi_workflow.py。"""
+
 from __future__ import annotations
 
 import datetime as _dt
@@ -45,16 +46,65 @@ def _dedupe_content(content: str) -> str:
 GANZHI_RE = re.compile(r"[甲乙丙丁戊己庚辛壬癸][子丑寅卯辰巳午未申酉戌亥]")
 
 
-YEAR_GANZHI_RE = re.compile(r"(?P<year>\d{4})年[^。；;，,、\n]{0,6}(?P<ganzhi>[甲乙丙丁戊己庚辛壬癸][子丑寅卯辰巳午未申酉戌亥])")
+YEAR_GANZHI_RE = re.compile(
+    r"(?P<year>\d{4})年[^。；;，,、\n]{0,6}(?P<ganzhi>[甲乙丙丁戊己庚辛壬癸][子丑寅卯辰巳午未申酉戌亥])"
+)
 
 
 _ALL_BAZI_SIGNALS = (
-    "八字", "命理", "算命", "排盘", "命盘", "运势", "大运", "流年",
-    "甲", "乙", "丙", "丁", "戊", "己", "庚", "辛", "壬", "癸",
-    "子", "丑", "寅", "卯", "辰", "巳", "午", "未", "申", "酉", "戌", "亥",
-    "五行", "十神", "用神", "忌神", "格局", "神煞", "财星", "官星", "印星", "食伤",
-    "事业", "财运", "感情", "婚姻", "健康", "考试", "六亲", "子女", "性格",
-    "合婚", "起名", "择日", "方位",
+    "八字",
+    "命理",
+    "算命",
+    "排盘",
+    "命盘",
+    "运势",
+    "大运",
+    "流年",
+    "甲",
+    "乙",
+    "丙",
+    "丁",
+    "戊",
+    "己",
+    "庚",
+    "辛",
+    "壬",
+    "癸",
+    "子",
+    "丑",
+    "寅",
+    "卯",
+    "辰",
+    "巳",
+    "午",
+    "未",
+    "申",
+    "酉",
+    "戌",
+    "亥",
+    "五行",
+    "十神",
+    "用神",
+    "忌神",
+    "格局",
+    "神煞",
+    "财星",
+    "官星",
+    "印星",
+    "食伤",
+    "事业",
+    "财运",
+    "感情",
+    "婚姻",
+    "健康",
+    "考试",
+    "六亲",
+    "子女",
+    "性格",
+    "合婚",
+    "起名",
+    "择日",
+    "方位",
 )
 
 
@@ -110,13 +160,67 @@ def classify_question(text: str, today: _dt.date | None = None) -> QuestionInten
             best_score = score
 
     # 闲聊场景优先级提升：含强闲聊信号词时，直接判定为 chitchat，避免被 liunian 的"最近"等词抢走
-    CHITCHAT_STRONG = ("哈哈","你好", "在吗", "谢谢", "辛苦", "早上好", "晚上好", "晚安",
-                       "吃饭了吗", "在干嘛", "生日快乐", "新年好")
+    CHITCHAT_STRONG = (
+        "哈哈",
+        "你好",
+        "在吗",
+        "谢谢",
+        "辛苦",
+        "早上好",
+        "晚上好",
+        "晚安",
+        "吃饭了吗",
+        "在干嘛",
+        "生日快乐",
+        "新年好",
+    )
     if any(w in text for w in CHITCHAT_STRONG) and not years:
         best_domain = "chitchat"
 
+    # 工具型通用查询（天气、搜索资料、实时信息等）不应被闲聊短路；
+    # 否则会直接跳过 ReAct / MCP / online-search 路径。
+    WEATHER_HINTS = (
+        "天气",
+        "气温",
+        "降雨",
+        "晴天",
+        "阴天",
+        "雨天",
+        "风力",
+        "风向",
+        "空气质量",
+        "湿度",
+        "雷阵雨",
+        "暴雨",
+        "天气预报",
+    )
+    SEARCH_HINTS = (
+        "查一下",
+        "搜索",
+        "搜一下",
+        "搜一搜",
+        "查询",
+        "资讯",
+        "新闻",
+        "最新",
+        "网上",
+        "网络",
+        "资料",
+        "百科",
+        "百度",
+        "谷歌",
+        "网页",
+        "在线",
+        "实时",
+        "信息",
+    )
+    tool_query = any(w in text for w in WEATHER_HINTS + SEARCH_HINTS)
+    if tool_query and not years:
+        best_domain = "general"
+
     # 零命理信号 + 无年份 → 闲聊（如"为什么这么多人执着西藏"）
-    if best_score == 0 and not years and best_domain == "general":
+    # 但天气/搜索/信息查询必须保留在 general，避免被直接短路掉 ReAct。
+    if best_score == 0 and not years and best_domain == "general" and not tool_query:
         best_domain = "chitchat"
 
     if years and best_domain == "general":
@@ -133,7 +237,9 @@ def classify_question(text: str, today: _dt.date | None = None) -> QuestionInten
     )
 
 
-def build_chart_context(birth_time: str, gender: str, sect: int = 2, yun_sect: int = 1, user_id: str = "", longitude: float = 0.0) -> WorkflowChartContext:
+def build_chart_context(
+    birth_time: str, gender: str, sect: int = 2, yun_sect: int = 1, user_id: str = "", longitude: float = 0.0
+) -> WorkflowChartContext:
     """根据出生时间/性别/流派构造 WorkflowChartContext（大运 10 柱、流年 8 年）。
 
     Args:
@@ -148,7 +254,12 @@ def build_chart_context(birth_time: str, gender: str, sect: int = 2, yun_sect: i
         已排盘完成的 WorkflowChartContext
     """
     chart = build_bazi_chart(
-        birth_time, gender, sect=sect, yun_sect=yun_sect, dayun_count=10, liunian_years=8,
+        birth_time,
+        gender,
+        sect=sect,
+        yun_sect=yun_sect,
+        dayun_count=10,
+        liunian_years=8,
         longitude=longitude or None,
     )
     return WorkflowChartContext(

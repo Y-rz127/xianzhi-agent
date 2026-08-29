@@ -23,6 +23,20 @@ def test_classify_question_extracts_domain_and_relative_years():
     assert intent.wants_report is False
 
 
+def test_classify_question_keeps_weather_queries_out_of_chitchat():
+    intent = classify_question("南宁今天天气怎么样？")
+
+    assert intent.domain == "general"
+    assert intent.domain != "chitchat"
+
+
+def test_classify_question_keeps_search_queries_out_of_chitchat():
+    intent = classify_question("帮我查一下网上关于AI的最新新闻")
+
+    assert intent.domain == "general"
+    assert intent.domain != "chitchat"
+
+
 def test_workflow_extends_liunian_for_target_year():
     workflow = XianzhiWorkflow(chat_model=None)
     ctx = build_chart_context("1990-05-20 14:30", MALE)
@@ -61,8 +75,8 @@ def test_build_theory_queries_uses_focused_queries():
     queries, meta = build_theory_queries("用神是什么")
     assert len(queries) == 2
     assert meta.startswith("topic=")
-    assert queries[0] == "用神是什么"           # 用户原句置首
-    assert "用神" in queries[1]                  # 术语精准 query
+    assert queries[0] == "用神是什么"  # 用户原句置首
+    assert "用神" in queries[1]  # 术语精准 query
     # 验证不含无关的"空亡 桃花 神煞 禄神"等内容
     assert "空亡" not in queries[0] and "空亡" not in queries[1]
     assert "桃花" not in queries[0] and "桃花" not in queries[1]
