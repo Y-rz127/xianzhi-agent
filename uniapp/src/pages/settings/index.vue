@@ -154,8 +154,8 @@ async function onSave() {
   position: absolute;
   top: 0; left: 0; right: 0; bottom: 0;
   background:
-    radial-gradient(circle at 20% 30%, rgba(107, 123, 142, 0.35), transparent 50%),
-    radial-gradient(circle at 80% 70%, rgba(184, 72, 60, 0.2), transparent 50%);
+    radial-gradient(circle at 20% 30%, var(--x-glow-blue), transparent 50%),
+    radial-gradient(circle at 80% 70%, var(--x-glow-red), transparent 50%);
 }
 .hero-orb {
   position: absolute;
@@ -166,12 +166,12 @@ async function onSave() {
 .orb-1 {
   top: -60rpx; right: -40rpx;
   width: 200rpx; height: 200rpx;
-  background: rgba(107, 123, 142, 0.45);
+  background: var(--x-glow-blue);
 }
 .orb-2 {
   bottom: -80rpx; left: -60rpx;
   width: 220rpx; height: 220rpx;
-  background: rgba(184, 72, 60, 0.3);
+  background: var(--x-glow-red);
 }
 .hero-content {
   position: relative;
@@ -184,7 +184,7 @@ async function onSave() {
   font-size: 56rpx;
   color: $color-paper;
   margin-bottom: 16rpx;
-  text-shadow: 0 0 24rpx rgba(107, 123, 142, 0.8);
+  text-shadow: var(--x-hero-shadow);
 }
 .hero-sub {
   margin-top: 10rpx;
@@ -249,7 +249,7 @@ async function onSave() {
 }
 .input {
   padding: 22rpx 24rpx;
-  background: rgba(107, 123, 142, 0.06);
+  background: var(--x-hint-bg);
   border: 1rpx solid $color-border;
   border-radius: 20rpx;
   font-size: 30rpx;
@@ -263,8 +263,8 @@ async function onSave() {
 .hint-card {
   margin-top: 8rpx;
   padding: 20rpx 24rpx;
-  background: rgba(184, 72, 60, 0.08);
-  border: 1rpx solid rgba(184, 72, 60, 0.25);
+  background: var(--x-warn-bg);
+  border: 1rpx solid var(--x-warn-border);
   border-radius: 20rpx;
 }
 .hint-line {
@@ -295,7 +295,7 @@ async function onSave() {
 }
 .btn-ghost {
   color: $color-ink-light;
-  background: rgba(107, 123, 142, 0.08);
+  background: var(--x-hint-bg);
   border: 1rpx solid $color-border;
 }
 .btn-primary {
@@ -313,12 +313,12 @@ async function onSave() {
   font-size: 30rpx;
 }
 .test-result.ok {
-  background: rgba(107, 142, 90, 0.12);
-  border: 1rpx solid rgba(107, 142, 90, 0.4);
+  background: var(--x-ok-bg);
+  border: 1rpx solid var(--x-ok-border);
 }
 .test-result.fail {
-  background: rgba(184, 72, 60, 0.12);
-  border: 1rpx solid rgba(184, 72, 60, 0.4);
+  background: var(--x-fail-bg);
+  border: 1rpx solid var(--x-fail-border);
 }
 .test-icon {
   margin-right: 16rpx;

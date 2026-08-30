@@ -1,5 +1,7 @@
 <template>
   <view class="page" :class="themeClass">
+    <view class="meteor meteor-1" v-if="themeClass === 't-dark'"></view>
+    <view class="meteor meteor-2" v-if="themeClass === 't-dark'"></view>
     <view class="status-bar" :style="{ height: statusBarHeight + 'px' }"></view>
 
     <view class="nav-back" :style="{ top: statusBarHeight + 'px' }" @tap="goBack">
