@@ -2,6 +2,7 @@
   <view class="page" :class="themeClass">
     <view class="meteor meteor-1" v-if="themeClass === 't-dark'"></view>
     <view class="meteor meteor-2" v-if="themeClass === 't-dark'"></view>
+    <view class="meteor meteor-3" v-if="themeClass === 't-dark'"></view>
     <!-- 水墨山水背景 -->
     <view class="landscape" aria-hidden="true">
       <view class="mountain mountain-far"></view>

@@ -170,6 +170,14 @@
     radial-gradient(2px 2px at 10% 60%, rgba(255, 255, 255, 0.5) 50%, transparent 51%);
   animation: starTwinkle 4.6s ease-in-out infinite 1.7s;
 }
+.t-dark .meteor-3 {
+  background:
+    radial-gradient(2.5px 2.5px at 22% 68%, rgba(255, 255, 255, 0.7) 50%, transparent 51%),
+    radial-gradient(3px 3px at 58% 76%, rgba(240, 208, 96, 0.6) 50%, transparent 51%),
+    radial-gradient(2px 2px at 82% 62%, rgba(255, 255, 255, 0.55) 50%, transparent 51%),
+    radial-gradient(2px 2px at 44% 88%, rgba(184, 134, 232, 0.5) 50%, transparent 51%);
+  animation: starTwinkle 5.2s ease-in-out infinite 0.9s;
+}
 @keyframes starTwinkle {
   0%, 100% { opacity: 0.45; }
   50% { opacity: 1; }
@@ -186,10 +194,14 @@
   opacity: 0;
   transform: rotate(35deg) translateX(0);
 }
-.t-dark .meteor-1::before { top: 6%; left: 2%; animation: meteorRun 26s linear infinite 1s; }
-.t-dark .meteor-1::after  { top: 2%; left: 40%; animation: meteorRun 30s linear infinite 9s; }
-.t-dark .meteor-2::before { top: 12%; left: 55%; animation: meteorRun 28s linear infinite 15s; }
-.t-dark .meteor-2::after  { top: 4%; left: 76%; animation: meteorRun 32s linear infinite 21s; }
+/* 六颗流星：起点沿"右上→左下"对角带散布全屏，统一向右下划去，错峰错速 */
+.t-dark .meteor-1::before { top: 6%;  left: 62%; animation: meteorRun 24s linear infinite 1s; }
+.t-dark .meteor-1::after  { top: 18%; left: 28%; animation: meteorRun 30s linear infinite 9s; }
+.t-dark .meteor-2::before { top: 30%; left: 74%; animation: meteorRun 27s linear infinite 15s; }
+.t-dark .meteor-2::after  { top: 45%; left: 12%; animation: meteorRun 32s linear infinite 21s; }
+.t-dark .meteor-3::before { top: 58%; left: 48%; animation: meteorRun 26s linear infinite 5s; }
+.t-dark .meteor-3::after  { top: 70%; left: 8%;  animation: meteorRun 29s linear infinite 17s; }
+
 @keyframes meteorRun {
   0% { transform: rotate(35deg) translateX(0); opacity: 0; }
   1% { opacity: 0.9; }

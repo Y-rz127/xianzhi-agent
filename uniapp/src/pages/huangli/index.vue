@@ -2,6 +2,7 @@
   <view class="page" :class="themeClass">
     <view class="meteor meteor-1" v-if="themeClass === 't-dark'"></view>
     <view class="meteor meteor-2" v-if="themeClass === 't-dark'"></view>
+    <view class="meteor meteor-3" v-if="themeClass === 't-dark'"></view>
     <view class="nav" @tap="back">‹</view>
     <scroll-view scroll-y class="scroll">
       <view class="hero">

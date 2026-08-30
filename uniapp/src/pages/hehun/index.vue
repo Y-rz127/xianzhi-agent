@@ -2,6 +2,7 @@
   <view class="page" :class="themeClass">
     <view class="meteor meteor-1" v-if="themeClass === 't-dark'"></view>
     <view class="meteor meteor-2" v-if="themeClass === 't-dark'"></view>
+    <view class="meteor meteor-3" v-if="themeClass === 't-dark'"></view>
     <scroll-view class="scroll" scroll-y>
       <!-- 状态栏占位 -->
       <view class="status-bar" :style="{ height: statusBarHeight + 'px' }"></view>
