@@ -27,6 +27,10 @@
       "style": { "navigationStyle": "custom", "navigationBarTitleText": "六爻算卦" }
     },
     {
+      "path": "pages/huangli/index",
+      "style": { "navigationStyle": "custom", "navigationBarTitleText": "每日黄历" }
+    },
+    {
       "path": "pages/settings/index",
       "style": { "navigationBarTitleText": "" }
     },

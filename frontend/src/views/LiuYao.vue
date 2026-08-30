@@ -40,7 +40,7 @@
             <p class="cast-tip">凝神静气，摇卦中…</p>
           </template>
           <template v-else-if="method === 'numbers'">
-            <div class="num-orbit"><b>{{ numbers[0] === '' || numbers[0] == null ? '—' : numbers[0] }}</b><span>☯</span><b>{{ numbers[1] === '' || numbers[1] == null ? '—' : numbers[1] }}</b></div>
+            <div class="num-orbit"><b>{{ numbers[0] == null ? '—' : numbers[0] }}</b><span>☯</span><b>{{ numbers[1] == null ? '—' : numbers[1] }}</b></div>
             <p class="cast-tip">以心念入卦，推演六爻…</p>
           </template>
           <template v-else>

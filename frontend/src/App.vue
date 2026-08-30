@@ -50,6 +50,10 @@
           <span class="nav-icon tarot-icon">☷</span>
           <span v-if="!sidebarCollapsed">六爻算卦</span>
         </router-link>
+        <router-link to="/huangli" class="nav-item" active-class="active" @click="onNavClick">
+          <span class="nav-icon huangli-icon">☰</span>
+          <span v-if="!sidebarCollapsed">每日黄历</span>
+        </router-link>
         <router-link to="/chart-cases" class="nav-item" active-class="active" @click="onNavClick">
           <span class="nav-icon cases-icon">
             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
@@ -304,6 +308,8 @@ onUnmounted(() => {
 .nav-item.active .hehun-icon { background: rgba(232,180,139,0.15); color: #e8b48b; box-shadow: 0 0 12px rgba(232,180,139,0.2); }
 .tarot-icon { color: #b886e8; }
 .nav-item.active .tarot-icon { background: rgba(184,134,232,0.15); color: #b886e8; box-shadow: 0 0 12px rgba(184,134,232,0.2); }
+.huangli-icon { color: #e8a05b; }
+.nav-item.active .huangli-icon { background: rgba(232,160,91,0.15); color: #e8a05b; box-shadow: 0 0 12px rgba(232,160,91,0.2); }
 .cases-icon { color: #8bb8e8; }
 .nav-item.active .cases-icon { background: rgba(139,184,232,0.15); color: #8bb8e8; box-shadow: 0 0 12px rgba(139,184,232,0.2); }
 .rag-icon { color: #8be8c7; }

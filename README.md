@@ -4,7 +4,7 @@
 
 ## 项目简介
 
-先知是一个集八字排盘、命理分析、合婚分析、塔罗占卜、命主档案管理于一体的智能体平台。核心采用 **Supervisor + 专业 Worker + Reviewer** 三层架构，让命理分析具备专业深度与严谨性。
+先知是一个集八字排盘、命理分析、合婚分析、塔罗占卜、六爻起卦、每日黄历、命主档案管理于一体的智能体平台。核心采用 **Supervisor + 专业 Worker + Reviewer** 三层架构，让命理分析具备专业深度与严谨性。
 
 ### 核心能力
 
@@ -12,6 +12,8 @@
 - **命理问答**：基于 RAG 知识库的术语解释、古籍引用、专项断事
 - **合婚分析**：双方八字合婚，五行匹配度评分
 - **塔罗占卜**：78 张完整塔罗牌，单张/三张/关系牌阵，AI 流式解读
+- **六爻起卦**：铜钱/数字/时间三式起卦，本卦变卦动爻，AI 深度解读
+- **每日黄历**：宜忌/八方位/时辰吉凶/择吉/月视图，纯算法确定性计算，对齐主流老黄历（Web + 小程序双端）
 - **命主档案**：注册用户可保存多个命主档案，便捷复用排盘
 - **命例收藏**：跨会话收藏命例，支持命例库浏览
 - **PDF 报告**：命盘详情 PDF 下载、完整命理报告导出
@@ -58,8 +60,8 @@
         └──────────────────┼──────────────────┘
                            ▼
    ┌──────────────────────────────────────────────────────┐
-   │  本地工具（11 个）│ MCP 工具（高德）│ RAG 知识库       │
-   │  bazi_*  │ search_knowledge │ search_web │ terminate  │
+   │  本地工具（16 个）│ MCP 工具（高德）│ RAG 知识库       │
+   │  bazi_* │ huangli_* │ search_knowledge │ search_web   │
    └──────────────────────────────────────────────────────┘
 ```
 
@@ -157,6 +159,24 @@ Layer 1（`KnowledgeBase.search` → `_search_reranked`）为后端无关的两�
 
 用关键词重叠度而非后端 score 重排，规避 Chroma（L2 距离越小越相关）与 pgvector / Milvus（余弦相似度越大越相关）的 score 方向不一致；不支持 score 检索的后端自动回退 MMR（`rag_mmr_lambda`）。完整对比见 [docs/multi_agent_architecture.md](docs/multi_agent_architecture.md)。
 
+### 5. 每日黄历（Web / 小程序）
+
+基于 lunar-python 纯算法的确定性黄历（`app/domain/huangli_calc.py` 领域层 + `app/sub_app/huangli/` 子应用），不依赖 LLM 与数据库：
+
+- **当日黄历**：宜忌、冲煞、彭祖百忌、胎神占方、纳音五行、吉神宜趋/凶煞宜忌、八吉神方位（财神/喜神/福神/阳贵/阴贵/五鬼/生门/死门）、值神黄黑道、十二建星、九星、二十八宿、节日节气（含中元/上巳等 24 民俗节）。方位流派对齐主流老黄历 App（17 日 × 8 字段回测 134/136，唯一分歧壬申生门死门已被手机自身庚午/辛未数据证伪为 App 错组）：财神按日干民历派（`_CAI_MINLI`）、五鬼按日干（`_WUGUI_GAN`，十干全实测）、阳贵/阴贵/生门/死门按六十甲子逐日表（`_DAY_GOD_POS`，渊海子平系，三处源表讹字按"对冲宫+三日组"双不变式校正，丙日阳贵覆写正南可回退）
+- **十二时辰吉凶**：每时辰值神/吉凶/宜忌（子时合并为一条，取当日早子段，主流黄历口径）
+- **择吉**：按宜忌事项词表（139 项）筛选区间吉日，天德/月德/天赦/四相加星排序，可避冲生肖
+- **月视图概览**：整月简报（农历、宜忌摘要、节日/节气/天赦角标）
+- **Agent 工具**：`huangli_today` / `huangli_zeji` 挂载 ReAct 路径，可回答"今天适合开业吗""帮我挑个下月搬家吉日"
+- **双端页面**：Web `/huangli`（侧栏导航）；小程序 `pages/huangli`（聊天抽屉快捷入口「黄历」）
+
+### 6. 六爻起卦
+
+- 铜钱 / 数字 / 时间三种起卦方式，纯算法可复现（`app/sub_app/liuyao/`）
+- 本卦 / 变卦 / 动爻完整排布，六十四卦 + 八卦上下卦标注
+- AI 深度解读（`POST /api/ai/liuyao/interpret`）
+- Web `/liuyao` 页面（摇卦动画 + 逐爻揭示），小程序同步支持
+
 ## 神煞排盘规则
 
 神煞是八字命盘的重要辅助指标。本项目以主流《渊海子平》《三命通会》为查表依据，并对齐问真八字等主流排盘软件的输出。
@@ -211,70 +231,55 @@ Layer 1（`KnowledgeBase.search` → `_search_reranked`）为后端无关的两�
 
 ```
 xianzhi-agent/
-├── main.py                      # 应用入口（FastAPI + lifespan）
+├── main.py                      # 应用入口（FastAPI + lifespan：模型/思考路由/后台初始化/缓存预热）
 ├── app/
 │   ├── agent/                   # 智能体核心
-│   │   ├── xianzhi.py            # 先知主类（ReAct + workflow 分流 + 闲聊短路）
-│   │   ├── xianzhi_workflow.py   # Supervisor + Worker + Reviewer 核心
-│   │   ├── xianzhi_langgraph.py  # LangGraph 可选封装
-│   │   ├── base_agent.py         # Agent 基类
-│   │   ├── tool_call_agent.py    # 工具调用 Agent
-│   │   └── react_agent.py        # ReAct Agent
+│   │   ├── xianzhi.py           # 先知主类（ReAct + workflow 分流 + 闲聊短路）
+│   │   ├── xianzhi_langgraph.py # LangGraph 可选封装
+│   │   ├── birth_parse.py       # 出生信息提取
+│   │   ├── prompts.py           # Prompt 中枢（断法/六爻解读等）
+│   │   ├── core/                # base_agent / react_agent / tool_call_agent
+│   │   └── workflow/            # Supervisor + Worker + Reviewer
+│   │                            #   （xianzhi_workflow + models/retrieval/workers/messages/support）
 │   ├── api/                     # REST/WebSocket 接口
-│   │   ├── xianzhi.py            # 先知聊天 WS / SSE / REST
-│   │   ├── tarot.py              # 塔罗 WS
-│   │   ├── rag.py                # 问答 WS
-│   │   ├── cases.py              # 命例库 REST（Web 端新建八字命例，cases 表）
-│   │   ├── auth.py               # 用户登录认证（JWT）
-│   │   ├── me.py                 # 当前用户信息
-│   │   ├── profiles.py           # 命主档案 REST
-│   │   ├── favorites.py          # 命例收藏 REST
-│   │   ├── feedback.py           # 用户反馈 REST
-│   │   ├── tarot_records.py      # 塔罗历史记录 REST
-│   │   ├── admin_users.py        # 管理员用户管理 REST
-│   │   ├── deps.py               # 依赖注入（用户认证等）
-│   │   ├── common.py             # 通用工具
-│   │   ├── observability.py      # 可观测性
-│   │   ├── tools.py              # 工具接口
-│   │   └── routes.py             # 路由聚合
-│   ├── domain/                  # 领域逻辑
-│   │   └── bazi_engine.py        # 八字排盘引擎（神煞查表）
-│   ├── tools/                   # 工具集
-│   │   ├── bazi.py               # 八字工具（8个）
-│   │   ├── rag_search.py         # 知识库检索工具
-│   │   ├── web_search.py         # 联网搜索（Serper.dev）
-│   │   ├── terminate.py          # 终止工具
-│   │   ├── mcp_client.py         # MCP 客户端（高德）
-│   │   ├── pdf_report.py         # PDF 报告生成
-│   │   ├── report_generator.py   # 报告生成器
-│   │   └── cache.py              # 排盘缓存
-│   ├── rag/                     # RAG 知识库
-│   │   ├── vector_store.py       # 向量库封装
-│   │   ├── retrieval.py          # 检索器
-│   │   └── knowledge_docs/       # 命理文档（40份）
-│   ├── memory/                  # 记忆系统
-│   │   ├── chat_memory.py        # 对话记忆
-│   │   └── postgres_memory.py    # PostgreSQL 持久化
-│   ├── db/                      # PostgreSQL 数据访问层
-│   ├── evaluation/              # 离线评估
-│   │   └── xianzhi_eval.py       # 答案质量检查
-│   ├── tarot_app.py             # 塔罗 App
-│   ├── observability.py         # LangSmith 可观测性
-│   ├── security.py              # 安全中间件                
-│   ├── config.py                # 配置
-│   └── logger.py                # 日志（loguru）
+│   │   ├── xianzhi.py           # 先知聊天 WS / SSE / REST
+│   │   ├── rag.py               # 问答 WS
+│   │   ├── auth.py / me.py      # 登录认证（JWT）/ 当前用户
+│   │   ├── cases.py / profiles.py / favorites.py      # 命例库 / 命主档案 / 收藏
+│   │   ├── tarot_records.py / feedback.py             # 塔罗记录 / 反馈
+│   │   ├── admin_users.py / admin_accounts.py         # 管理员
+│   │   ├── asr.py               # 语音转写
+│   │   └── routes.py / deps.py / common.py / context.py  # 聚合 / 依赖注入 / 通用 / 应用上下文
+│   ├── core/                    # config / logger（loguru）/ security（鉴权限流）
+│   │                            #   observability（LangSmith）/ thinking_router（思考模式路由）
+│   ├── domain/                  # 领域纯计算（不依赖 LLM 与数据库）
+│   │   ├── bazi_engine.py       # 八字排盘引擎（lunar-python + 神煞查表）
+│   │   ├── chart_builder / chart_format / analysis_calc / shensha_calc / tables
+│   │   ├── time_parse.py        # 农历/节日/时辰智能解析
+│   │   └── huangli_calc.py      # 黄历领域层（宜忌/八方位/时辰/择吉/月简报，对齐主流老黄历）
+│   ├── sub_app/                 # 玩法子应用（App 核心 + routes）
+│   │   ├── tarot/               # 塔罗（TarotApp，WS 流式解读）
+│   │   ├── hehun/               # 合婚
+│   │   ├── liuyao/              # 六爻（纯算法起卦 + AI 解读）
+│   │   └── huangli/             # 黄历（day/range/zeji/items 四接口）
+│   ├── tools/                   # 16 个本地工具（bazi/huangli/rag_search/web_search/terminate）
+│   │   ├── mcp_client.py        # MCP 客户端（高德）
+│   │   ├── pdf_report.py / report_generator.py        # PDF 报告
+│   │   └── cache.py / text_clean.py / fonts/          # 排盘缓存 / 文本清洗 / 字体
+│   ├── rag/                     # RAG 知识库（vector_store/retrieval/relevance/embeddings/fingerprint/case_store）
+│   │   └── knowledge_docs/      # 命理文档（40 份）
+│   ├── memory/                  # 对话记忆（chat_memory / postgres_memory / summarizer）
+│   ├── db/                      # PostgreSQL 数据访问层（pool/repository/users/profiles/chart_store…）
+│   └── evaluation/              # 离线评估（xianzhi_eval）
 ├── frontend/                    # Web 前端（Vue3 + Vite）
-├── uniapp/                      # 小程序前端（UniApp）
-├── docs/
-│   └── multi_agent_architecture.md  # 多 Agent 协作架构文档
-├── 学习资料/
-│   └── 智能体开发笔记/          # 智能体开发学习笔记
-├── .env.example                 # 环境变量示例
-├── requirements.txt             # Python 依赖
-├── Dockerfile                   # 后端容器
-├── docker-compose.yml           # 容器编排
-├── start.ps1 / stop.ps1         # Windows 启停脚本
-└── pyproject.toml
+│   └── src/views/               # 先知/合婚/塔罗/六爻/黄历/命例库/管理后台等
+├── uniapp/                      # 小程序前端（UniApp，聊天抽屉含合婚/塔罗/六爻/黄历入口）
+├── shared/                      # Web 与小程序共享 API 层（数据模型/端点常量/解析器）
+├── tests/                       # pytest 套件（黄历含 17 日老黄历 App 回测 + 表结构不变式）
+├── docs/                        # 多 Agent 架构 / code review / 持续学习路线图
+├── 学习资料/                     # 智能体开发学习笔记
+├── Dockerfile / docker-compose.yml / start.ps1 / stop.ps1
+└── pyproject.toml / requirements.txt / .env.example
 ```
 
 ## 快速开始
@@ -361,6 +366,12 @@ docker-compose up -d
 | `POST /api/ai/xianzhi/hehun` | 合婚分析 |
 | `GET /api/ai/xianzhi/cases` | 命例库列表（Web 端新建八字命例） |
 | `GET /api/ai/tarot/spreads` | 塔罗牌阵列表 |
+| `POST /api/ai/liuyao/cast` | 六爻起卦（coins/numbers/time） |
+| `POST /api/ai/liuyao/interpret` | 六爻 AI 解读 |
+| `GET /api/ai/huangli/day` | 当日完整黄历（date 可选，1900-2100） |
+| `GET /api/ai/huangli/range` | 月视图简报（区间上限 31 天） |
+| `GET /api/ai/huangli/zeji` | 择吉筛选（区间上限 60 天，可避冲生肖） |
+| `GET /api/ai/huangli/items` | 宜忌事项词表 |
 | `POST /api/auth/login` | 用户登录 |
 | `GET /api/me` | 当前用户信息 |
 | `GET/POST /api/profiles` | 命主档案 |
@@ -373,7 +384,7 @@ docker-compose up -d
 
 ## 工具集
 
-### 本地工具（11 个）
+### 本地工具（16 个）
 
 | 工具 | 用途 |
 |------|------|
@@ -385,8 +396,13 @@ docker-compose up -d
 | `bazi_liuyue` | 流月查询 |
 | `bazi_liuri` | 流日查询 |
 | `bazi_hehun` | 合婚分析 |
+| `bazi_infer_dates` | 出生日期反推（多候选） |
+| `lunar_to_solar` | 农历/节日/时辰转公历 |
+| `huangli_today` | 每日黄历查询（含八方位/时辰吉凶） |
+| `huangli_zeji` | 择吉吉日筛选 |
 | `search_knowledge` | RAG 知识库检索 |
 | `search_web` | 联网搜索（Serper.dev） |
+| `scrape_web_page` | 网页正文抓取 |
 | `do_terminate` | 任务终止 |
 
 ### MCP 工具
@@ -493,7 +509,7 @@ for s in _compute_shensha(chart.pillars):
 
 ### 添加新 Worker
 
-在 `app/agent/xianzhi_workflow.py` 的 `WORKERS` 注册表添加配置，并在 `DOMAIN_KEYWORDS` 和 `DOMAIN_RULE_QUERIES` 添加对应配置。详见 [docs/multi_agent_architecture.md](docs/multi_agent_architecture.md#扩展-worker)。
+在 `app/agent/workflow/xianzhi_workflow.py` 的 `WORKERS` 注册表添加配置，并在 `DOMAIN_KEYWORDS` 和 `DOMAIN_RULE_QUERIES` 添加对应配置。详见 [docs/multi_agent_architecture.md](docs/multi_agent_architecture.md#扩展-worker)。
 
 ### 命理知识库扩展
 
@@ -505,7 +521,7 @@ for s in _compute_shensha(chart.pillars):
 2. **专业深度 + 交叉校验**：单领域 Worker 更短更专业，Reviewer 用不同视角审视避免盲区
 3. **小程序兼容**：所有聊天用 WebSocket（SSE 不支持），HTTPS + 备案域名
 4. **用户体验**：不展示 ReAct 中间步骤，只输出最终回答；闲聊双重短路避免无谓工具调用
-5. **数据准确**：关键 UI 元素（神煞查表、空亡、命宫身宫）从后端计算填充，不依赖 LLM 生成
+5. **数据准确**：关键 UI 元素（神煞查表、空亡、命宫身宫、黄历八方位）从后端计算填充，不依赖 LLM 生成
 6. **每柱独立显示**：神煞按柱位垂直排列，柱内同名去重，命宫身宫独立显示在标题右侧
 
 ## 许可

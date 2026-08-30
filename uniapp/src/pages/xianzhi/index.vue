@@ -190,7 +190,7 @@
             <text class="dq-icon">⚙</text>
           </view>
         </view>
-        <!-- 快捷功能：合婚 / 塔罗 / 六爻 -->
+        <!-- 快捷功能：合婚 / 塔罗 / 六爻 / 黄历 -->
         <view class="drawer-quick">
           <view class="drawer-quick-btn" @tap="goHehun">
             <text class="dq-icon">合</text><text>合婚</text>
@@ -200,6 +200,9 @@
           </view>
           <view class="drawer-quick-btn" @tap="goLiuYao">
             <text class="dq-icon">卦</text><text>六爻</text>
+          </view>
+          <view class="drawer-quick-btn" @tap="goHuangLi">
+            <text class="dq-icon">历</text><text>黄历</text>
           </view>
         </view>
         <view class="drawer-header">
@@ -791,6 +794,7 @@ function goDisclaimer() { uni.navigateTo({ url: '/pages/legal/disclaimer' }) }
 function goSettings() { uni.navigateTo({ url: '/pages/settings/index' }) }
 function goTarot() { uni.navigateTo({ url: '/pages/tarot/index' }) }
 function goLiuYao() { uni.navigateTo({ url: '/pages/liuyao/index' }) }
+function goHuangLi() { uni.navigateTo({ url: '/pages/huangli/index' }) }
 function goMine() {
   uni.navigateTo({ url: isLoggedIn() ? '/pages/mine/index' : '/pages/login/index' })
 }

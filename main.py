@@ -1,4 +1,5 @@
 """先知智能体 - 应用入口。"""
+
 from __future__ import annotations
 
 import asyncio
@@ -24,6 +25,7 @@ from app.memory import create_chat_memory
 from app.rag.vector_store import get_knowledge_base
 from app.sub_app.tarot.tarot_app import TarotApp
 from app.tools.bazi import bazi_analysis, bazi_chart, bazi_dayun, bazi_tools
+from app.tools.huangli import huangli_tools
 from app.tools.mcp_client import mcp_manager
 from app.tools.rag_search import rag_tools
 from app.tools.terminate import terminate_tools
@@ -93,14 +95,18 @@ async def lifespan(app: FastAPI):
 
     # 意图拆解 / Reviewer 审核模型（独立实例，留空则复用主模型）
     decompose_http = httpx.Client(trust_env=False) if settings.decompose_model else None
-    decompose_model = _make_model(settings.decompose_model, 0.1, 30.0, decompose_http) if decompose_http else chat_model
+    decompose_model = (
+        _make_model(settings.decompose_model, 0.1, 30.0, decompose_http) if decompose_http else chat_model
+    )
     reviewer_http = httpx.Client(trust_env=False) if settings.reviewer_model else None
-    reviewer_model = _make_model(settings.reviewer_model, 0.1, 60.0, reviewer_http) if reviewer_http else chat_model
+    reviewer_model = (
+        _make_model(settings.reviewer_model, 0.1, 60.0, reviewer_http) if reviewer_http else chat_model
+    )
 
     # 记忆（数据库不可达时降级，不阻断端口监听）
     memory = create_chat_memory()
 
-    local_tools = bazi_tools + search_tools + terminate_tools + rag_tools
+    local_tools = bazi_tools + search_tools + terminate_tools + rag_tools + huangli_tools
     tarot_app = TarotApp(chat_model=chat_model)
 
     # Xianzhi 按会话池化，首次请求时按需创建实例；HTTP handler 经依赖注入获取，WS 经模块级 get_app_context()
@@ -205,7 +211,7 @@ _cors_origins = [o.strip() for o in settings.cors_origins.split(",") if o.strip(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins,
-    allow_credentials=True,
+    allow_credentials=True,  # 允许跨域请求携带认证信息（如 JWT）（仅限开发环境）（生产环境需鉴权）
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -217,6 +223,7 @@ app.add_middleware(RateLimitMiddleware)
 
 @app.middleware("http")
 async def security_headers_middleware(request, call_next):
+    """添加安全头，防止 XSS、点击劫持等攻击。"""
     response = await call_next(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
@@ -265,7 +272,9 @@ if __name__ == "__main__":
     # 必须读 settings.app_port 而非 os.environ——pydantic-settings 不会把 .env 写回环境变量，
     # 否则 APP_PORT=8123 会被无视、回退到 80；仍可用 PORT / APP_PORT 进程环境变量覆盖。
     in_container = os.path.exists("/.dockerenv") or os.environ.get("KUBERNETES_SERVICE_HOST") is not None
-    port = int(os.environ.get("PORT") or os.environ.get("APP_PORT") or (80 if in_container else settings.app_port))
+    port = int(
+        os.environ.get("PORT") or os.environ.get("APP_PORT") or (80 if in_container else settings.app_port)
+    )
     # WORKERS 控制多进程（默认 1）；进程级状态的影响已在 lifespan 启动告警中显式提示
     workers = max(1, int(os.environ.get("WORKERS") or 1))
     uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False, workers=workers)

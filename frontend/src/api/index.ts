@@ -431,6 +431,55 @@ export async function interpretLiuYao(question: string, result: LiuYaoResult): P
   return data.interpretation
 }
 
+// ========== 每日黄历 ==========
+
+export interface HuangLiHour { zhi: string; range: string; tian_shen: string; luck: string; yi: string[]; ji: string[]; chong: string }
+export interface HuangLiDay {
+  date: string; solar: string
+  lunar: { year_gz: string; month_gz: string; day_gz: string; text: string }
+  festivals: string[]; jieqi: string; yi: string[]; ji: string[]
+  chong: { desc: string; sha: string }
+  pengzu: { gan: string; zhi: string }
+  taishen: string; nayin: string
+  jishen: string[]; xiongsha: string[]
+  positions: { cai: string; xi: string; fu: string; yang_gui: string; yin_gui: string; five_ghost: string; sheng_men: string; si_men: string }
+  tian_shen: { name: string; type: string; luck: string }
+  zhixing: string; nine_star: string; xiu: { name: string; luck: string }
+  hours: HuangLiHour[]
+}
+export interface HuangLiRangeDay {
+  date: string; weekday: string; lunar_day: string
+  festivals: string[]; jieqi: string; yi_top5: string[]; ji_top3: string[]; tianshe: boolean
+}
+export interface HuangLiZejiDay {
+  date: string; day_gz: string; chong: string; jishen: string[]; tian_shen: string; stars: number; note: string
+}
+
+export async function getHuangLiDay(date?: string): Promise<HuangLiDay> {
+  const qs = date ? `?date=${encodeURIComponent(date)}` : ""
+  const res = await apiFetch(`${API_BASE}/ai/huangli/day${qs}`)
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || "获取黄历失败")
+  return res.json()
+}
+export async function getHuangLiRange(start: string, end: string): Promise<HuangLiRangeDay[]> {
+  const res = await apiFetch(`${API_BASE}/ai/huangli/range?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`)
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || "获取黄历区间失败")
+  return (await res.json()).days
+}
+export async function getHuangLiZeji(yi: string, start: string, end: string, avoidChong = ""): Promise<HuangLiZejiDay[]> {
+  const res = await apiFetch(
+    `${API_BASE}/ai/huangli/zeji?yi=${encodeURIComponent(yi)}&start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}` +
+    (avoidChong ? `&avoid_chong=${encodeURIComponent(avoidChong)}` : "")
+  )
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || "择吉失败")
+  return (await res.json()).days
+}
+export async function getHuangLiItems(): Promise<string[]> {
+  const res = await apiFetch(`${API_BASE}/ai/huangli/items`)
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || "获取事项词表失败")
+  return (await res.json()).items
+}
+
 // ========== 管理后台：用户管理 ==========
 
 export interface AdminUser {

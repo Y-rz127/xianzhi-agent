@@ -92,6 +92,37 @@ export interface LiuYaoResult { method: string; createdAt: string; lines: Array<
 export const castLiuYao = (method: 'coins' | 'numbers' | 'time', numbers?: number[]) => post<LiuYaoResult>('/ai/liuyao/cast', { method, numbers })
 export const interpretLiuYao = (question: string, result: LiuYaoResult) => post<{ interpretation: string }>('/ai/liuyao/interpret', { question, result })
 
+/* ============ 每日黄历（只读，无需登录） ============ */
+
+export interface HuangLiHour { zhi: string; range: string; tian_shen: string; luck: string; yi: string[]; ji: string[]; chong: string }
+export interface HuangLiDay {
+  date: string; solar: string
+  lunar: { year_gz: string; month_gz: string; day_gz: string; text: string }
+  festivals: string[]; jieqi: string; yi: string[]; ji: string[]
+  chong: { desc: string; sha: string }
+  pengzu: { gan: string; zhi: string }
+  taishen: string; nayin: string
+  jishen: string[]; xiongsha: string[]
+  positions: { cai: string; xi: string; fu: string; yang_gui: string; yin_gui: string; five_ghost: string; sheng_men: string; si_men: string }
+  tian_shen: { name: string; type: string; luck: string }
+  zhixing: string; nine_star: string; xiu: { name: string; luck: string }
+  hours: HuangLiHour[]
+}
+export interface HuangLiRangeDay {
+  date: string; weekday: string; lunar_day: string
+  festivals: string[]; jieqi: string; yi_top5: string[]; ji_top3: string[]; tianshe: boolean
+}
+export interface HuangLiZejiDay { date: string; day_gz: string; chong: string; jishen: string[]; tian_shen: string; stars: number; note: string }
+
+export const getHuangLiDay = (date?: string) => get<HuangLiDay>('/ai/huangli/day', date ? { date } : undefined)
+export const getHuangLiRange = (start: string, end: string) =>
+  get<{ days: HuangLiRangeDay[] }>('/ai/huangli/range', { start, end }).then((r) => r.days)
+export const getHuangLiZeji = (yi: string, start: string, end: string, avoidChong = '') =>
+  get<{ yi: string; days: HuangLiZejiDay[] }>('/ai/huangli/zeji', {
+    yi, start, end, avoid_chong: avoidChong || undefined,
+  }).then((r) => r.days)
+export const getHuangLiItems = () => get<{ items: string[] }>('/ai/huangli/items').then((r) => r.items)
+
 function put<T = any>(url: string, data?: any): Promise<T> {
   return request<T>({ url: withToken(url), method: 'PUT', data, header: { 'Content-Type': 'application/json' } })
 }
