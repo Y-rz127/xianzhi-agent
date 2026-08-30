@@ -439,6 +439,7 @@ Supervisor (XianzhiWorkflow)
 | `DASHSCOPE_MODEL` | 模型名 | `qwen-plus` |
 | `DASHSCOPE_URL` | OpenAI 兼容端点 | `https://dashscope.aliyuncs.com/compatible-mode/v1` |
 | `APP_PORT` | 服务端口 | `8123` |
+| `RELOAD` | 代码热重载（仅本地开发，改 .py 即重启，强制单进程） | `false` |
 | `CORS_ORIGINS` | CORS 允许源 | `http://localhost:5173,...` |
 | `AGENT_MAX_STEPS` | ReAct 最大步数 | `8` |
 | `MEMORY_STORE_TYPE` | 记忆存储 | `postgres`（本地兜底 `file`） |

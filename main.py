@@ -277,4 +277,9 @@ if __name__ == "__main__":
     )
     # WORKERS 控制多进程（默认 1）；进程级状态的影响已在 lifespan 启动告警中显式提示
     workers = max(1, int(os.environ.get("WORKERS") or 1))
-    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False, workers=workers)
+    # RELOAD=true 开启代码热重载（仅本地开发，.env 或进程环境变量均可）：改 .py 保存即生效。
+    # 与多 worker 互斥（热重载强制单进程）；每次重载都会重跑 lifespan 的 RAG/MCP
+    # 后台初始化与排盘缓存预热，保存频繁时启动日志会刷屏。
+    if settings.reload:
+        workers = 1
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=settings.reload, workers=workers)

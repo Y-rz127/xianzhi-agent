@@ -32,6 +32,8 @@ class Settings(BaseSettings):
     # 服务
     app_port: int = Field(default=8123, alias="APP_PORT")
     debug: bool = Field(default=False, alias="DEBUG")
+    # 代码热重载（仅本地开发）：改 .py 保存即重启，强制单进程，勿用于生产
+    reload: bool = Field(default=False, alias="RELOAD")
     # API 鉴权：逗号分隔的 API Key 列表，为空表示关闭鉴权（本地开发默认）
     api_keys: str = Field(default="", alias="API_KEYS")
     # 限流：单 IP 每分钟最大请求数（0=不限流）
