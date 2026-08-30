@@ -145,35 +145,56 @@
     linear-gradient(180deg, #0a0f1a 0%, #050810 60%);
 }
 
-/* 流星：两条错峰划过（纯 CSS，伪元素实现拖尾） */
+/* 流星 + 闪烁星层：两个固定层各带一组闪烁星点 + 两条流星（::before/::after），
+   共 4 颗流星，左上→右下慢速划过；尾迹在头后方（头右亮、尾左淡）。 */
 .t-dark .meteor {
   position: fixed;
-  top: 0;
-  width: 2rpx;
-  height: 2rpx;
-  border-radius: 50%;
-  background: transparent;
-  z-index: 0;
+  inset: 0;
   pointer-events: none;
-  transform: rotate(215deg);
+  z-index: 0;
 }
-.t-dark .meteor::before {
+/* 闪烁星点层（两层错峰呼吸） */
+.t-dark .meteor-1 {
+  background:
+    radial-gradient(3px 3px at 18% 16%, rgba(255, 255, 255, 0.9) 50%, transparent 51%),
+    radial-gradient(2.5px 2.5px at 64% 9%, rgba(240, 208, 96, 0.8) 50%, transparent 51%),
+    radial-gradient(2px 2px at 40% 38%, rgba(255, 255, 255, 0.6) 50%, transparent 51%),
+    radial-gradient(2.5px 2.5px at 86% 44%, rgba(184, 134, 232, 0.6) 50%, transparent 51%);
+  animation: starTwinkle 3.4s ease-in-out infinite;
+}
+.t-dark .meteor-2 {
+  background:
+    radial-gradient(2.5px 2.5px at 30% 24%, rgba(255, 255, 255, 0.8) 50%, transparent 51%),
+    radial-gradient(3px 3px at 76% 18%, rgba(255, 255, 255, 0.7) 50%, transparent 51%),
+    radial-gradient(2px 2px at 52% 52%, rgba(240, 208, 96, 0.6) 50%, transparent 51%),
+    radial-gradient(2px 2px at 10% 60%, rgba(255, 255, 255, 0.5) 50%, transparent 51%);
+  animation: starTwinkle 4.6s ease-in-out infinite 1.7s;
+}
+@keyframes starTwinkle {
+  0%, 100% { opacity: 0.45; }
+  50% { opacity: 1; }
+}
+/* 流星本体：头在右（亮），尾在左（淡），旋转 35° 后沿 +X 向右下移动 */
+.t-dark .meteor::before,
+.t-dark .meteor::after {
   content: "";
   position: absolute;
-  top: 0;
-  left: 0;
-  width: 2.5rpx;
-  height: 100rpx;
-  background: linear-gradient(to bottom, rgba(255, 255, 255, 0.9), transparent);
-  border-radius: 2rpx;
+  width: 150rpx;
+  height: 2.5rpx;
+  border-radius: 3rpx;
+  background: linear-gradient(to left, rgba(255, 255, 255, 0.95), rgba(240, 208, 96, 0.45) 45%, transparent);
+  opacity: 0;
+  transform: rotate(35deg) translateX(0);
 }
-.t-dark .meteor-1 { left: 72%; animation: meteorFall 9s linear infinite; animation-delay: 1.2s; }
-.t-dark .meteor-2 { left: 38%; animation: meteorFall 13s linear infinite; animation-delay: 5.5s; }
-@keyframes meteorFall {
-  0% { transform: rotate(215deg) translateX(0); opacity: 0; }
-  3% { opacity: 1; }
-  18% { transform: rotate(215deg) translateX(-60vh); opacity: 0; }
-  100% { transform: rotate(215deg) translateX(-60vh); opacity: 0; }
+.t-dark .meteor-1::before { top: 6%; left: 2%; animation: meteorRun 26s linear infinite 1s; }
+.t-dark .meteor-1::after  { top: 2%; left: 40%; animation: meteorRun 30s linear infinite 9s; }
+.t-dark .meteor-2::before { top: 12%; left: 55%; animation: meteorRun 28s linear infinite 15s; }
+.t-dark .meteor-2::after  { top: 4%; left: 76%; animation: meteorRun 32s linear infinite 21s; }
+@keyframes meteorRun {
+  0% { transform: rotate(35deg) translateX(0); opacity: 0; }
+  1% { opacity: 0.9; }
+  11% { transform: rotate(35deg) translateX(170vh); opacity: 0; }
+  100% { transform: rotate(35deg) translateX(170vh); opacity: 0; }
 }
 
 /* 暗夜下聊天页山水层让位给星空 */
@@ -181,15 +202,15 @@
 
 /* ============ 塔罗页主题变量（白天浅紫纸感 / 暗夜紫金） ============ */
 .t-light {
-  --x-tarot-page: linear-gradient(180deg, #FAFAF8 0%, #FAF7FC 45%, #F5F1F9 100%);
+  --x-tarot-page: linear-gradient(180deg, #FAFAF8 0%, #F5F3EF 100%);
   --x-tarot-text: #2A2438;
   --x-tarot-dim: #6F6880;
   --x-tarot-gold: #8A6A1E;
   --x-tarot-star: #B08A2E;
   --x-tarot-line: rgba(122, 90, 180, 0.35);
   --x-tarot-line-strong: rgba(122, 90, 180, 0.55);
-  --x-tarot-panel: rgba(122, 90, 180, 0.05);
-  --x-tarot-panel2: rgba(122, 90, 180, 0.10);
+  --x-tarot-panel: rgba(255, 255, 255, 0.6);
+  --x-tarot-panel2: rgba(255, 255, 255, 0.7);
   --x-tarot-card: linear-gradient(135deg, #F6F1FC 0%, #E7DCF7 100%);
   --x-tarot-cardback: linear-gradient(135deg, #EFE7FA 0%, #DFD0F2 100%);
   --x-tarot-core: radial-gradient(circle, rgba(122, 90, 180, 0.14) 0%, transparent 70%);

@@ -1,6 +1,6 @@
 <template>
-  <view class="page">
-    <!-- 紫蓝渐变头部 -->
+  <view class="page" :class="themeClass">
+    <!-- 头部 -->
     <view class="hero">
       <view class="hero-bg"></view>
       <view class="hero-orb orb-1"></view>
@@ -86,7 +86,7 @@ import { setConfig, getConfig } from '@/config'
 import { getHealth } from '@/api'
 import { useTheme } from '@/composables/useTheme'
 
-const { isDark, setTheme } = useTheme()
+const { isDark, setTheme, themeClass } = useTheme()
 
 const apiBase = ref('')
 const wsBase = ref('')
