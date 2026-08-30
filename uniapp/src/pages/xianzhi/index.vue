@@ -190,21 +190,23 @@
             <text class="dq-icon">⚙</text>
           </view>
         </view>
-        <!-- 快捷功能：合婚 / 塔罗 / 六爻 / 黄历 -->
-        <view class="drawer-quick">
-          <view class="drawer-quick-btn" @tap="goHehun">
-            <text class="dq-icon">合</text><text>合婚</text>
+        <!-- 快捷功能：横向滑动，一屏三个 -->
+        <scroll-view class="drawer-quick-scroll" scroll-x :show-scrollbar="false">
+          <view class="drawer-quick">
+            <view class="drawer-quick-btn" @tap="goHehun">
+              <text class="dq-icon">合</text><text>合婚</text>
+            </view>
+            <view class="drawer-quick-btn" @tap="goTarot">
+              <text class="dq-icon">塔</text><text>塔罗</text>
+            </view>
+            <view class="drawer-quick-btn" @tap="goLiuYao">
+              <text class="dq-icon">卦</text><text>六爻</text>
+            </view>
+            <view class="drawer-quick-btn" @tap="goHuangLi">
+              <text class="dq-icon">历</text><text>黄历</text>
+            </view>
           </view>
-          <view class="drawer-quick-btn" @tap="goTarot">
-            <text class="dq-icon">塔</text><text>塔罗</text>
-          </view>
-          <view class="drawer-quick-btn" @tap="goLiuYao">
-            <text class="dq-icon">卦</text><text>六爻</text>
-          </view>
-          <view class="drawer-quick-btn" @tap="goHuangLi">
-            <text class="dq-icon">历</text><text>黄历</text>
-          </view>
-        </view>
+        </scroll-view>
         <view class="drawer-header">
           <text class="drawer-title">历史会话</text>
           <text class="drawer-close" @tap="closeHistoryDrawer">✕</text>
@@ -1921,14 +1923,20 @@ messages.value.push({
   color: $color-ink-light;
   margin-top: 4rpx;
 }
+.drawer-quick-scroll {
+  width: 100%;
+  border-bottom: 1rpx solid rgba(44, 44, 44, 0.08);
+}
 .drawer-quick {
   display: flex;
   gap: 20rpx;
   padding: 8rpx 32rpx 24rpx;
-  border-bottom: 1rpx solid rgba(44, 44, 44, 0.08);
+  width: 100%;
+  box-sizing: border-box;
 }
 .drawer-quick-btn {
-  flex: 1;
+  /* 一屏恰好三个：(内容宽 - 2×gap)/3，第四个溢出走横向滑动 */
+  flex: 0 0 calc((100% - 40rpx) / 3);
   display: flex;
   align-items: center;
   justify-content: center;
