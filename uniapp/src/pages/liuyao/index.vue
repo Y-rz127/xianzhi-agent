@@ -189,28 +189,28 @@ onBeforeUnmount(() => {
 </script>
 
 <style lang="scss">
-.page { min-height: 100vh; background: linear-gradient(#14100b, #302313); color: #f0e4c7; }
+.page { min-height: 100vh; background: linear-gradient(180deg, $nx-bg, $nx-bg-2 55%, $nx-bg-3); color: $nx-text; }
 .scroll { height: 100vh; }
 .nav { position: fixed; z-index: 2; top: 50rpx; left: 28rpx; font-size: 60rpx; }
 .hero { text-align: center; padding: 140rpx 0 64rpx; }
 .hero text, .hero small { display: block; }
-.hero text { font-size: 64rpx; letter-spacing: 14rpx; color: #f0cf7b; }
-.hero small { margin-top: 24rpx; color: #c7af79; font-size: 28rpx; }
+.hero text { font-size: 64rpx; letter-spacing: 14rpx; color: $nx-gold-light; }
+.hero small { margin-top: 24rpx; color: $nx-text-dim; font-size: 28rpx; }
 
-.panel { margin: 32rpx 36rpx; padding: 40rpx 36rpx; border: 1rpx solid rgba(235, 194, 104, .28); border-radius: 24rpx; background: rgba(255, 255, 255, .04); }
-.label { display: block; color: #e8c777; margin: 20rpx 0 16rpx; font-size: 30rpx; font-weight: 600; letter-spacing: 2rpx; }
-.panel textarea { width: 100%; box-sizing: border-box; padding: 24rpx; background: #21180d; color: #fff; border-radius: 14rpx; font-size: 29rpx; line-height: 1.7; min-height: 120rpx; }
+.panel { margin: 32rpx 36rpx; padding: 40rpx 36rpx; border: 1rpx solid $nx-border; border-radius: 24rpx; background: $nx-card; }
+.label { display: block; color: $nx-gold-light; margin: 20rpx 0 16rpx; font-size: 30rpx; font-weight: 600; letter-spacing: 2rpx; }
+.panel textarea { width: 100%; box-sizing: border-box; padding: 24rpx; background: $nx-bg-3; color: $nx-text; border: 1rpx solid $nx-border; border-radius: 14rpx; font-size: 29rpx; line-height: 1.7; min-height: 120rpx; }
 .methods { display: flex; gap: 18rpx; margin-top: 8rpx; }
-.method { flex: 1; text-align: center; padding: 24rpx 12rpx; border: 1rpx solid #745c32; border-radius: 14rpx; color: #cbb887; font-size: 29rpx; transition: all .25s; }
-.method.active { background: #80632a; color: #fff; border-color: #b58b35; }
+.method { flex: 1; text-align: center; padding: 24rpx 12rpx; border: 1rpx solid $nx-border; border-radius: 14rpx; color: $nx-text-dim; font-size: 29rpx; transition: all .25s; }
+.method.active { background: rgba(202, 169, 93, .15); color: $nx-gold-light; border-color: $nx-accent-liuyao; }
 .nums { display: flex; gap: 28rpx; margin-top: 32rpx; }
-.nums input { flex: 1; min-width: 0; box-sizing: border-box; padding: 32rpx 28rpx; height: 120rpx; background: #21180d; color: #fff; border-radius: 18rpx; font-size: 34rpx; line-height: 1.6; }
+.nums input { flex: 1; min-width: 0; box-sizing: border-box; padding: 32rpx 28rpx; height: 120rpx; background: $nx-bg-3; color: $nx-text; border: 1rpx solid $nx-border; border-radius: 18rpx; font-size: 34rpx; line-height: 1.6; }
 .cast, .interpret { margin-top: 40rpx; padding: 28rpx; background: linear-gradient(135deg, #b58b35, #e7bd67); color: #271b08; font-size: 32rpx; font-weight: 600; border-radius: 16rpx; letter-spacing: 4rpx; }
 .cast[disabled] { opacity: .6; }
 
 /* ===== 起卦动画 ===== */
-.cast-stage { margin-top: 40rpx; padding-top: 34rpx; border-top: 1rpx solid rgba(235, 194, 104, .28); min-height: 220rpx; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 30rpx; }
-.cast-tip { color: #c9ad74; font-size: 26rpx; letter-spacing: 4rpx; }
+.cast-stage { margin-top: 40rpx; padding-top: 34rpx; border-top: 1rpx solid $nx-border; min-height: 220rpx; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 30rpx; }
+.cast-tip { color: $nx-text-dim; font-size: 26rpx; letter-spacing: 4rpx; }
 
 /* 铜钱 */
 .coins { display: flex; gap: 30rpx; align-items: center; justify-content: center; height: 110rpx; }
@@ -276,22 +276,22 @@ onBeforeUnmount(() => {
 }
 
 .result { margin-bottom: 100rpx; }
-.hexagram-display { display: flex; justify-content: center; gap: 48rpx; margin: 40rpx 0; padding: 28rpx; background: rgba(255, 255, 255, .02); border-radius: 20rpx; border: 1rpx solid rgba(235, 194, 104, .15); }
+.hexagram-display { display: flex; justify-content: center; gap: 48rpx; margin: 40rpx 0; padding: 28rpx; background: rgba(255, 255, 255, .02); border-radius: 20rpx; border: 1rpx solid $nx-border; }
 .hexagram-col { flex: 1; max-width: 320rpx; text-align: center; }
 .hexagram-title small, .hexagram-title text { display: block; }
-.hexagram-title small { font-size: 22rpx; color: #c7af79; margin-bottom: 10rpx; letter-spacing: 2rpx; }
-.hexagram-title text:first-of-type { font-size: 38rpx; color: #efd089; margin: 8rpx 0; font-weight: 700; letter-spacing: 4rpx; }
-.sub-info { font-size: 23rpx; color: #bca57a; margin-top: 6rpx; line-height: 1.5; }
+.hexagram-title small { font-size: 22rpx; color: $nx-text-dim; margin-bottom: 10rpx; letter-spacing: 2rpx; }
+.hexagram-title text:first-of-type { font-size: 38rpx; color: $nx-gold-light; margin: 8rpx 0; font-weight: 700; letter-spacing: 4rpx; }
+.sub-info { font-size: 23rpx; color: $nx-text-muted; margin-top: 6rpx; line-height: 1.5; }
 .yao-stack { margin-top: 24rpx; display: flex; flex-direction: column-reverse; gap: 14rpx; }
 .yao-item { display: flex; align-items: center; gap: 16rpx; height: 52rpx; position: relative; }
 .yao-line { width: 100%; height: 12rpx; border-radius: 6rpx; background: linear-gradient(90deg, #dcc077 0 42%, transparent 42% 58%, #dcc077 58%); transition: all .3s; }
 .yao-line.yang { background: linear-gradient(90deg, #f0cf7b, #e7bd67); box-shadow: 0 2rpx 12rpx rgba(240, 207, 123, .4); }
 .yao-item.moving .yao-line { animation: yaoGlow 2s ease-in-out infinite; }
 @keyframes yaoGlow { 0%, 100% { box-shadow: 0 0 8rpx #f3d075; } 50% { box-shadow: 0 0 24rpx #f3d075, 0 0 40rpx rgba(243, 208, 117, .4); } }
-.yao-label { width: 80rpx; color: #bca57a; font-size: 24rpx; flex-shrink: 0; }
+.yao-label { width: 80rpx; color: $nx-text-dim; font-size: 24rpx; flex-shrink: 0; }
 .moving-tag { position: absolute; right: -60rpx; color: #f0ce75; font-size: 24rpx; font-weight: 700; background: rgba(240, 206, 117, .15); padding: 4rpx 14rpx; border-radius: 8rpx; border: 1rpx solid rgba(240, 206, 117, .3); }
-.summary { display: block; text-align: center; line-height: 1.9; color: #d8c7a3; margin: 36rpx 0; font-size: 29rpx; padding: 0 8rpx; }
-.answer { margin-top: 32rpx; padding: 32rpx; background: rgba(255, 255, 255, .06); border-radius: 16rpx; }
-.answer text { display: block; line-height: 2; font-size: 29rpx; }
-.answer text:first-child { color: #efcf83; margin-bottom: 16rpx; font-size: 32rpx; font-weight: 600; letter-spacing: 2rpx; }
+.summary { display: block; text-align: center; line-height: 1.9; color: $nx-text-dim; margin: 36rpx 0; font-size: 29rpx; padding: 0 8rpx; }
+.answer { margin-top: 32rpx; padding: 32rpx; background: rgba(255, 255, 255, .04); border: 1rpx solid $nx-border; border-radius: 16rpx; }
+.answer text { display: block; line-height: 2; font-size: 29rpx; color: $nx-text; }
+.answer text:first-child { color: $nx-gold-light; margin-bottom: 16rpx; font-size: 32rpx; font-weight: 600; letter-spacing: 2rpx; }
 </style>

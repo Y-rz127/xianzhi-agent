@@ -70,6 +70,29 @@ $spacing-lg: 40rpx;
 $spacing-xl: 48rpx;
 $spacing-2xl: 64rpx;
 
+/* === 夜光玻璃 token（对齐 Web 端 style.css 基底，玩法页深色化专用） === */
+$nx-bg: #050810;
+$nx-bg-2: #0a0f1a;
+$nx-bg-3: #0f1520;
+$nx-card: rgba(15, 21, 32, 0.85);
+$nx-card-solid: #0f1520;
+$nx-border: rgba(138, 180, 220, 0.12);
+$nx-border-strong: rgba(212, 175, 55, 0.25);
+$nx-text: #f5f7fa;
+$nx-text-dim: #7c8fa5;
+$nx-text-muted: #5a6c82;
+$nx-gold: #d4af37;
+$nx-gold-light: #f1d894;
+/* 模块 accent（与 Web 导航图标色一致） */
+$nx-accent-hehun: #e8b48b;
+$nx-accent-tarot: #b886e8;
+$nx-accent-liuyao: #caa95d;
+$nx-accent-huangli: #e8a05b;
+/* 宜/忌/toast 语义色 */
+$nx-yi: #8fce9f;
+$nx-ji: #e79ba1;
+$nx-toast: #b54b62;
+
 /* === 旧变量兼容（保持 uni-app 内置组件主题色） === */
 $uni-color-primary: $color-primary;
 $uni-color-success: $state-success;

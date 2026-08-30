@@ -329,10 +329,10 @@ function saveRecord() {
 </script>
 
 <style lang="scss">
-/* === 塔罗 · 紫金神秘主题 === */
+/* === 塔罗 · 统一夜底 + 紫金 accent（基底对齐 Web） === */
 .page {
   height: 100vh;
-  background: linear-gradient(180deg, #0d0b1a 0%, #1a1040 30%, #2a1860 60%, #1a1040 100%);
+  background: linear-gradient(180deg, $nx-bg 0%, #0c0a1c 40%, #150f30 70%, $nx-bg-2 100%);
   color: #e8e0f0;
   overflow: hidden;
 }
