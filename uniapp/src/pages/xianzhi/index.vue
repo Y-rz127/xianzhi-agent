@@ -1523,14 +1523,14 @@ messages.value.push({
 .msg-text :deep(.md-render) .md-h3 { font-size: 34rpx; }
 .msg-text :deep(.md-render) .md-h4 { font-size: 32rpx; }
 .msg.user .msg-text {
-  /* 多行文字从左开始排列（与 AI 消息一致），气泡仍右贴齐 */
+  /* 与 AI 气泡同款卡片配色（深卡/白卡随主题），仅镜像圆角区分左右；身份靠头像 */
   text-align: left;
-  background: $color-primary;
+  background: $color-bg-card;
   border-radius: 28rpx 8rpx 28rpx 28rpx;
-  color: $color-bg;
-  border: none;
-  /* 浅色字压深底：改回亚像素抗锯齿，避免文字被磨得过细 */
-  -webkit-font-smoothing: auto;
+  color: $color-ink;
+  border: 1rpx solid $color-border;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 .msg-text.thinking { opacity: 0.7; }
 .typing { color: $color-ink-light; }
