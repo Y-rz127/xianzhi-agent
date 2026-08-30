@@ -223,13 +223,18 @@ app.add_middleware(RateLimitMiddleware)
 
 @app.middleware("http")
 async def security_headers_middleware(request, call_next):
-    """添加安全头，防止 XSS、点击劫持等攻击。"""
+    """安全响应头中间件：为所有响应自动注入安全相关的 HTTP 头"""
     response = await call_next(request)
+    # 禁止浏览器 MIME 嗅探：强制使用服务端声明的 Content-Type，
+    # 防止攻击者上传恶意文件后浏览器按错误类型解析执行
     response.headers["X-Content-Type-Options"] = "nosniff"
+    # 禁止页面被 iframe 嵌入：防止点击劫持（Clickjacking）攻击
     response.headers["X-Frame-Options"] = "DENY"
     # 纯 JSON/SSE 无需加载资源，加严格 CSP；Swagger 页需加载 CDN 资源，不加以免白屏
     if not request.url.path.startswith(("/docs", "/redoc", "/openapi.json")):
         response.headers["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none'"
+    # 静态资源（/assets/）内容不变可长期缓存：max-age=1年 + immutable
+    # 表示资源永不变化，浏览器无需发条件请求验证，直接用本地缓存
     if request.url.path.startswith("/assets/"):
         response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
     return response
