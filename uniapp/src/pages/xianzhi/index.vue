@@ -1099,9 +1099,9 @@ messages.value.push({
   bottom: 0;
   height: 45%;
   background: linear-gradient(to top,
-    rgba(26, 26, 26, 0.22) 0%,
-    rgba(26, 26, 26, 0.12) 60%,
-    rgba(26, 26, 26, 0) 100%);
+    rgba(138, 180, 220, 0.10) 0%,
+    rgba(138, 180, 220, 0.05) 60%,
+    rgba(138, 180, 220, 0) 100%);
   clip-path: polygon(
     0% 100%,
     0% 75%, 8% 68%, 15% 72%, 22% 60%, 30% 65%, 38% 55%, 45% 62%, 52% 50%, 60% 58%, 68% 52%, 75% 60%, 82% 55%, 90% 62%, 100% 58%,
@@ -1114,9 +1114,9 @@ messages.value.push({
   bottom: 0;
   height: 38%;
   background: linear-gradient(to top,
-    rgba(26, 26, 26, 0.38) 0%,
-    rgba(26, 26, 26, 0.22) 50%,
-    rgba(26, 26, 26, 0.08) 100%);
+    rgba(138, 180, 220, 0.16) 0%,
+    rgba(138, 180, 220, 0.09) 50%,
+    rgba(138, 180, 220, 0.02) 100%);
   clip-path: polygon(
     0% 100%,
     0% 70%, 6% 60%, 14% 68%, 20% 55%, 28% 62%, 35% 50%, 42% 58%, 50% 45%, 58% 55%, 65% 48%, 72% 58%, 80% 52%, 88% 60%, 95% 55%, 100% 62%,
@@ -1132,9 +1132,9 @@ messages.value.push({
   bottom: 28%;
   height: 12%;
   background: linear-gradient(to bottom,
-    rgba(250, 250, 248, 0.85) 0%,
-    rgba(250, 250, 248, 0.4) 50%,
-    rgba(250, 250, 248, 0) 100%);
+    rgba(150, 185, 225, 0.10) 0%,
+    rgba(150, 185, 225, 0.04) 50%,
+    rgba(150, 185, 225, 0) 100%);
   pointer-events: none;
   z-index: 1;
 }
@@ -1144,9 +1144,9 @@ messages.value.push({
   bottom: 0;
   height: 32%;
   background: linear-gradient(to top,
-    rgba(26, 26, 26, 0.6) 0%,
-    rgba(26, 26, 26, 0.35) 50%,
-    rgba(26, 26, 26, 0.1) 100%);
+    rgba(138, 180, 220, 0.22) 0%,
+    rgba(138, 180, 220, 0.13) 50%,
+    rgba(138, 180, 220, 0.03) 100%);
   clip-path: polygon(
     0% 100%,
     0% 65%, 10% 50%, 18% 58%, 28% 42%, 38% 52%, 48% 38%, 56% 48%, 66% 40%, 74% 52%, 84% 45%, 92% 55%, 100% 48%,
@@ -1169,7 +1169,7 @@ messages.value.push({
   top: 0;
   width: 14rpx;
   height: 14rpx;
-  border: 2rpx solid rgba(26, 26, 26, 0.45);
+  border: 2rpx solid rgba(180, 205, 235, 0.45);
   border-bottom: none;
   border-right: none;
   border-radius: 50% 0 0 0;
