@@ -113,3 +113,56 @@
   --x-ji: #e79ba1;
   --x-toast: #b54b62;
 }
+
+/* ============ 暗夜全局星空背景（所有 .t-dark 页面根节点） ============ */
+.page.t-dark {
+  background-color: #050810;
+  background-image:
+    radial-gradient(1.5px 1.5px at 15% 18%, rgba(255, 255, 255, 0.7) 50%, transparent 51%),
+    radial-gradient(1px 1px at 35% 8%, rgba(255, 255, 255, 0.5) 50%, transparent 51%),
+    radial-gradient(2px 2px at 55% 22%, rgba(240, 208, 96, 0.6) 50%, transparent 51%),
+    radial-gradient(1.5px 1.5px at 72% 12%, rgba(255, 255, 255, 0.6) 50%, transparent 51%),
+    radial-gradient(1px 1px at 88% 28%, rgba(255, 255, 255, 0.45) 50%, transparent 51%),
+    radial-gradient(1px 1px at 25% 42%, rgba(255, 255, 255, 0.35) 50%, transparent 51%),
+    radial-gradient(2px 2px at 65% 48%, rgba(184, 134, 232, 0.5) 50%, transparent 51%),
+    radial-gradient(1px 1px at 82% 62%, rgba(255, 255, 255, 0.3) 50%, transparent 51%),
+    radial-gradient(1px 1px at 10% 72%, rgba(255, 255, 255, 0.25) 50%, transparent 51%),
+    radial-gradient(1.5px 1.5px at 45% 84%, rgba(255, 255, 255, 0.2) 50%, transparent 51%),
+    radial-gradient(90% 55% at 50% 0%, rgba(124, 77, 255, 0.10), transparent 70%),
+    linear-gradient(180deg, #0a0f1a 0%, #050810 60%);
+}
+
+/* 暗夜下聊天页山水层让位给星空 */
+.t-dark .landscape { display: none; }
+
+/* ============ 塔罗页主题变量（白天浅紫纸感 / 暗夜紫金） ============ */
+.t-light {
+  --x-tarot-page: linear-gradient(180deg, #FAFAF8 0%, #F3EEFA 50%, #ECE4F6 100%);
+  --x-tarot-text: #2A2438;
+  --x-tarot-dim: #6F6880;
+  --x-tarot-gold: #8A6A1E;
+  --x-tarot-star: #B08A2E;
+  --x-tarot-line: rgba(122, 90, 180, 0.35);
+  --x-tarot-line-strong: rgba(122, 90, 180, 0.55);
+  --x-tarot-panel: rgba(122, 90, 180, 0.07);
+  --x-tarot-panel2: rgba(122, 90, 180, 0.10);
+  --x-tarot-card: linear-gradient(135deg, #F6F1FC 0%, #E7DCF7 100%);
+  --x-tarot-cardback: linear-gradient(135deg, #EFE7FA 0%, #DFD0F2 100%);
+  --x-tarot-core: radial-gradient(circle, rgba(122, 90, 180, 0.25) 0%, transparent 70%);
+  --x-tarot-glow: 0 0 32rpx rgba(122, 90, 180, 0.25);
+}
+.t-dark {
+  --x-tarot-page: linear-gradient(180deg, #0a0f1a 0%, #0c0a1c 40%, #150f30 70%, #0a0f1a 100%);
+  --x-tarot-text: #e8e0f0;
+  --x-tarot-dim: rgba(232, 224, 240, 0.6);
+  --x-tarot-gold: #f0d060;
+  --x-tarot-star: #f0d060;
+  --x-tarot-line: rgba(240, 208, 96, 0.2);
+  --x-tarot-line-strong: rgba(240, 208, 96, 0.35);
+  --x-tarot-panel: rgba(240, 208, 96, 0.05);
+  --x-tarot-panel2: rgba(42, 24, 96, 0.4);
+  --x-tarot-card: linear-gradient(135deg, #2a1860 0%, #1a1040 100%);
+  --x-tarot-cardback: linear-gradient(135deg, #1a1040 0%, #0d0b1a 100%);
+  --x-tarot-core: radial-gradient(circle, rgba(240, 208, 96, 0.4) 0%, transparent 70%);
+  --x-tarot-glow: 0 0 32rpx rgba(240, 208, 96, 0.4);
+}

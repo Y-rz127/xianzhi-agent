@@ -352,9 +352,9 @@ onMounted(() => {
 .good { color: $nx-yi; font-weight: 600; }
 .bad { color: $nx-ji; font-weight: 600; }
 
-/* 时辰 */
-.hours { display: flex; flex-wrap: wrap; gap: 12rpx; }
-.hour { width: calc(25% - 9rpx); box-sizing: border-box; text-align: center; padding: 16rpx 4rpx; border: 1rpx solid $nx-border; border-radius: 14rpx; opacity: .68; }
+/* 时辰：4 列 × 3 行 */
+.hours { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12rpx; }
+.hour { box-sizing: border-box; text-align: center; padding: 16rpx 4rpx; border: 1rpx solid $nx-border; border-radius: 14rpx; opacity: .68; }
 .hour.lucky { opacity: 1; border-color: $nx-border-strong; background: rgba(212, 175, 55, .08); }
 .hour.active { border-color: $nx-gold; background: rgba(212, 175, 55, .16); }
 .hour .hz { display: block; font-size: 28rpx; font-weight: 600; color: $nx-gold-light; }

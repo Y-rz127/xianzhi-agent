@@ -335,8 +335,8 @@ function saveRecord() {
 /* === 塔罗 · 统一夜底 + 紫金 accent（基底对齐 Web） === */
 .page {
   height: 100vh;
-  background: linear-gradient(180deg, $nx-bg 0%, #0c0a1c 40%, #150f30 70%, $nx-bg-2 100%);
-  color: #e8e0f0;
+  background: var(--x-tarot-page);
+  color: var(--x-tarot-text);
   overflow: hidden;
 }
 
@@ -357,9 +357,9 @@ function saveRecord() {
   position: absolute;
   width: 6rpx;
   height: 6rpx;
-  background: #f0d060;
+  background: var(--x-tarot-star);
   border-radius: 50%;
-  box-shadow: 0 0 8rpx #f0d060;
+  box-shadow: 0 0 8rpx var(--x-tarot-star);
   animation: twinkle 3s infinite ease-in-out;
 }
 .star-1 { top: 12%; left: 15%; animation-delay: 0s; }
@@ -383,16 +383,16 @@ function saveRecord() {
 .ring {
   position: absolute;
   border-radius: 50%;
-  border: 1rpx solid rgba(240, 208, 96, 0.2);
+  border: 1rpx solid var(--x-tarot-line);
 }
-.ring-outer { inset: 0; border-color: rgba(240, 208, 96, 0.15); animation: rotate 20s linear infinite; }
-.ring-mid { inset: 30rpx; border-color: rgba(240, 208, 96, 0.25); animation: rotate 15s linear infinite reverse; }
-.ring-inner { inset: 60rpx; border-color: rgba(240, 208, 96, 0.35); animation: rotate 10s linear infinite; }
+.ring-outer { inset: 0; border-color: var(--x-tarot-line); animation: rotate 20s linear infinite; }
+.ring-mid { inset: 30rpx; border-color: var(--x-tarot-line-strong); animation: rotate 15s linear infinite reverse; }
+.ring-inner { inset: 60rpx; border-color: var(--x-tarot-line-strong); animation: rotate 10s linear infinite; }
 .ring-core {
   position: absolute;
   inset: 90rpx;
   border-radius: 50%;
-  background: radial-gradient(circle, rgba(240, 208, 96, 0.4) 0%, transparent 70%);
+  background: var(--x-tarot-core);
   animation: pulse 3s ease-in-out infinite;
 }
 @keyframes rotate { to { transform: rotate(360deg); } }
@@ -407,23 +407,23 @@ function saveRecord() {
   text-align: center;
   font-size: 60rpx;
   font-weight: 600;
-  color: #f0d060;
+  color: var(--x-tarot-gold);
   letter-spacing: 0.12em;
   line-height: 1.25;
-  text-shadow: 0 0 32rpx rgba(240, 208, 96, 0.4);
+  text-shadow: 0 0 32rpx var(--x-tarot-line-strong);
 }
 .hero-sub {
   display: block;
   margin-top: 12rpx;
   font-size: 28rpx;
-  color: rgba(232, 224, 240, 0.6);
+  color: var(--x-tarot-dim);
   letter-spacing: 0.08em;
 }
 .hero-divider {
   width: 120rpx;
   height: 2rpx;
   margin: 32rpx auto 0;
-  background: linear-gradient(90deg, transparent, rgba(240, 208, 96, 0.4), transparent);
+  background: linear-gradient(90deg, transparent, var(--x-tarot-gold), transparent);
 }
 
 /* === Section === */
@@ -433,15 +433,15 @@ function saveRecord() {
 .section-title {
   display: block;
   font-size: 32rpx;
-  color: #f0d060;
+  color: var(--x-tarot-gold);
   letter-spacing: 0.1em;
   margin-bottom: 20rpx;
 }
 
 /* === 问题输入 === */
 .question-wrap {
-  background: rgba(240, 208, 96, 0.05);
-  border: 1rpx solid rgba(240, 208, 96, 0.2);
+  background: var(--x-tarot-panel);
+  border: 1rpx solid var(--x-tarot-line);
   border-radius: 20rpx;
   padding: 8rpx 28rpx;
 }
@@ -451,11 +451,11 @@ function saveRecord() {
   max-height: 160rpx;
   padding: 16rpx 0;
   font-size: 32rpx;
-  color: #f0e8d8;
+  color: var(--x-tarot-text);
   line-height: 1.5;
 }
 .q-placeholder {
-  color: rgba(232, 224, 240, 0.35);
+  color: var(--x-tarot-dim);
 }
 
 /* === 牌阵选择 === */
@@ -474,15 +474,15 @@ function saveRecord() {
   align-items: center;
   width: 220rpx;
   padding: 24rpx 16rpx;
-  background: rgba(42, 24, 96, 0.4);
-  border: 1rpx solid rgba(240, 208, 96, 0.15);
+  background: var(--x-tarot-panel2);
+  border: 1rpx solid var(--x-tarot-line);
   border-radius: 20rpx;
   transition: all 0.3s;
 }
 .spread-card.active {
-  background: rgba(240, 208, 96, 0.12);
-  border-color: rgba(240, 208, 96, 0.5);
-  box-shadow: 0 0 20rpx rgba(240, 208, 96, 0.2);
+  background: var(--x-tarot-panel);
+  border-color: var(--x-tarot-line-strong);
+  box-shadow: 0 0 20rpx var(--x-tarot-line);
 }
 .spread-icon-wrap {
   width: 72rpx;
@@ -494,16 +494,16 @@ function saveRecord() {
 }
 .spread-icon {
   font-size: 44rpx;
-  color: #f0d060;
+  color: var(--x-tarot-gold);
 }
 .spread-name {
   font-size: 30rpx;
-  color: #f0e8d8;
+  color: var(--x-tarot-text);
   margin-bottom: 6rpx;
 }
 .spread-desc {
   font-size: 24rpx;
-  color: rgba(232, 224, 240, 0.5);
+  color: var(--x-tarot-dim);
   text-align: center;
   white-space: normal;
   line-height: 1.3;
@@ -522,7 +522,7 @@ function saveRecord() {
   justify-content: center;
   background: linear-gradient(135deg, #f0d060 0%, #d4a040 100%);
   border-radius: 48rpx;
-  box-shadow: 0 8rpx 32rpx rgba(240, 208, 96, 0.3);
+  box-shadow: 0 8rpx 32rpx var(--x-tarot-line-strong);
   transition: opacity 0.2s;
 }
 .cta-btn.disabled {
@@ -580,14 +580,14 @@ function saveRecord() {
   -webkit-backface-visibility: hidden;
 }
 .card-face {
-  background: linear-gradient(135deg, #2a1860 0%, #1a1040 100%);
-  border: 2rpx solid rgba(240, 208, 96, 0.3);
-  box-shadow: 0 8rpx 32rpx rgba(0, 0, 0, 0.4), 0 0 16rpx rgba(240, 208, 96, 0.1);
+  background: var(--x-tarot-card);
+  border: 2rpx solid var(--x-tarot-line-strong);
+  box-shadow: 0 8rpx 32rpx rgba(0, 0, 0, 0.4), 0 0 16rpx var(--x-tarot-line);
   transform: rotateY(180deg);
 }
 .card-back {
-  background: linear-gradient(135deg, #1a1040 0%, #0d0b1a 100%);
-  border: 2rpx solid rgba(240, 208, 96, 0.2);
+  background: var(--x-tarot-cardback);
+  border: 2rpx solid var(--x-tarot-line);
 }
 /* 牌面默认背面朝向用户（rotateY(180deg)），配合父级翻牌旋转 180° 后正向显示 */
 .drawn-card.flipped .card-face {
@@ -599,35 +599,35 @@ function saveRecord() {
 .card-back-pattern {
   position: absolute;
   inset: 12rpx;
-  border: 1rpx solid rgba(240, 208, 96, 0.15);
+  border: 1rpx solid var(--x-tarot-line);
   border-radius: 16rpx;
 }
 .card-back-emblem {
   font-size: 48rpx;
-  color: rgba(240, 208, 96, 0.4);
+  color: var(--x-tarot-line-strong);
 }
 .card-emblem {
   font-size: 56rpx;
-  color: #f0d060;
+  color: var(--x-tarot-gold);
   margin-bottom: 12rpx;
-  text-shadow: 0 0 16rpx rgba(240, 208, 96, 0.4);
+  text-shadow: 0 0 16rpx var(--x-tarot-line-strong);
 }
 .card-name {
   font-size: 28rpx;
-  color: #f0e8d8;
+  color: var(--x-tarot-text);
   text-align: center;
   line-height: 1.3;
   margin-bottom: 6rpx;
 }
 .card-name-en {
   font-size: 22rpx;
-  color: rgba(232, 224, 240, 0.5);
+  color: var(--x-tarot-dim);
   text-align: center;
 }
 .card-pos {
   margin-top: 10rpx;
   font-size: 24rpx;
-  color: rgba(240, 208, 96, 0.6);
+  color: var(--x-tarot-gold);
   letter-spacing: 0.05em;
 }
 
@@ -637,7 +637,7 @@ function saveRecord() {
 }
 .flip-hint-text {
   font-size: 28rpx;
-  color: rgba(232, 224, 240, 0.5);
+  color: var(--x-tarot-dim);
   letter-spacing: 0.1em;
 }
 
@@ -645,24 +645,24 @@ function saveRecord() {
 .meaning-block {
   margin-top: 24rpx;
   padding: 28rpx 24rpx;
-  background: rgba(26, 16, 64, 0.6);
-  border: 1rpx solid rgba(240, 208, 96, 0.2);
+  background: var(--x-tarot-panel2);
+  border: 1rpx solid var(--x-tarot-line);
   border-radius: 20rpx;
 }
 .meaning-title {
   display: block;
   font-size: 32rpx;
-  color: #f0d060;
+  color: var(--x-tarot-gold);
   letter-spacing: 0.08em;
   margin-bottom: 16rpx;
 }
 .meaning-text {
   font-size: 30rpx;
   line-height: 1.7;
-  color: #e8e0f0;
+  color: var(--x-tarot-text);
 }
 .typing {
-  color: rgba(240, 208, 96, 0.6);
+  color: var(--x-tarot-gold);
   font-style: italic;
 }
 
