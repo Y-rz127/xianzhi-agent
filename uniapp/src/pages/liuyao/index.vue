@@ -4,7 +4,7 @@
     <scroll-view scroll-y class="scroll">
       <view class="hero">
         <text>六爻算卦</text>
-        <small>心诚则灵 · 仅作自省与决策参考</small>
+        <small class="hero-sub">心诚则灵 · 仅作自省与决策参考</small>
       </view>
 
       <view class="panel">
@@ -54,7 +54,7 @@
         <view class="hexagram-display">
           <view class="hexagram-col">
             <view class="hexagram-title">
-              <small>本卦</small>
+              <small class="ht-label">本卦</small>
               <text>{{ result.original.name }}</text>
               <text class="sub-info">{{ result.original.upper.symbol }} {{ result.original.upper.name }}上 · {{ result.original.lower.symbol }} {{ result.original.lower.name }}下</text>
             </view>
@@ -68,7 +68,7 @@
           </view>
           <view v-if="result.changed" class="hexagram-col">
             <view class="hexagram-title">
-              <small>变卦</small>
+              <small class="ht-label">变卦</small>
               <text>{{ result.changed.name }}</text>
               <text class="sub-info">{{ result.changed.upper.symbol }} {{ result.changed.upper.name }}上 · {{ result.changed.lower.symbol }} {{ result.changed.lower.name }}下</text>
             </view>
@@ -196,9 +196,9 @@ onBeforeUnmount(() => {
 .scroll { height: 100vh; }
 .nav { position: fixed; z-index: 2; top: 50rpx; left: 28rpx; font-size: 60rpx; }
 .hero { text-align: center; padding: 140rpx 0 64rpx; }
-.hero text, .hero small { display: block; }
+.hero text, .hero .hero-sub { display: block; }
 .hero text { font-size: 64rpx; letter-spacing: 14rpx; color: $nx-gold-light; }
-.hero small { margin-top: 24rpx; color: $nx-text-dim; font-size: 28rpx; }
+.hero .hero-sub { margin-top: 24rpx; color: $nx-text-dim; font-size: 28rpx; }
 
 .panel { margin: 32rpx 36rpx; padding: 40rpx 36rpx; border: 1rpx solid $nx-border; border-radius: 24rpx; background: $nx-card; }
 .label { display: block; color: $nx-gold-light; margin: 20rpx 0 16rpx; font-size: 30rpx; font-weight: 600; letter-spacing: 2rpx; }
@@ -281,8 +281,8 @@ onBeforeUnmount(() => {
 .result { margin-bottom: 100rpx; }
 .hexagram-display { display: flex; justify-content: center; gap: 48rpx; margin: 40rpx 0; padding: 28rpx; background: rgba(255, 255, 255, .02); border-radius: 20rpx; border: 1rpx solid $nx-border; }
 .hexagram-col { flex: 1; max-width: 320rpx; text-align: center; }
-.hexagram-title small, .hexagram-title text { display: block; }
-.hexagram-title small { font-size: 22rpx; color: $nx-text-dim; margin-bottom: 10rpx; letter-spacing: 2rpx; }
+.hexagram-title .ht-label, .hexagram-title text { display: block; }
+.hexagram-title .ht-label { font-size: 22rpx; color: $nx-text-dim; margin-bottom: 10rpx; letter-spacing: 2rpx; }
 .hexagram-title text:first-of-type { font-size: 38rpx; color: $nx-gold-light; margin: 8rpx 0; font-weight: 700; letter-spacing: 4rpx; }
 .sub-info { font-size: 23rpx; color: $nx-text-muted; margin-top: 6rpx; line-height: 1.5; }
 .yao-stack { margin-top: 24rpx; display: flex; flex-direction: column-reverse; gap: 14rpx; }

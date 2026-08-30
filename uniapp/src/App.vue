@@ -6,8 +6,8 @@ onShow(() => {})
 </script>
 
 <style lang="scss">
-/* 主题变量定义：白天纸墨 / 暗夜玻璃两套（页面根节点 .t-light/.t-dark 切换） */
-@import './styles/theme.scss';
+/* 主题变量（.t-light/.t-dark 两套 --x-*）由 main.ts 以模块方式全局引入，
+   避免在 style 块内用已废弃的 Sass @import */
 
 /* 全局样式（颜色全部经主题变量解析） */
 page {
