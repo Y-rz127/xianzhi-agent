@@ -1,5 +1,5 @@
 <template>
-  <scroll-view class="page" scroll-y>
+  <scroll-view class="page" :class="themeClass" scroll-y>
     <view class="content">
       <view class="section">
         <text class="h2">一、服务说明</text>
@@ -35,6 +35,9 @@
 </template>
 
 <script setup lang="ts">
+import { useTheme } from '@/composables/useTheme'
+
+const { themeClass } = useTheme()
 </script>
 
 <style lang="scss" scoped>

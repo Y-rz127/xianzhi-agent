@@ -1,5 +1,5 @@
 <template>
-  <view class="page">
+  <view class="page" :class="themeClass">
     <scroll-view class="scroll" scroll-y>
       <!-- 状态栏占位 -->
       <view class="status-bar" :style="{ height: statusBarHeight + 'px' }"></view>
@@ -206,8 +206,11 @@
 <script setup lang="ts">
 import { ref, computed, reactive, watch } from 'vue'
 import { hehun } from '@/api'
+import { useTheme } from '@/composables/useTheme'
 import { regionData, type City } from '@/utils/region-data'
 
+
+const { themeClass } = useTheme()
 const today = new Date().toISOString().slice(0, 10)
 const a = reactive({ date: '', time: '', gender: '男' as '男' | '女', place: '', longitude: 0 })
 const b = reactive({ date: '', time: '', gender: '女' as '男' | '女', place: '', longitude: 0 })

@@ -1,5 +1,5 @@
 <template>
-  <view class="page">
+  <view class="page" :class="themeClass">
     <view class="nav-placeholder" :style="{ height: (statusBarHeight + navBarHeight) + 'px' }"></view>
     <view class="nav-bar">
       <text class="back" @tap="goBack">‹</text>
@@ -53,10 +53,13 @@
 </template>
 
 <script setup lang="ts">
+import { useTheme } from '@/composables/useTheme'
 import { ref } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import { fetchTarotRecords, deleteTarotRecord, type TarotRecord } from '@/api'
 
+
+const { themeClass } = useTheme()
 const statusBarHeight = ref(20)
 const navBarHeight = ref(44)
 try {

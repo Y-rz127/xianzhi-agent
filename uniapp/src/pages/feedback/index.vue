@@ -1,5 +1,5 @@
 <template>
-  <view class="page">
+  <view class="page" :class="themeClass">
     <view class="body">
       <view class="card">
         <text class="label">反馈内容</text>
@@ -26,9 +26,12 @@
 </template>
 
 <script setup lang="ts">
+import { useTheme } from '@/composables/useTheme'
 import { ref } from 'vue'
 import { submitFeedback } from '@/api'
 
+
+const { themeClass } = useTheme()
 const content = ref('')
 const contact = ref('')
 const errMsg = ref('')

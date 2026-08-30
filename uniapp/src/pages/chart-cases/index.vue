@@ -1,5 +1,5 @@
 <template>
-  <view class="page">
+  <view class="page" :class="themeClass">
     <view class="status-bar" :style="{ height: statusBarHeight + 'px' }"></view>
 
     <!-- 紫蓝渐变头部 -->
@@ -75,11 +75,14 @@
 </template>
 
 <script setup lang="ts">
+import { useTheme } from '@/composables/useTheme'
 import { ref, onMounted } from 'vue'
 import { fetchChartCases, fetchFavorites, addFavorite, removeFavorite, getChart, type ChartCase, type ChartData } from '@/api'
 import { isLoggedIn } from '@/utils/storage'
 import BaziModal from '@/components/BaziModal/BaziModal.vue'
 
+
+const { themeClass } = useTheme()
 const statusBarHeight = ref(20)
 try {
   const sysInfo = uni.getWindowInfo()

@@ -1,5 +1,5 @@
 <template>
-  <view class="page">
+  <view class="page" :class="themeClass">
     <view class="nav" @tap="back">‹</view>
     <scroll-view scroll-y class="scroll">
       <view class="hero">
@@ -153,11 +153,14 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { useTheme } from '@/composables/useTheme'
 import { onMounted } from 'vue'
 import {
   getHuangLiDay, getHuangLiItems, getHuangLiRange, getHuangLiZeji,
   type HuangLiDay, type HuangLiRangeDay, type HuangLiZejiDay,
 } from '@/api'
+
+const { themeClass } = useTheme()
 
 const zodiacs = ['鼠', '牛', '虎', '兔', '龙', '蛇', '马', '羊', '猴', '鸡', '狗', '猪']
 const avoidRange = ['不限生肖', ...zodiacs]

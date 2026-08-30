@@ -1,5 +1,5 @@
 <template>
-  <view class="page">
+  <view class="page" :class="themeClass">
     <view class="body">
       <view class="logo">☯</view>
       <text class="app-name">先知 · 玄学命理</text>
@@ -24,6 +24,9 @@
 </template>
 
 <script setup lang="ts">
+import { useTheme } from '@/composables/useTheme'
+
+const { themeClass } = useTheme()
 function goDisclaimer() { uni.navigateTo({ url: '/pages/legal/disclaimer' }) }
 function goTerms() { uni.navigateTo({ url: '/pages/legal/terms' }) }
 </script>

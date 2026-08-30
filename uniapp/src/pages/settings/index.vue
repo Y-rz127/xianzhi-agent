@@ -44,6 +44,27 @@
         </view>
       </view>
 
+      <!-- 外观主题 -->
+      <view class="card form-card">
+        <view class="card-title-row">
+          <text class="card-dot">✦</text>
+          <text class="card-title">外观主题</text>
+        </view>
+        <view class="theme-row">
+          <view :class="['theme-opt', !isDark && 'on']" @tap="setTheme('light')">
+            <text class="theme-emoji">☀</text>
+            <text class="theme-name">白天 · 纸墨</text>
+          </view>
+          <view :class="['theme-opt', isDark && 'on']" @tap="setTheme('dark')">
+            <text class="theme-emoji">☾</text>
+            <text class="theme-name">暗夜 · 玻璃</text>
+          </view>
+        </view>
+        <view class="hint-card">
+          <text class="hint-line">切换立即生效并自动记住；重新进入小程序保持所选主题</text>
+        </view>
+      </view>
+
       <!-- 操作按钮 -->
       <view class="actions">
         <text class="btn btn-ghost" @tap="onReset">恢复默认</text>
@@ -63,6 +84,9 @@
 import { ref, onMounted } from 'vue'
 import { setConfig, getConfig } from '@/config'
 import { getHealth } from '@/api'
+import { useTheme } from '@/composables/useTheme'
+
+const { isDark, setTheme } = useTheme()
 
 const apiBase = ref('')
 const wsBase = ref('')
@@ -105,6 +129,17 @@ async function onSave() {
   display: flex;
   flex-direction: column;
 }
+
+/* 主题选择 */
+.theme-row { display: flex; gap: 20rpx; margin: 8rpx 0 20rpx; }
+.theme-opt {
+  flex: 1; display: flex; flex-direction: column; align-items: center; gap: 10rpx;
+  padding: 28rpx 0; border: 1rpx solid $color-border; border-radius: 16rpx;
+  background: $color-bg-card; color: $color-ink-light;
+}
+.theme-opt.on { border-color: $color-primary; color: $color-primary; box-shadow: $glow-primary; }
+.theme-emoji { font-size: 44rpx; line-height: 1; }
+.theme-name { font-size: 26rpx; }
 
 /* 水墨渐变头部 */
 .hero {

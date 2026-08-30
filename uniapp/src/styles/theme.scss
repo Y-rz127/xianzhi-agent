@@ -1,0 +1,115 @@
+/**
+ * theme.scss - 主题系统（白天纸墨 / 暗夜玻璃）
+ *
+ * 通过 CSS 自定义属性实现运行时切换：页面根节点绑定 .t-light / .t-dark
+ * （由 useTheme() 的 themeClass 提供），所有颜色经 var(--x-*) 解析。
+ * uni.scss 的 $color-* 已重定向到这些 var()，页面内 SCSS 变量用法不变。
+ *
+ * 适配背景：默认白天（纸墨浅色，观感对齐改造前）；暗夜对齐 Web 端 style.css。
+ */
+
+/* ============ 白天 · 纸墨（宣纸白底 + 墨字 + 朱砂） ============ */
+.t-light {
+  --x-bg: #FAFAF8;
+  --x-bg-warm: #F5F3EF;
+  --x-bg-card: #FFFFFF;
+  --x-bg-elevated: #FFFFFF;
+  --x-bg-inverse: #F5F7FA;
+
+  --x-primary: #2C2C2C;
+  --x-primary-light: #555555;
+  --x-primary-lighter: #888888;
+  --x-primary-lightest: #AAAAAA;
+  --x-primary-dark: #1A1A1A;
+  --x-primary-darker: #111111;
+
+  --x-ink: #1A1A1A;
+  --x-ink-light: #555555;
+  --x-ink-lighter: #888888;
+  --x-ink-lightest: #AAAAAA;
+
+  --x-vermilion: #B8483C;
+  --x-vermilion-light: #D45D4F;
+
+  --x-border: rgba(0, 0, 0, 0.08);
+  --x-border-light: rgba(0, 0, 0, 0.04);
+  --x-divider: rgba(0, 0, 0, 0.06);
+
+  --x-success: #4A7A3A;
+  --x-warning: #8B7D3A;
+  --x-error: #B8483C;
+  --x-info: #3A6B7A;
+
+  --x-gold: #B08A2E;
+  --x-gold-light: #8A6A1E;
+
+  /* 聊天页山水背景层（浅底：墨山 + 白雾） */
+  --x-mountain-far: rgba(26, 26, 26, 0.22);
+  --x-mountain-mid: rgba(26, 26, 26, 0.38);
+  --x-mountain-near: rgba(26, 26, 26, 0.6);
+  --x-mist: rgba(250, 250, 248, 0.85);
+  --x-bird: rgba(26, 26, 26, 0.45);
+
+  /* 玩法页深色面板的替代（浅色下走卡片实底） */
+  --x-panel-bg: #FFFFFF;
+  --x-panel-border: rgba(0, 0, 0, 0.08);
+  --x-input-bg: #F5F3EF;
+  --x-accent-text: #8A6A1E;
+  --x-accent-dim: #99895F;
+  --x-yi: #4A7A3A;
+  --x-ji: #B8483C;
+  --x-toast: #B8483C;
+}
+
+/* ============ 暗夜 · 玻璃（对齐 Web：深蓝黑底 + 亮字 + 主金） ============ */
+.t-dark {
+  --x-bg: #050810;
+  --x-bg-warm: #0a0f1a;
+  --x-bg-card: #0f1520;
+  --x-bg-elevated: #131b2a;
+  --x-bg-inverse: #050810;
+
+  --x-primary: #d4af37;
+  --x-primary-light: #e8c964;
+  --x-primary-lighter: #8fa3b8;
+  --x-primary-lightest: #5a6c82;
+  --x-primary-dark: #a8862b;
+  --x-primary-darker: #7c6320;
+
+  --x-ink: #f5f7fa;
+  --x-ink-light: #b9c6d4;
+  --x-ink-lighter: #7c8fa5;
+  --x-ink-lightest: #5a6c82;
+
+  --x-vermilion: #e0655a;
+  --x-vermilion-light: #ef8a80;
+
+  --x-border: rgba(138, 180, 220, 0.12);
+  --x-border-light: rgba(138, 180, 220, 0.07);
+  --x-divider: rgba(138, 180, 220, 0.10);
+
+  --x-success: #6fbf73;
+  --x-warning: #d9b45a;
+  --x-error: #e0655a;
+  --x-info: #6fa8c9;
+
+  --x-gold: #d4af37;
+  --x-gold-light: #f1d894;
+
+  /* 聊天页山水背景层（深底：冷色剪影 + 微冷雾） */
+  --x-mountain-far: rgba(138, 180, 220, 0.10);
+  --x-mountain-mid: rgba(138, 180, 220, 0.16);
+  --x-mountain-near: rgba(138, 180, 220, 0.22);
+  --x-mist: rgba(150, 185, 225, 0.10);
+  --x-bird: rgba(180, 205, 235, 0.45);
+
+  /* 玩法页深色面板 */
+  --x-panel-bg: rgba(15, 21, 32, 0.85);
+  --x-panel-border: rgba(138, 180, 220, 0.12);
+  --x-input-bg: #0f1520;
+  --x-accent-text: #f1d894;
+  --x-accent-dim: #7c8fa5;
+  --x-yi: #8fce9f;
+  --x-ji: #e79ba1;
+  --x-toast: #b54b62;
+}

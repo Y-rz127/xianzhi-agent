@@ -1,5 +1,5 @@
 <template>
-  <view class="page">
+  <view class="page" :class="themeClass">
     <view class="status-bar" :style="{ height: statusBarHeight + 'px' }"></view>
 
     <view class="nav-back" :style="{ top: statusBarHeight + 'px' }" @tap="goBack">
@@ -136,6 +136,9 @@
 import { ref, computed, nextTick } from 'vue'
 import { onShow, onHide } from '@dcloudio/uni-app'
 import { requireLogin } from '@/utils/authGuard'
+import { useTheme } from '@/composables/useTheme'
+
+const { themeClass } = useTheme()
 // 塔罗两阶段：draw 抽牌 + interpret AI 流式解读
 import { drawTarotCards, interpretTarotWS, closeAllWS } from '@/api/chat'
 import { createTarotRecord } from '@/api'

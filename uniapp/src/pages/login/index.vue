@@ -1,5 +1,5 @@
 <template>
-  <view class="page">
+  <view class="page" :class="themeClass">
     <view class="hero">
       <view class="hero-bg"></view>
       <view class="hero-orb orb-1"></view>
@@ -60,12 +60,15 @@
 </template>
 
 <script setup lang="ts">
+import { useTheme } from '@/composables/useTheme'
 import { ref } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import { login, register, wxLogin } from '@/api'
 import { getUser, setToken, setUser, clearAuth } from '@/utils/storage'
 import { getConfig, setConfig } from '@/config'
 
+
+const { themeClass } = useTheme()
 const mode = ref<'login' | 'register'>('login')
 const nickname = ref('')
 const password = ref('')

@@ -1,5 +1,5 @@
 <template>
-  <view class="page">
+  <view class="page" :class="themeClass">
     <view class="body">
       <view class="form-row">
         <text class="label">名称</text>
@@ -46,11 +46,14 @@
 </template>
 
 <script setup lang="ts">
+import { useTheme } from '@/composables/useTheme'
 import { ref, reactive } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import { createProfile, updateProfile, type BaziProfile } from '@/api'
 import { getLocalDateString } from '@/utils/datetimePicker'
 
+
+const { themeClass } = useTheme()
 const today = getLocalDateString()
 const isEdit = ref(false)
 const editId = ref('')

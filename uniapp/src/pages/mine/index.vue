@@ -1,5 +1,5 @@
 <template>
-  <view class="page">
+  <view class="page" :class="themeClass">
     <view class="nav-placeholder" :style="{ height: (statusBarHeight + navBarHeight) + 'px' }">
     <view class="nav-back" :style="{ top: statusBarHeight + 'px' }" @tap="goBack">
       <text class="nav-back-arrow">‹</text>
@@ -68,6 +68,7 @@
 </template>
 
 <script setup lang="ts">
+import { useTheme } from '@/composables/useTheme'
 import { ref, computed } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import { getUser, clearAuth } from '@/utils/storage'
@@ -78,6 +79,8 @@ import {
   fetchTarotRecords,
   updateMe,
 } from '@/api'
+
+const { themeClass } = useTheme()
 
 // 模板中直接调用 uni.navigateTo 需显式暴露全局对象
 const uniApp = uni

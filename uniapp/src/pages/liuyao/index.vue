@@ -1,5 +1,5 @@
 <template>
-  <view class="page">
+  <view class="page" :class="themeClass">
     <view class="nav" @tap="back">‹</view>
     <scroll-view scroll-y class="scroll">
       <view class="hero">
@@ -94,7 +94,10 @@
 <script setup lang="ts">
 import { ref, computed, onBeforeUnmount } from 'vue'
 import { castLiuYao, interpretLiuYao, type LiuYaoResult } from '@/api'
+import { useTheme } from '@/composables/useTheme'
 
+
+const { themeClass } = useTheme()
 const methods = [
   { key: 'coins', name: '铜钱起卦' },
   { key: 'numbers', name: '数字起卦' },

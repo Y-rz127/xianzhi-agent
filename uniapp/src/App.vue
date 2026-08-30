@@ -6,7 +6,10 @@ onShow(() => {})
 </script>
 
 <style lang="scss">
-/* 全局样式 - 白底黑字水墨主题 */
+/* 主题变量定义：白天纸墨 / 暗夜玻璃两套（页面根节点 .t-light/.t-dark 切换） */
+@import './styles/theme.scss';
+
+/* 全局样式（颜色全部经主题变量解析） */
 page {
   background-color: $color-bg;
   background: $color-bg;
@@ -14,6 +17,48 @@ page {
   font-size: 28rpx;
   color: $color-ink;
   min-height: 100vh;
+}
+
+/* 主题兜底：页面根节点未绑定 .t-light/.t-dark 时按白天渲染（与默认主题一致） */
+page {
+  --x-bg: #FAFAF8;
+  --x-bg-warm: #F5F3EF;
+  --x-bg-card: #FFFFFF;
+  --x-bg-elevated: #FFFFFF;
+  --x-primary: #2C2C2C;
+  --x-primary-light: #555555;
+  --x-primary-lighter: #888888;
+  --x-primary-lightest: #AAAAAA;
+  --x-primary-dark: #1A1A1A;
+  --x-primary-darker: #111111;
+  --x-ink: #1A1A1A;
+  --x-ink-light: #555555;
+  --x-ink-lighter: #888888;
+  --x-ink-lightest: #AAAAAA;
+  --x-vermilion: #B8483C;
+  --x-vermilion-light: #D45D4F;
+  --x-border: rgba(0, 0, 0, 0.08);
+  --x-border-light: rgba(0, 0, 0, 0.04);
+  --x-divider: rgba(0, 0, 0, 0.06);
+  --x-success: #4A7A3A;
+  --x-warning: #8B7D3A;
+  --x-error: #B8483C;
+  --x-info: #3A6B7A;
+  --x-gold: #B08A2E;
+  --x-gold-light: #8A6A1E;
+  --x-mountain-far: rgba(26, 26, 26, 0.22);
+  --x-mountain-mid: rgba(26, 26, 26, 0.38);
+  --x-mountain-near: rgba(26, 26, 26, 0.6);
+  --x-mist: rgba(250, 250, 248, 0.85);
+  --x-bird: rgba(26, 26, 26, 0.45);
+  --x-panel-bg: #FFFFFF;
+  --x-panel-border: rgba(0, 0, 0, 0.08);
+  --x-input-bg: #F5F3EF;
+  --x-accent-text: #8A6A1E;
+  --x-accent-dim: #99895F;
+  --x-yi: #4A7A3A;
+  --x-ji: #B8483C;
+  --x-toast: #B8483C;
 }
 
 /* 通用文本 */

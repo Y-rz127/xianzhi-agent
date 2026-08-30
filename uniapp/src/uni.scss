@@ -1,54 +1,56 @@
 /**
- * uni.scss - 全局样式变量
- * 先知 - 白底黑字水墨风格
- * 宣纸白底 + 墨黑文字 + 朱砂点缀
+ * uni.scss - 全局样式变量（主题化）
+ * 变量重定向到 CSS 自定义属性 var(--x-*)，运行时随页面根节点 .t-light/.t-dark
+ * 切换（两套值定义在 styles/theme.scss；默认白天纸墨，暗夜对齐 Web 端）。
+ * 变量名沿用旧"水墨"体系（改值不改名），页面内 $color-* 用法零改动。
+ * 注意：这些变量已非编译期色值，禁止对其做 rgba($x)/darken 等 SCSS 颜色函数运算。
  */
 
-/* === 品牌主色系（墨色 - 深黑） === */
-$color-primary: #2C2C2C;
-$color-primary-light: #555555;
-$color-primary-lighter: #888888;
-$color-primary-lightest: #AAAAAA;
-$color-primary-dark: #1A1A1A;
-$color-primary-darker: #111111;
+/* === 品牌主色系 === */
+$color-primary: var(--x-primary);
+$color-primary-light: var(--x-primary-light);
+$color-primary-lighter: var(--x-primary-lighter);
+$color-primary-lightest: var(--x-primary-lightest);
+$color-primary-dark: var(--x-primary-dark);
+$color-primary-darker: var(--x-primary-darker);
 
-/* === 墨色系（文字） === */
-$color-ink: #1A1A1A;
-$color-ink-light: #555555;
-$color-ink-lighter: #888888;
-$color-ink-lightest: #AAAAAA;
+/* === 文字系 === */
+$color-ink: var(--x-ink);
+$color-ink-light: var(--x-ink-light);
+$color-ink-lighter: var(--x-ink-lighter);
+$color-ink-lightest: var(--x-ink-lightest);
 
-/* === 朱砂红（点缀，用于警示/重要） === */
-$color-vermilion: #B8483C;
-$color-vermilion-light: #D45D4F;
+/* === 朱砂红（点缀，警示/重要） === */
+$color-vermilion: var(--x-vermilion);
+$color-vermilion-light: var(--x-vermilion-light);
 
-/* === 宣纸色（背景） === */
-$color-paper: #FAFAF8;
-$color-paper-warm: #F5F3EF;
-$color-paper-dark: #E8E4DC;
+/* === 底色系 === */
+$color-paper: var(--x-bg);
+$color-paper-warm: var(--x-bg-warm);
+$color-paper-dark: var(--x-bg-card);
 
 /* === 状态色 === */
-$state-success: #4A7A3A;
-$state-warning: #8B7D3A;
-$state-error: #B8483C;
-$state-info: #3A6B7A;
+$state-success: var(--x-success);
+$state-warning: var(--x-warning);
+$state-error: var(--x-error);
+$state-info: var(--x-info);
 
-/* === 中性色（白底系） === */
-$color-bg: #FAFAF8;
-$color-bg-warm: #F5F3EF;
-$color-bg-card: #FFFFFF;
-$color-bg-elevated: #FFFFFF;
-$color-bg-inverse: #1A1A1A;
-$color-border: rgba(0, 0, 0, 0.08);
-$color-border-light: rgba(0, 0, 0, 0.04);
-$color-surface-divider: rgba(0, 0, 0, 0.06);
+/* === 中性色 === */
+$color-bg: var(--x-bg);
+$color-bg-warm: var(--x-bg-warm);
+$color-bg-card: var(--x-bg-card);
+$color-bg-elevated: var(--x-bg-elevated);
+$color-bg-inverse: var(--x-ink);
+$color-border: var(--x-border);
+$color-border-light: var(--x-border-light);
+$color-surface-divider: var(--x-divider);
 
-/* === 阴影（水墨） === */
-$shadow-sm: 0 2rpx 8rpx rgba(0, 0, 0, 0.06);
-$shadow-md: 0 8rpx 24rpx rgba(0, 0, 0, 0.08);
-$shadow-elevated: 0 16rpx 48rpx rgba(0, 0, 0, 0.1);
-$glow-primary: 0 0 32rpx rgba(44, 44, 44, 0.08);
-$glow-gold: 0 0 24rpx rgba(44, 44, 44, 0.06);
+/* === 阴影（投影黑度两套通用） === */
+$shadow-sm: 0 2rpx 8rpx rgba(0, 0, 0, 0.18);
+$shadow-md: 0 8rpx 24rpx rgba(0, 0, 0, 0.22);
+$shadow-elevated: 0 16rpx 48rpx rgba(0, 0, 0, 0.28);
+$glow-primary: 0 0 32rpx rgba(212, 175, 55, 0.12);
+$glow-gold: 0 0 24rpx rgba(212, 175, 55, 0.1);
 
 /* === 字体（书法感） === */
 $font-family-display: 'STKaiti', 'KaiTi', 'PingFang SC', 'Noto Serif SC', serif;
@@ -70,28 +72,28 @@ $spacing-lg: 40rpx;
 $spacing-xl: 48rpx;
 $spacing-2xl: 64rpx;
 
-/* === 夜光玻璃 token（对齐 Web 端 style.css 基底，玩法页深色化专用） === */
-$nx-bg: #050810;
-$nx-bg-2: #0a0f1a;
-$nx-bg-3: #0f1520;
-$nx-card: rgba(15, 21, 32, 0.85);
-$nx-card-solid: #0f1520;
-$nx-border: rgba(138, 180, 220, 0.12);
-$nx-border-strong: rgba(212, 175, 55, 0.25);
-$nx-text: #f5f7fa;
-$nx-text-dim: #7c8fa5;
-$nx-text-muted: #5a6c82;
-$nx-gold: #d4af37;
-$nx-gold-light: #f1d894;
-/* 模块 accent（与 Web 导航图标色一致） */
-$nx-accent-hehun: #e8b48b;
-$nx-accent-tarot: #b886e8;
-$nx-accent-liuyao: #caa95d;
-$nx-accent-huangli: #e8a05b;
+/* === 玩法页 token（随主题映射：暗夜=夜光玻璃基底，白天=纸墨卡片） === */
+$nx-bg: var(--x-bg);
+$nx-bg-2: var(--x-bg-warm);
+$nx-bg-3: var(--x-bg-card);
+$nx-card: var(--x-panel-bg);
+$nx-card-solid: var(--x-bg-card);
+$nx-border: var(--x-panel-border);
+$nx-border-strong: var(--x-gold);
+$nx-text: var(--x-ink);
+$nx-text-dim: var(--x-ink-lighter);
+$nx-text-muted: var(--x-ink-lightest);
+$nx-gold: var(--x-gold);
+$nx-gold-light: var(--x-gold-light);
+/* 模块 accent（固定色，两套主题下均成立） */
+$nx-accent-hehun: #C08A5E;
+$nx-accent-tarot: #9A6FD4;
+$nx-accent-liuyao: var(--x-gold);
+$nx-accent-huangli: var(--x-gold);
 /* 宜/忌/toast 语义色 */
-$nx-yi: #8fce9f;
-$nx-ji: #e79ba1;
-$nx-toast: #b54b62;
+$nx-yi: var(--x-yi);
+$nx-ji: var(--x-ji);
+$nx-toast: var(--x-toast);
 
 /* === 旧变量兼容（保持 uni-app 内置组件主题色） === */
 $uni-color-primary: $color-primary;
@@ -100,7 +102,7 @@ $uni-color-warning: $color-primary;
 $uni-color-error: $state-error;
 
 $uni-text-color: $color-ink;
-$uni-text-color-inverse: #FAFAF8;
+$uni-text-color-inverse: #050810;
 $uni-text-color-grey: $color-ink-light;
 $uni-text-color-placeholder: $color-ink-lighter;
 
