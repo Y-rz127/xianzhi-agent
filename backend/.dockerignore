@@ -1,8 +1,3 @@
-# 前端 / 移动端源码（后端镜像不需要，且体积大）
-frontend/
-uniapp/
-学习资料/
-
 # 敏感配置（禁止打进镜像）
 .env
 .env.local
@@ -26,17 +21,16 @@ dist/
 .ruff_cache/
 .venv/
 venv/
+.coverage
+htmlcov/
 
 # 测试
 tests/
 .pytest_cache/
+.test_tmp/
 
-# 工具与元数据
-.workbuddy/
-.github/
-.git/
-.gitignore
+# 本地工具（locust / iztro oracle 生成器的 node_modules 体积大且运行时不需要）
+scripts/node_modules/
 
-# 文档（运行时不需要；部署文档保留在仓库即可）
-docs/
+# 文档（运行时不需要）
 *.md

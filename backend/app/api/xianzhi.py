@@ -300,9 +300,19 @@ async def get_chart(birth_time: str, gender: str, sect: int = 2, yun_sect: int =
     Args:
         longitude: 出生地经度（用于真太阳时校正，可选）
     """
+    from app.tools.cache import bazi_cache
+
+    # 复用与聊天工具同一套 LRU：/chart 是全量重算的 CPU 密集路径，高频请求会抢 GIL 拖垮事件循环
+    # key 追加经度（真太阳时校正会改变四柱）；None 与 0 是不同 key，语义正确
+    cache_tool = f"chart_api:{longitude}"
+    payload = bazi_cache.get(birth_time, gender, sect, yun_sect, cache_tool)
+    if payload is not None:
+        return payload
     try:
         # 排盘为同步重计算，放到线程池避免阻塞事件循环
-        return await asyncio.to_thread(_compute_chart_payload, birth_time, gender, sect, yun_sect, longitude)
+        payload = await asyncio.to_thread(_compute_chart_payload, birth_time, gender, sect, yun_sect, longitude)
+        bazi_cache.set(birth_time, gender, payload, sect, yun_sect, cache_tool)
+        return payload
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 

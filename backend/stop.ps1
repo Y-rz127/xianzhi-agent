@@ -32,7 +32,7 @@ function Get-CandidatePids {
     # 1) python from this repo's .venv (CIM ExecutablePath; avoids Get-Process .Path access issues)
     # 2) any python whose commandline mentions main.py / uvicorn / multiprocessing spawn children
     # 3) live children of the above (process tree)
-    $venvPy = (Join-Path $PSScriptRoot ".venv\Scripts\python.exe") -replace "\\", "\\\\"
+    $venvPy = (Join-Path (Split-Path -Parent $PSScriptRoot) ".venv\Scripts\python.exe") -replace "\\", "\\\\"
     $procs = Get-CimInstance Win32_Process -Filter "Name='python.exe' or Name='pythonw.exe' or Name='uvicorn.exe'" -ErrorAction SilentlyContinue | Where-Object {
         ($_.ExecutablePath -and $_.ExecutablePath -match $venvPy) -or
         ($_.CommandLine -and $_.CommandLine -match "main\.py|uvicorn|multiprocessing")

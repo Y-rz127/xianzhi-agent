@@ -35,8 +35,10 @@ def get_pool():
 
             pg_pool = ConnectionPool(
                 settings.pg_dsn(),
-                min_size=1,
-                max_size=5,
+                min_size=settings.pg_pool_min_size,
+                max_size=settings.pg_pool_max_size,
+                # 并发超池时最多等待这么久，避免请求无限悬挂
+                timeout=settings.pg_pool_timeout,
                 kwargs={"autocommit": True},
                 check=check_connection,  # 借出前探活，避免借到被服务端断开的死连接
                 max_lifetime=1800,  # 空闲连接 30 分钟主动回收，降低踩到 PG 空闲超时的概率

@@ -230,7 +230,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, watch, type Ref } from "vue"
-import { fetchChartCases, createChartCase, updateChartCase, deleteChartCase, getChart, exportChartCasesJSON, importChartCasesJSON, inferBaziDates, type ChartCase, type ChartData, type BaziCandidate } from "../api"
+import { fetchChartCases, createChartCase, updateChartCase, deleteChartCase, getChart, exportChartCasesJSON, importChartCasesJSON, inferBaziDates, type ChartCase, type ChartData, type BaziCandidate } from "../api/index.ts"
 import BaziModal from "../components/BaziModal.vue"
 
 const cases = ref<ChartCase[]>([])

@@ -11,6 +11,7 @@
 |------|----------|------|
 | 后端 FastAPI | CloudBase 云托管（容器，跑现有 `Dockerfile`） | 平台注入 `PORT`，代码已自动读取 |
 | 数据库 | 腾讯云 PostgreSQL（需支持 pgvector） | 存对话记忆 + RAG 向量 |
+| Redis | 腾讯云 Redis（或自建，需与云托管同 VPC） | 跨副本限流等共享状态；未配置时降级为进程内存（单副本可用） |
 | 前端 | 微信小程序（开发版 + 真机调试）或 H5 网页 | 运行时填云托管域名即可 |
 
 ---
@@ -44,12 +45,13 @@
 
 ### 4.1 准备构建产物
 
-仓库已含 `Dockerfile` 与 `.dockerignore`（已排除 `frontend/`、`uniapp/`、`.env`、`data/`、
-`.workbuddy/` 等，**镜像不会泄露密钥、也不会把前端代码打进去**）。
+仓库已含 `backend/Dockerfile` 与 `backend/.dockerignore`（已排除 `tests/`、`data/`、`logs/`、`.env`、
+`scripts/node_modules/` 等，**镜像不会泄露密钥、也不会把多余代码打进去**）。
 
 CloudBase 云托管支持两种方式：
 - **关联代码仓库**（推荐）：控制台新建服务 → 关联 GitHub 仓库 → 指定分支 → 自动检测 `Dockerfile` 构建。
-- **上传本地代码**：在项目根目录打包（排除 `.env`、`node_modules`）后上传。
+  注意 Dockerfile 位于 `backend/` 子目录，需把云托管的**构建根目录/工作目录设为 `backend`**（或选择该目录触发构建）。
+- **上传本地代码**：在 `backend/` 目录打包（排除 `.env`、`node_modules`）后上传。
 
 ### 4.2 服务关键配置
 
@@ -57,7 +59,7 @@ CloudBase 云托管支持两种方式：
 |--------|-----------|
 | 监听端口 | 平台注入 `PORT`（默认 80），`main.py` 已优先读取，无需改代码 |
 | 健康检查路径 | `/api/health`（代码已提供） |
-| 环境变量 | 见 `.env.example` 全部项；重点：`POSTGRES_CONNECTION_STRING`、`DASHSCOPE_API_KEY`、`VECTOR_STORE_TYPE=postgres`、`MEMORY_STORE_TYPE=postgres`、`CORS_ORIGINS` |
+| 环境变量 | 见 `.env.example` 全部项；重点：`POSTGRES_CONNECTION_STRING`、`DASHSCOPE_API_KEY`、`VECTOR_STORE_TYPE=postgres`、`MEMORY_STORE_TYPE=postgres`、`CORS_ORIGINS`、`REDIS_URL`、`TRUST_PROXY_HEADERS=true`、`LLM_MAX_CONCURRENCY` |
 | 内存 / 超时 | 建议内存 ≥ 1GB、请求超时 ≥ 60s（LLM 调用较慢） |
 
 > 改动点：`main.py` 的 `uvicorn` 启动已改为优先读 `PORT`；`Dockerfile` 的 `EXPOSE 80`；
@@ -79,8 +81,8 @@ CloudBase 云托管支持两种方式：
 
 ### 5.2 H5 网页
 
-- 构建：`VITE_API_BASE=https://你的云托管域名/api npm run build`（`frontend` 目录）。
-- 产物 `frontend/dist` 托管到 CloudBase 静态网站 / 任意静态服务器。
+- 构建：`VITE_API_BASE=https://你的云托管域名/api npm run build`（`frontend/web` 目录）。
+- 产物 `frontend/web/dist` 托管到 CloudBase 静态网站 / 任意静态服务器。
 - 若用自有域名，需 ICP 备案并把域名加入 `CORS_ORIGINS`。
 
 ---
@@ -96,6 +98,12 @@ CloudBase 云托管支持两种方式：
 
 - **pgvector**：腾讯云 PG 需手动 `CREATE EXTENSION vector`，否则启动报错。
 - **SSL**：腾讯云 PG 强制 `sslmode=require`，连接串务必带该参数。
+- **Redis（多副本部署必配）**：单副本可不配（限流自动降级为进程内存）。多副本时必须配
+  `REDIS_URL`（腾讯云 Redis 需与云托管同 VPC），否则限流上限按副本数线性放宽、形同虚设。
+- **TRUST_PROXY_HEADERS**：经云托管网关/CDN 访问时设为 `true`，限流才按真实客户端 IP 统计
+  （云托管容器默认仅能经平台网关访问，不存在头部伪造风险）。
+- **LLM 背压**：`LLM_MAX_CONCURRENCY` 是全模型共享的并发上限，按 DashScope 配额 ≤80% 取值；
+  排队超时或上游持续故障时接口返回「繁忙」提示而不是堆积重试。
 - **鉴权**：`API_KEYS` 为空时后端不校验 Key（本地默认）；云端自己用也建议设一个 Key，避免被扫。
 - **CORS**：`CORS_ORIGINS` 需包含前端域名，否则浏览器请求被拦；小程序 `wx.request` 不受 CORS 限制。
 - **备案**：仅「自己开发调试 / 真机调试」使用时，微信小程序勾选不校验合法域名即可，**无需备案**；

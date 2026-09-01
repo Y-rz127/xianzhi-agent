@@ -15,7 +15,7 @@ import UserAdmin from "../views/UserAdmin.vue"
 import Feedback from "../views/Feedback.vue"
 import AnswerFeedback from "../views/AnswerFeedback.vue"
 import AdminLogin from "../views/AdminLogin.vue"
-import { isAdminLoggedIn } from "../utils/adminAuth"
+import { isAdminLoggedIn } from "../utils/adminAuth.ts"
 
 const routes: RouteRecordRaw[] = [
   { path: "/", redirect: "/xianzhi" },

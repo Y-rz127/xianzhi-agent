@@ -18,30 +18,48 @@ services:
       retries: 5
     restart: unless-stopped
 
+  redis:
+    image: redis:7-alpine
+    container_name: xianzhi-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - xianzhi-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
   api:
-    build: .
+    build: ./backend
     container_name: xianzhi-api
     ports:
       # 容器内 main.py 强制监听 80 端口，主机 8123 映射到容器 80
       - "8123:80"
     env_file:
       # 通过 .env 文件注入 DASHSCOPE_API_KEY、EMBEDDING_API_KEY、API_KEYS 等关键变量
-      - .env
+      - ./backend/.env
     environment:
       POSTGRES_CONNECTION_STRING: postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/xianzhi
       VECTOR_STORE_TYPE: postgres
       MEMORY_STORE_TYPE: postgres
+      # 容器内服务名互访；本机直跑后端时在 .env 填 redis://localhost:6379/0
+      REDIS_URL: redis://redis:6379/0
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     volumes:
-      - ./app:/app/app
-      - ./data:/app/data
+      - ./backend/app:/app/app
+      - ./backend/data:/app/data
     restart: unless-stopped
 
   frontend:
     build:
-      context: ./frontend
+      context: ./frontend/web
       dockerfile: Dockerfile
     container_name: xianzhi-frontend
     ports:
@@ -52,3 +70,4 @@ services:
 
 volumes:
   xianzhi-pg-data:
+  xianzhi-redis-data:

@@ -36,6 +36,7 @@ from app.agent.workflow.xianzhi_workflow import (
 )
 from app.core.config import settings
 from app.core.logger import log
+from app.core.llm_throttle import LLMBusyError
 from app.core.thinking_router import use_thinking
 from app.domain.bazi_engine import find_birth_dates_from_pillars
 from app.memory import create_chat_memory
@@ -403,6 +404,9 @@ class Xianzhi(ToolCallAgent):
             history_snapshot = list(self.message_list)
             summary = self._get_session_summary()
             yield self._execute_workflow(user_prompt, history_snapshot, summary)
+        except LLMBusyError as e:
+            log.info("[xianzhi] LLM 繁忙或熔断: {}", e)
+            yield "当前咨询人数较多，请稍后再试。"
         except Exception as e:
             self.state = AgentState.ERROR
             self._last_error = str(e)
@@ -422,6 +426,9 @@ class Xianzhi(ToolCallAgent):
             summary = await asyncio.to_thread(self._get_session_summary)
             answer = await asyncio.to_thread(self._execute_workflow, user_prompt, history_snapshot, summary)
             yield answer
+        except LLMBusyError as e:
+            log.info("[xianzhi] LLM 繁忙或熔断: {}", e)
+            yield "当前咨询人数较多，请稍后再试。"
         except Exception as e:
             self.state = AgentState.ERROR
             self._last_error = str(e)

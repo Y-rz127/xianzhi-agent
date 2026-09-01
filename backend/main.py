@@ -6,6 +6,7 @@ import asyncio
 import os
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 
 import httpx
@@ -19,6 +20,7 @@ from app.api.routes import router
 from app.core.config import ensure_dirs, settings
 from app.core.logger import log
 from app.core.observability import init_observability, record_request
+from app.core.llm_throttle import ThrottledModel
 from app.core.security import ApiKeyAuthMiddleware, RateLimitMiddleware
 from app.core.thinking_router import ThinkingRouter
 from app.memory import create_chat_memory
@@ -63,6 +65,13 @@ async def lifespan(app: FastAPI):
     _bg_init_tasks: list[asyncio.Task] = []
     ensure_dirs()
 
+    # 专用线程池替换 asyncio 默认池（默认仅 min(32, cpu+4) 个线程）：
+    # 同步 workflow/LLM 调用经 asyncio.to_thread 落此池，数十秒级长会话会占满默认小池拖垮全站
+    thread_pool = ThreadPoolExecutor(
+        max_workers=max(8, settings.thread_pool_size), thread_name_prefix="xianzhi-worker"
+    )
+    asyncio.get_running_loop().set_default_executor(thread_pool)
+
     # API_KEYS 未配置时管理端点无鉴权，仅限开发环境；多 worker 时进程级状态彼此独立
     if not settings.api_keys.strip():
         log.warning(
@@ -74,6 +83,10 @@ async def lifespan(app: FastAPI):
             "多 worker 模式（WORKERS={}）：内存限流/会话 Agent 池/八字缓存为进程级状态，进程间相互独立（限流上限按 worker 数线性放宽）；横向扩容/跨副本限流需外置 Redis",
             workers,
         )
+    if settings.memory_store_type.lower() != "postgres":
+        log.warning("MEMORY_STORE_TYPE 非 postgres：多副本部署会话历史不一致，生产必须设为 postgres")
+    if settings.vector_store_type.lower() != "postgres":
+        log.warning("VECTOR_STORE_TYPE 非 postgres：多副本将各自维护本地向量索引，生产必须设为 postgres")
 
     # LangSmith 可观测性（最早初始化，确保后续 LangChain 调用均被追踪）
     init_observability()
@@ -92,16 +105,21 @@ async def lifespan(app: FastAPI):
     )
     # 思考模式中间件：闲聊由调用方用 use_thinking(False) 关闭，其他路径默认开启。
     # 底层在构造期派生 ON/OFF 两份副本，运行时按 contextvar 透明切换。
-    chat_model = ThinkingRouter(raw_chat_model, default_thinking=settings.llm_enable_thinking)
+    # ThrottledModel 在最外层：所有模型实例共享同一并发信号量与熔断器（DashScope 配额保护）。
+    chat_model = ThrottledModel(ThinkingRouter(raw_chat_model, default_thinking=settings.llm_enable_thinking))
 
     # 意图拆解 / Reviewer 审核模型（独立实例，留空则复用主模型）
     decompose_http = httpx.Client(trust_env=False) if settings.decompose_model else None
     decompose_model = (
-        _make_model(settings.decompose_model, 0.1, 30.0, decompose_http) if decompose_http else chat_model
+        ThrottledModel(_make_model(settings.decompose_model, 0.1, 30.0, decompose_http))
+        if decompose_http
+        else chat_model
     )
     reviewer_http = httpx.Client(trust_env=False) if settings.reviewer_model else None
     reviewer_model = (
-        _make_model(settings.reviewer_model, 0.1, 60.0, reviewer_http) if reviewer_http else chat_model
+        ThrottledModel(_make_model(settings.reviewer_model, 0.1, 60.0, reviewer_http))
+        if reviewer_http
+        else chat_model
     )
 
     # 记忆（数据库不可达时降级，不阻断端口监听）
@@ -194,6 +212,20 @@ async def lifespan(app: FastAPI):
     # 关闭 LLM 客户端 httpx 连接池（仅独立实例，复用主模型的无需关闭）
     for client in (decompose_http, reviewer_http, http):
         _close_quietly(client)
+
+    # 关闭专用线程池（取消排队任务，等待中的执行不再接收；已在执行的不强杀）
+    try:
+        thread_pool.shutdown(wait=False, cancel_futures=True)
+    except Exception:
+        pass
+
+    # 关闭 Redis 全局连接
+    try:
+        from app.core.redis_client import close_redis
+
+        await close_redis()
+    except Exception:
+        pass
 
     try:
         await mcp_manager.stop()

@@ -38,7 +38,7 @@ export default defineConfig({
   resolve: {
     alias: {
       // R11 共享 API 层：仓库根 shared/（纯 TS，Web/小程序共用）
-      '@shared': resolve(__dirname, '../shared'),
+      '@shared': resolve(__dirname, '../../shared'),
     },
   },
   server: {

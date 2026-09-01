@@ -128,8 +128,8 @@
 import { ref, computed, watch } from "vue"
 import MarkdownRender from "../components/MarkdownRender.vue"
 import BaziCard from "../components/BaziCard.vue"
-import { getChart, apiFetch, type ChartData } from "../api"
-import { regionData } from "../utils/region-data"
+import { getChart, apiFetch, type ChartData } from "../api/index.ts"
+import { regionData } from "../utils/region-data.ts"
 
 const API_BASE = import.meta.env.DEV ? "http://localhost:8123/api" : "/api"
 

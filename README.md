@@ -243,57 +243,63 @@ Layer 1（`KnowledgeBase.search` → `_search_reranked`）为后端无关的两�
 
 ```
 xianzhi-agent/
-├── main.py                      # 应用入口（FastAPI + lifespan：模型/思考路由/后台初始化/缓存预热）
-├── app/
-│   ├── agent/                   # 智能体核心
-│   │   ├── xianzhi.py           # 先知主类（ReAct + workflow 分流 + 闲聊短路）
-│   │   ├── xianzhi_langgraph.py # LangGraph 可选封装
-│   │   ├── birth_parse.py       # 出生信息提取
-│   │   ├── prompts.py           # Prompt 中枢（断法/六爻解读等）
-│   │   ├── core/                # base_agent / react_agent / tool_call_agent
-│   │   └── workflow/            # Supervisor + Worker + Reviewer
-│   │                            #   （xianzhi_workflow + models/retrieval/workers/messages/support）
-│   ├── api/                     # REST/WebSocket 接口
-│   │   ├── xianzhi.py           # 先知聊天 WS / SSE / REST
-│   │   ├── rag.py               # 问答 WS
-│   │   ├── auth.py / me.py      # 登录认证（JWT）/ 当前用户
-│   │   ├── cases.py / profiles.py / favorites.py      # 命例库 / 命主档案 / 收藏
-│   │   ├── tarot_records.py / feedback.py             # 塔罗记录 / 反馈
-│   │   ├── admin_users.py / admin_accounts.py         # 管理员
-│   │   ├── asr.py               # 语音转写
-│   │   └── routes.py / deps.py / common.py / context.py  # 聚合 / 依赖注入 / 通用 / 应用上下文
-│   ├── core/                    # config / logger（loguru）/ security（鉴权限流）
-│   │                            #   observability（LangSmith）/ thinking_router（思考模式路由）
-│   ├── domain/                  # 领域纯计算（不依赖 LLM 与数据库）
-│   │   ├── bazi_engine.py       # 八字排盘引擎（lunar-python + 神煞查表）
-│   │   ├── chart_builder / chart_format / analysis_calc / shensha_calc / tables
-│   │   ├── time_parse.py        # 农历/节日/时辰智能解析
-│   │   └── huangli_calc.py      # 黄历领域层（宜忌/八方位/时辰/择吉/月简报，对齐主流老黄历）
-│   │   ├── ziwei/               # 紫微斗数领域层（tables/engine/models，纯函数排盘，iztro 黄金快照钉死）
-│   ├── sub_app/                 # 玩法子应用（App 核心 + routes）
-│   │   ├── tarot/               # 塔罗（TarotApp，WS 流式解读）
-│   │   ├── hehun/               # 合婚
-│   │   ├── liuyao/              # 六爻（纯算法起卦 + AI 解读）
-│   │   ├── huangli/             # 黄历（day/range/zeji/items 四接口）
-│   │   └── ziwei/               # 紫微斗数（chart 排盘 + interpret AI 简批）
-│   ├── tools/                   # 16 个本地工具（bazi/huangli/rag_search/web_search/terminate）
-│   │   ├── mcp_client.py        # MCP 客户端（高德）
-│   │   ├── pdf_report.py / report_generator.py        # PDF 报告
-│   │   └── cache.py / text_clean.py / fonts/          # 排盘缓存 / 文本清洗 / 字体
-│   ├── rag/                     # RAG 知识库（vector_store/retrieval/relevance/embeddings/fingerprint/case_store）
-│   │   └── knowledge_docs/      # 命理文档（40 份）
-│   ├── memory/                  # 对话记忆（chat_memory / postgres_memory / summarizer）
-│   ├── db/                      # PostgreSQL 数据访问层（pool/repository/users/profiles/chart_store…）
-│   └── evaluation/              # 离线评估（xianzhi_eval）
-├── frontend/                    # Web 前端（Vue3 + Vite）
-│   └── src/views/               # 先知/合婚/塔罗/六爻/黄历/命例库/管理后台等
-├── uniapp/                      # 小程序前端（UniApp，聊天抽屉含合婚/塔罗/六爻/黄历/紫微入口）
+├── backend/                     # 后端（Python FastAPI）
+│   ├── main.py                  # 应用入口（FastAPI + lifespan：模型/思考路由/后台初始化/缓存预热）
+│   ├── app/
+│   │   ├── agent/               # 智能体核心
+│   │   │   ├── xianzhi.py       # 先知主类（ReAct + workflow 分流 + 闲聊短路）
+│   │   │   ├── xianzhi_langgraph.py # LangGraph 可选封装
+│   │   │   ├── birth_parse.py   # 出生信息提取
+│   │   │   ├── prompts.py       # Prompt 中枢（断法/六爻解读等）
+│   │   │   ├── core/            # base_agent / react_agent / tool_call_agent
+│   │   │   └── workflow/        # Supervisor + Worker + Reviewer
+│   │   │                        #   （xianzhi_workflow + models/retrieval/workers/messages/support）
+│   │   ├── api/                 # REST/WebSocket 接口
+│   │   │   ├── xianzhi.py       # 先知聊天 WS / SSE / REST
+│   │   │   ├── rag.py           # 问答 WS
+│   │   │   ├── auth.py / me.py  # 登录认证（JWT）/ 当前用户
+│   │   │   ├── cases.py / profiles.py / favorites.py      # 命例库 / 命主档案 / 收藏
+│   │   │   ├── tarot_records.py / feedback.py             # 塔罗记录 / 反馈
+│   │   │   ├── admin_users.py / admin_accounts.py         # 管理员
+│   │   │   ├── asr.py           # 语音转写
+│   │   │   └── routes.py / deps.py / common.py / context.py  # 聚合 / 依赖注入 / 通用 / 应用上下文
+│   │   ├── core/                # config / logger（loguru）/ security（鉴权限流）
+│   │   │                        #   observability（LangSmith）/ thinking_router（思考模式路由）
+│   │   ├── domain/              # 领域纯计算（不依赖 LLM 与数据库）
+│   │   │   ├── bazi_engine.py   # 八字排盘引擎（lunar-python + 神煞查表）
+│   │   │   ├── chart_builder / chart_format / analysis_calc / shensha_calc / tables
+│   │   │   ├── time_parse.py    # 农历/节日/时辰智能解析
+│   │   │   ├── huangli_calc.py  # 黄历领域层（宜忌/八方位/时辰/择吉/月简报，对齐主流老黄历）
+│   │   │   └── ziwei/           # 紫微斗数领域层（tables/engine/models，纯函数排盘，iztro 黄金快照钉死）
+│   │   ├── sub_app/             # 玩法子应用（App 核心 + routes）
+│   │   │   ├── tarot/           # 塔罗（TarotApp，WS 流式解读）
+│   │   │   ├── hehun/           # 合婚
+│   │   │   ├── liuyao/          # 六爻（纯算法起卦 + AI 解读）
+│   │   │   ├── huangli/         # 黄历（day/range/zeji/items 四接口）
+│   │   │   └── ziwei/           # 紫微斗数（chart 排盘 + interpret AI 简批）
+│   │   ├── tools/               # 16 个本地工具（bazi/huangli/rag_search/web_search/terminate）
+│   │   │   ├── mcp_client.py    # MCP 客户端（高德）
+│   │   │   ├── pdf_report.py / report_generator.py        # PDF 报告
+│   │   │   └── cache.py / text_clean.py / fonts/          # 排盘缓存 / 文本清洗 / 字体
+│   │   ├── rag/                 # RAG 知识库（vector_store/retrieval/relevance/embeddings/fingerprint/case_store）
+│   │   │   └── knowledge_docs/  # 命理文档（40 份）
+│   │   ├── memory/              # 对话记忆（chat_memory / postgres_memory / summarizer）
+│   │   ├── db/                  # PostgreSQL 数据访问层（pool/repository/users/profiles/chart_store…）
+│   │   └── evaluation/          # 离线评估（xianzhi_eval）
+│   ├── tests/                   # pytest 套件（黄历含 17 日老黄历 App 回测 + 表结构不变式）
+│   ├── scripts/                 # 工具脚本（locust 压测 / iztro oracle 快照生成）
+│   ├── data/ / logs/            # 运行时数据与日志（不入库）
+│   ├── Dockerfile / .dockerignore / .env.example
+│   ├── start.ps1 / stop.ps1     # 一键启停（复用仓库根 .venv，工作目录在 backend/）
+│   └── pyproject.toml / requirements.txt / requirements.lock / .coveragerc
+├── frontend/                    # 前端
+│   ├── web/                     # Web 前端（Vue3 + Vite）
+│   │   └── src/views/           # 先知/合婚/塔罗/六爻/黄历/命例库/管理后台等
+│   └── uniapp/                  # 小程序前端（UniApp，聊天抽屉含合婚/塔罗/六爻/黄历/紫微入口）
 ├── shared/                      # Web 与小程序共享 API 层（数据模型/端点常量/解析器）
-├── tests/                       # pytest 套件（黄历含 17 日老黄历 App 回测 + 表结构不变式）
 ├── docs/                        # 多 Agent 架构 / code review / 持续学习路线图
 ├── 学习资料/                     # 智能体开发学习笔记
-├── Dockerfile / docker-compose.yml / start.ps1 / stop.ps1
-└── pyproject.toml / requirements.txt / .env.example
+└── docker-compose.yml           # 编排（api=backend/ 镜像，frontend=frontend/web/ 镜像）
 ```
 
 ## 快速开始
@@ -307,10 +313,10 @@ xianzhi-agent/
 ### 1. 配置环境变量
 
 ```powershell
-cp .env.example .env
+cp backend/.env.example backend/.env
 ```
 
-编辑 `.env`，至少配置：
+编辑 `backend/.env`，至少配置：
 
 ```env
 DASHSCOPE_API_KEY=your-api-key
@@ -323,34 +329,35 @@ APP_PORT=8123
 ### 2. 安装依赖
 
 ```powershell
-# 后端
+# 后端（venv 建在仓库根）
 python -m venv .venv
 .venv\Scripts\activate
-pip install -r requirements.txt
+pip install -r backend/requirements.txt
 
 # 前端（Web）
-cd frontend
+cd frontend\web
 npm install
 
 # 前端（小程序）
-cd uniapp
+cd frontend\uniapp
 npm install
 ```
 
 ### 3. 启动服务
 
 ```powershell
-# 后端
-.venv\Scripts\python.exe main.py
-# 或用启动脚本
+# 后端（工作目录须在 backend/，data/logs 相对路径基于它）
+cd backend
+..\.venv\Scripts\python.exe main.py
+# 或用启动脚本（自动处理工作目录与端口清理）
 .\start.ps1
 
 # 前端（Web）
-cd frontend
+cd frontend\web
 npm run dev
 
 # 前端（小程序）
-cd uniapp
+cd frontend\uniapp
 npm run dev:mp-weixin
 ```
 
@@ -467,7 +474,7 @@ Supervisor (XianzhiWorkflow)
 | `AMAP_MAPS_API_KEY` | 高德 MCP Key | 空 |
 | `LANGSMITH_TRACING` | LangSmith 追踪 | `false` |
 
-完整配置见 [.env.example](.env.example)。
+完整配置见 [backend/.env.example](backend/.env.example)。
 
 ## 可观测性
 
@@ -501,7 +508,9 @@ Supervisor (XianzhiWorkflow)
 ### 测试多 Agent 架构
 
 ```powershell
-.venv\Scripts\python.exe -c "
+# 在 backend/ 目录下执行（导入 app.* 需以 backend 为工作目录）
+cd backend
+..\.venv\Scripts\python.exe -c "
 from app.agent.workflow.xianzhi_workflow import WORKERS, ReviewerWorker
 print(f'Workers: {len(WORKERS)}')
 reviewer = ReviewerWorker()
@@ -512,7 +521,9 @@ print(f'Compliance risks: {len(reviewer.COMPLIANCE_RISKS)}')
 ### 测试神煞排盘
 
 ```powershell
-.venv\Scripts\python.exe -c "
+# 在 backend/ 目录下执行
+cd backend
+..\.venv\Scripts\python.exe -c "
 from app.domain.bazi_engine import build_bazi_chart, _compute_shensha
 chart = build_bazi_chart('2004-06-22 08:00', '男', sect=2, yun_sect=1)
 for p in chart.pillars:

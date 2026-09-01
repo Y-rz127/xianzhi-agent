@@ -11,7 +11,8 @@ param(
 $OutputEncoding = [System.Text.Encoding]::UTF8
 
 $ErrorActionPreference = "Stop"
-$projectRoot = $PSScriptRoot
+$projectRoot = $PSScriptRoot   # backend/ directory
+$repoRoot = Split-Path -Parent $PSScriptRoot  # repo root (holds .venv)
 $port = 8123
 
 # 1. 先清理可能残留的旧进程（端口 + 虚拟环境下的 python）
@@ -23,7 +24,7 @@ if ($existing) {
 }
 
 # 2. 启动
-$exe = Join-Path $projectRoot ".venv\Scripts\python.exe"
+$exe = Join-Path $repoRoot ".venv\Scripts\python.exe"
 $main = Join-Path $projectRoot "main.py"
 if (-not (Test-Path $exe)) { throw "Not found: $exe (run: uv venv / pip install -r requirements.txt)" }
 if (-not (Test-Path $main)) { throw "Not found: $main" }

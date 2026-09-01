@@ -29,6 +29,14 @@ class Settings(BaseSettings):
     llm_timeout: float = Field(default=60.0, alias="LLM_TIMEOUT")
     llm_max_retries: int = Field(default=2, alias="LLM_MAX_RETRIES")
 
+    # LLM 背压与熔断（DashScope 配额保护）
+    # 全模型共享的并发上限：队列满时按 llm_queue_timeout 等待，超时抛 LLMBusyError
+    llm_max_concurrency: int = Field(default=20, alias="LLM_MAX_CONCURRENCY")
+    llm_queue_timeout: float = Field(default=120.0, alias="LLM_QUEUE_TIMEOUT")
+    # 连续失败达阈值触发熔断（快速失败，避免上游故障时每个请求空等重试）
+    llm_circuit_failure_threshold: int = Field(default=8, alias="LLM_CIRCUIT_FAILURE_THRESHOLD")
+    llm_circuit_open_seconds: float = Field(default=30.0, alias="LLM_CIRCUIT_OPEN_SECONDS")
+
     # 服务
     app_port: int = Field(default=8123, alias="APP_PORT")
     debug: bool = Field(default=False, alias="DEBUG")
@@ -38,6 +46,11 @@ class Settings(BaseSettings):
     api_keys: str = Field(default="", alias="API_KEYS")
     # 限流：单 IP 每分钟最大请求数（0=不限流）
     rate_limit_per_minute: int = Field(default=60, alias="RATE_LIMIT_PER_MINUTE")
+    # 经可信代理（CDN/CLB）部署时开启：从 X-Forwarded-For 取真实客户端 IP
+    # 前提是容器仅能经网关访问（CloudBase 默认如此），否则该头可被客户端伪造
+    trust_proxy_headers: bool = Field(default=False, alias="TRUST_PROXY_HEADERS")
+    # Redis（限流等共享状态；多副本部署必须，未配置时限流降级为进程内存）
+    redis_url: str = Field(default="", alias="REDIS_URL")
     # 单条用户消息最大长度（字符），超出直接拒绝，防止 token 账单被打爆
     max_message_length: int = Field(default=4000, alias="MAX_MESSAGE_LENGTH")
     # CORS 允许的前端源（逗号分隔，支持通配符 *）
@@ -48,6 +61,15 @@ class Settings(BaseSettings):
 
     # Agent
     agent_max_steps: int = Field(default=8, alias="AGENT_MAX_STEPS")
+
+    # 并发与连接池
+    # 专用线程池（替换 asyncio 默认池，默认仅 min(32, cpu+4)）：
+    # 同步 workflow/LLM 调用经 asyncio.to_thread 落此池，长会话会长时间占用线程
+    thread_pool_size: int = Field(default=128, alias="THREAD_POOL_SIZE")
+    pg_pool_min_size: int = Field(default=2, alias="PG_POOL_MIN_SIZE")
+    pg_pool_max_size: int = Field(default=20, alias="PG_POOL_MAX_SIZE")
+    # 连接池借出超时（秒）：并发超池时最多等待这么久，避免请求无限悬挂
+    pg_pool_timeout: float = Field(default=10.0, alias="PG_POOL_TIMEOUT")
 
     # 搜索 API
     search_api_key: str = Field(default="", alias="SEARCH_API_KEY")

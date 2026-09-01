@@ -274,8 +274,8 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, nextTick } from "vue"
-import type { Pillar, WuxingItem, DayunItem, ShenshaItem, LiuNianItem, ChartAnalysis } from "../api"
-import { downloadReport, generateFullReport, downloadFullReportPDF } from "../api"
+import type { Pillar, WuxingItem, DayunItem, ShenshaItem, LiuNianItem, ChartAnalysis } from "../api/index.ts"
+import { downloadReport, generateFullReport, downloadFullReportPDF } from "../api/index.ts"
 import MarkdownRender from "./MarkdownRender.vue"
 
 type TabKey = 'pillars' | 'wuxing' | 'dayun' | 'liunian' | 'report'

@@ -2,8 +2,11 @@
 
 - 鉴权：API_KEYS 为空时关闭；非空时仅校验管理后台路径。
   HTTP 支持 X-API-Key 请求头或 ?api_key= 查询参数；WebSocket 同规则。
-- 限流：内存滑动窗口，单 IP 每分钟 RATE_LIMIT_PER_MINUTE 次（0=不限流）。
-  多 worker 部署时应换 Redis 等共享存储，本实现覆盖单进程场景。
+- 限流：优先 Redis 滑动窗口（多副本共享同一上限）；
+  Redis 未配置/不可用时降级为进程内存滑动窗口（单机兜底，
+  多副本场景每副本各限一份，上限按副本数放宽）。
+  经可信代理（CDN/CLB）部署时开启 TRUST_PROXY_HEADERS，
+  从 X-Forwarded-For 取真实客户端 IP（前提：容器仅能经网关访问）。
 """
 from __future__ import annotations
 
@@ -58,6 +61,19 @@ def _extract_api_key(scope: Scope) -> str:
     return provided
 
 
+def _client_ip(scope: Scope) -> str:
+    """取真实客户端 IP。TRUST_PROXY_HEADERS 开启时从 X-Forwarded-For 首段取，
+    否则用直连地址（本地开发/未过代理场景，防伪造）。"""
+    client = scope.get("client")
+    ip = client[0] if client else "unknown"
+    if settings.trust_proxy_headers:
+        headers = {k.decode("latin-1").lower(): v.decode("latin-1") for k, v in scope.get("headers", [])}
+        xff = headers.get("x-forwarded-for", "")
+        if xff:
+            ip = xff.split(",")[0].strip() or ip
+    return ip
+
+
 class ApiKeyAuthMiddleware:
     """API Key 鉴权（HTTP + WebSocket 纯 ASGI 中间件）。"""
 
@@ -88,7 +104,7 @@ class ApiKeyAuthMiddleware:
 
 
 class RateLimitMiddleware:
-    """单 IP 滑动窗口限流（内存实现，单进程有效）。"""
+    """单 IP 滑动窗口限流：Redis 共享判定为主，进程内存为兜底。"""
 
     def __init__(self, app: ASGIApp):
         self.app = app
@@ -103,23 +119,37 @@ class RateLimitMiddleware:
                 if not w or now - w[-1] > 120:
                     del self._hits[ip]
 
-    async def __call__(self, scope: Scope, receive: Receive, send: Send):
-        limit = settings.rate_limit_per_minute
-        if scope["type"] not in ("http", "websocket") or limit <= 0 or _is_exempt(scope.get("path", "")):
-            await self.app(scope, receive, send)
-            return
-        client = scope.get("client")
-        ip = client[0] if client else "unknown"
+    def _local_allow(self, ip: str, limit: int) -> bool:
+        """进程内存滑动窗口判定（Redis 不可用时的单机兜底）。"""
         now = time.monotonic()
         window = self._hits[ip]
         while window and now - window[0] > 60:
             window.popleft()
         if len(window) >= limit:
-            if scope["type"] == "websocket":
-                await send({"type": "websocket.close", "code": 429, "reason": "Too Many Requests"})
-            else:
-                await JSONResponse({"detail": "请求过于频繁，请稍后再试"}, status_code=429)(scope, receive, send)
-            return
+            return False
         window.append(now)
         self._sweep(now)
+        return True
+
+    @staticmethod
+    async def _reject(scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "websocket":
+            await send({"type": "websocket.close", "code": 429, "reason": "Too Many Requests"})
+        else:
+            await JSONResponse({"detail": "请求过于频繁，请稍后再试"}, status_code=429)(scope, receive, send)
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send):
+        limit = settings.rate_limit_per_minute
+        if scope["type"] not in ("http", "websocket") or limit <= 0 or _is_exempt(scope.get("path", "")):
+            await self.app(scope, receive, send)
+            return
+        ip = _client_ip(scope)
+        from app.core.redis_client import rate_limit_allow
+
+        verdict = await rate_limit_allow(f"rl:{ip}", limit, 60)
+        if verdict is None:
+            verdict = self._local_allow(ip, limit)
+        if not verdict:
+            await self._reject(scope, receive, send)
+            return
         await self.app(scope, receive, send)

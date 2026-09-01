@@ -31,6 +31,9 @@ loguru>=0.7.2
 # MCP 协议（高德地图 MCP server 接入）
 mcp>=1.28.0
 
+# Redis（分布式限流等跨副本共享状态）
+redis>=5.0.0
+
 # PostgreSQL 记忆 / pgvector
 # psycopg[binary] 供 psycopg_pool（记忆表，v3）使用；
 # psycopg2-binary 供 langchain_postgres.PGVector（向量库，SQLAlchemy 默认 postgresql:// 方言）使用，二者独立共存，
