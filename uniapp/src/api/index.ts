@@ -123,6 +123,40 @@ export const getHuangLiZeji = (yi: string, start: string, end: string, avoidChon
   }).then((r) => r.days)
 export const getHuangLiItems = () => get<{ items: string[] }>('/ai/huangli/items').then((r) => r.items)
 
+/* ============ 紫微斗数（排盘 + 点宫详情 + AI 简批，只读排盘无需登录） ============ */
+
+export interface ZiWeiStar { name: string; type: string; brightness: string; mutagen: string }
+export interface ZiWeiDecadal { range: number[]; heavenly_stem: string; earthly_branch: string }
+export interface ZiWeiPalace {
+  index: number; name: string; heavenly_stem: string; earthly_branch: string; is_body: boolean
+  major_stars: ZiWeiStar[]; minor_stars: ZiWeiStar[]; adjective_stars: ZiWeiStar[]
+  changsheng12: string; boshi12: string; jiangqian12: string; suiqian12: string
+  decadal: ZiWeiDecadal | null; ages: number[]
+}
+export interface ZiWeiChart {
+  gender: string; solar_date: string; lunar_date: string
+  time_index: number; time_name: string; time_range: string
+  sign: string; zodiac: string
+  earthly_branch_of_soul: string; earthly_branch_of_body: string
+  soul_star: string; body_star: string; five_elements_class: string
+  four_pillars: { yearly: string; monthly: string; daily: string; hourly: string }
+  palaces: ZiWeiPalace[]
+}
+export interface ZiWeiCastParams {
+  date: string; time_index: number; gender: string; calendar?: 'solar' | 'lunar'; leap?: boolean
+}
+
+export const getZiWeiChart = (p: ZiWeiCastParams) =>
+  get<ZiWeiChart>('/ai/ziwei/chart', {
+    date: p.date, time_index: p.time_index, gender: p.gender,
+    calendar: p.calendar || 'solar', leap: p.leap || undefined,
+  })
+export const interpretZiWei = (p: ZiWeiCastParams & { focus?: string }) =>
+  post<{ text: string }>('/ai/ziwei/interpret', {
+    date: p.date, time_index: p.time_index, gender: p.gender,
+    calendar: p.calendar || 'solar', leap: p.leap || false, focus: p.focus || '',
+  }).then((r) => r.text)
+
 function put<T = any>(url: string, data?: any): Promise<T> {
   return request<T>({ url: withToken(url), method: 'PUT', data, header: { 'Content-Type': 'application/json' } })
 }

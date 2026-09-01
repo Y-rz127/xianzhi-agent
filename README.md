@@ -14,6 +14,7 @@
 - **塔罗占卜**：78 张完整塔罗牌，单张/三张/关系牌阵，AI 流式解读
 - **六爻起卦**：铜钱/数字/时间三式起卦，本卦变卦动爻，AI 深度解读
 - **每日黄历**：宜忌/八方位/时辰吉凶/择吉/月视图，纯算法确定性计算，对齐主流老黄历（Web + 小程序双端）
+- **紫微斗数**：Python 自研排盘引擎（iztro 黄金快照逐宫逐曜钉死），十二宫 4×4 命盘 + 点宫详情 + AI 简批，接入仙芝对话（小程序）
 - **命主档案**：注册用户可保存多个命主档案，便捷复用排盘
 - **命例收藏**：跨会话收藏命例，支持命例库浏览
 - **PDF 报告**：命盘详情 PDF 下载、完整命理报告导出
@@ -177,6 +178,17 @@ Layer 1（`KnowledgeBase.search` → `_search_reranked`）为后端无关的两�
 - AI 深度解读（`POST /api/ai/liuyao/interpret`）
 - Web `/liuyao` 页面（摇卦动画 + 逐爻揭示），小程序同步支持
 
+### 7. 紫微斗数排盘
+
+基于 Python 自研排盘引擎的确定性命盘（`app/domain/ziwei/` 领域层 + `app/sub_app/ziwei/` 子应用），零运行时依赖、不碰数据库与 RAG：
+
+- **引擎正确性**：安星法（《紫微斗数全书》通行派）、十四主星庙旺利陷、六吉六煞、三十余杂曜、生年四化、大限/小限、身宫、五行局全部纯函数实现；以开源 iztro 2.6.0（MIT）为黄金 oracle，`scripts/gen_ziwei_oracle.js` 一次性生成 45 组生辰快照（五行局 5 种 × 十二时辰 × 男女 × 闰月 × 晚子时 × 年分界全覆盖），`tests/test_ziwei.py` 逐宫逐曜断言钉死流派与规则。
+- **流派与规则**：四化取三合通用表（`MUTAGEN_BY_STEM` 可替换常量）；年分界取正月初一（`getYearInGanZhi`）；闰月上半归本月、下半归下月；晚子时（23:00–24:00）起紫微归次日。
+- **接口**：`GET /api/ai/ziwei/chart`（排盘，阳历/农历 + 闰月）、`POST /api/ai/ziwei/interpret`（AI 简批，后端重排盘不信任前端传盘）。
+- **Agent 工具**：`app/tools/ziwei.py` 的 `ziwei_chart` 已接入仙芝对话，可直接排盘并衔接解读。
+- **小程序**：`pages/ziwei`（黛蓝紫 accent `#5B6FC8`，暗夜星空 + 流星），经典 4×4 宫格命盘（`grid repeat(4,1fr)`）+ 中央信息区 + 四化角标 + 点宫详情弹层 + AI 简批；聊天抽屉快捷入口「紫微」。
+- 定位为传统民俗文化参考，文案带免责口径。
+
 ## 神煞排盘规则
 
 神煞是八字命盘的重要辅助指标。本项目以主流《渊海子平》《三命通会》为查表依据，并对齐问真八字等主流排盘软件的输出。
@@ -257,11 +269,13 @@ xianzhi-agent/
 │   │   ├── chart_builder / chart_format / analysis_calc / shensha_calc / tables
 │   │   ├── time_parse.py        # 农历/节日/时辰智能解析
 │   │   └── huangli_calc.py      # 黄历领域层（宜忌/八方位/时辰/择吉/月简报，对齐主流老黄历）
+│   │   ├── ziwei/               # 紫微斗数领域层（tables/engine/models，纯函数排盘，iztro 黄金快照钉死）
 │   ├── sub_app/                 # 玩法子应用（App 核心 + routes）
 │   │   ├── tarot/               # 塔罗（TarotApp，WS 流式解读）
 │   │   ├── hehun/               # 合婚
 │   │   ├── liuyao/              # 六爻（纯算法起卦 + AI 解读）
-│   │   └── huangli/             # 黄历（day/range/zeji/items 四接口）
+│   │   ├── huangli/             # 黄历（day/range/zeji/items 四接口）
+│   │   └── ziwei/               # 紫微斗数（chart 排盘 + interpret AI 简批）
 │   ├── tools/                   # 16 个本地工具（bazi/huangli/rag_search/web_search/terminate）
 │   │   ├── mcp_client.py        # MCP 客户端（高德）
 │   │   ├── pdf_report.py / report_generator.py        # PDF 报告
@@ -273,7 +287,7 @@ xianzhi-agent/
 │   └── evaluation/              # 离线评估（xianzhi_eval）
 ├── frontend/                    # Web 前端（Vue3 + Vite）
 │   └── src/views/               # 先知/合婚/塔罗/六爻/黄历/命例库/管理后台等
-├── uniapp/                      # 小程序前端（UniApp，聊天抽屉含合婚/塔罗/六爻/黄历入口）
+├── uniapp/                      # 小程序前端（UniApp，聊天抽屉含合婚/塔罗/六爻/黄历/紫微入口）
 ├── shared/                      # Web 与小程序共享 API 层（数据模型/端点常量/解析器）
 ├── tests/                       # pytest 套件（黄历含 17 日老黄历 App 回测 + 表结构不变式）
 ├── docs/                        # 多 Agent 架构 / code review / 持续学习路线图

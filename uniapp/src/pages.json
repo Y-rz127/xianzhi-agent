@@ -31,6 +31,10 @@
       "style": { "navigationStyle": "custom", "navigationBarTitleText": "每日黄历" }
     },
     {
+      "path": "pages/ziwei/index",
+      "style": { "navigationStyle": "custom", "navigationBarTitleText": "紫微斗数" }
+    },
+    {
       "path": "pages/settings/index",
       "style": { "navigationBarTitleText": "" }
     },

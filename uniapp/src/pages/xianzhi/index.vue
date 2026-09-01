@@ -208,6 +208,9 @@
             <view class="drawer-quick-btn" @tap="goHuangLi">
               <text class="dq-icon">历</text><text>黄历</text>
             </view>
+            <view class="drawer-quick-btn" @tap="goZiWei">
+              <text class="dq-icon">微</text><text>紫微</text>
+            </view>
           </view>
         </scroll-view>
         <view class="drawer-header">
@@ -803,6 +806,7 @@ function goSettings() { uni.navigateTo({ url: '/pages/settings/index' }) }
 function goTarot() { uni.navigateTo({ url: '/pages/tarot/index' }) }
 function goLiuYao() { uni.navigateTo({ url: '/pages/liuyao/index' }) }
 function goHuangLi() { uni.navigateTo({ url: '/pages/huangli/index' }) }
+function goZiWei() { uni.navigateTo({ url: '/pages/ziwei/index' }) }
 function goMine() {
   uni.navigateTo({ url: isLoggedIn() ? '/pages/mine/index' : '/pages/login/index' })
 }
