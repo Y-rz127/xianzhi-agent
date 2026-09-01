@@ -1,3 +1,0 @@
-Method,Name,Error,Occurrences,First Seen,Last Seen
-GET,/api/ai/xianzhi/chart,RemoteDisconnected('Remote end closed connection without response'),5,2026-09-01T03:49:46Z,2026-09-01T03:52:00Z
-GET,/api/ai/xianzhi/chart,"ConnectionResetError(10054, '远程主机强迫关闭了一个现有的连接。', None, 10054, None)",5,2026-09-01T03:49:40Z,2026-09-01T03:51:56Z

@@ -8,6 +8,7 @@ import Hehun from "../views/Hehun.vue"
 import Tarot from "../views/Tarot.vue"
 import LiuYao from "../views/LiuYao.vue"
 import HuangLi from "../views/HuangLi.vue"
+import ZiWei from "../views/ZiWei.vue"
 import RagManager from "../views/RagManager.vue"
 import ChartCases from "../views/ChartCases.vue"
 import Observability from "../views/Observability.vue"
@@ -27,9 +28,10 @@ const routes: RouteRecordRaw[] = [
   { path: "/tarot", name: "tarot", component: Tarot, meta: { title: "每日塔罗" } },
   { path: "/liuyao", name: "liuyao", component: LiuYao, meta: { title: "六爻算卦" } },
   { path: "/huangli", name: "huangli", component: HuangLi, meta: { title: "每日黄历" } },
+  { path: "/ziwei", name: "ziwei", component: ZiWei, meta: { title: "紫微斗数" } },
   { path: "/rag-manager", name: "rag-manager", component: RagManager, meta: { title: "知识库管理" } },
   { path: "/chart-cases", name: "chart-cases", component: ChartCases, meta: { title: "命例库" } },
-  { path: "/observability", name: "observability", component: Observability, meta: { title: "可观测性" } },
+  { path: "/observability", name: "observability", component: Observability, meta: { title: "监测台" } },
   { path: "/user-admin", name: "user-admin", component: UserAdmin, meta: { title: "用户管理" } },
   { path: "/feedback", name: "feedback", component: Feedback, meta: { title: "问题反馈" } },
   { path: "/answer-feedback", name: "answer-feedback", component: AnswerFeedback, meta: { title: "回答反馈" } },

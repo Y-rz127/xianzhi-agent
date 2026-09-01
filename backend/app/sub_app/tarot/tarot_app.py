@@ -8,6 +8,7 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.agent.prompts import TAROT_SYSTEM_PROMPT
+from app.core.llm_throttle import llm_tag
 from app.core.logger import log
 
 # 牌组数据
@@ -298,11 +299,12 @@ class TarotApp:
         msgs = [SystemMessage(content=TAROT_SYSTEM_PROMPT), HumanMessage(content=user_prompt)]
         try:
             has_any_chunk = False
-            async for chunk in self.chat_model.astream(msgs):
-                text = chunk.content
-                if text:
-                    has_any_chunk = True
-                    yield text
+            with llm_tag("tarot"):
+                async for chunk in self.chat_model.astream(msgs):
+                    text = chunk.content
+                    if text:
+                        has_any_chunk = True
+                        yield text
             if not has_any_chunk:
                 log.warning("塔罗 LLM 返回空片段，使用 fallback 解读")
                 for piece in self._fallback_reading(question, spread, cards):

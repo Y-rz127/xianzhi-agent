@@ -5,17 +5,24 @@ lifespan 内构造的 AppContext 实例，HTTP handler 经 FastAPI 依赖注入�
 WebSocket 等无法使用 Depends 的场景经模块级 get_app_context() 获取同一实例。
 
 Xianzhi 智能体按会话池化（池为 AppContext 实例态）：
-- 每个 conversation_id 对应一个独立的 Xianzhi 实例 + 独立 asyncio.Lock；
+- 每个 conversation_id 对应一个独立的 Xianzhi 实例 + 会话锁；
 - 同一会话内请求串行（保证命盘上下文、消息列表一致性），
   不同会话并行处理，不再被全局锁串行化；
 - 池容量有限（LRU 淘汰最久未用实例），对话历史与出生信息均可从
   持久化记忆（PG/文件）恢复，淘汰无数据损失。
+
+会话锁（SessionLock）为双层互斥：
+- 进程内 asyncio.Lock：同副本内的快速路径
+- Redis 分布式锁：跨副本互斥（多副本部署时同一会话可能落到不同副本）
+- Redis 不可用时自动降级为仅进程内锁（单副本语义不变）
 
 TarotApp 本身不持有会话级可变状态
 （历史均从记忆存储按会话读取），保持单例即可。
 """
 from __future__ import annotations
 
+import asyncio
+import secrets
 import threading
 from collections import OrderedDict
 from dataclasses import dataclass, field
@@ -28,6 +35,55 @@ from app.core.logger import log
 # 会话 Agent 池容量上限（超出后 LRU 淘汰最久未使用实例）
 _MAX_AGENTS = 100
 
+# 分布式锁 TTL：覆盖最坏持有场景（LLM 排队 120s + 生成 180s + 审核/修复多轮）；
+# 进程崩溃无法走到释放时靠 TTL 兜底自动解锁
+_REDIS_LOCK_TTL_MS = 900_000
+_REDIS_LOCK_KEY_PREFIX = "lock:session:"
+# 他人持锁时的轮询间隔（与原 asyncio.Lock 的等待语义一致）
+_LOCK_WAIT_INTERVAL = 0.5
+
+
+class SessionLock:
+    """会话级互斥锁：进程内锁快路径 + Redis 分布式锁跨副本互斥。"""
+
+    def __init__(self, conversation_id: str, local: asyncio.Lock) -> None:
+        self._key = f"{_REDIS_LOCK_KEY_PREFIX}{conversation_id}"
+        self._local = local
+        self._token = ""
+
+    async def __aenter__(self) -> "SessionLock":
+        await self._local.acquire()
+        try:
+            await self._acquire_redis()
+        except Exception:
+            self._local.release()
+            raise
+        return self
+
+    async def __aexit__(self, *exc_info) -> None:
+        try:
+            if self._token:
+                from app.core.redis_client import release_lock
+
+                await release_lock(self._key, self._token)
+                self._token = ""
+        finally:
+            self._local.release()
+
+    async def _acquire_redis(self) -> None:
+        from app.core.redis_client import acquire_lock
+
+        while True:
+            token = secrets.token_hex(16)
+            got = await acquire_lock(self._key, token, _REDIS_LOCK_TTL_MS)
+            if got is None:
+                # Redis 不可用：仅本地锁兜底
+                return
+            if got:
+                self._token = token
+                return
+            await asyncio.sleep(_LOCK_WAIT_INTERVAL)
+
 
 @dataclass
 class AppContext:
@@ -39,8 +95,8 @@ class AppContext:
     tarot_app: Any = None
     decompose_model: Any = None
     reviewer_model: Any = None
-    # conversation_id -> (agent, lock)
-    _agents: "OrderedDict[str, tuple]" = field(default_factory=OrderedDict, repr=False)
+    # conversation_id -> Xianzhi 实例（会话锁为 agent.lock 上的 SessionLock，获取时现构）
+    _agents: "OrderedDict[str, Any]" = field(default_factory=OrderedDict, repr=False)
     _pool_lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     def __post_init__(self):
@@ -51,16 +107,20 @@ class AppContext:
             self.reviewer_model = self.chat_model
 
     def get_xianzhi(self, conversation_id: str):
-        """获取（或创建）指定会话的 Xianzhi 实例及其专用锁（调用方在锁内完成会话操作，避免并发污染）。"""
+        """获取（或创建）指定会话的 Xianzhi 实例及其会话锁（调用方在锁内完成会话操作，避免并发污染）。
+
+        返回的锁为 SessionLock（进程内锁 + Redis 分布式锁双层互斥）。
+        """
         cid = conversation_id if conversation_id and conversation_id.strip() else "xianzhi-default"
         with self._pool_lock:
             hit = self._agents.get(cid)
             if hit is not None:
                 self._agents.move_to_end(cid)
-                return hit
+                return hit, SessionLock(cid, hit.lock)
             if self.chat_model is None:
                 raise RuntimeError("Xianzhi not initialized")
             from app.agent.xianzhi import create_xianzhi_agent
+
             agent = create_xianzhi_agent(
                 chat_model=self.chat_model,
                 local_tools=self.local_tools,
@@ -69,13 +129,12 @@ class AppContext:
                 decompose_model=self.decompose_model,
                 reviewer_model=self.reviewer_model,
             )
-            entry = (agent, agent.lock)
-            self._agents[cid] = entry
+            self._agents[cid] = agent
             while len(self._agents) > _MAX_AGENTS:
-                evicted_cid, _ = self._agents.popitem(last=False)
+                evicted_cid, _agent = self._agents.popitem(last=False)
                 log.info("会话 Agent 池 LRU 淘汰: {} (pool_size={})", evicted_cid, len(self._agents))
             log.info("会话 Agent 创建: {} (pool_size={})", cid, len(self._agents))
-            return entry
+            return agent, SessionLock(cid, agent.lock)
 
     def agent_pool_stats(self) -> dict:
         """会话池状态（监控/调试接口用）。"""

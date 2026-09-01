@@ -5,6 +5,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, Tool
 
 from app.agent.core.base_agent import AgentState
 from app.agent.core.react_agent import ReActAgent
+from app.core.llm_throttle import llm_tag
 from app.core.logger import log
 from app.tools.text_clean import clean_think_tags, strip_user_input_boundary
 
@@ -28,7 +29,8 @@ class ToolCallAgent(ReActAgent):
             self.message_list.append(HumanMessage(content=self.next_step_prompt))
         messages = self._build_messages()
         try:
-            ai_msg = self._llm_with_tools.invoke(messages)
+            with llm_tag("react"):
+                ai_msg = self._llm_with_tools.invoke(messages)
             # 过滤推理模型的 thinking 推理块，避免泄漏到回答
             raw_content = ai_msg.content or ""
             cleaned = clean_think_tags(raw_content)

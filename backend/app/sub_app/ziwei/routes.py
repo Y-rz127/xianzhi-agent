@@ -7,6 +7,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from app.agent.prompts import ZIWEI_SYSTEM_PROMPT
 from app.api.common import client_error
 from app.api.context import get_app_context
+from app.core.llm_throttle import llm_tag
 from app.core.logger import log
 from app.sub_app.ziwei import ziwei_app
 
@@ -54,9 +55,10 @@ async def ziwei_interpret(body: dict):
         "请严格按系统提示的结构：格局基调 → 命/财/官三宫逐宫 → 三方四正综合 → 一条建议。"
     )
     try:
-        response = await get_app_context().chat_model.ainvoke(
-            [SystemMessage(content=ZIWEI_SYSTEM_PROMPT), HumanMessage(content=prompt)]
-        )
+        with llm_tag("ziwei"):
+            response = await get_app_context().chat_model.ainvoke(
+                [SystemMessage(content=ZIWEI_SYSTEM_PROMPT), HumanMessage(content=prompt)]
+            )
         return {"text": str(response.content)}
     except Exception:  # noqa: BLE001
         raise HTTPException(status_code=502, detail="AI 解读暂不可用，请稍后再试")

@@ -10,6 +10,7 @@ import threading
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from app.core.llm_throttle import llm_tag
 from app.core.logger import log
 
 # 每 6 轮对话（一问一答=1轮，约12条消息）触发一次增量摘要
@@ -59,12 +60,13 @@ def maybe_summarize(memory, chat_model, conversation_id: str, recent_messages: l
             try:
                 log.info("[摘要] 会话 {} 开始生成摘要...", conversation_id)
                 prompt = _SUMMARY_PROMPT.format(old_summary=old_summary or "（无）", recent_text=recent_text)
-                resp = chat_model.invoke(
-                    [
-                        SystemMessage(content="你是会话摘要助手，只输出摘要文本，不输出任何解释。"),
-                        HumanMessage(content=prompt),
-                    ]
-                )
+                with llm_tag("summary"):
+                    resp = chat_model.invoke(
+                        [
+                            SystemMessage(content="你是会话摘要助手，只输出摘要文本，不输出任何解释。"),
+                            HumanMessage(content=prompt),
+                        ]
+                    )
                 new_summary = (getattr(resp, "content", "") or "").strip()
                 if new_summary and len(new_summary) > 10:
                     if len(new_summary) > _SUMMARY_MAX_CHARS:

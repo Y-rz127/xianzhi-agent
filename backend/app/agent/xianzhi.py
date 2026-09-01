@@ -36,7 +36,7 @@ from app.agent.workflow.xianzhi_workflow import (
 )
 from app.core.config import settings
 from app.core.logger import log
-from app.core.llm_throttle import LLMBusyError
+from app.core.llm_throttle import LLMBusyError, llm_tag
 from app.core.thinking_router import use_thinking
 from app.domain.bazi_engine import find_birth_dates_from_pillars
 from app.memory import create_chat_memory
@@ -387,7 +387,9 @@ class Xianzhi(ToolCallAgent):
         if not self._workflow_context:
             raise RuntimeError("workflow context is not mounted")
         history = list(history_snapshot) if history_snapshot is not None else list(self.message_list)
-        return self._workflow.answer(user_prompt, self._workflow_context, history, summary)
+        # workflow 标签覆盖整条链路（拆分/分类→生成→审核→修复），成本归因不落 unknown
+        with llm_tag("workflow"):
+            return self._workflow.answer(user_prompt, self._workflow_context, history, summary)
 
     def _execute_workflow(self, user_prompt: str, history_snapshot, summary: str) -> str:
         """执行一轮 workflow 并更新 agent 状态，返回回答文本（同步/异步路径共用）。"""
@@ -477,7 +479,8 @@ class Xianzhi(ToolCallAgent):
                         content=(f"【最近对话】\n{history_ctx}\n\n【用户说】\n{user_prompt}\n\n请正面回应，简短直接。")
                     ),
                 ]
-                response = self.chat_model.invoke(messages)
+                with llm_tag("chitchat"):
+                    response = self.chat_model.invoke(messages)
                 content = (getattr(response, "content", "") or "").strip()
                 content = clean_think_tags(content)
                 # 闲聊路径同样可能被模型回显 "--- USER INPUT BEGIN/END ---" 边界标记，

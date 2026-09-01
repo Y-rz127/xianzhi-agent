@@ -9,7 +9,8 @@
   .venv\\Scripts\\python.exe -m locust -f scripts/locustfile.py ChartUser \\
       --host http://127.0.0.1:8123 --headless -u 500 -r 50 -t 2m --only-summary
 
-  # 压聊天链路（真实 LLM 计费）：先把 ChatUser.weight 改为 1，然后
+  # 压聊天链路（真实 LLM 计费）：设置 LOCUST_CHAT_WEIGHT=1 激活 ChatUser
+  $env:LOCUST_CHAT_WEIGHT="1"
   .venv\\Scripts\\python.exe -m locust -f scripts/locustfile.py ChatUser \\
       --host http://127.0.0.1:8123 --headless -u 20 -r 2 -t 10m --only-summary
 
@@ -23,7 +24,9 @@
 """
 from __future__ import annotations
 
+import os
 import random
+import uuid
 
 from locust import HttpUser, between, task
 
@@ -72,12 +75,16 @@ class ChartUser(HttpUser):
 class ChatUser(HttpUser):
     """聊天用户：SSE 全链路（真实 LLM 计费）。
 
-    weight=0 表示默认不参与压测；跑聊天链路前把 weight 改为 1，
+    weight 默认 0（绝不烧 token）；压聊天时设置环境变量 LOCUST_CHAT_WEIGHT=1，
     并用位置参数 ChatUser 单跑该类。
     """
 
-    weight = 0
+    weight = int(os.environ.get("LOCUST_CHAT_WEIGHT", "0"))
     wait_time = between(30, 60)
+
+    def on_start(self):
+        # 每用户独立会话：共享 conversation_id 会全部串行在同一个会话锁上，测的是锁不是吞吐
+        self.conversation_id = f"load-{uuid.uuid4().hex[:12]}"
 
     @task
     def chat(self):
@@ -85,6 +92,7 @@ class ChatUser(HttpUser):
             "/api/ai/xianzhi/chat",
             params={
                 "message": "帮我看看整体命盘",
+                "conversation_id": self.conversation_id,
                 "birth_time": "1990-01-01 12:00",
                 "gender": "男",
             },

@@ -14,6 +14,8 @@
 
 from __future__ import annotations
 
+import time
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -117,26 +119,44 @@ def test_rag_status(client: TestClient) -> None:
     assert isinstance(data.get("count"), int)
 
 
+def _wait_task(client: TestClient, task_id: str, timeout: float = 120.0) -> dict:
+    """轮询任务状态直到 done/failed。"""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        r = client.get(f"/api/ai/xianzhi/report/tasks/{task_id}")
+        assert r.status_code == 200
+        data = r.json()
+        if data["status"] in ("done", "failed"):
+            return data
+        time.sleep(1)
+    raise AssertionError("任务等待超时")
+
+
 @pytest.mark.integration
 def test_report_pdf(client: TestClient) -> None:
-    response = client.get(
-        "/api/ai/xianzhi/report",
-        params={"birth_time": BIRTH_TIME, "gender": GENDER},
+    r = client.post(
+        "/api/ai/xianzhi/report/tasks",
+        json={"kind": "basic_report", "birth_time": BIRTH_TIME, "gender": GENDER},
     )
-    assert response.status_code == 200
-    assert response.headers.get("content-type") == "application/pdf"
-    assert len(response.content) > 0
-    assert "attachment" in response.headers.get("content-disposition", "")
+    assert r.status_code == 200
+    task = _wait_task(client, r.json()["task_id"])
+    assert task["status"] == "done", task.get("error")
+    r = client.get(f"/api/ai/xianzhi/report/tasks/{task['task_id']}/result")
+    assert r.status_code == 200
+    assert r.headers.get("content-type") == "application/pdf"
+    assert len(r.content) > 0
+    assert "attachment" in r.headers.get("content-disposition", "")
 
 
 @pytest.mark.integration
 def test_full_report(client: TestClient) -> None:
     if app_state.get_chat_model() is None:
         pytest.skip("chat_model 未初始化，跳过集成测试")
-    response = client.get(
-        "/api/ai/xianzhi/full_report",
-        params={"birth_time": BIRTH_TIME, "gender": GENDER},
+    r = client.post(
+        "/api/ai/xianzhi/report/tasks",
+        json={"kind": "full_report", "birth_time": BIRTH_TIME, "gender": GENDER},
     )
-    assert response.status_code == 200
-    data = response.json()
-    assert "content" in data or "error" in data
+    assert r.status_code == 200
+    task = _wait_task(client, r.json()["task_id"], timeout=600)
+    assert task["status"] == "done", task.get("error")
+    assert "content" in task

@@ -230,6 +230,7 @@ class XianzhiWorkflow:
         # ===== LangGraph 图编排：分类→扩盘→检索→生成→校验→修复（唯一执行路径） =====
         # 思考模式：闲聊（intent.domain=="chitchat"）关闭，其他路径开启；
         # 由 use_thinking 写入 contextvar，图内 generate/repair 节点的 chat_model.invoke 自动读取。
+        # （llm_tag 在 Xianzhi._run_workflow_once 入口统一设置，覆盖本链路的成本归因）
         with use_thinking(intent.domain != "chitchat"):
             result = self._graph.invoke(
                 {

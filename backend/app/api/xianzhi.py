@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 
-from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from sse_starlette.sse import EventSourceResponse
 
 from app.api.common import check_message_length, client_error, is_message_too_long, message_too_long_text
@@ -342,96 +342,95 @@ async def infer_bazi_dates(payload: dict):
     return {"pillars": pillars, "gender": gender, "candidates": candidates}
 
 
-def _build_pdf_report(birth_time: str, gender: str) -> bytes:
-    """同步生成基础 PDF 报告（排盘工具 invoke + PDF 渲染）。"""
-    from app.tools.bazi import bazi_analysis, bazi_chart, bazi_dayun, bazi_liunian
-    from app.tools.pdf_report import generate_bazi_report
+# ---------------- 报告任务（后台异步队列） ----------------
 
-    chart_text = bazi_chart.invoke({"birth_time": birth_time, "gender": gender})
-    analysis_text = bazi_analysis.invoke({"birth_time": birth_time, "gender": gender, "question": "整体命盘"})
-    dayun_text = bazi_dayun.invoke({"birth_time": birth_time, "gender": gender, "count": 8})
-    liunian_text = bazi_liunian.invoke({"birth_time": birth_time, "gender": gender, "years": 10})
-    return generate_bazi_report(
-        birth_time=birth_time,
-        gender=gender,
-        chart_text=chart_text,
-        analysis_text=analysis_text,
-        dayun_text=dayun_text,
-        liunian_text=liunian_text,
-    )
+# 提交节流：每 kind 每 IP 10 分钟内最多 3 次（报告是重资产动作：CPU/LLM 配额）
+_REPORT_TASK_SUBMIT_LIMIT = 3
+_REPORT_TASK_SUBMIT_WINDOW = 600
 
 
-@router.get("/report")
-async def generate_report(birth_time: str, gender: str):
+@router.post("/report/tasks")
+async def submit_report_task(payload: dict, request: Request):
+    """提交报告生成任务，返回 task_id；生成在后台队列执行，轮询 GET /report/tasks/{id} 取状态。
+
+    kind: basic_report(排盘 PDF) | full_report(LLM Markdown) | full_report_pdf(LLM PDF)
+    """
+    from app.core.redis_client import rate_limit_allow
+    from app.db import report_tasks
+    from app.tasks.worker import enqueue
+    from app.tools.report_tasks import KINDS
+
+    kind = (payload.get("kind") or "").strip()
+    birth_time = (payload.get("birth_time") or "").strip()
+    gender = (payload.get("gender") or "").strip()
+    if kind not in KINDS:
+        raise HTTPException(status_code=400, detail=f"kind 必须是 {'/'.join(KINDS)}")
+    if not birth_time or not gender:
+        raise HTTPException(status_code=400, detail="birth_time 和 gender 必填")
+
+    ip = request.client.host if request.client else "unknown"
+    verdict = await rate_limit_allow(f"task-submit:{kind}:{ip}", _REPORT_TASK_SUBMIT_LIMIT, _REPORT_TASK_SUBMIT_WINDOW)
+    if verdict is False:
+        raise HTTPException(status_code=429, detail="提交过于频繁，请稍后再试")
+
+    params = {"birth_time": birth_time, "gender": gender, "sections": (payload.get("sections") or "").strip()}
+    # 幂等复用：同参数任务未过期直接返回旧 task_id（防止重复烧 LLM/CPU）
+    existing = await asyncio.to_thread(report_tasks.find_same_task, kind, params)
+    if existing:
+        return {"task_id": existing, "status": "pending"}
+    try:
+        await asyncio.to_thread(report_tasks.delete_old)
+    except Exception:
+        pass
+    task_id = await asyncio.to_thread(report_tasks.create_task, kind, params)
+    try:
+        await enqueue(task_id)
+    except Exception:
+        await asyncio.to_thread(report_tasks.fail, task_id, "任务队列不可用，请稍后重试")
+        raise HTTPException(status_code=503, detail="任务队列不可用，请稍后再试")
+    return {"task_id": task_id, "status": "pending"}
+
+
+@router.get("/report/tasks/{task_id}")
+async def get_report_task(task_id: str):
+    """查询任务状态；full_report 完成后 content 字段直接携带 Markdown 文本。"""
+    from app.db import report_tasks
+
+    row = await asyncio.to_thread(report_tasks.get_task, task_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    result = {
+        "task_id": row["id"],
+        "kind": row["kind"],
+        "status": row["status"],
+        "error": row["error"],
+        "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+        "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
+    }
+    if row["kind"] == "full_report" and row["status"] == "done" and row["payload"]:
+        result["content"] = bytes(row["payload"]).decode("utf-8", errors="replace")
+    return result
+
+
+@router.get("/report/tasks/{task_id}/result")
+async def get_report_task_result(task_id: str):
+    """下载任务产物（PDF / Markdown 文件）。"""
     from fastapi import Response
 
-    try:
-        pdf_bytes = await asyncio.to_thread(_build_pdf_report, birth_time, gender)
-        return Response(content=pdf_bytes, media_type="application/pdf", headers={"Content-Disposition": 'attachment; filename="xianzhi_bazi_report.pdf"'})
-    except Exception as e:
-        log.exception("PDF 报告生成失败")
-        raise HTTPException(status_code=500, detail=client_error(e))
+    from app.db import report_tasks
+    from app.tools.report_tasks import KINDS
 
-
-@router.get("/full_report")
-async def full_report(birth_time: str, gender: str, sections: str = "",
-                      app_ctx: AppContext = Depends(app_context_dependency)):
-    """生成 LLM 分节命理报告（Markdown）。"""
-    chat_model = app_ctx.chat_model
-    if chat_model is None:
-        return {"error": "Xianzhi not initialized"}
-    from app.tools.report_generator import DEFAULT_SECTIONS, generate_full_report
-
-    selected = sections.split(",") if sections else DEFAULT_SECTIONS
-    try:
-        content = await asyncio.to_thread(generate_full_report, chat_model, birth_time, gender, selected)
-        return {"content": content}
-    except Exception as e:
-        log.exception("生成命理报告失败")
-        raise HTTPException(status_code=500, detail=client_error(e))
-
-
-def _build_full_report_pdf(chat_model, birth_time: str, gender: str, selected: list) -> bytes:
-    """同步生成 LLM 分节报告 PDF（多次 LLM 调用 + 排盘工具 invoke + PDF 渲染）。"""
-    from app.tools.bazi import bazi_analysis, bazi_chart, bazi_dayun, bazi_liunian
-    from app.tools.pdf_report import generate_bazi_report
-    from app.tools.report_generator import generate_full_report
-
-    ai_commentary = generate_full_report(chat_model, birth_time, gender, selected)
-    chart_text = bazi_chart.invoke({"birth_time": birth_time, "gender": gender})
-    analysis_text = bazi_analysis.invoke({"birth_time": birth_time, "gender": gender, "question": "整体命盘"})
-    dayun_text = bazi_dayun.invoke({"birth_time": birth_time, "gender": gender, "count": 8})
-    liunian_text = bazi_liunian.invoke({"birth_time": birth_time, "gender": gender, "years": 10})
-    return generate_bazi_report(
-        birth_time=birth_time,
-        gender=gender,
-        chart_text=chart_text,
-        analysis_text=analysis_text,
-        dayun_text=dayun_text,
-        liunian_text=liunian_text,
-        ai_commentary=ai_commentary,
+    row = await asyncio.to_thread(report_tasks.get_task, task_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    if row["status"] in ("pending", "running"):
+        raise HTTPException(status_code=409, detail="任务尚未完成")
+    if row["status"] != "done" or row["payload"] is None:
+        raise HTTPException(status_code=410, detail=f"任务生成失败：{row['error'] or '未知错误'}")
+    prefix, media = KINDS[row["kind"]]
+    ext = "md" if row["kind"] == "full_report" else "pdf"
+    return Response(
+        content=bytes(row["payload"]),
+        media_type=media,
+        headers={"Content-Disposition": f'attachment; filename="{prefix}.{ext}"'},
     )
-
-
-@router.get("/full_report_pdf")
-async def full_report_pdf(birth_time: str, gender: str, sections: str = "",
-                          app_ctx: AppContext = Depends(app_context_dependency)):
-    """生成 LLM 分节命理报告 PDF。"""
-    chat_model = app_ctx.chat_model
-    if chat_model is None:
-        return {"error": "Xianzhi not initialized"}
-    from fastapi import Response
-
-    from app.tools.report_generator import DEFAULT_SECTIONS
-
-    selected = sections.split(",") if sections else DEFAULT_SECTIONS
-    try:
-        pdf_bytes = await asyncio.to_thread(_build_full_report_pdf, chat_model, birth_time, gender, selected)
-        return Response(
-            content=pdf_bytes,
-            media_type="application/pdf",
-            headers={"Content-Disposition": 'attachment; filename="xianzhi_full_report.pdf"'},
-        )
-    except Exception as e:
-        log.exception("生成 PDF 报告失败")
-        raise HTTPException(status_code=500, detail=client_error(e))

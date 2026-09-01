@@ -6,6 +6,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.agent.prompts import LIUYAO_SYSTEM_PROMPT
 from app.api.context import get_app_context
+from app.core.llm_throttle import llm_tag
 from app.sub_app.liuyao.liuyao_app import cast
 
 router = APIRouter(prefix="/liuyao", tags=["LiuYao"])
@@ -62,9 +63,10 @@ async def interpret_liuyao(body: dict):
         f"解读要落到占问者的具体问题上。"
     )
     try:
-        response = await get_app_context().chat_model.ainvoke(
-            [SystemMessage(content=LIUYAO_SYSTEM_PROMPT), HumanMessage(content=prompt)]
-        )
+        with llm_tag("liuyao"):
+            response = await get_app_context().chat_model.ainvoke(
+                [SystemMessage(content=LIUYAO_SYSTEM_PROMPT), HumanMessage(content=prompt)]
+            )
         return {"interpretation": str(response.content)}
     except Exception:
         raise HTTPException(status_code=502, detail="AI 解读暂不可用，请稍后再试")

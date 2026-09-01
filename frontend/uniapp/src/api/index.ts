@@ -213,28 +213,47 @@ export const getChart = (birthTime: string, gender: string, sect = 2, yunSect = 
     ...(longitude ? { longitude } : {}),
   })
 
-/* ============ 命理报告 ============ */
+/* ============ 命理报告（后台任务：提交 → 轮询 → 取结果） ============ */
 
-export interface FullReportResult { content?: string; error?: string }
+export interface ReportTaskStatus {
+  task_id: string
+  kind: string
+  status: 'pending' | 'running' | 'done' | 'failed'
+  error?: string
+  content?: string
+}
 
-export const generateFullReport = (birthTime: string, gender: string, sections?: string[]) =>
-  get<FullReportResult>('/ai/xianzhi/full_report', {
+const TASK_POLL_INTERVAL = 2000
+const TASK_POLL_TIMEOUT = 15 * 60 * 1000
+
+async function runReportTask<T extends ReportTaskStatus>(kind: string, params: Record<string, any>): Promise<T> {
+  const { task_id } = await post<{ task_id: string }>('/ai/xianzhi/report/tasks', { kind, ...params })
+  const deadline = Date.now() + TASK_POLL_TIMEOUT
+  for (;;) {
+    await new Promise((resolve) => setTimeout(resolve, TASK_POLL_INTERVAL))
+    const t = await get<T>(`/ai/xianzhi/report/tasks/${task_id}`)
+    if (t.status === 'done') return t
+    if (t.status === 'failed') throw new Error(t.error || '报告生成失败')
+    if (Date.now() > deadline) throw new Error('报告生成超时，请稍后再试')
+  }
+}
+
+export const generateFullReport = async (birthTime: string, gender: string, sections?: string[]) => {
+  const t = await runReportTask<ReportTaskStatus>('full_report', {
     birth_time: birthTime,
     gender,
     sections: sections?.length ? sections.join(',') : undefined,
   })
+  return { content: t.content || '' }
+}
 
 /**
- * 下载 PDF 报告
+ * 下载任务产物 PDF
+ * 提交任务 → 轮询完成 → 下载 /result 链接
  * 小程序: uni.downloadFile + uni.openDocument
  * H5: 直接打开 URL
  */
-export function downloadPdf(path: string, params: Record<string, string>): void {
-  const qs = Object.keys(params)
-    .map((k) => `${encodeURIComponent(k)}=${encodeURIComponent(params[k])}`)
-    .join('&')
-  const url = `${getConfig().apiBase}${path}?${qs}`
-
+function downloadTaskResultUrl(url: string): void {
   // #ifdef H5
   window.open(url, '_blank')
   // #endif
@@ -256,11 +275,17 @@ export function downloadPdf(path: string, params: Record<string, string>): void 
   // #endif
 }
 
+function downloadReportTaskPdf(kind: string, params: Record<string, any>): void {
+  runReportTask<ReportTaskStatus>(kind, params)
+    .then((t) => downloadTaskResultUrl(`${getConfig().apiBase}/ai/xianzhi/report/tasks/${t.task_id}/result`))
+    .catch((e: any) => uni.showToast({ title: e?.message || '报告生成失败', icon: 'none' }))
+}
+
 export const downloadReport = (birthTime: string, gender: string) =>
-  downloadPdf('/ai/xianzhi/report', { birth_time: birthTime, gender })
+  downloadReportTaskPdf('basic_report', { birth_time: birthTime, gender })
 
 export const downloadFullReportPdf = (birthTime: string, gender: string, sections?: string[]) =>
-  downloadPdf('/ai/xianzhi/full_report_pdf', {
+  downloadReportTaskPdf('full_report_pdf', {
     birth_time: birthTime,
     gender,
     ...(sections?.length ? { sections: sections.join(',') } : {}),

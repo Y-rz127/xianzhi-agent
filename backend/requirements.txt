@@ -34,13 +34,15 @@ mcp>=1.28.0
 # Redis（分布式限流等跨副本共享状态）
 redis>=5.0.0
 
-# PostgreSQL 记忆 / pgvector
+# PostgreSQL 记忆 / pgvector / 迁移
 # psycopg[binary] 供 psycopg_pool（记忆表，v3）使用；
 # psycopg2-binary 供 langchain_postgres.PGVector（向量库，SQLAlchemy 默认 postgresql:// 方言）使用，二者独立共存，
 # 只要向量库可选 postgres（docker-compose 默认），psycopg2-binary 就必须保留。
 psycopg[binary]>=3.2.0
 psycopg2-binary>=2.9.0
 langchain-postgres>=0.0.17,<0.1.0
+# alembic：表结构版本化迁移（migrations/），部署前必须 upgrade head
+alembic>=1.13.0
 
 # PDF 报告
 reportlab>=4.0.0

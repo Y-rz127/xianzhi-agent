@@ -10,7 +10,7 @@
           </svg>
         </div>
         <div>
-          <h2 class="text-glow-soft">可观测性</h2>
+          <h2 class="text-glow-soft">监测台</h2>
           <div class="header-info">API 指标监控 · 每 5 秒自动刷新</div>
         </div>
       </div>
@@ -91,6 +91,82 @@
       </div>
     </section>
 
+    <section class="llm-section glass-card">
+      <div class="section-header">
+        <div class="section-title">LLM 调用与成本</div>
+        <div class="llm-header-right">
+          <button class="btn btn-xs" @click="togglePriceEditor">{{ priceEditing ? "收起单价编辑" : "配置单价" }}</button>
+          <div class="llm-summary">
+            <span>调用 {{ formatNumber(llmTotals.calls) }} 次</span>
+            <span>输入 {{ formatTokens(llmTotals.prompt_tokens) }}</span>
+            <span>输出 {{ formatTokens(llmTotals.completion_tokens) }}</span>
+            <span class="llm-cost">{{ llmTotals.est_cost > 0 ? `≈ ¥${llmTotals.est_cost.toFixed(4)}` : (llmTotals.price_configured ? "已配置单价" : "未配置单价") }}</span>
+          </div>
+        </div>
+      </div>
+      <div v-if="priceEditing" class="price-editor">
+        <div class="chain-hint">单价单位：元/百万 token。逐行填写模型名与输入/输出单价；删除全部行保存 = 不折算成本。</div>
+        <div class="price-rows">
+          <div class="price-row price-row-head"><span>模型</span><span>输入单价</span><span>输出单价</span><span></span></div>
+          <div v-for="(row, i) in priceRows" :key="i" class="price-row">
+            <input v-model="row.model" class="price-input" placeholder="模型名，如 qwen3.8-27b" spellcheck="false" />
+            <input v-model="row.input" class="price-input" type="number" min="0" step="0.1" placeholder="输入" />
+            <input v-model="row.output" class="price-input" type="number" min="0" step="0.1" placeholder="输出" />
+            <button class="btn btn-xs" @click="priceRows.splice(i, 1)">删除</button>
+          </div>
+        </div>
+        <div class="chain-actions" style="margin-top: var(--spacing-md);">
+          <button class="btn btn-xs" @click="priceRows.push({ model: '', input: '', output: '' })">添加模型</button>
+          <button class="btn btn-xs" @click="savePrice" :disabled="priceSaving">{{ priceSaving ? "保存中" : "保存单价" }}</button>
+          <button class="btn btn-xs" @click="togglePriceEditor">取消</button>
+        </div>
+        <div v-if="priceMessage" class="chain-message" :class="{ 'chain-error': priceError }">{{ priceMessage }}</div>
+      </div>
+      <div v-if="llmEntries.length === 0" class="empty-state">
+        <p>暂无 LLM 调用数据（需配置 LLM_PRICE_MAP 才显示金额）</p>
+      </div>
+      <div v-else class="llm-table">
+        <div class="llm-row llm-row-head">
+          <span>模型</span><span>用途</span><span>次数</span><span>输入 token</span><span>输出 token</span><span>平均耗时</span><span>估算成本</span>
+        </div>
+        <div v-for="row in llmEntries" :key="row.model + row.tag" class="llm-row">
+          <span class="llm-model">{{ row.model }}</span>
+          <span class="llm-tag">{{ row.tag }}</span>
+          <span>{{ row.calls }}</span>
+          <span>{{ formatTokens(row.prompt_tokens) }}</span>
+          <span>{{ formatTokens(row.completion_tokens) }}</span>
+          <span>{{ row.avg_latency_ms }} ms</span>
+          <span class="llm-cost">{{ row.est_cost > 0 ? `¥${row.est_cost.toFixed(4)}` : "-" }}</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="chain-section glass-card">
+      <div class="section-header">
+        <div class="section-title">模型降级链</div>
+        <div class="chain-actions">
+          <button class="btn btn-xs" @click="loadChain" :disabled="chainLoading">{{ chainLoading ? "加载中" : "重新加载" }}</button>
+          <button class="btn btn-xs" @click="saveChain" :disabled="chainSaving">{{ chainSaving ? "保存中" : "保存" }}</button>
+        </div>
+      </div>
+      <div class="chain-hint">主模型失败（限流/超时/5xx/模型不存在）时按顺序自动降级；每行填一个模型名，第一行为主模型。留空=回退 .env 主模型。</div>
+      <textarea
+        v-model="chainText"
+        class="chain-input"
+        rows="4"
+        placeholder="qwen3.8-27b&#10;qwen3.8-flash&#10;qwen3.8-2.4t-a95b"
+        spellcheck="false"
+      ></textarea>
+      <div class="chain-candidates">
+        <span class="chain-candidate-label">候选：</span>
+        <span v-for="c in chainCandidates" :key="c" class="chain-chip" @click="addCandidate(c)" :title="`添加 ${c}`">{{ c }}</span>
+      </div>
+      <div v-if="chainOrder.length" class="chain-summary">
+        当前生效链：<span v-for="(m, i) in chainOrder" :key="m + i" class="chain-item">{{ i + 1 }}. {{ m }}</span>
+      </div>
+      <div v-if="chainMessage" class="chain-message" :class="{ 'chain-error': chainError }">{{ chainMessage }}</div>
+    </section>
+
     <section class="top-endpoints glass-card">
       <div class="section-title">Top 5 端点</div>
       <div v-if="topEndpoints.length === 0" class="empty-state">
@@ -134,7 +210,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from "vue"
-import { fetchMetrics, type MetricsData } from "../api"
+import { fetchMetrics, getLlmChain, updateLlmChain, getLlmPrice, updateLlmPrice, type MetricsData, type LlmPriceMap } from "../api"
 
 const metrics = ref<MetricsData | null>(null)
 const loading = ref(false)
@@ -156,6 +232,8 @@ const chartData = computed(() => {
 })
 
 const topEndpoints = computed(() => metrics.value?.top_endpoints ?? [])
+const llmEntries = computed(() => metrics.value?.llm ?? [])
+const llmTotals = computed(() => metrics.value?.llm_totals ?? { calls: 0, prompt_tokens: 0, completion_tokens: 0, est_cost: 0, price_configured: false })
 const recentErrors = computed(() => {
   const list = metrics.value?.recent_errors ?? []
   return [...list].reverse()
@@ -205,6 +283,12 @@ function formatNumber(n: number): string {
   return n.toLocaleString("zh-CN")
 }
 
+function formatTokens(n: number): string {
+  if (n >= 1e6) return (n / 1e6).toFixed(2) + "M"
+  if (n >= 1e3) return (n / 1e3).toFixed(1) + "K"
+  return String(n)
+}
+
 function formatUptime(seconds: number): string {
   const h = Math.floor(seconds / 3600)
   const m = Math.floor((seconds % 3600) / 60)
@@ -234,8 +318,122 @@ async function loadMetrics() {
   }
 }
 
+// ---- LLM 降级链配置 ----
+const chainText = ref("")
+const chainOrder = ref<string[]>([])
+const chainCandidates = ref<string[]>([])
+const chainLoading = ref(false)
+const chainSaving = ref(false)
+const chainMessage = ref("")
+const chainError = ref(false)
+
+async function loadChain() {
+  chainLoading.value = true
+  chainError.value = false
+  try {
+    const data = await getLlmChain()
+    chainOrder.value = data.models
+    chainCandidates.value = data.candidates
+    chainText.value = data.models.join("\n")
+    chainMessage.value = ""
+  } catch (e: any) {
+    chainError.value = true
+    chainMessage.value = e.message || "获取降级链失败"
+  } finally {
+    chainLoading.value = false
+  }
+}
+
+async function saveChain() {
+  const models = chainText.value.split("\n").map((s) => s.trim()).filter(Boolean)
+  chainSaving.value = true
+  chainError.value = false
+  try {
+    const data = await updateLlmChain(models)
+    chainOrder.value = data.models
+    chainText.value = data.models.join("\n")
+    chainMessage.value = "已保存并生效"
+    setTimeout(() => (chainMessage.value = ""), 3000)
+  } catch (e: any) {
+    chainError.value = true
+    chainMessage.value = e.message || "保存失败"
+  } finally {
+    chainSaving.value = false
+  }
+}
+
+function addCandidate(name: string) {
+  const current = chainText.value.split("\n").map((s) => s.trim()).filter(Boolean)
+  if (!current.includes(name)) {
+    current.push(name)
+    chainText.value = current.join("\n")
+  }
+}
+
+// ---- LLM 单价配置 ----
+interface PriceRow { model: string; input: string; output: string }
+const priceEditing = ref(false)
+const priceRows = ref<PriceRow[]>([])
+const priceSaving = ref(false)
+const priceMessage = ref("")
+const priceError = ref(false)
+
+function togglePriceEditor() {
+  priceEditing.value = !priceEditing.value
+  if (priceEditing.value) {
+    priceMessage.value = ""
+    loadPrice()
+  }
+}
+
+function toRows(prices: LlmPriceMap): PriceRow[] {
+  const rows = Object.entries(prices).map(([model, p]) => ({ model, input: String(p.input), output: String(p.output) }))
+  return rows.length ? rows : [{ model: "", input: "", output: "" }]
+}
+
+async function loadPrice() {
+  try {
+    const data = await getLlmPrice()
+    priceRows.value = toRows(data.prices)
+    priceError.value = false
+  } catch {
+    priceError.value = true
+  }
+}
+
+async function savePrice() {
+  const prices: LlmPriceMap = {}
+  for (const row of priceRows.value) {
+    const model = row.model.trim()
+    if (!model) continue
+    const input = Number(row.input)
+    const output = Number(row.output)
+    if (!Number.isFinite(input) || input < 0 || !Number.isFinite(output) || output < 0) {
+      priceError.value = true
+      priceMessage.value = `「${model}」的输入/输出单价必须是非负数字`
+      return
+    }
+    prices[model] = { input, output }
+  }
+  priceSaving.value = true
+  priceError.value = false
+  try {
+    const data = await updateLlmPrice(prices)
+    priceRows.value = toRows(data.prices)
+    priceMessage.value = "单价已保存并生效"
+    loadMetrics()
+    setTimeout(() => (priceMessage.value = ""), 3000)
+  } catch (e: any) {
+    priceError.value = true
+    priceMessage.value = e.message || "保存失败"
+  } finally {
+    priceSaving.value = false
+  }
+}
+
 onMounted(() => {
   loadMetrics()
+  loadChain()
   timer = setInterval(loadMetrics, 5000)
 })
 
@@ -322,10 +520,130 @@ onUnmounted(() => {
   margin-top: 4px;
 }
 
-.charts-section, .top-endpoints, .errors-section {
+.charts-section, .top-endpoints, .errors-section, .llm-section, .chain-section {
   padding: var(--spacing-lg);
   border-radius: var(--radius);
 }
+.chain-actions { display: flex; gap: var(--spacing-md); }
+.chain-hint { font-size: 12px; color: var(--text-dim); margin-bottom: var(--spacing-md); line-height: 1.6; }
+.chain-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg-bright, rgba(255, 255, 255, 0.04));
+  color: var(--text);
+  font-family: var(--font-mono, monospace);
+  font-size: 13px;
+  resize: vertical;
+}
+.chain-input:focus { outline: none; border-color: var(--accent, #d4af37); }
+.chain-candidates {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--spacing-8, 8px);
+  margin-top: var(--spacing-md);
+}
+.chain-candidate-label { font-size: 12px; color: var(--text-dim); }
+.chain-chip {
+  font-size: 12px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.chain-chip:hover { color: var(--text); border-color: var(--accent, #d4af37); }
+.chain-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-md);
+  align-items: center;
+  margin-top: var(--spacing-md);
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.chain-item {
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: var(--bg-bright, rgba(255, 255, 255, 0.06));
+  font-family: var(--font-mono, monospace);
+  color: var(--text);
+}
+.chain-message { margin-top: var(--spacing-md); font-size: 12px; color: var(--success, #1dc981); }
+.chain-message.chain-error { color: var(--danger, #e8463a); }
+.llm-summary {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.llm-header-right {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+}
+.price-editor {
+  margin-bottom: var(--spacing-lg);
+  padding: var(--spacing-md);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+}
+.price-rows { display: flex; flex-direction: column; gap: 6px; }
+.price-row {
+  display: grid;
+  grid-template-columns: 1.6fr 1fr 1fr auto;
+  gap: var(--spacing-md);
+  align-items: center;
+  font-size: 12px;
+}
+.price-row-head { color: var(--text-muted); font-weight: 600; }
+.price-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm, 6px);
+  border: 1px solid var(--border);
+  background: var(--bg-bright, rgba(255, 255, 255, 0.04));
+  color: var(--text);
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+}
+.price-input:focus { outline: none; border-color: var(--accent, #d4af37); }
+.llm-table {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.llm-row {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr 0.6fr 1fr 1fr 1fr 1fr;
+  gap: var(--spacing-md);
+  align-items: center;
+  padding: 6px 8px;
+  font-size: 12px;
+  color: var(--text);
+  border-bottom: 1px solid var(--border);
+}
+.llm-row-head {
+  font-weight: 600;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border);
+}
+.llm-model { font-family: var(--font-mono, monospace); }
+.llm-tag {
+  display: inline-block;
+  width: fit-content;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--bg-bright, rgba(255, 255, 255, 0.06));
+  color: var(--text-dim);
+}
+.llm-cost { color: var(--accent-light, #ffd700); font-weight: 600; white-space: nowrap; }
 .section-header {
   display: flex;
   align-items: center;

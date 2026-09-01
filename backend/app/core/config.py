@@ -23,8 +23,10 @@ class Settings(BaseSettings):
     # 意图拆解/Reviewer 审核模型（轻量独立实例，留空则复用主模型）
     decompose_model: str = Field(default="", alias="DECOMPOSE_MODEL")
     reviewer_model: str = Field(default="", alias="REVIEWER_MODEL")
-    # LLM 生成参数；thinking 默认关闭，避免  thinking 标签泄漏
-    llm_temperature: float = Field(default=0.7, alias="LLM_TEMPERATURE")
+    # LLM 生成参数；temperature 默认不传（None）：
+    # kimi-k3 等模型不接受 temperature 参数，显式设置会被 400 拒绝；
+    # 使用 qwen 等支持采样温度的模型时可设 LLM_TEMPERATURE=0.7
+    llm_temperature: Optional[float] = Field(default=None, alias="LLM_TEMPERATURE")
     llm_enable_thinking: bool = Field(default=False, alias="LLM_ENABLE_THINKING")
     llm_timeout: float = Field(default=60.0, alias="LLM_TIMEOUT")
     llm_max_retries: int = Field(default=2, alias="LLM_MAX_RETRIES")
@@ -36,6 +38,11 @@ class Settings(BaseSettings):
     # 连续失败达阈值触发熔断（快速失败，避免上游故障时每个请求空等重试）
     llm_circuit_failure_threshold: int = Field(default=8, alias="LLM_CIRCUIT_FAILURE_THRESHOLD")
     llm_circuit_open_seconds: float = Field(default=30.0, alias="LLM_CIRCUIT_OPEN_SECONDS")
+    # LLM 成本换算表（可选，JSON）：key 为模型名前缀（最长匹配），
+    # value 为 {"input": 输入单价, "output": 输出单价}，单位 元/百万 token。
+    # 留空则 /metrics 只统计 token 不折算金额。例（单价请按实际填写）：
+    # LLM_PRICE_MAP={"kimi-k3": {"input": 4, "output": 16}, "qwen3.8": {"input": 1, "output": 4}}
+    llm_price_map: str = Field(default="", alias="LLM_PRICE_MAP")
 
     # 服务
     app_port: int = Field(default=8123, alias="APP_PORT")
@@ -70,6 +77,8 @@ class Settings(BaseSettings):
     pg_pool_max_size: int = Field(default=20, alias="PG_POOL_MAX_SIZE")
     # 连接池借出超时（秒）：并发超池时最多等待这么久，避免请求无限悬挂
     pg_pool_timeout: float = Field(default=10.0, alias="PG_POOL_TIMEOUT")
+    # 报告任务后台 worker 数量（PDF 渲染 CPU 密集；LLM 报告受全局背压约束）
+    report_task_workers: int = Field(default=2, alias="REPORT_TASK_WORKERS")
 
     # 搜索 API
     search_api_key: str = Field(default="", alias="SEARCH_API_KEY")

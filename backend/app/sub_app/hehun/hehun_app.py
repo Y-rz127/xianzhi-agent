@@ -9,6 +9,7 @@ from __future__ import annotations
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.agent.prompts import HEHUN_SYSTEM_PROMPT
+from app.core.llm_throttle import llm_tag
 from app.core.logger import log
 from app.tools.text_clean import clean_think_tags
 
@@ -70,7 +71,8 @@ def analyze(
         ),
     ]
     try:
-        resp = chat_model.invoke(messages)
+        with llm_tag("hehun"):
+            resp = chat_model.invoke(messages)
         content = clean_think_tags((getattr(resp, "content", "") or "").strip())
         return content or base_result
     except Exception as e:

@@ -54,6 +54,10 @@
           <span class="nav-icon huangli-icon">☰</span>
           <span v-if="!sidebarCollapsed">每日黄历</span>
         </router-link>
+        <router-link to="/ziwei" class="nav-item" active-class="active" @click="onNavClick">
+          <span class="nav-icon ziwei-icon">✦</span>
+          <span v-if="!sidebarCollapsed">紫微斗数</span>
+        </router-link>
         <router-link to="/chart-cases" class="nav-item" active-class="active" @click="onNavClick">
           <span class="nav-icon cases-icon">
             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
@@ -70,7 +74,7 @@
           <span class="nav-icon observability-icon">
             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M18.7 8l-5.1 5.2-2.8-2.7L7 14.3"/></svg>
           </span>
-          <span v-if="!sidebarCollapsed">可观测性</span>
+          <span v-if="!sidebarCollapsed">监测台</span>
         </router-link>
         <router-link to="/user-admin" class="nav-item" active-class="active" @click="onNavClick">
           <span class="nav-icon admin-icon">
@@ -310,6 +314,8 @@ onUnmounted(() => {
 .nav-item.active .tarot-icon { background: rgba(184,134,232,0.15); color: #b886e8; box-shadow: 0 0 12px rgba(184,134,232,0.2); }
 .huangli-icon { color: #e8a05b; }
 .nav-item.active .huangli-icon { background: rgba(232,160,91,0.15); color: #e8a05b; box-shadow: 0 0 12px rgba(232,160,91,0.2); }
+.ziwei-icon { color: #8fa1e8; }
+.nav-item.active .ziwei-icon { background: rgba(143,161,232,0.15); color: #8fa1e8; box-shadow: 0 0 12px rgba(143,161,232,0.2); }
 .cases-icon { color: #8bb8e8; }
 .nav-item.active .cases-icon { background: rgba(139,184,232,0.15); color: #8bb8e8; box-shadow: 0 0 12px rgba(139,184,232,0.2); }
 .rag-icon { color: #8be8c7; }

@@ -96,19 +96,82 @@ export const chatWithXianzhi = (message: string, conversationId: string, cb: SSE
     yun_sect: opts?.yun_sect !== undefined ? String(opts.yun_sect) : undefined,
   }, cb)
 
-export function downloadReport(birthTime: string, gender: string): void {
-  const qs = `birth_time=${encodeURIComponent(birthTime)}&gender=${encodeURIComponent(gender)}`
-  const url = `${API_BASE}/ai/xianzhi/report?${qs}`
-  window.open(url, "_blank")
+export interface ReportTaskStatus {
+  task_id: string
+  kind: string
+  status: "pending" | "running" | "done" | "failed"
+  error?: string
+  content?: string
+}
+
+const TASK_POLL_INTERVAL = 2000
+const TASK_POLL_TIMEOUT = 15 * 60 * 1000
+
+async function runReportTask(kind: string, body: Record<string, string>): Promise<ReportTaskStatus> {
+  const res = await apiFetch(`${API_BASE}/ai/xianzhi/report/tasks`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ kind, ...body }),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: `提交失败 ${res.status}` }))
+    throw new Error(err.detail || `提交失败 ${res.status}`)
+  }
+  const { task_id } = await res.json()
+  const deadline = Date.now() + TASK_POLL_TIMEOUT
+  for (;;) {
+    await new Promise((resolve) => setTimeout(resolve, TASK_POLL_INTERVAL))
+    const sres = await apiFetch(`${API_BASE}/ai/xianzhi/report/tasks/${task_id}`)
+    if (!sres.ok) throw new Error(`任务状态查询失败 ${sres.status}`)
+    const status: ReportTaskStatus = await sres.json()
+    if (status.status === "done") return status
+    if (status.status === "failed") throw new Error(status.error || "报告生成失败")
+    if (Date.now() > deadline) throw new Error("报告生成超时，请稍后再试")
+  }
+}
+
+function saveBlob(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement("a")
+  a.href = url
+  a.download = filename
+  a.click()
+  URL.revokeObjectURL(url)
 }
 
 export async function generateFullReport(birthTime: string, gender: string, sections?: string[]): Promise<string> {
-  const params = new URLSearchParams({ birth_time: birthTime, gender })
-  if (sections && sections.length) params.set("sections", sections.join(","))
-  const res = await apiFetch(`${API_BASE}/ai/xianzhi/full_report?${params.toString()}`)
-  const data = await res.json()
-  if (data.error) throw new Error(data.error)
-  return data.content || ""
+  const t = await runReportTask("full_report", {
+    birth_time: birthTime,
+    gender,
+    sections: sections && sections.length ? sections.join(",") : "",
+  })
+  return t.content || ""
+}
+
+export async function downloadReport(birthTime: string, gender: string): Promise<void> {
+  try {
+    const t = await runReportTask("basic_report", { birth_time: birthTime, gender })
+    const res = await apiFetch(`${API_BASE}/ai/xianzhi/report/tasks/${t.task_id}/result`)
+    if (!res.ok) throw new Error(`下载失败 ${res.status}`)
+    saveBlob(await res.blob(), `排盘报告_${birthTime.replace(/[ :]/g, "_")}.pdf`)
+  } catch (e) {
+    alert(`报告下载失败：${(e as Error).message}`)
+  }
+}
+
+export async function downloadFullReportPDF(birthTime: string, gender: string, sections?: string[]): Promise<void> {
+  try {
+    const t = await runReportTask("full_report_pdf", {
+      birth_time: birthTime,
+      gender,
+      sections: sections && sections.length ? sections.join(",") : "",
+    })
+    const res = await apiFetch(`${API_BASE}/ai/xianzhi/report/tasks/${t.task_id}/result`)
+    if (!res.ok) throw new Error(`下载失败 ${res.status}`)
+    saveBlob(await res.blob(), `完整命理报告_${birthTime.replace(/[ :]/g, "_")}.pdf`)
+  } catch (e) {
+    alert(`报告下载失败：${(e as Error).message}`)
+  }
 }
 
 export async function getChart(birthTime: string, gender: string, sect = 2, yunSect = 1, longitude?: number): Promise<ChartData> {
@@ -217,13 +280,6 @@ export async function importChartCasesJSON(file: File): Promise<{ inserted: numb
   return await res.json()
 }
 
-export function downloadFullReportPDF(birthTime: string, gender: string, sections?: string[]): void {
-  const params = new URLSearchParams({ birth_time: birthTime, gender })
-  if (sections && sections.length) params.set("sections", sections.join(","))
-  const url = `${API_BASE}/ai/xianzhi/full_report_pdf?${params.toString()}`
-  window.open(url, "_blank")
-}
-
 export async function fetchSessions(type: "xianzhi"): Promise<ChatSession[]> {
   try {
     const res = await apiFetch(`${API_BASE}${EP.SESSIONS}`)
@@ -258,6 +314,16 @@ export interface ErrorRecord {
   latency_ms: number
 }
 
+export interface LlmMetricEntry {
+  model: string
+  tag: string
+  calls: number
+  prompt_tokens: number
+  completion_tokens: number
+  avg_latency_ms: number
+  est_cost: number
+}
+
 export interface MetricsData {
   total_requests: number
   avg_latency_ms: number
@@ -266,6 +332,8 @@ export interface MetricsData {
   endpoints: EndpointMetrics[]
   top_endpoints: EndpointMetrics[]
   recent_errors: ErrorRecord[]
+  llm: LlmMetricEntry[]
+  llm_totals: { calls: number; prompt_tokens: number; completion_tokens: number; est_cost: number; price_configured: boolean }
   uptime_seconds: number
 }
 
@@ -278,6 +346,50 @@ export async function fetchMetrics(): Promise<MetricsData> {
 export async function getRagStatus(): Promise<RagStatus> {
   const res = await apiFetch(`${API_BASE}/ai/rag/status`)
   if (!res.ok) throw new Error("获取 RAG 状态失败")
+  return await res.json()
+}
+
+export interface LlmChainStatus { models: string[]; candidates: string[] }
+
+export async function getLlmChain(): Promise<LlmChainStatus> {
+  const res = await apiFetch(`${API_BASE}/ai/admin/llm/chain`)
+  if (!res.ok) throw new Error("获取降级链失败")
+  return await res.json()
+}
+
+export async function updateLlmChain(models: string[]): Promise<LlmChainStatus> {
+  const res = await apiFetch(`${API_BASE}/ai/admin/llm/chain`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ models }),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: `保存失败 ${res.status}` }))
+    throw new Error(err.detail || `保存失败 ${res.status}`)
+  }
+  return await res.json()
+}
+
+export type LlmPriceMap = Record<string, { input: number; output: number }>
+
+export interface LlmPriceStatus { prices: LlmPriceMap; candidates: string[] }
+
+export async function getLlmPrice(): Promise<LlmPriceStatus> {
+  const res = await apiFetch(`${API_BASE}/ai/admin/llm/price`)
+  if (!res.ok) throw new Error("获取单价表失败")
+  return await res.json()
+}
+
+export async function updateLlmPrice(prices: LlmPriceMap): Promise<LlmPriceStatus> {
+  const res = await apiFetch(`${API_BASE}/ai/admin/llm/price`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ prices }),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: `保存失败 ${res.status}` }))
+    throw new Error(err.detail || `保存失败 ${res.status}`)
+  }
   return await res.json()
 }
 
@@ -478,6 +590,52 @@ export async function getHuangLiItems(): Promise<string[]> {
   const res = await apiFetch(`${API_BASE}/ai/huangli/items`)
   if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || "获取事项词表失败")
   return (await res.json()).items
+}
+
+/* ============ 紫微斗数（排盘 + 点宫详情 + AI 简批） ============ */
+
+export interface ZiWeiStar { name: string; type: string; brightness: string; mutagen: string }
+export interface ZiWeiDecadal { range: number[]; heavenly_stem: string; earthly_branch: string }
+export interface ZiWeiPalace {
+  index: number; name: string; heavenly_stem: string; earthly_branch: string; is_body: boolean
+  major_stars: ZiWeiStar[]; minor_stars: ZiWeiStar[]; adjective_stars: ZiWeiStar[]
+  changsheng12: string; boshi12: string; jiangqian12: string; suiqian12: string
+  decadal: ZiWeiDecadal | null; ages: number[]
+}
+export interface ZiWeiChart {
+  gender: string; solar_date: string; lunar_date: string
+  time_index: number; time_name: string; time_range: string
+  sign: string; zodiac: string
+  earthly_branch_of_soul: string; earthly_branch_of_body: string
+  soul_star: string; body_star: string; five_elements_class: string
+  four_pillars: { yearly: string; monthly: string; daily: string; hourly: string }
+  palaces: ZiWeiPalace[]
+}
+export interface ZiWeiCastParams {
+  date: string; time_index: number; gender: string; calendar?: "solar" | "lunar"; leap?: boolean
+}
+
+export async function getZiWeiChart(p: ZiWeiCastParams): Promise<ZiWeiChart> {
+  const params = new URLSearchParams({
+    date: p.date, time_index: String(p.time_index), gender: p.gender, calendar: p.calendar || "solar",
+  })
+  if (p.leap) params.set("leap", "true")
+  const res = await apiFetch(`${API_BASE}/ai/ziwei/chart?${params.toString()}`)
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || "排盘失败")
+  return res.json()
+}
+export async function interpretZiWei(p: ZiWeiCastParams & { focus?: string }): Promise<string> {
+  const res = await apiFetch(`${API_BASE}/ai/ziwei/interpret`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      date: p.date, time_index: p.time_index, gender: p.gender,
+      calendar: p.calendar || "solar", leap: p.leap || false, focus: p.focus || "",
+    }),
+  })
+  const data = await res.json()
+  if (!res.ok) throw new Error(data.detail || "解读失败")
+  return data.text
 }
 
 // ========== 管理后台：用户管理 ==========

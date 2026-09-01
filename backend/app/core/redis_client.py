@@ -5,6 +5,7 @@
 - 连接失败进入 30s 冷却：Redis 宕机时避免每个请求都卡在连接超时上
 - PING 成功缓存 5s：避免为每个请求付一次探测往返
 """
+
 from __future__ import annotations
 
 import secrets
@@ -13,9 +14,9 @@ import time
 from app.core.config import settings
 from app.core.logger import log
 
-_client = None       # redis.asyncio.Redis | None
-_last_ok = 0.0       # 上次 PING 成功时间（monotonic）
-_down_until = 0.0    # 连接失败后冷却截止时间（monotonic）
+_client = None  # redis.asyncio.Redis | None
+_last_ok = 0.0  # 上次 PING 成功时间（monotonic）
+_down_until = 0.0  # 连接失败后冷却截止时间（monotonic）
 
 _COOL_DOWN = 30.0
 _OK_TTL = 5.0
@@ -93,6 +94,40 @@ async def rate_limit_allow(key: str, limit: int, window_seconds: int):
     except Exception:
         log.warning("Redis 限流判定异常，降级为进程内存")
         return None
+
+
+# 分布式锁（SET NX + token 校验释放，Lua 原子）
+_ACQUIRE_LOCK_LUA = """
+if redis.call('SET', KEYS[1], ARGV[1], 'NX', 'PX', ARGV[2]) then return 1 end
+return 0
+"""
+_RELEASE_LOCK_LUA = """
+if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) end
+return 0
+"""
+
+
+async def acquire_lock(key: str, token: str, ttl_ms: int):
+    """Redis 分布式锁抢占。True=拿到锁，False=他人持有，None=Redis 不可用（调用方降级）。"""
+    r = await get_redis()
+    if r is None:
+        return None
+    try:
+        return bool(await r.eval(_ACQUIRE_LOCK_LUA, 1, key, token, ttl_ms))
+    except Exception:
+        log.warning("Redis 锁获取异常，降级为进程内锁")
+        return None
+
+
+async def release_lock(key: str, token: str) -> None:
+    """释放 Redis 分布式锁（仅当 token 匹配，防止误删他人锁）。"""
+    r = await get_redis()
+    if r is None:
+        return
+    try:
+        await r.eval(_RELEASE_LOCK_LUA, 1, key, token)
+    except Exception:
+        log.warning("Redis 锁释放异常")
 
 
 async def close_redis() -> None:

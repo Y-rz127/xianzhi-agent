@@ -39,6 +39,17 @@
    填到环境变量 `POSTGRES_CONNECTION_STRING`。
 4. 同时设 `VECTOR_STORE_TYPE=postgres` 与 `MEMORY_STORE_TYPE=postgres`（见 `.env.example`）。
 
+### 3.5 表结构迁移（alembic，首次部署必做一次性标记）
+
+表结构变更统一走 `backend/migrations/`（alembic），应用内建表逻辑只作兜底。
+
+- **全新空库**：部署前在 backend 目录执行
+  `alembic upgrade head`（自动建全部业务表 + CREATE EXTENSION vector）
+- **已有的存量库**（表已是当前结构）：执行一次 `alembic stamp head` 打版本标记，
+  后续发布时 `alembic upgrade head` 增量升级；不 stamp 会导致下次 upgrade 报“表已存在”
+- 连接串复用 `POSTGRES_CONNECTION_STRING`，运行前先设好该环境变量；
+  `langchain_pg_*`（向量/记忆库表）不在迁移内，由对应库运行时自建
+
 ---
 
 ## 4. 后端部署到 CloudBase 云托管
@@ -64,6 +75,31 @@ CloudBase 云托管支持两种方式：
 
 > 改动点：`main.py` 的 `uvicorn` 启动已改为优先读 `PORT`；`Dockerfile` 的 `EXPOSE 80`；
 > 新增 `.dockerignore` 防止密钥/前端代码进入镜像。本地与云端双兼容。
+
+### 4.3 生产容量：副本模型与关键约束
+
+| 项 | 说明 |
+|----|------|
+| 运行形态 | **单容器单进程（WORKERS=1）+ 水平副本**。不要在同一容器开多 worker：限流/会话锁已 Redis 化没问题，但八字缓存等进程内状态按 worker 数放大、不如副本隔离干净 |
+| 副本数起步 | 2 副本（滚动发布不断流）；聊天链路单副本承载约 5~7 请求/分钟（40~70s/请求，压测基线数据），扩缩触发建议看 CPU + 在飞请求数 |
+| LLM 背压 | `LLM_MAX_CONCURRENCY` 是全副本共享配额按**每副本**生效，若上游 DashScope 配额是全局的，多副本时要按 配额/副本数 调小该值 |
+| 报告任务 | 后台队列模型：提交落 PG（`report_tasks` 表）→ Redis 队列 → 各副本 worker 消费。**Redis 是必配项**（未配 Redis 提交直接 503）；`REPORT_TASK_WORKERS` 控制每副本消费并发，PDF 渲染 CPU 密集不要调太大 |
+| 长连接 | 聊天 SSE/WS 单请求可达 2~5 分钟：网关/CDN 的回源与读超时必须 ≥ 300s，且关闭对 /api/ai/xianzhi 路径的响应缓冲；健康检查与长连接路径要分开限流 |
+| 探针 | 存活/就绪统一用 `GET /api/health`（返回 DB/RAG/agent 池状态，启动期间后台初始化不阻塞端口监听）；扩缩容前先确认 `rag_ready=true` |
+
+### 4.4 数据库连接治理（PgBouncer）
+
+应用内 PG 连接池上限 `PG_POOL_MAX_SIZE`（默认 20）。多副本时总连接 = 副本数 × 池上限，
+会顶到腾讯云 PG 的 `max_connections`（默认几百）。两个选择：
+
+1. **（推荐）前置 PgBouncer**：应用 `POSTGRES_CONNECTION_STRING` 指向 PgBouncer（默认 5432 换成
+   PgBouncer 端口，如 6432），PgBouncer 与 PG 之间用少量连接复用；应用端 `PG_POOL_MAX_SIZE`
+   可保持 20 不变。
+2. **直连调参**：算好 副本数 × `PG_POOL_MAX_SIZE` ≤ 实例 `max_connections` - 预留（RAG/migrations/后台任务占用），
+   按需调小 `PG_POOL_MAX_SIZE`；连接借出超时由 `PG_POOL_TIMEOUT`（默认 10s）兜底。
+
+> 报告任务的产物（PDF 字节）持久化在 PG `report_tasks.payload`，单条几百 KB 量级，
+> 低频写入无压力；7 天后随任务清理。
 
 ---
 

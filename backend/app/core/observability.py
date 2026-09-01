@@ -1,6 +1,7 @@
-"""LangSmith 可观测性：通过环境变量开启 LangChain V2 追踪，并维护进程内 API 指标供 /metrics 展示。"""
+"""LangSmith 可观测性：通过环境变量开启 LangChain V2 追踪，并维护进程内 API/LLM 指标供 /metrics 展示。"""
 from __future__ import annotations
 
+import json
 import os
 import threading
 import time
@@ -20,14 +21,96 @@ _metrics: dict[str, Any] = {
     "recent_errors": [],
     # DB/记忆层失败等被降级兜住的错误，供 /metrics 观测
     "internal_errors": defaultdict(int),
+    # LLM 调用指标：key = "model|tag"
+    "llm": defaultdict(lambda: {
+        "calls": 0, "prompt_tokens": 0, "completion_tokens": 0, "total_latency_ms": 0.0,
+    }),
     "started_at": time.time(),
 }
+
+# LLM 单价表：优先 PG app_config（Web 管理端热改），未配置时回退 env LLM_PRICE_MAP。
+# 30s TTL 缓存，避免每个 /metrics 请求打一次 DB。
+_price_cache: dict[str, tuple[float, float]] | None = None
+_price_cache_at: float = 0.0
+_price_lock = threading.Lock()
+_PRICE_TTL_SECONDS = 30.0
+
+
+def _load_price_map() -> dict[str, tuple[float, float]]:
+    global _price_cache, _price_cache_at
+    now = time.monotonic()
+    with _price_lock:
+        if _price_cache is not None and now - _price_cache_at < _PRICE_TTL_SECONDS:
+            return _price_cache
+        raw = None
+        try:
+            from app.db.app_config import get_config
+
+            stored = get_config("llm_price_map")
+            if isinstance(stored, dict):
+                raw = stored.get("prices") or {}
+        except Exception:
+            raw = None
+        if raw is None:
+            raw = _parse_env_price_map()
+        parsed: dict[str, tuple[float, float]] = {}
+        for model, p in (raw or {}).items():
+            if not isinstance(p, dict):
+                continue
+            try:
+                parsed[str(model)] = (float(p.get("input", 0)), float(p.get("output", 0)))
+            except (TypeError, ValueError):
+                continue
+        _price_cache = parsed
+        _price_cache_at = now
+        return parsed
+
+
+def _parse_env_price_map() -> dict:
+    try:
+        return json.loads(settings.llm_price_map) if settings.llm_price_map.strip() else {}
+    except Exception:
+        log.warning("LLM_PRICE_MAP 解析失败，成本折算禁用: {}", settings.llm_price_map)
+        return {}
+
+
+def invalidate_price_cache() -> None:
+    """管理后台修改单价后立即生效。"""
+    global _price_cache, _price_cache_at
+    with _price_lock:
+        _price_cache = None
+        _price_cache_at = 0.0
+
+
+def current_price_map() -> dict:
+    """当前生效单价表 {模型名: {"input": 元/百万token, "output": 元/百万token}}。"""
+    return {model: {"input": p[0], "output": p[1]} for model, p in _load_price_map().items()}
+
+
+def _price_of(model: str) -> tuple[float, float]:
+    """模型名前缀最长匹配价格；未配置返回 (0, 0)。"""
+    price_map = _load_price_map()
+    best = None
+    for prefix, price in price_map.items():
+        if model.startswith(prefix) and (best is None or len(prefix) > len(best)):
+            best = prefix
+    return price_map[best] if best else (0.0, 0.0)
 
 
 def record_error(category: str) -> None:
     """记录一次内部错误（如记忆写入失败、DB 读取降级）。降级路径也必须调用，确保静默故障可观测。"""
     with _metrics_lock:
         _metrics["internal_errors"][category] += 1
+
+
+def record_llm_call(model: str, tag: str, prompt_tokens: int, completion_tokens: int, elapsed_ms: float) -> None:
+    """记录一次 LLM 调用（token 用量/耗时/用途）。由 ThrottledModel 在所有调用成功路径上报。"""
+    with _metrics_lock:
+        entry = _metrics["llm"][f"{model}|{tag}"]
+        entry["calls"] += 1
+        entry["prompt_tokens"] += prompt_tokens
+        entry["completion_tokens"] += completion_tokens
+        entry["total_latency_ms"] += elapsed_ms
 
 
 def record_request(method: str, path: str, status: int, duration: float) -> None:
@@ -81,6 +164,30 @@ def get_metrics() -> dict[str, Any]:
         # 按调用量降序
         endpoints.sort(key=lambda x: x["count"], reverse=True)
 
+        # LLM 成本汇总：按 model+用途 分组，带可选金额折算
+        llm_entries = []
+        llm_totals = {"calls": 0, "prompt_tokens": 0, "completion_tokens": 0, "est_cost": 0.0}
+        for key, data in _metrics["llm"].items():
+            model, tag = key.split("|", 1)
+            in_price, out_price = _price_of(model)
+            cost = data["prompt_tokens"] / 1e6 * in_price + data["completion_tokens"] / 1e6 * out_price
+            avg_ms = round(data["total_latency_ms"] / data["calls"], 1) if data["calls"] else 0.0
+            llm_entries.append({
+                "model": model,
+                "tag": tag,
+                "calls": data["calls"],
+                "prompt_tokens": data["prompt_tokens"],
+                "completion_tokens": data["completion_tokens"],
+                "avg_latency_ms": avg_ms,
+                "est_cost": round(cost, 4),
+            })
+            llm_totals["calls"] += data["calls"]
+            llm_totals["prompt_tokens"] += data["prompt_tokens"]
+            llm_totals["completion_tokens"] += data["completion_tokens"]
+            llm_totals["est_cost"] = round(llm_totals["est_cost"] + cost, 4)
+        llm_entries.sort(key=lambda x: x["calls"], reverse=True)
+        llm_totals["price_configured"] = bool(_load_price_map())
+
         avg_latency_ms = round(total_latency_ms / total_requests, 2) if total_requests else 0.0
         status = dict(_metrics["status_codes"])
         error_rate = round((status["4xx"] + status["5xx"]) / total_requests * 100, 2) if total_requests else 0.0
@@ -94,6 +201,8 @@ def get_metrics() -> dict[str, Any]:
             "top_endpoints": endpoints[:5],
             "recent_errors": list(_metrics["recent_errors"]),
             "internal_errors": dict(_metrics["internal_errors"]),
+            "llm": llm_entries,
+            "llm_totals": llm_totals,
             "uptime_seconds": round(time.time() - _metrics["started_at"], 2),
         }
 

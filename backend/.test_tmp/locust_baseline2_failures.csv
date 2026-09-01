@@ -1,3 +1,0 @@
-Method,Name,Error,Occurrences,First Seen,Last Seen
-GET,/api/ai/xianzhi/chart,"ConnectionAbortedError(10053, '你的主机中的软件中止了一个已建立的连接。', None, 10053, None)",1,2026-09-01T03:54:59Z,2026-09-01T03:54:59Z
-GET,/api/health,"ConnectionResetError(10054, '远程主机强迫关闭了一个现有的连接。', None, 10054, None)",1,2026-09-01T03:56:57Z,2026-09-01T03:56:57Z

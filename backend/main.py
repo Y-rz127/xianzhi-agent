@@ -18,9 +18,10 @@ from langchain_openai import ChatOpenAI
 from app.api.context import AppContext, set_app_context
 from app.api.routes import router
 from app.core.config import ensure_dirs, settings
+from app.core.llm_failover import FailoverModel
+from app.core.llm_throttle import ThrottledModel
 from app.core.logger import log
 from app.core.observability import init_observability, record_request
-from app.core.llm_throttle import ThrottledModel
 from app.core.security import ApiKeyAuthMiddleware, RateLimitMiddleware
 from app.core.thinking_router import ThinkingRouter
 from app.memory import create_chat_memory
@@ -105,8 +106,24 @@ async def lifespan(app: FastAPI):
     )
     # 思考模式中间件：闲聊由调用方用 use_thinking(False) 关闭，其他路径默认开启。
     # 底层在构造期派生 ON/OFF 两份副本，运行时按 contextvar 透明切换。
-    # ThrottledModel 在最外层：所有模型实例共享同一并发信号量与熔断器（DashScope 配额保护）。
+    # ThrottledModel 提供并发信号量+按模型隔离的熔断；最外层 FailoverModel 按降级链切换模型。
     chat_model = ThrottledModel(ThinkingRouter(raw_chat_model, default_thinking=settings.llm_enable_thinking))
+
+    def _make_failover_model(name: str) -> ThrottledModel:
+        """降级链备选模型实例工厂（共用主 http 连接池；max_retries=1 快速失败换链）。"""
+        llm = ChatOpenAI(
+            model=name,
+            base_url=settings.dashscope_url,
+            api_key=settings.dashscope_api_key,
+            timeout=settings.llm_timeout,
+            max_retries=1,
+            extra_body={"enable_thinking": settings.llm_enable_thinking},
+            http_client=http,
+        )
+        return ThrottledModel(ThinkingRouter(llm, default_thinking=settings.llm_enable_thinking))
+
+    # 降级链配置存 PG（Web 管理端热改），未配置时等效单主模型
+    chat_model = FailoverModel(chat_model, _make_failover_model)
 
     # 意图拆解 / Reviewer 审核模型（独立实例，留空则复用主模型）
     decompose_http = httpx.Client(trust_env=False) if settings.decompose_model else None
@@ -139,6 +156,22 @@ async def lifespan(app: FastAPI):
     )
     app.state.app_context = app_ctx
     set_app_context(app_ctx)
+
+    # 报告任务后台 worker（Redis 队列消费；多副本各自消费，任务单飞）
+    # 启动前先修复上次进程崩溃遗留的 running/超时 pending 悬挂任务
+    try:
+        from app.db import report_tasks as report_task_db
+
+        await asyncio.to_thread(report_task_db.reconcile_after_restart)
+    except Exception as e:
+        log.warning("报告任务悬挂修复失败（数据库不可达，跳过）: {}", e)
+    from app.tasks.worker import worker_loop
+
+    report_stop = asyncio.Event()
+    report_workers = [
+        asyncio.create_task(worker_loop(app_ctx.chat_model, report_stop))
+        for _ in range(max(1, settings.report_task_workers))
+    ]
 
     # 重/可失败的初始化放后台执行，避免阻塞端口监听导致存活探针失败
     async def _bg_init():
@@ -194,6 +227,15 @@ async def lifespan(app: FastAPI):
         set_app_context(None)
     except Exception:
         pass
+
+    # 停止报告任务 worker：给 3s 让循环自然退出，未退出的强取消
+    # （正在执行的长任务落在线程池里随进程终止，其 PG 状态由下次启动的 reconcile 修复）
+    report_stop.set()
+    try:
+        await asyncio.wait_for(asyncio.gather(*report_workers), timeout=3)
+    except Exception:
+        for w in report_workers:
+            w.cancel()
 
     # 关闭 PG 连接池与 RAG 指纹持久化连接池（cases 已复用 postgres_memory 的连接池）
     try:
