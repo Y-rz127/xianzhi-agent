@@ -20,6 +20,7 @@ from app.sub_app.hehun.routes import router as hehun_router
 from app.sub_app.huangli.routes import router as huangli_router
 from app.sub_app.liuyao.routes import router as liuyao_router
 from app.sub_app.tarot.routes import router as tarot_router
+from app.sub_app.ziwei.routes import router as ziwei_router
 
 router = APIRouter(prefix="/ai", tags=["AI"])
 router.include_router(auth_router)
@@ -31,6 +32,7 @@ router.include_router(liuyao_router)
 router.include_router(rag_mgmt_router)
 router.include_router(hehun_router)
 router.include_router(huangli_router)
+router.include_router(ziwei_router)
 router.include_router(observability_router)
 router.include_router(profiles_router)
 router.include_router(favorites_router)

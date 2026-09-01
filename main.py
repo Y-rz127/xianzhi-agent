@@ -30,6 +30,7 @@ from app.tools.mcp_client import mcp_manager
 from app.tools.rag_search import rag_tools
 from app.tools.terminate import terminate_tools
 from app.tools.web_search import search_tools
+from app.tools.ziwei import ziwei_tools
 
 
 def _close_quietly(client) -> None:
@@ -106,7 +107,7 @@ async def lifespan(app: FastAPI):
     # 记忆（数据库不可达时降级，不阻断端口监听）
     memory = create_chat_memory()
 
-    local_tools = bazi_tools + search_tools + terminate_tools + rag_tools + huangli_tools
+    local_tools = bazi_tools + search_tools + terminate_tools + rag_tools + huangli_tools + ziwei_tools
     tarot_app = TarotApp(chat_model=chat_model)
 
     # Xianzhi 按会话池化，首次请求时按需创建实例；HTTP handler 经依赖注入获取，WS 经模块级 get_app_context()
