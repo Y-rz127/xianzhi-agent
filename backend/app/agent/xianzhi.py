@@ -460,8 +460,10 @@ class Xianzhi(ToolCallAgent):
     def _chitchat_reply(self, user_prompt: str) -> str:
         """闲聊短路：直接调一次 LLM，不走 ReAct 循环，不调任何工具。"""
         log.info("[xianzhi] 闲聊短路，跳过 ReAct 工具调用")
-        # 闲聊关闭思考模式（在调用线程内设置，确保 run_stream / arun_stream 两种路径都生效）
-        with use_thinking(False):
+        # 闲聊不再关思考：主模型 qwen3.8-2.4t-a95b 强制要求 enable_thinking=True，
+        # 关思考会被 DashScope 以 400 拒绝（"restricted to True"）；实测闲聊开思考约 4s，可接受。
+        # （在调用线程内设置，确保 run_stream / arun_stream 两种路径都生效）
+        with use_thinking(True):
             self.state = AgentState.RUNNING
             self.message_list.append(HumanMessage(content=user_prompt))
             try:

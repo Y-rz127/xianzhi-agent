@@ -134,6 +134,8 @@ async def ws_chat_with_xianzhi(websocket: WebSocket):
                 client_alive = True
                 try:
                     async for chunk in agent.arun_stream(message, verbose=verbose):
+                        # 调试：确认发送给前端的 chunk 内容（排查"AI 回复为空"）
+                        log.info("[ws] 发送 chunk {}字 :: {}", len(chunk or ""), (chunk or "")[:40])
                         if not await _safe_ws_send(websocket, {"type": "message", "data": chunk}):
                             client_alive = False
                             log.info("客户端已断开，停止流式发送")
