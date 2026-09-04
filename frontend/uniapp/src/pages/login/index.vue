@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <view class="page" :class="themeClass">
     <view class="hero">
       <view class="hero-bg"></view>
@@ -131,7 +131,7 @@ async function onWxLogin() {
     setUser(res.user)
     wxLoggingIn.value = false
     uni.showToast({ title: '登录成功', icon: 'success' })
-    setTimeout(() => uni.switchTab({ url: '/pages/mine/index' }), 500)
+    setTimeout(() => uni.reLaunch({ url: '/pages/mine/index' }), 500)
     // #endif
     // #ifndef MP-WEIXIN
     wxLoggingIn.value = false
@@ -167,7 +167,7 @@ async function onSubmit() {
     setUser(res.user)
     uni.hideLoading()
     uni.showToast({ title: '成功', icon: 'success' })
-    uni.switchTab({ url: '/pages/mine/index' })
+    uni.reLaunch({ url: '/pages/mine/index' })
   } catch (e: any) {
     uni.hideLoading()
     errMsg.value = e?.message || '操作失败'

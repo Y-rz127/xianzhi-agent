@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <view class="page" :class="themeClass">
     <view class="nav-placeholder" :style="{ height: (statusBarHeight + navBarHeight) + 'px' }"></view>
     <view class="nav-bar">
@@ -100,7 +100,7 @@ async function loadProfiles() {
   finally { loading.value = false }
 }
 
-function goBack() { uni.navigateBack({ fail: () => uni.switchTab({ url: '/pages/mine/index' }) }) }
+function goBack() { uni.navigateBack({ fail: () => uni.reLaunch({ url: '/pages/mine/index' }) }) }
 function goNew() { uni.navigateTo({ url: '/pages/mine/profile-edit' }) }
 function goEdit(p: BaziProfile) {
   uni.navigateTo({
@@ -109,7 +109,7 @@ function goEdit(p: BaziProfile) {
 }
 function bringToChat(p: BaziProfile) {
   uni.setStorageSync('XZ_LAUNCH', { birthTime: p.birthTime, gender: p.gender, name: p.name })
-  uni.switchTab({ url: '/pages/xianzhi/index' })
+  uni.reLaunch({ url: '/pages/xianzhi/index' })
 }
 
 // 查看详情

@@ -97,7 +97,8 @@
           <!-- 排盘可视化组件：优先用后端直排盘数据（保证四柱完整），否则从回答文本解析 -->
 
           <view class="msg-text" :class="{ thinking: isThinking(msg.content) }">
-            <MarkdownRender v-if="msg.role === 'assistant' && msg.content" :content="formatContent(msg.content)" />
+            <!-- AI 消息：用纯 text 渲染（uni-app mp-weixin 的 rich-text 渲染不可靠，曾导致内容为空），保留换行 -->
+            <text v-if="msg.role === 'assistant' && msg.content" class="msg-content" :user-select="true">{{ formatContent(msg.content) }}</text>
             <text v-else-if="!msg.content" class="typing">推演中…</text>
             <text v-else>{{ formatContent(msg.content) }}</text>
           </view>
@@ -996,7 +997,9 @@ function onSend() {
   const idx = targetList.length - 1
 
   const onMessage = (chunk: string) => {
-    targetList[idx].content += chunk
+    // 整对象替换以强制触发 v-for 重新渲染（直接改 content 属性在部分 mp-weixin 版本不刷新）
+    const cur = targetList[idx]
+    targetList[idx] = { ...cur, content: cur.content + chunk }
     scrollToBottom()
   }
   const onDone = () => { thinking.value = false }
@@ -1514,6 +1517,12 @@ messages.value.push({
   /* 深色字压白底：灰度抗锯齿让笔画边缘更锐利，避免发虚 */
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+/* AI 消息纯文本渲染（替换 rich-text 兜底）：保留换行、允许长按选择 */
+.msg-content {
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.6;
 }
 /* 统一助手 rich-text 与用户气泡字号：MarkdownRender 默认 28rpx，这里让气泡正文统一为 32rpx */
 .msg-text :deep(.md-render) {

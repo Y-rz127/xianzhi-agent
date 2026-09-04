@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <view class="page" :class="themeClass">
     <view class="status-bar" :style="{ height: statusBarHeight + 'px' }"></view>
 
@@ -139,12 +139,12 @@ async function toggleFav(c: ChartCase) {
 }
 
 function goBack() {
-  uni.navigateBack({ fail: () => uni.switchTab({ url: '/pages/xianzhi/index' }) })
+  uni.navigateBack({ fail: () => uni.reLaunch({ url: '/pages/xianzhi/index' }) })
 }
 
 function loadChartCase(c: ChartCase) {
   uni.setStorageSync('XZ_LAUNCH', { birthTime: c.birthTime, gender: c.gender, name: c.name })
-  uni.switchTab({ url: '/pages/xianzhi/index' })
+  uni.reLaunch({ url: '/pages/xianzhi/index' })
 }
 
 // ---------- 查看详情 ----------

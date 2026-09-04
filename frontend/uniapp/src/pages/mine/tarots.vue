@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <view class="page" :class="themeClass">
     <view class="nav-placeholder" :style="{ height: (statusBarHeight + navBarHeight) + 'px' }"></view>
     <view class="nav-bar">
@@ -84,7 +84,7 @@ async function loadTarots() {
   finally { loading.value = false }
 }
 
-function goBack() { uni.navigateBack({ fail: () => uni.switchTab({ url: '/pages/mine/index' }) }) }
+function goBack() { uni.navigateBack({ fail: () => uni.reLaunch({ url: '/pages/mine/index' }) }) }
 function toggleTarot(t: TarotRecord) { expandedTarot.value = expandedTarot.value === t.id ? '' : t.id }
 function spreadName(s: string) {
   return s === 'three_card' ? '过去现在未来' : s === 'relationship' ? '关系牌阵' : '每日一牌'
