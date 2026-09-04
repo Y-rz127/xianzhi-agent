@@ -41,6 +41,9 @@ function request<T = any>(options: UniApp.RequestOptions): Promise<T> {
     uni.request({
       ...options,
       header,
+      // wx.request / uni.request 默认 60s 会掐断慢请求；主模型做重推理任务（如紫微简批）
+      // 需 135s+，故对齐后端 LLM_TIMEOUT 设更长超时，避免前端先超时收不到结果。
+      timeout: options.timeout ?? 240000,
       url: getApiBase() + options.url,
       success: (res) => {
         if (res.statusCode >= 200 && res.statusCode < 300) {
