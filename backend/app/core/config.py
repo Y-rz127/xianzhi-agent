@@ -120,6 +120,11 @@ class Settings(BaseSettings):
     embedding_local_fallback: bool = Field(default=True, alias="EMBEDDING_LOCAL_FALLBACK")
     # 检索结果缓存 TTL（秒），0=不缓存；避免多轮对话重复调用 embedding
     rag_search_cache_ttl: int = Field(default=60, alias="RAG_SEARCH_CACHE_TTL")
+    # Embedding 批量参数：单次请求最大条数与总字符上限。
+    # DashScope 部分文本嵌入模型（如 qwen 系 flash）在长输入/大批量下会"挂死不返回"而非报错，
+    # 收敛到安全的条数与总字符数可避免这类模型把全量重建拖到超时（详见 embeddings.py）。
+    embedding_batch_size: int = Field(default=10, alias="EMBEDDING_BATCH_SIZE")
+    embedding_max_chars_per_batch: int = Field(default=6000, alias="EMBEDDING_MAX_CHARS_PER_BATCH")
 
     # LangSmith 可观测性
     langsmith_api_key: str = Field(default="", alias="LANGSMITH_API_KEY")

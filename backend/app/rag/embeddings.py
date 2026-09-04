@@ -9,16 +9,45 @@ from app.core.logger import log
 
 
 class BatchEmbeddings(Embeddings):
-    """把大批量 embed_documents 拆成小批次，规避 DashScope 单次 ≤20 条限制。"""
+    """把大批量 embed_documents 拆成小批次，同时满足条数与总字符数双上限。
 
-    def __init__(self, wrapped: Embeddings, batch_size: int = 20):
+    背景：DashScope 部分文本嵌入模型（如 qwen 系 flash）超限时不会返回错误，
+    而是"挂死不响应"直到客户端超时（实测 qwen3.7-text-embedding-flash 单条 ≥600 字、
+    或一批总字符 ≈8.2k 即挂死）。仅按条数拆批（旧版固定 20 条）在长文本/大批量下仍会触发。
+    因此同时用 batch_size 与 max_chars_per_batch 收敛每个请求，规避挂死。
+    """
+
+    def __init__(self, wrapped: Embeddings, batch_size: int = 10, max_chars_per_batch: int = 6000):
         self._wrapped = wrapped
-        self._batch_size = batch_size
+        self._batch_size = max(1, int(batch_size))
+        self._max_chars_per_batch = max(1, int(max_chars_per_batch))
+
+    def _batch(self, texts: list[str]) -> list[list[str]]:
+        """按「条数上限 + 总字符上限」切批；单条超限时单独成批。"""
+        batches: list[list[str]] = []
+        cur: list[str] = []
+        cur_chars = 0
+        for t in texts:
+            # 单条本身超限（罕见，正常 chunk ≤600 字不会触发）——单独一批，避免拖垮整体
+            if len(t) > self._max_chars_per_batch:
+                if cur:
+                    batches.append(cur)
+                    cur, cur_chars = [], 0
+                batches.append([t])
+                continue
+            cur.append(t)
+            cur_chars += len(t)
+            if len(cur) >= self._batch_size or cur_chars >= self._max_chars_per_batch:
+                batches.append(cur)
+                cur, cur_chars = [], 0
+        if cur:
+            batches.append(cur)
+        return batches
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
         result: list[list[float]] = []
-        for i in range(0, len(texts), self._batch_size):
-            result.extend(self._wrapped.embed_documents(texts[i : i + self._batch_size]))
+        for batch in self._batch(texts):
+            result.extend(self._wrapped.embed_documents(batch))
         return result
 
     def embed_query(self, text: str) -> list[float]:
@@ -26,15 +55,28 @@ class BatchEmbeddings(Embeddings):
 
 
 def get_embeddings() -> Embeddings:
-    """DashScope 文本嵌入模型（批量调用包一层 BatchEmbeddings）。"""
-    from langchain_community.embeddings import DashScopeEmbeddings
+    """DashScope 文本嵌入（OpenAI 兼容端点 compatible-mode/v1 + 批量拆分）。
+
+    注意：必须走 compatible-mode/v1 而非原生 DashScopeEmbeddings（原生 SDK 端点）。
+    qwen3.7-text-embedding-flash 在原生端点长输入会挂死 300s 无响应（2026-09-04 排查）。
+    但实测该 flash 模型即便在兼容端点，单条 ≥600 字 / 一批总字符 ≈8.2k 时仍会挂死不返回
+    （约 60s 客户端超时），因此默认 embedding 模型请用 text-embedding-v2（长输入与大批量均稳定 <2s）。
+    批量条数与单次总字符上限见 settings.embedding_batch_size / embedding_max_chars_per_batch。
+    """
+    from langchain_openai import OpenAIEmbeddings
 
     return BatchEmbeddings(
-        DashScopeEmbeddings(
+        OpenAIEmbeddings(
             model=settings.embedding_model,
+            api_key=settings.embedding_api_key,
+            base_url=settings.dashscope_url,
+            timeout=60,
             max_retries=3,
-            dashscope_api_key=settings.embedding_api_key,
-        )
+            # 切片长度远小于 8192 token，关闭本地 tiktoken 预切分，整段直传
+            check_embedding_ctx_length=False,
+        ),
+        batch_size=settings.embedding_batch_size,
+        max_chars_per_batch=settings.embedding_max_chars_per_batch,
     )
 
 

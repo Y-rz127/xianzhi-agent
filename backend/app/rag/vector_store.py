@@ -100,17 +100,47 @@ def _load_postgres(embeddings: Embeddings):
     return store
 
 
+def _pg_connectivity_ok() -> bool:
+    """快速探测 Postgres 连通性，用于区分「Postgres 不可用」与「embedding/写入异常」。
+
+    PGVector 重建失败时异常可能来自连接，也可能来自 embedding 生成（如 DashScope 模型
+    超时挂死）。先做一次带 connect_timeout 的轻量探测，命中失败才判定"Postgres 不可用"，
+    避免把 embedding 超时误报成 Postgres 故障。探测本身耗时 ≈0，仅在重建路径调用。
+    """
+    try:
+        import psycopg
+
+        with psycopg.connect(settings.pg_dsn()) as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1")
+        return True
+    except Exception as e:
+        log.warning("Postgres 连通性探测失败（标记为不可用）： {}", e)
+        return False
+
+
 def _rebuild_store(chunks: list[Document], embeddings: Embeddings, store_type: str):
     """按配置全量重建向量库，返回 (store, 实际生效的 store_type)。
 
     高优先级向量库不可用时回退 Chroma，指纹记录实际生效类型，
     避免下次启动重复尝试不可用后端。
+
+    注意：Postgres 重建失败并不一定意味着 Postgres 不可用——完整重建需要先 embed 全部文本，
+    常见元凶是 DashScope embedding 模型超时（长输入/大批量挂死）。这里先探测连通性，
+    失败才归因于 Postgres；探测通过但重建失败的，明确提示为 embedding/写入异常。
     """
     if store_type == "postgres":
+        if not _pg_connectivity_ok():
+            log.warning("Postgres 连接不可用，回退 Chroma（索引可用性受限）")
+            return _build_chroma(chunks, embeddings), "chroma"
         try:
             return _build_postgres(chunks, embeddings), "postgres"
         except Exception as e:
-            log.warning("Postgres 向量库不可用，回退 Chroma: {}", e)
+            log.warning(
+                "Postgres 可达但重建失败（多为 DashScope embedding 超时/写入异常，而非 Postgres 故障）。"
+                "建议改用 text-embedding-v2 并排查网络；本次回退 Chroma: {}",
+                e,
+            )
     return _build_chroma(chunks, embeddings), "chroma"
 
 
