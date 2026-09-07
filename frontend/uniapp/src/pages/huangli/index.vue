@@ -13,9 +13,7 @@
       <!-- 日期切换 -->
       <view class="date-bar">
         <view class="dbtn" @tap="shiftDay(-1)">‹ 前一天</view>
-        <picker mode="date" :value="dateInput" start="1900-01-01" end="2100-12-31" @change="onDatePick">
-          <view class="dbtn current">{{ dateInput }}</view>
-        </picker>
+        <view class="dbtn current" @tap="openDateSheet('main')">{{ dateInput }}</view>
         <view class="dbtn" @tap="shiftDay(1)">后一天 ›</view>
         <view class="dbtn today" @tap="goToday">回今天</view>
       </view>
@@ -26,7 +24,7 @@
           <text class="day-solar">{{ day.date }} {{ day.solar.slice(-3) }}</text>
           <view class="badges">
             <text class="badge gold">{{ day.lunar.text }}</text>
-            <text class="badge">{{ day.lunar.day_gz }}日</text>
+            <text class="badge">{{ day.lunar.month_gz }}月{{ day.lunar.day_gz }}日</text>
             <text v-for="f in day.festivals" :key="'f' + f" class="badge red">{{ f }}</text>
             <text v-if="day.jieqi" class="badge green">{{ day.jieqi }}</text>
             <text v-if="day.tian_shen.luck === '吉'" class="badge gold">{{ day.tian_shen.name }}·{{ day.tian_shen.type }}</text>
@@ -117,21 +115,13 @@
       <view class="panel">
         <text class="sec-title">择吉</text>
         <view class="zrow">
-          <picker mode="selector" :range="items" :value="itemIndex" @change="onItemPick">
-            <view class="zpick wide">{{ zejiItem || '选择事项' }}</view>
-          </picker>
-          <picker mode="selector" :range="avoidRange" :value="avoidIndex" @change="onAvoidPick">
-            <view class="zpick">{{ avoidRange[avoidIndex] }}</view>
-          </picker>
+          <view class="zpick wide" @tap="openSheet('item')">{{ zejiItem || '选择事项' }}</view>
+          <view class="zpick" @tap="openSheet('avoid')">{{ avoidRange[avoidIndex] }}</view>
         </view>
         <view class="zrow">
-          <picker mode="date" :value="zejiStart" start="1900-01-01" end="2100-12-31" @change="onZejiStartPick">
-            <view class="zpick">{{ zejiStart || '起始日期' }}</view>
-          </picker>
+          <view class="zpick" @tap="openDateSheet('start')">{{ zejiStart || '起始日期' }}</view>
           <text class="zsep">至</text>
-          <picker mode="date" :value="zejiEnd" :start="zejiStart" end="2100-12-31" @change="onZejiEndPick">
-            <view class="zpick">{{ zejiEnd || '截止日期' }}</view>
-          </picker>
+          <view class="zpick" @tap="openDateSheet('end')">{{ zejiEnd || '截止日期' }}</view>
         </view>
         <button class="zeji-btn" :loading="zejiLoading" :disabled="zejiLoading" @tap="runZeji">
           {{ zejiLoading ? '推算中…' : '查询吉日' }}
@@ -151,6 +141,56 @@
 
       <view class="footer">黄历宜忌源自传统历法推演，仅供民俗文化参考，不构成任何决策建议。</view>
     </scroll-view>
+
+    <!-- 事项/生肖选择弹层（自定义底部弹层，字号可控并随主题配色） -->
+    <view v-if="showSheet" class="sheet-mask" @tap="showSheet = false">
+      <view class="sheet" @tap.stop>
+        <view class="sheet-head">
+          <text class="sheet-title">{{ sheetTitle }}</text>
+          <text class="sheet-close" @tap="showSheet = false">✕</text>
+        </view>
+        <scroll-view scroll-y class="sheet-body">
+          <text
+            v-for="(opt, i) in sheetOptions" :key="i"
+            :class="['sheet-item', sheetIndex === i && 'active']"
+            @tap="pickOption(i)"
+          >{{ opt }}</text>
+        </scroll-view>
+      </view>
+    </view>
+    <!-- 日期选择弹层（年/月/日三列，字号可控并随主题配色） -->
+    <view v-if="showDateSheet" class="sheet-mask" @tap="showDateSheet = false">
+      <view class="sheet" @tap.stop>
+        <view class="sheet-head">
+          <text class="sheet-cancel" @tap="showDateSheet = false">取消</text>
+          <text class="sheet-title">{{ datePreview }}</text>
+          <text class="sheet-ok" @tap="commitDate">确定</text>
+        </view>
+        <view class="date-cols">
+          <scroll-view scroll-y class="date-col">
+            <text
+              v-for="y in dpYears" :key="y"
+              :class="['date-item', dpY === y && 'active']"
+              @tap="dpY = y"
+            >{{ y }}年</text>
+          </scroll-view>
+          <scroll-view scroll-y class="date-col">
+            <text
+              v-for="m in 12" :key="m"
+              :class="['date-item', dpM === m && 'active']"
+              @tap="dpM = m"
+            >{{ m }}月</text>
+          </scroll-view>
+          <scroll-view scroll-y class="date-col">
+            <text
+              v-for="d in dpDays" :key="d"
+              :class="['date-item', dpD === d && 'active']"
+              @tap="dpD = d"
+            >{{ d }}日</text>
+          </scroll-view>
+        </view>
+      </view>
+    </view>
   </view>
 </template>
 
@@ -246,21 +286,70 @@ function goToday() {
   dateInput.value = fmt(new Date())
   loadDay()
 }
-function onDatePick(e: any) {
-  dateInput.value = e.detail.value
-  loadDay()
-}
 function jumpTo(iso: string) {
   dateInput.value = iso
   loadDay()
   uni.pageScrollTo({ scrollTop: 0, duration: 250 })
 }
 
-function onItemPick(e: any) {
-  itemIndex.value = Number(e.detail.value)
+/* 自定义日期选择弹层（原生 date picker 弹层字号偏小且不受主题控制，故改用自绘三列） */
+const showDateSheet = ref(false)
+const dateTarget = ref<'main' | 'start' | 'end'>('main')
+const dpY = ref(2026)
+const dpM = ref(1)
+const dpD = ref(1)
+const dpYears = Array.from({ length: 2100 - 1900 + 1 }, (_, i) => 1900 + i)
+const dpDays = computed(() => {
+  const max = new Date(dpY.value, dpM.value, 0).getDate()
+  return Array.from({ length: max }, (_, i) => i + 1)
+})
+const datePreview = computed(() => {
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${dpY.value}-${pad(dpM.value)}-${pad(dpD.value)}`
+})
+
+function openDateSheet(target: 'main' | 'start' | 'end') {
+  const v = target === 'main' ? dateInput.value : target === 'start' ? zejiStart.value : zejiEnd.value
+  const [y, m, d] = (v || fmt(new Date())).split('-').map(Number)
+  dpY.value = y
+  dpM.value = m
+  dpD.value = d
+  dateTarget.value = target
+  showDateSheet.value = true
 }
-function onAvoidPick(e: any) {
-  avoidIndex.value = Number(e.detail.value)
+function commitDate() {
+  const iso = datePreview.value
+  const maxD = new Date(dpY.value, dpM.value, 0).getDate()
+  if (dpD.value > maxD) dpD.value = maxD
+  if (dateTarget.value === 'main') {
+    dateInput.value = iso
+    loadDay()
+  } else if (dateTarget.value === 'start') {
+    zejiStart.value = iso
+    if (zejiEnd.value && iso > zejiEnd.value) zejiEnd.value = iso
+  } else {
+    zejiEnd.value = iso
+    if (zejiStart.value && iso < zejiStart.value) zejiStart.value = iso
+  }
+  showDateSheet.value = false
+}
+
+/* 自定义事项/生肖选择弹层（原生 picker 弹层字号偏小且不受主题控制，故改用自绘底部弹层） */
+const showSheet = ref(false)
+const sheetKind = ref<'item' | 'avoid'>('item')
+const sheetIndex = ref(0)
+const sheetOptions = computed(() => (sheetKind.value === 'item' ? items.value : avoidRange))
+const sheetTitle = computed(() => (sheetKind.value === 'item' ? '择吉事项' : '冲煞生肖'))
+
+function openSheet(kind: 'item' | 'avoid') {
+  sheetKind.value = kind
+  sheetIndex.value = kind === 'item' ? itemIndex.value : avoidIndex.value
+  showSheet.value = true
+}
+function pickOption(i: number) {
+  if (sheetKind.value === 'item') itemIndex.value = i
+  else avoidIndex.value = i
+  showSheet.value = false
 }
 
 async function runZeji() {
@@ -321,7 +410,7 @@ onMounted(() => {
 .day-head { text-align: center; margin-bottom: 24rpx; }
 .day-solar { display: block; font-size: 44rpx; font-weight: 700; color: $nx-gold-light; letter-spacing: 2rpx; }
 .badges { display: flex; flex-wrap: wrap; justify-content: center; gap: 12rpx; margin-top: 16rpx; }
-.badge { padding: 6rpx 18rpx; border-radius: 999rpx; font-size: 22rpx; border: 1rpx solid $nx-border; color: $nx-text-dim; }
+.badge { padding: 6rpx 18rpx; border-radius: 999rpx; font-size: 24rpx; border: 1rpx solid $nx-border; color: $nx-text-dim; }
 .badge.gold { color: $nx-gold-light; border-color: $nx-border-strong; background: rgba(212, 175, 55, .1); }
 .badge.red { color: $nx-ji; border-color: rgba(231, 155, 161, .45); }
 .badge.green { color: $nx-yi; border-color: rgba(143, 206, 159, .45); }
@@ -337,21 +426,21 @@ onMounted(() => {
 .chip.ji { color: $nx-ji; background: rgba(181, 75, 98, .1); border: 1rpx solid rgba(231, 155, 161, .3); }
 
 .infos { display: flex; flex-wrap: wrap; margin-top: 28rpx; border-top: 1rpx solid $nx-border; padding-top: 24rpx; }
-.info { width: 50%; box-sizing: border-box; padding: 10rpx 8rpx; display: flex; gap: 12rpx; }
-.info .k { color: $nx-text-muted; font-size: 24rpx; flex-shrink: 0; }
-.info .v { color: $nx-text; font-size: 24rpx; }
-.info .v.small { font-size: 22rpx; line-height: 1.5; }
+.info { width: 50%; box-sizing: border-box; padding: 12rpx 8rpx; display: flex; gap: 12rpx; }
+.info .k { color: $nx-text-muted; font-size: 26rpx; flex-shrink: 0; }
+.info .v { color: $nx-text; font-size: 28rpx; line-height: 1.4; }
+.info .v.small { font-size: 26rpx; line-height: 1.5; }
 .info:nth-child(8) { width: 100%; }
 
 .positions { display: flex; flex-wrap: wrap; margin-top: 18rpx; padding-top: 20rpx; border-top: 1rpx solid $nx-border; }
 .pos { width: 25%; box-sizing: border-box; text-align: center; padding: 8rpx 0; }
 .pos:nth-child(n+5) { padding-top: 18rpx; }
-.pos .k { display: block; color: $nx-text-muted; font-size: 22rpx; }
-.pos .v { display: block; color: $nx-gold-light; font-size: 28rpx; font-weight: 600; margin-top: 6rpx; }
+.pos .k { display: block; color: $nx-text-muted; font-size: 24rpx; }
+.pos .v { display: block; color: $nx-gold-light; font-size: 32rpx; font-weight: 600; margin-top: 6rpx; }
 
 .fold { margin-top: 24rpx; text-align: center; color: $nx-text-dim; font-size: 25rpx; padding: 14rpx; border: 1rpx dashed rgba(212, 175, 55, .25); border-radius: 12rpx; }
 .shens { margin-top: 18rpx; }
-.shen-line { display: block; font-size: 24rpx; color: $nx-text; line-height: 1.8; }
+.shen-line { display: block; font-size: 27rpx; color: $nx-text; line-height: 1.8; }
 .good { color: $nx-yi; font-weight: 600; }
 .bad { color: $nx-ji; font-weight: 600; }
 
@@ -370,17 +459,17 @@ onMounted(() => {
 .hd-line { display: block; font-size: 24rpx; color: $nx-text; line-height: 1.8; }
 
 /* 月概览 */
-.month { display: flex; flex-wrap: wrap; }
-.mcell { width: 14.28%; box-sizing: border-box; height: 128rpx; padding: 8rpx 2rpx; text-align: center; border: 1rpx solid $nx-border; position: relative; }
+.month { display: grid; grid-template-columns: repeat(6, 1fr); }
+.mcell { box-sizing: border-box; min-height: 140rpx; padding: 10rpx 4rpx 8rpx; text-align: center; border: 1rpx solid $nx-border; position: relative; }
 .mcell.cur { background: rgba(212, 175, 55, .15); border-color: $nx-border-strong; }
-.mcell .md { display: block; font-size: 26rpx; color: $nx-text; }
-.mcell .ml { display: block; font-size: 17rpx; color: $nx-text-muted; margin-top: 2rpx; overflow: hidden; }
-.mcell .mf { display: block; font-size: 17rpx; color: $nx-ji; margin-top: 2rpx; overflow: hidden; }
-.mcell .ms { position: absolute; top: 2rpx; right: 4rpx; font-size: 16rpx; color: $nx-gold-light; }
+.mcell .md { display: block; font-size: 30rpx; color: $nx-text; line-height: 1.2; }
+.mcell .ml { display: block; font-size: 21rpx; color: $nx-text-dim; margin-top: 4rpx; line-height: 1.3; }
+.mcell .mf { display: block; font-size: 21rpx; color: $nx-ji; margin-top: 4rpx; line-height: 1.3; }
+.mcell .ms { position: absolute; top: 4rpx; right: 6rpx; font-size: 20rpx; color: $nx-gold-light; }
 
 /* 择吉 */
 .zrow { display: flex; align-items: center; gap: 14rpx; margin-bottom: 18rpx; }
-.zrow picker { flex: 1; min-width: 0; }
+.zrow .zpick { flex: 1; min-width: 0; }
 .zpick { padding: 18rpx 20rpx; background: $nx-bg-3; border: 1rpx solid $nx-border; border-radius: 12rpx; color: $nx-text; font-size: 26rpx; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .zpick.wide { font-weight: 600; color: $nx-gold-light; }
 .zsep { color: $nx-text-muted; font-size: 24rpx; flex-shrink: 0; }
@@ -393,6 +482,26 @@ onMounted(() => {
 .zd { display: block; font-size: 28rpx; color: $nx-gold-light; font-weight: 600; }
 .zsub { display: block; font-size: 22rpx; color: $nx-text-dim; margin-top: 6rpx; }
 .zstar { flex-shrink: 0; font-size: 22rpx; color: $nx-gold-light; text-align: right; max-width: 40%; }
+
+/* 事项/生肖选择弹层 */
+.sheet-mask { position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 999; background: rgba(0, 0, 0, .55); display: flex; align-items: flex-end; }
+.sheet { width: 100%; max-height: 72vh; background: $nx-bg-3; border-top-left-radius: 28rpx; border-top-right-radius: 28rpx; border-top: 4rpx solid $nx-accent-huangli; display: flex; flex-direction: column; overflow: hidden; padding-bottom: env(safe-area-inset-bottom); }
+.sheet-head { display: flex; align-items: center; justify-content: space-between; padding: 30rpx 36rpx; border-bottom: 1rpx solid $nx-border; flex-shrink: 0; }
+.sheet-title { font-size: 34rpx; color: $nx-gold-light; font-weight: 700; letter-spacing: 2rpx; }
+.sheet-close { font-size: 36rpx; color: $nx-text-dim; padding: 0 12rpx; }
+.sheet-body { height: 56vh; max-height: 56vh; padding: 10rpx 0 30rpx; }
+.sheet-item { display: block; padding: 26rpx 40rpx; font-size: 34rpx; color: $nx-text; text-align: center; line-height: 1.5; }
+.sheet-item.active { color: $nx-gold-light; font-weight: 700; background: rgba(212, 175, 55, .12); }
+.sheet-item:active { background: rgba(212, 175, 55, .08); }
+
+/* 日期选择弹层（年/月/日三列） */
+.sheet-cancel { font-size: 32rpx; color: $nx-text-dim; padding: 0 12rpx; }
+.sheet-ok { font-size: 32rpx; color: $nx-gold-light; font-weight: 600; padding: 0 12rpx; }
+.date-cols { display: flex; height: 52vh; }
+.date-col { flex: 1; }
+.date-item { display: block; padding: 26rpx 6rpx; font-size: 34rpx; color: $nx-text; text-align: center; line-height: 1.5; }
+.date-item.active { color: $nx-gold-light; font-weight: 700; background: rgba(212, 175, 55, .12); }
+.date-item:active { background: rgba(212, 175, 55, .08); }
 
 .footer { text-align: center; color: $nx-text-muted; font-size: 21rpx; padding: 24rpx 60rpx 60rpx; line-height: 1.7; }
 </style>

@@ -284,7 +284,7 @@ def _compute_chart_payload(birth_time: str, gender: str, sect: int, yun_sect: in
     birth_time = _normalize_birth_time(birth_time)
     parse_birth(birth_time)
     parse_gender(gender)
-    chart = build_bazi_chart(birth_time, gender, sect=sect, yun_sect=yun_sect, dayun_count=8, liunian_years=5, longitude=longitude)
+    chart = build_bazi_chart(birth_time, gender, sect=sect, yun_sect=yun_sect, dayun_count=12, liunian_years=5, longitude=longitude, liunian_cover_dayun=True)
     payload = chart_to_api_dict(chart)
     payload.update({
         "chartText": format_chart_text(chart),

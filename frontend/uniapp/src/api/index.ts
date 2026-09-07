@@ -11,6 +11,9 @@ export type {
   AnswerFeedbackPayload, BaziProfile, ChartAnalysis, ChartCase, ChartData,
   ChatSession, DayunItem, FavoriteCase, HehunParams, LiuNianItem, Pillar,
   SessionMessage, ShenshaItem, TarotRecord, WuxingItem, XzUser,
+  XiPanColumn, XiPanCurrent, XiPanDaYun, XiPanData, XiPanLiuNian,
+  XiPanLiuYue, XiPanQiYun, XiPanRelationGroup, XiPanRelations, XiPanSiLing,
+  XiPanSnapshot, XiPanWuxingState, XiPanMonthMeta,
 } from '@shared/api'
 export type { SessionBirthInfo as BirthInfo } from '@shared/api'
 export { parseDayun, parsePillars, parseShensha, parseWuxing } from '@shared/api'
@@ -215,6 +218,11 @@ export const getChart = (birthTime: string, gender: string, sect = 2, yunSect = 
     yun_sect: yunSect,
     ...(longitude ? { longitude } : {}),
   })
+
+export interface BaziCandidate { birth_time: string; ganzhi: string; shi_chen: string }
+/** 根据四柱干支反推候选出生日期（用户只知八字、不知精确生辰时） */
+export const inferBaziDates = (pillars: string, gender: string, topN = 1) =>
+  post<{ pillars: string; gender: string; candidates: BaziCandidate[] }>(EP.INFER_DATES, { pillars, gender, top_n: topN })
 
 /* ============ 命理报告（后台任务：提交 → 轮询 → 取结果） ============ */
 

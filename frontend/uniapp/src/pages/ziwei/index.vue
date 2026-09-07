@@ -19,28 +19,28 @@
         </view>
 
         <text class="label">出生日期</text>
-        <picker v-if="calendar === 'solar'" mode="date" :value="solarDate" start="1900-01-01" end="2099-12-31" @change="e => solarDate = e.detail.value">
+        <picker v-if="calendar === 'solar'" mode="date" :value="solarDate" start="1900-01-01" end="2099-12-31" @change="onSolarDatePick">
           <view class="field">{{ solarDate }}</view>
         </picker>
         <view v-else class="lunar-row">
-          <picker class="lunar-cell" mode="selector" :range="yearOptions" :value="lunarYearIdx" @change="e => lunarYearIdx = +e.detail.value">
+          <picker class="lunar-cell" mode="selector" :range="yearOptions" :value="lunarYearIdx" @change="onLunarYearPick">
             <view class="field">{{ yearOptions[lunarYearIdx] }}</view>
           </picker>
-          <picker class="lunar-cell" mode="selector" :range="monthOptions" :value="lunarMonthIdx" @change="e => lunarMonthIdx = +e.detail.value">
+          <picker class="lunar-cell" mode="selector" :range="monthOptions" :value="lunarMonthIdx" @change="onLunarMonthPick">
             <view class="field">{{ monthOptions[lunarMonthIdx] }}</view>
           </picker>
-          <picker class="lunar-cell" mode="selector" :range="dayOptions" :value="lunarDayIdx" @change="e => lunarDayIdx = +e.detail.value">
+          <picker class="lunar-cell" mode="selector" :range="dayOptions" :value="lunarDayIdx" @change="onLunarDayPick">
             <view class="field">{{ dayOptions[lunarDayIdx] }}</view>
           </picker>
         </view>
 
         <view v-if="calendar === 'lunar'" class="leap-line">
           <text class="leap-text">闰月（该年有闰月时生效）</text>
-          <switch :checked="leap" color="#5B6FC8" @change="e => leap = e.detail.value" />
+          <switch :checked="leap" color="#5B6FC8" @change="onLeapChange" />
         </view>
 
         <text class="label">出生时辰</text>
-        <picker mode="selector" :range="timeOptions" :value="timeIndex" @change="e => timeIndex = +e.detail.value">
+        <picker mode="selector" :range="timeOptions" :value="timeIndex" @change="onTimePick">
           <view class="field">{{ timeOptions[timeIndex] }}</view>
         </picker>
 
@@ -205,7 +205,8 @@ const CENTER_CELLS = new Set([5, 6, 9, 10])
 const boardCells = computed(() => {
   const byCell: Record<number, ZiWeiPalace> = {}
   if (chart.value) for (const p of chart.value.palaces) byCell[BRANCH_CELL[p.earthly_branch]] = p
-  const cells: any[] = []
+  interface BoardCell { key: string; cls: string; style: string; palace: ZiWeiPalace | null }
+  const cells: BoardCell[] = []
   for (let c = 0; c < 16; c++) {
     const row = Math.floor(c / 4) + 1
     const col = (c % 4) + 1
@@ -236,6 +237,12 @@ const sanFangSiZheng = computed(() => {
 function back() { uni.navigateBack() }
 function resetForm() { phase.value = 'form'; chart.value = null; interpretation.value = '' }
 function openDetail(p: ZiWeiPalace) { detail.value = p }
+function onSolarDatePick(e: any) { solarDate.value = e.detail.value }
+function onLunarYearPick(e: any) { lunarYearIdx.value = +e.detail.value }
+function onLunarMonthPick(e: any) { lunarMonthIdx.value = +e.detail.value }
+function onLunarDayPick(e: any) { lunarDayIdx.value = +e.detail.value }
+function onLeapChange(e: any) { leap.value = !!e.detail.value }
+function onTimePick(e: any) { timeIndex.value = +e.detail.value }
 
 function castParams() {
   if (calendar.value === 'solar') {

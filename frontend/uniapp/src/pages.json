@@ -46,6 +46,13 @@
       }
     },
     {
+      "path": "pages/chart-detail/index",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "命盘详情"
+      }
+    },
+    {
       "path": "pages/mine/index",
       "style": {
         "navigationStyle": "custom",

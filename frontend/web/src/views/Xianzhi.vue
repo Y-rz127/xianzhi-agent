@@ -1,5 +1,6 @@
 <template>
   <div class="chat-view">
+    <transition name="toast-fade"><div v-if="toastMsg" class="chat-toast">{{ toastMsg }}</div></transition>
     <div class="sidebar-mask" v-if="!sidebarCollapsed && isMobile" @click="sidebarCollapsed = true"></div>
     <div class="chat-sidebar" :class="{ collapsed: sidebarCollapsed }">
       <div class="sidebar-header">
@@ -71,7 +72,7 @@
               <option :value="2">分钟数</option>
             </select>
           </div>
-          <button class="btn header-btn btn-accent" @click="showBaziModal" title="命盘详情">
+          <button class="btn header-btn btn-accent" @click="openChartDetail" title="命盘详情">
             <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0z"/><path d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
             命盘
           </button>
@@ -200,23 +201,6 @@
       </div>
     </div>
 
-    <BaziModal
-      :visible="showModal"
-      :pillars="modalPillars"
-      :wuxing="modalWuxing"
-      :dayun="modalDayun"
-      :liunian="modalLiunian"
-      :shensha="modalShensha"
-      :analysis="chartData?.analysis"
-      :startYun="chartData?.startYun"
-      :warnings="chartData?.warnings || []"
-      :birthTime="lastBirthInfo?.time"
-      :gender="lastBirthInfo?.gender"
-      :mingGong="chartData?.mingGong"
-      :shenGong="chartData?.shenGong"
-      @close="showModal = false"
-    />
-
     <Teleport to="body">
       <div v-if="showCaseModal" class="case-modal-overlay" @click.self="closeCaseModal">
         <div class="case-modal">
@@ -260,15 +244,17 @@
 <script setup lang="ts">
 defineOptions({ name: 'Xianzhi' })
 import { ref, nextTick, computed, onMounted, onActivated, onUnmounted } from "vue"
-import { chatWithXianzhi, downloadReport, parsePillars, parseWuxing, parseDayun, parseShensha, fetchSessions, deleteSession as deleteSessionApi, getSessionMessages, getSessionBirthInfo, fetchChartCases, createChartCase, deleteChartCase, getChart, submitAnswerFeedback, transcribeAudio, type ChatSession, type SessionMessage, type ChartCase, type ChartData, type SSECallbacks } from "../api/index.ts"
+import { chatWithXianzhi, downloadReport, parsePillars, parseWuxing, parseDayun, parseShensha, fetchSessions, deleteSession as deleteSessionApi, getSessionMessages, getSessionBirthInfo, fetchChartCases, createChartCase, deleteChartCase, getChart, inferBaziDates, submitAnswerFeedback, transcribeAudio, type ChatSession, type SessionMessage, type ChartCase, type ChartData, type SSECallbacks } from "../api/index.ts"
 import { matchCityByName } from "../utils/region-data.ts"
 import BaziCard from "../components/BaziCard.vue"
 import WuxingChart from "../components/WuxingChart.vue"
 import DayunTimeline from "../components/DayunTimeline.vue"
-import BaziModal from "../components/BaziModal.vue"
 import MarkdownRender from "../components/MarkdownRender.vue"
+import { useRouter } from "vue-router"
 
 interface BirthInfo { time: string; gender: string }
+
+const router = useRouter()
 
 const messages = ref<SessionMessage[]>([])
 const input = ref("")
@@ -288,7 +274,6 @@ const sidebarCollapsed = ref(true)
 const isMobile = ref(false)
 const appSidebarOpen = ref(false)
 const sessions = ref<ChatSession[]>([])
-const showModal = ref(false)
 const chartCases = ref<ChartCase[]>([])
 const showCaseModal = ref(false)
 const caseModalMode = ref<"save" | "manual">("save")
@@ -395,11 +380,6 @@ const pillars = computed(() => lastAssistantMsg.value ? parsePillars(extractAnsw
 const wuxing = computed(() => lastAssistantMsg.value ? parseWuxing(extractAnswer(lastAssistantMsg.value.content)) : [])
 const dayun = computed(() => lastAssistantMsg.value ? parseDayun(extractAnswer(lastAssistantMsg.value.content)) : [])
 const shensha = computed(() => lastAssistantMsg.value ? parseShensha(extractAnswer(lastAssistantMsg.value.content)) : [])
-const modalPillars = computed(() => chartData.value?.pillars?.length ? chartData.value.pillars : pillars.value)
-const modalWuxing = computed(() => chartData.value?.wuxing?.length ? chartData.value.wuxing : wuxing.value)
-const modalDayun = computed(() => chartData.value?.dayun?.length ? chartData.value.dayun : dayun.value)
-const modalLiunian = computed(() => chartData.value?.liunian || [])
-const modalShensha = computed(() => chartData.value?.shensha?.length ? chartData.value.shensha : shensha.value)
 const parsedDayun = computed(() => dayun.value.map(d => ({ ...d, liunian: [] })))
 const canSaveCase = computed(() =>
   caseName.value.trim() && caseBirthTime.value.trim() && (caseGender.value === "男" || caseGender.value === "女")
@@ -486,13 +466,41 @@ const fetchChartData = async (birthTime: string, gender: string) => {
   }
 }
 
-const tryExtractBirth = (text: string) => {
-  const m = text.match(/(男|女)/)
-  const t = text.match(/(\d{4}[-年/]\d{1,2}[-月/]\d{1,2}[日 ]+\d{1,2}[:：]\d{1,2})/)
-  if (m && t) {
-    const time = t[1].replace(/年|月/g, "-").replace("日", "").replace("：", ":").trim()
-    lastBirthInfo.value = { time, gender: m[1] }
-    fetchChartData(time, m[1])
+let toastTimer: ReturnType<typeof setTimeout> | undefined
+const toastMsg = ref("")
+const showToast = (msg: string) => {
+  toastMsg.value = msg
+  if (toastTimer) clearTimeout(toastTimer)
+  toastTimer = setTimeout(() => { toastMsg.value = "" }, 2600)
+}
+
+const tryExtractBirth = async (text: string) => {
+  const gender = text.match(/(男|女)/)?.[1]
+  const standard = text.match(/(\d{4}[-年/]\d{1,2}[-月/]\d{1,2}[日 ]+\d{1,2}[:：]\d{1,2})/)
+  if (gender && standard) {
+    const time = standard[1].replace(/年|月/g, "-").replace("日", "").replace("：", ":").trim()
+    lastBirthInfo.value = { time, gender }
+    fetchChartData(time, gender)
+    return
+  }
+  // 干支四柱（如 甲申 庚午 壬申 甲辰）→ 反推出生时间
+  if (gender) {
+    const pillars = (text.match(/[甲乙丙丁戊己庚辛壬癸][子丑寅卯辰巳午未申酉戌亥]/g) || []).slice(0, 4).join("")
+    if (pillars.length === 8) {
+      try {
+        const { candidates } = await inferBaziDates({ pillars, gender, top_n: 1 })
+        const bt = candidates?.[0]?.birth_time
+        if (bt) {
+          lastBirthInfo.value = { time: bt, gender }
+          fetchChartData(bt, gender)
+          toastMsg.value = `已按四柱 ${pillars} 反推出生时间：${bt}`
+        } else {
+          toastMsg.value = "该四柱有多个可能出生时间，请补充出生年月日时"
+        }
+      } catch {
+        toastMsg.value = "四柱反推失败，请提供标准出生年月日时"
+      }
+    }
   }
 }
 
@@ -529,11 +537,19 @@ const exportChat = () => {
 }
 
 const useExample = (ex: string) => { input.value = ex }
-const showBaziModal = async () => {
-  if (lastBirthInfo.value && !chartData.value) {
-    await fetchChartData(lastBirthInfo.value.time, lastBirthInfo.value.gender)
-  }
-  showModal.value = true
+const openChartDetail = () => {
+  const bi = lastBirthInfo.value
+  if (!bi?.time || !bi.gender) return
+  router.push({
+    path: "/chart-detail",
+    query: {
+      birth_time: bi.time,
+      gender: bi.gender,
+      sect: String(sect.value),
+      yun_sect: String(yunSect.value),
+      ...(birthLongitude.value ? { longitude: String(birthLongitude.value) } : {}),
+    },
+  })
 }
 const toggleSidebar = () => {
   sidebarCollapsed.value = !sidebarCollapsed.value
@@ -950,6 +966,11 @@ textarea:disabled { opacity: 0.5; cursor: not-allowed; }
   .chat-view { overflow: hidden; }
 }
 
+.chat-toast { position: fixed; top: 70px; left: 50%; transform: translateX(-50%); z-index: 200;
+  background: rgba(15,21,32,0.92); color: #f5f5f5; border: 1px solid var(--border);
+  border-radius: 8px; padding: 8px 16px; font-size: 13px; max-width: 86vw; text-align: center; }
+.toast-fade-enter-active, .toast-fade-leave-active { transition: opacity 0.2s; }
+.toast-fade-enter-from, .toast-fade-leave-to { opacity: 0; }
 .case-modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7);
   display: flex; align-items: center; justify-content: center; z-index: 100; }
 .case-modal { width: 90%; max-width: 420px; background: rgba(15,21,32,0.95); border: 1px solid var(--border);

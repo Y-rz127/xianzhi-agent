@@ -25,8 +25,6 @@ from app.domain.chart_builder import (  # noqa: F401
     _ganzhi_detail,
     _gender_label,
     _pillar,
-    _ten_god,
-    _zizuo,
     build_bazi_chart,
     chart_to_api_dict,
     parse_birth,
@@ -57,3 +55,4 @@ from app.domain.tables import (  # noqa: F401  (私有表显式重导出，* 不
     _YANG_GAN,
     _ZHI_SEQ,
 )
+from app.domain.xipan import build_xipan, ten_god, zizuo  # noqa: F401

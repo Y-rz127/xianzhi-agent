@@ -32,6 +32,7 @@ from app.domain.tables import (
     WUXING_ORDER,
     ZHI_WUXING,
 )
+from app.domain.xipan import build_xipan, ten_god, zizuo
 
 
 def parse_birth(birth_time: str) -> tuple[int, int, int, int, int]:
@@ -67,51 +68,16 @@ def _gender_label(gender_int: int) -> str:
     return "男" if gender_int == 1 else "女"
 
 
-def _zizuo(gan: str, zhi: str) -> str:
-    """天干在其本柱地支的十二长生状态（自坐）：阳干顺行、阴干逆行。"""
-    if not gan or not zhi:
-        return ""
-    base = _GAN_CHANGSHENG_ZHI.get(gan)
-    if not base or base not in _ZHI_SEQ or zhi not in _ZHI_SEQ:
-        return ""
-    i_base = _ZHI_SEQ.index(base)
-    i_zhi = _ZHI_SEQ.index(zhi)
-    offset = (i_zhi - i_base) % 12 if gan in _YANG_GAN else (i_base - i_zhi) % 12
-    return CHANG_SHENG[offset]
-
-
-def _ten_god(day_master: str, target_gan: str) -> str:
-    """计算 target_gan 相对 day_master 的十神（主星）。"""
-    if not day_master or not target_gan:
-        return ""
-    dm_wx = GAN_WUXING.get(day_master, "")
-    tg_wx = GAN_WUXING.get(target_gan, "")
-    if not dm_wx or not tg_wx:
-        return ""
-    same_polarity = (day_master in _YANG_GAN) == (target_gan in _YANG_GAN)
-    if dm_wx == tg_wx:
-        return "比肩" if same_polarity else "劫财"
-    if GENERATES[dm_wx] == tg_wx:
-        return "食神" if same_polarity else "伤官"
-    if CONTROLS[dm_wx] == tg_wx:
-        return "偏财" if same_polarity else "正财"
-    if GENERATES[tg_wx] == dm_wx:
-        return "偏印" if same_polarity else "正印"
-    if CONTROLS[tg_wx] == dm_wx:
-        return "七杀" if same_polarity else "正官"
-    return ""
-
-
 def _ganzhi_detail(ganzhi: str, day_master_gan: str, pillars: list[Pillar], gender_int: int) -> dict[str, Any]:
     """为大运/流年干支计算详细字段：主星、藏干、副星、星运、神煞。"""
     if not ganzhi or len(ganzhi) < 2:
         return {}
     gan = ganzhi[0]
     zhi = ganzhi[1]
-    shishen_gan = _ten_god(day_master_gan, gan)
+    shishen_gan = ten_god(day_master_gan, gan)
     hidden = [s for s, _ in HIDDEN_STEMS.get(zhi, ())]
-    shishen_zhi = [_ten_god(day_master_gan, s) for s in hidden]
-    changsheng = _zizuo(day_master_gan, zhi)
+    shishen_zhi = [ten_god(day_master_gan, s) for s in hidden]
+    changsheng = zizuo(day_master_gan, zhi)
     # 临时 Pillar 并入四柱计算神煞，再筛出该柱神煞
     temp_name = "运柱"
     temp_pillar = Pillar(
@@ -252,11 +218,13 @@ def build_bazi_chart(
     liunian_years: int = 5,
     liunian_start_year: int | None = None,
     longitude: float | None = None,
+    liunian_cover_dayun: bool = False,
 ) -> BaziChart:
     """构建完整八字命盘（BaziChart）。
 
     sect: 日柱计算流派；yun_sect: 大运计算流派；
-    longitude: 出生地经度，用于真太阳时校正（基准 120°E，每度差 4 分钟）。
+    longitude: 出生地经度，用于真太阳时校正（基准 120°E，每度差 4 分钟）；
+    liunian_cover_dayun: 流年范围自动扩展到覆盖当前大运起止（前端流年神煞需整运十年）。
     """
     y, m, d, h, mi = parse_birth(birth_time)
     gender_int = parse_gender(gender)
@@ -286,20 +254,28 @@ def build_bazi_chart(
 
     pillars = [
         _pillar("年柱", ec.getYear(), ec.getYearNaYin(), ec.getYearXunKong(), ec.getYearHideGan(), ec.getYearShiShenGan(), ec.getYearShiShenZhi(),
-                changsheng=ec.getYearDiShi(), zizuo=_zizuo(ec.getYearGan(), ec.getYearZhi())),
+                changsheng=ec.getYearDiShi(), zizuo=zizuo(ec.getYearGan(), ec.getYearZhi())),
         _pillar("月柱", ec.getMonth(), ec.getMonthNaYin(), ec.getMonthXunKong(), ec.getMonthHideGan(), ec.getMonthShiShenGan(), ec.getMonthShiShenZhi(),
-                changsheng=ec.getMonthDiShi(), zizuo=_zizuo(ec.getMonthGan(), ec.getMonthZhi())),
+                changsheng=ec.getMonthDiShi(), zizuo=zizuo(ec.getMonthGan(), ec.getMonthZhi())),
         _pillar("日柱", ec.getDay(), ec.getDayNaYin(), ec.getDayXunKong(), ec.getDayHideGan(), "日主", ec.getDayShiShenZhi(),
-                changsheng=ec.getDayDiShi(), zizuo=_zizuo(ec.getDayGan(), ec.getDayZhi())),
+                changsheng=ec.getDayDiShi(), zizuo=zizuo(ec.getDayGan(), ec.getDayZhi())),
         _pillar("时柱", ec.getTime(), ec.getTimeNaYin(), ec.getTimeXunKong(), ec.getTimeHideGan(), ec.getTimeShiShenGan(), ec.getTimeShiShenZhi(),
-                changsheng=ec.getTimeDiShi(), zizuo=_zizuo(ec.getTimeGan(), ec.getTimeZhi())),
+                changsheng=ec.getTimeDiShi(), zizuo=zizuo(ec.getTimeGan(), ec.getTimeZhi())),
     ]
     wuxing = _build_wuxing_analysis(ec)
     analysis = _build_domain_analysis(pillars, wuxing)
     day_master_gan = ec.getDayGan()
     dayun = _build_dayun(yun, dayun_count, day_master_gan, pillars, gender_int)
     start_year = liunian_start_year or datetime.date.today().year
-    liunian = _build_liunian(yun, dayun, start_year, liunian_years, day_master_gan, pillars, gender_int)
+    liunian_end = start_year + liunian_years - 1
+    if liunian_cover_dayun:
+        # 流年范围扩展到覆盖当前大运起止（含大运起始年可能早于今年的情形）
+        cur_dyun = _find_dayun_for_year(dayun, start_year)
+        if cur_dyun:
+            start_year = min(start_year, cur_dyun.start_year)
+            liunian_end = max(liunian_end, cur_dyun.end_year)
+    liunian = _build_liunian(yun, dayun, start_year, liunian_end - start_year + 1, day_master_gan, pillars, gender_int)
+    xipan = build_xipan(yun, pillars, gender_int, day_master_gan, dayun_direction)
 
     warnings = [
         "流年干支采用立春口径；具体到立春前后的事件判断，应结合准确日期时刻。",
@@ -324,6 +300,7 @@ def build_bazi_chart(
         analysis=analysis,
         dayun=dayun,
         liunian=liunian,
+        xipan=xipan,
         ming_gong=ec.getMingGong(),
         ming_gong_nayin=ec.getMingGongNaYin(),
         shen_gong=ec.getShenGong(),
@@ -413,4 +390,5 @@ def chart_to_api_dict(chart: BaziChart) -> dict[str, Any]:
         "shenGong": f"{chart.shen_gong}（{chart.shen_gong_nayin}）",
         "startYun": chart.start_yun,
         "warnings": chart.warnings,
+        "xipan": chart.xipan,
     }

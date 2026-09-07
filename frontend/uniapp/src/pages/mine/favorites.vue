@@ -41,25 +41,6 @@
         </view>
       </view>
 
-    <!-- 查看详情弹窗 -->
-    <BaziModal
-      v-if="showBazi"
-      :visible="showBazi"
-      :pillars="activeChart?.pillars || []"
-      :wuxing="activeChart?.wuxing || []"
-      :dayun="activeChart?.dayun || []"
-      :liunian="activeChart?.liunian || []"
-      :shensha="activeChart?.shensha || []"
-      :analysis="activeChart?.analysis"
-      :startYun="activeChart?.startYun"
-      :warnings="activeChart?.warnings || []"
-      :birthTime="detailItem?.birthTime"
-      :gender="detailItem?.gender"
-      :mingGong="activeChart?.mingGong"
-      :shenGong="activeChart?.shenGong"
-      @close="closeDetail"
-    />
-      <view class="bottom-spacer"></view>
     </scroll-view>
   </view>
 </template>
@@ -68,8 +49,7 @@
 import { useTheme } from '@/composables/useTheme'
 import { ref } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
-import { fetchFavorites, removeFavorite, getChart, type FavoriteCase, type ChartData } from '@/api'
-import BaziModal from '@/components/BaziModal/BaziModal.vue'
+import { fetchFavorites, removeFavorite, type FavoriteCase } from '@/api'
 
 
 const { themeClass } = useTheme()
@@ -105,27 +85,14 @@ function bringCaseToChat(f: FavoriteCase) {
 }
 
 // 查看详情
-const detailItem = ref<FavoriteCase | null>(null)
-const showBazi = ref(false)
-const activeChart = ref<ChartData | null>(null)
-
-async function viewDetail(f: FavoriteCase) {
-  detailItem.value = f
-  uni.showLoading({ title: '加载中…' })
-  try {
-    const chart = await getChart(f.birthTime, f.gender)
-    activeChart.value = chart
-    showBazi.value = true
-  } catch (e: any) {
-    uni.showToast({ title: e?.message || '加载失败', icon: 'none' })
-  } finally {
-    uni.hideLoading()
+function viewDetail(f: FavoriteCase) {
+  if (!f.birthTime || !f.gender) {
+    uni.showToast({ title: '该命例缺少出生时间或性别', icon: 'none' })
+    return
   }
-}
-function closeDetail() {
-  showBazi.value = false
-  detailItem.value = null
-  activeChart.value = null
+  uni.navigateTo({
+    url: `/pages/chart-detail/index?birth_time=${encodeURIComponent(f.birthTime)}&gender=${encodeURIComponent(f.gender)}`,
+  })
 }
 
 function onRemove(f: FavoriteCase) {
@@ -182,6 +149,4 @@ function onRemove(f: FavoriteCase) {
 .action-btn.primary { color: $color-bg; background: $color-primary; border: none; }
 .action-btn.normal { color: $color-primary; border-color: rgba(107,123,142,0.3); }
 .action-btn.danger { color: $color-vermilion; background: rgba(184,72,60,0.04); border-color: rgba(184,72,60,0.2); }
-
-.bottom-spacer { height: 50rpx; }
 </style>

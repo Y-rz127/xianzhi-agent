@@ -83,6 +83,152 @@ export interface ChartAnalysis {
   confidence?: number
 }
 
+/* ============ 细盘（时间层级：起运→大运→流年→流月） ============ */
+
+/** 起运信息：交运时间与节气 */
+export interface XiPanQiYun {
+  /** 出生后X年X月X天X时起运 */
+  after: string
+  /** 交运公历时刻 */
+  startDate: string
+  /** 交运年天干（逢X干之年交运） */
+  gan: string
+  /** 出生前一个节（顺排）/后一个节（逆排）名 */
+  jieqi: string
+  /** 距节气天数 */
+  daysAfterJieqi: number
+  /** 大运顺排/逆排 */
+  direction: string
+}
+
+/** 细盘大运项（含藏干十神与星运） */
+export interface XiPanDaYun {
+  index: number
+  ganzhi: string
+  shishen: string
+  startAge: number
+  endAge: number
+  startYear: number
+  endYear: number
+  xunkong: string
+  hiddenStems: string[]
+  shishenZhi: string[]
+  changsheng: string
+}
+
+/** 细盘流年项（含所属大运 index 与小运） */
+export interface XiPanLiuNian {
+  year: number
+  ganzhi: string
+  age: number
+  dayunIndex: number
+  shishen: string
+  /** 地支藏干十神（本气在前），横条展示取 [0] */
+  shishenZhi?: string[]
+  /** 星运：日主对该流年支的十二长生 */
+  changsheng?: string
+  xunkong: string
+  xiaoyun: string
+}
+
+/** 细盘流月项（按节气切分，每年 12 个节） */
+export interface XiPanLiuYue {
+  year: number
+  zhi: string
+  jieqi: string
+  date: string
+  ganzhi: string
+  shishen: string
+  // 去重下发：地支十神/星运查 monthMeta[zhi]，神煞名查 liuyueShensha[ganzhi]，说明查 shenshaDict[name]
+}
+
+/** 月支 → 地支十神 / 星运（两者都是月支的纯函数，12 条一份即可） */
+export interface XiPanMonthMeta {
+  shishenZhi: string[]
+  changsheng: string
+}
+
+/** 当前活动大运/流年/流月（童限期 dayunLabel 为小运、dayun 为当年小运干支） */
+export interface XiPanCurrent {
+  year: number
+  age: number
+  dayunIndex: number
+  dayun: string
+  dayunLabel: string
+  dayunShishen: string
+  liunian: string
+  liunianShishen: string
+  liunianXunkong: string
+  liuyue: string
+  liuyueShishen: string
+  liuyueJieqi: string
+  liuyueDate: string
+}
+
+/** 快照单列（流年/大运/四柱共 6 列） */
+export interface XiPanColumn {
+  name: string
+  ganzhi: string
+  shishen: string
+  gan: string
+  zhi: string
+  hiddenStems: string[]
+  shishenZhi: string[]
+  changsheng: string
+  zizuo: string
+  xunkong: string
+  nayin: string
+}
+
+/** 当前大运+流年叠加四柱的六列快照 */
+export interface XiPanSnapshot {
+  columns: XiPanColumn[]
+  label: string
+}
+
+/** 月令五行旺相休囚 */
+export interface XiPanWuxingState { name: string; state: string }
+
+/** 人元司令分野 */
+export interface XiPanSiLing { stem: string; detail: string }
+
+/** 干支关系一组：岁运（大运·流年·流月）或原局四柱 */
+export interface XiPanRelationGroup {
+  /** 岁运栏为「壬申 · 丙午 · 丙申」，原局栏为四柱干支 */
+  label: string
+  /** 天干栏：五合与相克（克者在前），如「丙庚相克」 */
+  gan: string[]
+  /** 地支栏：三合/半合/拱局/会方/六合/六冲/六害/六破/三刑/自刑 */
+  zhi: string[]
+  /** 整柱栏：伏吟/反吟（岁运）或盖头/截脚（原局） */
+  zhu: string[]
+}
+
+/** 岁运分析与原局分析 */
+export interface XiPanRelations {
+  suiyun: XiPanRelationGroup
+  yuanju: XiPanRelationGroup
+}
+
+export interface XiPanData {
+  qiyun: XiPanQiYun
+  current: XiPanCurrent
+  dayun: XiPanDaYun[]
+  liunian: XiPanLiuNian[]
+  liuyue: XiPanLiuYue[]
+  /** 流月干支 → 神煞名列表（月干支 60 个一循环，按干支去重下发） */
+  liuyueShensha?: Record<string, string[]>
+  /** 神煞名 → 说明，配合 liuyueShensha 解析流月神煞 */
+  shenshaDict?: Record<string, string>
+  /** 月支 → 地支十神/星运，配合 liuyue[].zhi 解析 */
+  monthMeta?: Record<string, XiPanMonthMeta>
+  snapshot: XiPanSnapshot
+  relations?: XiPanRelations
+  wuxingState: XiPanWuxingState[]
+  siling: XiPanSiLing
+  note?: string
+}
+
 export interface ChartData {
   birth?: Record<string, any>
   pillars: Pillar[]
@@ -99,6 +245,7 @@ export interface ChartData {
   liunianText?: string
   mingGong?: string
   shenGong?: string
+  xipan?: XiPanData
 }
 
 export interface BaziCandidate { birth_time: string; ganzhi: string; shi_chen: string }

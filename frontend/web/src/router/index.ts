@@ -11,6 +11,7 @@ import HuangLi from "../views/HuangLi.vue"
 import ZiWei from "../views/ZiWei.vue"
 import RagManager from "../views/RagManager.vue"
 import ChartCases from "../views/ChartCases.vue"
+import ChartDetail from "../views/ChartDetail.vue"
 import Observability from "../views/Observability.vue"
 import UserAdmin from "../views/UserAdmin.vue"
 import Feedback from "../views/Feedback.vue"
@@ -31,6 +32,7 @@ const routes: RouteRecordRaw[] = [
   { path: "/ziwei", name: "ziwei", component: ZiWei, meta: { title: "紫微斗数" } },
   { path: "/rag-manager", name: "rag-manager", component: RagManager, meta: { title: "知识库管理" } },
   { path: "/chart-cases", name: "chart-cases", component: ChartCases, meta: { title: "命例库" } },
+  { path: "/chart-detail", name: "chart-detail", component: ChartDetail, meta: { title: "命盘详情" } },
   { path: "/observability", name: "observability", component: Observability, meta: { title: "监测台" } },
   { path: "/user-admin", name: "user-admin", component: UserAdmin, meta: { title: "用户管理" } },
   { path: "/feedback", name: "feedback", component: Feedback, meta: { title: "问题反馈" } },

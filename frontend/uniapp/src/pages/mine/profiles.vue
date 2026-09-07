@@ -45,24 +45,6 @@
         </view>
       </view>
 
-    <!-- 查看详情弹窗 -->
-    <BaziModal
-      v-if="showBazi"
-      :visible="showBazi"
-      :pillars="activeChart?.pillars || []"
-      :wuxing="activeChart?.wuxing || []"
-      :dayun="activeChart?.dayun || []"
-      :liunian="activeChart?.liunian || []"
-      :shensha="activeChart?.shensha || []"
-      :analysis="activeChart?.analysis"
-      :startYun="activeChart?.startYun"
-      :warnings="activeChart?.warnings || []"
-      :birthTime="detailItem?.birthTime"
-      :gender="detailItem?.gender"
-      :mingGong="activeChart?.mingGong"
-      :shenGong="activeChart?.shenGong"
-      @close="closeDetail"
-    />
       <view class="bottom-spacer"></view>
     </scroll-view>
   </view>
@@ -72,8 +54,7 @@
 import { useTheme } from '@/composables/useTheme'
 import { ref } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
-import { fetchProfiles, deleteProfile, getChart, type BaziProfile, type ChartData } from '@/api'
-import BaziModal from '@/components/BaziModal/BaziModal.vue'
+import { fetchProfiles, deleteProfile, type BaziProfile } from '@/api'
 
 
 const { themeClass } = useTheme()
@@ -113,27 +94,14 @@ function bringToChat(p: BaziProfile) {
 }
 
 // 查看详情
-const detailItem = ref<BaziProfile | null>(null)
-const showBazi = ref(false)
-const activeChart = ref<ChartData | null>(null)
-
-async function viewDetail(p: BaziProfile) {
-  detailItem.value = p
-  uni.showLoading({ title: '加载中…' })
-  try {
-    const chart = await getChart(p.birthTime, p.gender)
-    activeChart.value = chart
-    showBazi.value = true
-  } catch (e: any) {
-    uni.showToast({ title: e?.message || '加载失败', icon: 'none' })
-  } finally {
-    uni.hideLoading()
+function viewDetail(p: BaziProfile) {
+  if (!p.birthTime || !p.gender) {
+    uni.showToast({ title: '该档案缺少出生时间或性别', icon: 'none' })
+    return
   }
-}
-function closeDetail() {
-  showBazi.value = false
-  detailItem.value = null
-  activeChart.value = null
+  uni.navigateTo({
+    url: `/pages/chart-detail/index?birth_time=${encodeURIComponent(p.birthTime)}&gender=${encodeURIComponent(p.gender)}`,
+  })
 }
 
 function onDelete(p: BaziProfile) {

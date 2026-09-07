@@ -120,6 +120,7 @@ class BaziChart:
     shen_gong_nayin: str
     start_yun: dict[str, Any]
     warnings: list[str]
+    xipan: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

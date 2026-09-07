@@ -22,7 +22,7 @@
             <h3>{{ day.date }}</h3>
             <div class="badges">
               <span class="badge lunar-badge">{{ day.lunar.text }}</span>
-              <span class="badge gz-badge">{{ day.lunar.day_gz }}日</span>
+              <span class="badge gz-badge">{{ day.lunar.month_gz }}月{{ day.lunar.day_gz }}日</span>
               <span v-for="f in day.festivals" :key="'f-' + f" class="badge fest-badge">{{ f }}</span>
               <span v-if="day.jieqi" class="badge jieqi-badge">{{ day.jieqi }}</span>
               <span v-if="day.tian_shen.luck === '吉'" class="badge gold-badge">{{ day.tian_shen.name }} · {{ day.tian_shen.type }}</span>

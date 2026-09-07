@@ -3,6 +3,8 @@ export type {
   AnswerFeedbackPayload, BaziCandidate, ChartAnalysis, ChartCase, ChartData,
   ChatOptions, ChatSession, DayunItem, LiuNianItem, Pillar, SessionBirthInfo,
   SessionMessage, ShenshaItem, WuxingItem,
+  XiPanCurrent, XiPanColumn, XiPanDaYun, XiPanData, XiPanLiuNian, XiPanLiuYue,
+  XiPanQiYun, XiPanSiLing, XiPanSnapshot, XiPanWuxingState,
 } from "@shared/api"
 export { EP, parseDayun, parsePillars, parseShensha, parseWuxing } from "@shared/api"
 import type { AnswerFeedbackPayload, BaziCandidate, BaziProfile, ChartCase, ChartData, ChatOptions, ChatSession, FavoriteCase, SessionBirthInfo, SessionMessage, TarotRecord } from "@shared/api"

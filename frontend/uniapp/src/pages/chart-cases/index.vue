@@ -52,34 +52,14 @@
       </view>
     </view>
 
-    <!-- 查看详情弹窗 -->
-    <BaziModal
-      v-if="showBazi"
-      :visible="showBazi"
-      :pillars="activeChart?.pillars || []"
-      :wuxing="activeChart?.wuxing || []"
-      :dayun="activeChart?.dayun || []"
-      :liunian="activeChart?.liunian || []"
-      :shensha="activeChart?.shensha || []"
-      :analysis="activeChart?.analysis"
-      :startYun="activeChart?.startYun"
-      :warnings="activeChart?.warnings || []"
-      :birthTime="detailCase?.birthTime"
-      :gender="detailCase?.gender"
-      :mingGong="activeChart?.mingGong"
-      :shenGong="activeChart?.shenGong"
-      @close="closeDetail"
-    />
-
   </view>
 </template>
 
 <script setup lang="ts">
 import { useTheme } from '@/composables/useTheme'
 import { ref, onMounted } from 'vue'
-import { fetchChartCases, fetchFavorites, addFavorite, removeFavorite, getChart, type ChartCase, type ChartData } from '@/api'
+import { fetchChartCases, fetchFavorites, addFavorite, removeFavorite, type ChartCase } from '@/api'
 import { isLoggedIn } from '@/utils/storage'
-import BaziModal from '@/components/BaziModal/BaziModal.vue'
 
 
 const { themeClass } = useTheme()
@@ -148,28 +128,14 @@ function loadChartCase(c: ChartCase) {
 }
 
 // ---------- 查看详情 ----------
-const detailCase = ref<ChartCase | null>(null)
-const showBazi = ref(false)
-const activeChart = ref<ChartData | null>(null)
-
-async function viewDetail(c: ChartCase) {
-  detailCase.value = c
-  uni.showLoading({ title: '加载中…' })
-  try {
-    const chart = await getChart(c.birthTime, c.gender)
-    activeChart.value = chart
-    showBazi.value = true
-  } catch (e: any) {
-    uni.showToast({ title: e?.message || '加载失败', icon: 'none' })
-  } finally {
-    uni.hideLoading()
+function viewDetail(c: ChartCase) {
+  if (!c.birthTime || !c.gender) {
+    uni.showToast({ title: '该命例缺少出生时间或性别', icon: 'none' })
+    return
   }
-}
-
-function closeDetail() {
-  showBazi.value = false
-  detailCase.value = null
-  activeChart.value = null
+  uni.navigateTo({
+    url: `/pages/chart-detail/index?birth_time=${encodeURIComponent(c.birthTime)}&gender=${encodeURIComponent(c.gender)}`,
+  })
 }
 
 onMounted(load)

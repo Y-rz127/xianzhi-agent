@@ -29,9 +29,9 @@
         <view v-if="phase === 'casting'" class="cast-stage">
           <view v-if="method === 'coins'" class="coins shake"><view v-for="n in 3" :key="n" class="coin"/></view>
           <view v-else-if="method === 'numbers'" class="num-orbit">
-            <text class="num">{{ numbers[0] === '' || numbers[0] == null ? '—' : numbers[0] }}</text>
+            <text class="num">{{ numText(numbers[0]) }}</text>
             <text class="taiji">☯</text>
-            <text class="num">{{ numbers[1] === '' || numbers[1] == null ? '—' : numbers[1] }}</text>
+            <text class="num">{{ numText(numbers[1]) }}</text>
           </view>
           <view v-else class="clock"><view class="clock-hand"/><view class="clock-dot"/></view>
           <text class="cast-tip">{{ method === 'coins' ? '凝神静气，摇卦中…' : method === 'numbers' ? '以心念入卦，推演六爻…' : '感时应物，此刻起卦…' }}</text>
@@ -109,7 +109,11 @@ const methods = [
 
 const method = ref<typeof methods[number]['key']>('coins')
 const question = ref('')
-const numbers = ref<number[]>([])
+const numbers = ref<Array<number | ''>>([])
+// v-model.number 清空输入时写入 ''，展示层需兼容空值
+function numText(v: number | '' | null | undefined): string {
+  return v === '' || v == null ? '—' : String(v)
+}
 const loading = ref(false)
 const interpreting = ref(false)
 const result = ref<LiuYaoResult | null>(null)
@@ -147,7 +151,7 @@ async function doCast() {
   try {
     // 摇卦动画固定展示约 1.6s，避免接口过快导致仪式感缺失
     const [data] = await Promise.all([
-      castLiuYao(method.value, numbers.value),
+      castLiuYao(method.value, numbers.value as number[]),
       new Promise<void>(resolve => setTimeout(resolve, 1600)),
     ])
     result.value = data

@@ -189,23 +189,6 @@
       </div>
     </Teleport>
 
-    <BaziModal
-      :visible="showBaziModal"
-      :pillars="activeChart?.pillars || []"
-      :wuxing="activeChart?.wuxing || []"
-      :dayun="activeChart?.dayun || []"
-      :liunian="activeChart?.liunian || []"
-      :shensha="activeChart?.shensha || []"
-      :analysis="activeChart?.analysis"
-      :startYun="activeChart?.startYun"
-      :warnings="activeChart?.warnings || []"
-      :birthTime="activeCase?.birthTime"
-      :gender="activeCase?.gender"
-      :mingGong="activeChart?.mingGong"
-      :shenGong="activeChart?.shenGong"
-      @close="closeBaziModal"
-    />
-
     <!-- 确认弹窗 -->
     <Teleport to="body">
       <div v-if="showConfirm" class="confirm-overlay" @click.self="showConfirm = false">
@@ -230,8 +213,10 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, watch, type Ref } from "vue"
-import { fetchChartCases, createChartCase, updateChartCase, deleteChartCase, getChart, exportChartCasesJSON, importChartCasesJSON, inferBaziDates, type ChartCase, type ChartData, type BaziCandidate } from "../api/index.ts"
-import BaziModal from "../components/BaziModal.vue"
+import { useRouter } from "vue-router"
+import { fetchChartCases, createChartCase, updateChartCase, deleteChartCase, exportChartCasesJSON, importChartCasesJSON, inferBaziDates, type ChartCase, type BaziCandidate } from "../api/index.ts"
+
+const router = useRouter()
 
 const cases = ref<ChartCase[]>([])
 const loading = ref(false)
@@ -252,10 +237,6 @@ const canInferBazi = computed(() =>
   !!form.value.pillars.day.trim() && !!form.value.pillars.time.trim() &&
   (form.value.gender === "男" || form.value.gender === "女")
 )
-
-const showBaziModal = ref(false)
-const activeCase = ref<ChartCase | null>(null)
-const activeChart = ref<ChartData | null>(null)
 
 const importInput = ref<HTMLInputElement | null>(null)
 
@@ -432,23 +413,20 @@ const confirmDelete = (c: ChartCase) => {
   })
 }
 
-const viewCase = async (c: ChartCase) => {
-  activeCase.value = c
-  activeChart.value = c.chartData || null
-  if (!activeChart.value && c.birthTime && c.gender) {
-    try {
-      activeChart.value = await getChart(c.birthTime, c.gender)
-    } catch {
-      activeChart.value = null
-    }
+const viewCase = (c: ChartCase) => {
+  if (!c.birthTime || !c.gender) {
+    showToast("该命例缺少出生时间或性别，无法排盘", "error")
+    return
   }
-  showBaziModal.value = true
-}
-
-const closeBaziModal = () => {
-  showBaziModal.value = false
-  activeCase.value = null
-  activeChart.value = null
+  router.push({
+    path: "/chart-detail",
+    query: {
+      birth_time: c.birthTime,
+      gender: c.gender,
+      sect: String(c.chartData?.birth?.sect ?? 2),
+      yun_sect: String(c.chartData?.birth?.yunSect ?? 1),
+    },
+  })
 }
 
 const handleExport = () => {

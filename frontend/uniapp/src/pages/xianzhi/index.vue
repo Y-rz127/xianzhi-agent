@@ -26,7 +26,7 @@
         <view class="header-left">
           <text class="icon-btn" @tap="openHistoryDrawer">☰</text>
           <text class="header-title display-font">先知</text>
-          <text v-if="chartData" class="icon-btn bazi-btn" @tap="openBaziModal">☯</text>
+          <text v-if="chartData" class="icon-btn bazi-btn" @tap="openChartDetail">☯</text>
         </view>
       </view>
     </view>
@@ -152,24 +152,6 @@
         <text class="send-icon">➤</text>
       </view>
     </view>
-
-    <!-- 命盘详情弹窗 -->
-    <BaziModal
-      :visible="showBaziModal"
-      :pillars="modalPillars"
-      :wuxing="modalWuxing"
-      :dayun="modalDayun"
-      :liunian="chartData?.liunian || []"
-      :shensha="modalShensha"
-      :analysis="chartData?.analysis"
-      :startYun="chartData?.startYun"
-      :warnings="chartData?.warnings || []"
-      :birthTime="lastBirthInfo?.time"
-      :gender="lastBirthInfo?.gender"
-      :mingGong="chartData?.mingGong"
-      :shenGong="chartData?.shenGong"
-      @close="showBaziModal = false"
-    />
 
     <!-- 历史会话抽屉 -->
     <view v-if="showHistoryDrawer" class="drawer-mask" @tap="closeHistoryDrawer">
@@ -327,8 +309,7 @@ import { requireLogin } from '@/utils/authGuard'
 import { useTheme } from '@/composables/useTheme'
 import { chatWithXianzhiWS, closeAllWS } from '@/api/chat'
 import {
-  parsePillars, parseWuxing, parseDayun, parseShensha,
-  downloadReport, getChart,
+  downloadReport, getChart, inferBaziDates,
   fetchSessions, fetchMySessions, deleteSession as deleteSessionApi, getSessionMessages,
   getSessionBirthInfo,
   submitAnswerFeedback,
@@ -346,23 +327,24 @@ interface BirthInfo { time: string; gender: string }
 
 const recording = ref(false)
 const voiceBusy = ref(false)
-const recorder = uni.getRecorderManager()
+const recorder: ReturnType<typeof uni.getRecorderManager> | null = uni.getRecorderManager() || null
 function audioAsDataUri(filePath: string): Promise<string> {
   return new Promise((resolve, reject) => uni.getFileSystemManager().readFile({ filePath, encoding: 'base64', success: (res: any) => resolve(`data:audio/mpeg;base64,${res.data}`), fail: reject }))
 }
 async function toggleVoice() {
   if (thinking.value || voiceBusy.value) return
-  if (recording.value) { recorder.stop(); return }
+  if (recording.value) { recorder?.stop(); return }
+  if (!recorder) { uni.showToast({ title: '当前环境不支持语音输入', icon: 'none' }); return }
   recording.value = true
   recorder.start({ duration: 60000, sampleRate: 16000, numberOfChannels: 1, format: 'mp3' })
 }
-recorder.onStop(async (res) => {
+recorder?.onStop(async (res) => {
   recording.value = false; voiceBusy.value = true
   try { const data = await transcribeAudio(await audioAsDataUri(res.tempFilePath), 'mp3'); inputText.value = inputText.value ? `${inputText.value}${data.text}` : data.text; uni.showToast({ title: '语音已转为文字', icon: 'none' }) }
   catch (e: any) { uni.showToast({ title: e?.message || '语音识别失败', icon: 'none' }) }
   finally { voiceBusy.value = false }
 })
-recorder.onError(() => { recording.value = false; voiceBusy.value = false; uni.showToast({ title: '录音不可用，请检查授权', icon: 'none' }) })
+recorder?.onError(() => { recording.value = false; voiceBusy.value = false; uni.showToast({ title: '录音不可用，请检查授权', icon: 'none' }) })
 
 // 十二时辰 → HH:MM（用于把后端返回的"辰时"等标准化为 time picker 友好的格式）
 const ZHI_HOUR_MAP: Record<string, string> = {
@@ -494,7 +476,7 @@ function confirmRegionPicker() {
       const time = `${birthDate.value} ${birthTime.value}`
       lastBirthInfo.value = { time, gender: gender.value }
       _skipNextChartWatch = true
-      getChart(time, gender.value, sect, 1, birthLongitude.value).then(d => { chartData.value = d }).catch(() => { chartData.value = null })
+      getChart(time, gender.value, sect, 1, birthLongitude.value || undefined).then(d => { chartData.value = d }).catch(() => { chartData.value = null })
     }
   }
   showRegionPicker.value = false
@@ -525,7 +507,6 @@ function onMsgScroll(e: any) {
 const lastBirthInfo = ref<BirthInfo | null>(null)
 // 防止 watch 与显式 getChart 调用重复请求的标志
 let _skipNextChartWatch = false
-const showBaziModal = ref(false)
 const chartData = ref<ChartData | null>(null)
 // 会话ID：编码 user_id（mp-xianzhi__<userId>__<ts>），实现多用户会话隔离
 function genConversationId(): string {
@@ -589,9 +570,17 @@ function closeHistoryDrawer() {
 async function switchToSession(session: ChatSession) {
   if (!session?.id) return
   conversationId.value = session.id
-  // 拉取该会话的历史消息
   try {
-    const msgs = await getSessionMessages('xianzhi', session.id)
+    // 先恢复本地出生地/经度：必须在排盘之前，否则与 openChartDetail 的 cache key 不一致，
+    // 同一次排盘会被算两遍（无存档时显式清空，避免沿用上一个会话的值）
+    const bp = getBirthPlaceLocal(session.id)
+    birthPlace.value = bp ? bp.place : ''
+    birthLongitude.value = bp ? bp.longitude : 0
+    // 历史消息与出生信息互不依赖，并发取回
+    const [msgs, bi] = await Promise.all([
+      getSessionMessages('xianzhi', session.id),
+      getSessionBirthInfo(session.id),
+    ])
     messages.value = msgs.map(m => ({ role: m.role, content: m.content }))
     // 从后端恢复命盘上下文（支持农历/节日/时辰等自然语言输入场景）
     lastBirthInfo.value = null
@@ -599,11 +588,6 @@ async function switchToSession(session: ChatSession) {
     birthDate.value = ''
     birthTime.value = ''
     gender.value = '男' as '男' | '女'
-    // 先清空出生地/经度，避免上一个会话/命盘的值跨会话挂载到本会话
-    // （下面只在本地有存档时才恢复，无档必须显式清空，否则会沿用陈旧值）
-    birthPlace.value = ''
-    birthLongitude.value = 0
-    const bi = await getSessionBirthInfo(session.id)
     if (bi.time && bi.gender) {
       lastBirthInfo.value = { time: bi.time, gender: bi.gender }
       const [d, t] = bi.time.split(' ')
@@ -612,13 +596,10 @@ async function switchToSession(session: ChatSession) {
       birthTime.value = zhiHourToHHMM(t)
       gender.value = bi.gender as '男' | '女'
       _skipNextChartWatch = true
-      try { chartData.value = await getChart(bi.time, bi.gender, 2, 1) } catch { chartData.value = null }
-    }
-    // 从本地存储恢复出生地/经度（后端 birth-info 接口不含这两项）
-    const bp = getBirthPlaceLocal(session.id)
-    if (bp) {
-      birthPlace.value = bp.place
-      birthLongitude.value = bp.longitude
+      // 命盘只服务内嵌卡片，不阻塞进入会话：后台补齐，失败保持 null
+      getChart(bi.time, bi.gender, 2, 1, birthLongitude.value || undefined)
+        .then((c) => { chartData.value = c })
+        .catch(() => { chartData.value = null })
     }
   } catch (e) {
     uni.showToast({ title: '加载消息失败', icon: 'none' })
@@ -832,13 +813,6 @@ function newSession() {
   feedbackReasons.value = {}
 }
 
-/** 从 ReAct 输出中提取 [回答] 部分（用于解析可视化数据） */
-function extractAnswer(text: string): string {
-  if (!text) return ''
-  const m = text.match(/\[回答\]\s*([\s\S]*)/)
-  return m ? m[1] : text
-}
-
 /** 判断是否还在思考（含 ReAct 标记） */
 function isThinking(content: string) {
   return typeof content === 'string' && (content.includes('[思考]') || content.includes('[行动]') || content.includes('[观察]'))
@@ -934,41 +908,53 @@ function onInputFocus() {
   setTimeout(scrollToBottom, 400)
 }
 
-/** 最后一条助手消息（用于解析命盘数据给 modal） */
-const lastAssistantContent = computed(() => {
-  for (let i = messages.value.length - 1; i >= 0; i--) {
-    if (messages.value[i].role === 'assistant') return messages.value[i].content
-  }
-  return ''
-})
-const modalPillars = computed(() => chartData.value?.pillars?.length ? chartData.value.pillars : parsePillars(extractAnswer(lastAssistantContent.value)))
-const modalWuxing = computed(() => chartData.value?.wuxing?.length ? chartData.value.wuxing : parseWuxing(extractAnswer(lastAssistantContent.value)))
-const modalDayun = computed(() => chartData.value?.dayun?.length ? chartData.value.dayun : parseDayun(extractAnswer(lastAssistantContent.value)))
-const modalShensha = computed(() => chartData.value?.shensha?.length ? chartData.value.shensha : parseShensha(extractAnswer(lastAssistantContent.value)))
-
-function openBaziModal() {
-  if (!modalPillars.value.length && !modalWuxing.value.length) {
-    uni.showToast({ title: '暂无可显示的命盘', icon: 'none' })
+function openChartDetail() {
+  const bi = lastBirthInfo.value
+  if (!bi?.time || !bi.gender) {
+    uni.showToast({ title: '请先提供出生时间和性别', icon: 'none' })
     return
   }
-  showBaziModal.value = true
+  const q = `birth_time=${encodeURIComponent(bi.time)}&gender=${encodeURIComponent(bi.gender)}&sect=2&yun_sect=1`
+  const lon = birthLongitude.value || undefined
+  uni.navigateTo({ url: `/pages/chart-detail/index?${q}${lon ? `&longitude=${lon}` : ''}` })
 }
 
-/** 从用户消息中提取出生信息，同步更新顶部表单（watch 会自动拉取 chartData 并设置 lastBirthInfo） */
+/** 把解析出的出生时间同步到表单、命盘上下文并主动拉取 chartData */
+async function applyExtractedBirth(time: string, g: '男' | '女') {
+  lastBirthInfo.value = { time, gender: g }
+  const [d, tm] = time.split(' ')
+  birthDate.value = d || ''
+  birthTime.value = zhiHourToHHMM(tm)
+  gender.value = g
+  _skipNextChartWatch = true
+  try { chartData.value = await getChart(time, g, 2, 1) } catch { chartData.value = null }
+}
+
 async function tryExtractBirth(text: string) {
-  const m = text.match(/(男|女)/)
+  const gender = text.match(/(男|女)/)?.[1] as '男' | '女' | undefined
   const t = text.match(/(\d{4}[-年/]\d{1,2}[-月/]\d{1,2}[日 ]+\d{1,2}[:：]\d{1,2})/)
-  if (m && t) {
+  if (gender && t) {
     const time = t[1].replace(/年|月/g, '-').replace('日', '').replace('：', ':').trim()
-    // 同步设置 lastBirthInfo + 表单字段，确保按钮立即显示
-    lastBirthInfo.value = { time, gender: m[1] as '男' | '女' }
-    const [d, tm] = time.split(' ')
-    birthDate.value = d || ''
-    birthTime.value = zhiHourToHHMM(tm)
-    gender.value = m[1] as '男' | '女'
-    // 主动拉取 chartData（对齐 web 端 tryExtractBirth + fetchChartData 行为）
-    _skipNextChartWatch = true
-    try { chartData.value = await getChart(time, m[1] as '男' | '女', 2, 1) } catch { chartData.value = null }
+    await applyExtractedBirth(time, gender)
+    return
+  }
+  // 干支四柱（如 甲申 庚午 壬申 甲辰）→ 反推出生时间
+  if (gender) {
+    const pillars = (text.match(/[甲乙丙丁戊己庚辛壬癸][子丑寅卯辰巳午未申酉戌亥]/g) || []).slice(0, 4).join('')
+    if (pillars.length === 8) {
+      try {
+        const { candidates } = await inferBaziDates(pillars, gender, 1)
+        const bt = candidates?.[0]?.birth_time
+        if (bt) {
+          await applyExtractedBirth(bt, gender)
+          uni.showToast({ title: `已按四柱 ${pillars} 反推出生：${bt}`, icon: 'none' })
+        } else {
+          uni.showToast({ title: '该四柱有多个可能出生时间，请补充出生年月日时', icon: 'none' })
+        }
+      } catch {
+        uni.showToast({ title: '四柱反推失败，请提供标准出生年月日时', icon: 'none' })
+      }
+    }
   }
 }
 
