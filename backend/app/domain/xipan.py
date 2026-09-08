@@ -279,10 +279,10 @@ def _build_liunian_list(
     return items, year_dayun, xiaoyun
 
 
-def _liuyue_shensha(
+def _yunzhu_shensha(
     ganzhi: str, pillars: list[Pillar], day_master: str, gender_int: int
 ) -> list[dict[str, str]]:
-    """流月神煞：与大运/流年同口径——临时运柱并入四柱算神煞，再按柱筛出。"""
+    """运柱神煞（大运/流年/流月同一口径）：把该干支当临时运柱并入四柱算神煞，再按柱筛出。"""
     if len(ganzhi) != 2 or ganzhi[0] not in GAN_WUXING or ganzhi[1] not in ZHI_WUXING:
         return []
     gan, zhi = ganzhi
@@ -319,6 +319,42 @@ def _month_meta(day_master: str) -> dict[str, dict[str, Any]]:
     }
 
 
+def _ganzhi_meta(day_master: str) -> dict[str, dict[str, Any]]:
+    """全部 60 个干支的命盘列字段（十神/藏干/地支十神/星运/自坐/旬空/纳音）。
+
+    这些都是「干支 + 日主」的纯函数。前端点选任意大运/流年都要就地重拼命盘大表，
+    整轮 60 个一次算完下发（约 5KB），比固定按当前时刻只给一列更灵活也不增体积。
+    """
+    out: dict[str, dict[str, Any]] = {}
+    for n in range(60):
+        gz = _GAN_SEQ[n % 10] + _ZHI_SEQ[n % 12]
+        col = _ganzhi_column("", gz, day_master, _xunkong(gz))
+        col.pop("name", None)
+        out[gz] = col
+    return out
+
+
+def _liunian_shensha_index(
+    liunian_list: list[dict[str, Any]], pillars: list[Pillar], day_master: str, gender_int: int
+) -> tuple[dict[str, list[str]], dict[str, str]]:
+    """流年干支 → 神煞名，外加 名 → 说明。
+
+    流年神煞只由流年干支决定，60 条即可覆盖全部 125 个流年；此前神煞挂在顶层 chart.liunian
+    上且只覆盖当前大运十年，切到别的大运就没有神煞可显示。
+    """
+    names: dict[str, list[str]] = {}
+    desc: dict[str, str] = {}
+    for item in liunian_list:
+        gz = item["ganzhi"]
+        if gz in names:
+            continue
+        ss = _yunzhu_shensha(gz, pillars, day_master, gender_int)
+        names[gz] = [entry["name"] for entry in ss]
+        for entry in ss:
+            desc.setdefault(entry["name"], entry["description"])
+    return names, desc
+
+
 def _build_liuyue_list(
     start_year: int, end_year: int, day_master: str, pillars: list[Pillar], gender_int: int
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
@@ -343,7 +379,7 @@ def _build_liuyue_list(
             # 月干支 60 个一循环，神煞按干支缓存（同一干支神煞不变）
             ss = shensha_cache.get(gz)
             if ss is None:
-                ss = _liuyue_shensha(gz, pillars, day_master, gender_int)
+                ss = _yunzhu_shensha(gz, pillars, day_master, gender_int)
                 shensha_cache[gz] = ss
                 shensha_by_gz[gz] = [entry["name"] for entry in ss]
                 for entry in ss:
@@ -690,6 +726,10 @@ def build_xipan(
     end_year = max((d["endYear"] for d in dayun_list), default=birth_year + 80)
     liunian_list, year_dayun, xiaoyun = _build_liunian_list(yun, day_master, end_year, segments=len(dayun_list))
     liuyue_list, liuyue_extras = _build_liuyue_list(birth_year, end_year, day_master, pillars, gender_int)
+    ln_shensha, ln_desc = _liunian_shensha_index(liunian_list, pillars, day_master, gender_int)
+    liuyue_extras["liunianShensha"] = ln_shensha
+    liuyue_extras["shenshaDict"].update(ln_desc)
+    liuyue_extras["ganzhiMeta"] = _ganzhi_meta(day_master)
 
     cur = _current(today, yun, year_dayun, xiaoyun, dayun_list, day_master, birth_year)
     month_zhi = pillars[1].zhi if pillars else ""

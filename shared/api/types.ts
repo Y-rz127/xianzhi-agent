@@ -27,6 +27,8 @@ export interface Pillar {
 export interface WuxingItem { name: string; count: number; color: string }
 
 export interface DayunItem {
+  /** 大运序号，与 xipan.dayun[].index 对齐（0 为童限，chart.dayun 不含该项） */
+  index?: number
   year: string
   ganzhi: string
   startAge: number
@@ -148,6 +150,19 @@ export interface XiPanMonthMeta {
   changsheng: string
 }
 
+/** 干支 → 命盘列字段（十神/藏干/星运/自坐/旬空/纳音，均为「干支 + 日主」的纯函数） */
+export interface XiPanGanzhiMeta {
+  shishen: string
+  gan: string
+  zhi: string
+  hiddenStems: string[]
+  shishenZhi: string[]
+  changsheng: string
+  zizuo: string
+  xunkong: string
+  nayin: string
+}
+
 /** 当前活动大运/流年/流月（童限期 dayunLabel 为小运、dayun 为当年小运干支） */
 export interface XiPanCurrent {
   year: number
@@ -218,6 +233,10 @@ export interface XiPanData {
   liuyue: XiPanLiuYue[]
   /** 流月干支 → 神煞名列表（月干支 60 个一循环，按干支去重下发） */
   liuyueShensha?: Record<string, string[]>
+  /** 流年干支 → 神煞名列表（覆盖全部流年，切到任何一步大运的十年都取得到） */
+  liunianShensha?: Record<string, string[]>
+  /** 60 干支 → 命盘列字段，供前端按点选的大运/流年重拼命盘大表 */
+  ganzhiMeta?: Record<string, XiPanGanzhiMeta>
   /** 神煞名 → 说明，配合 liuyueShensha 解析流月神煞 */
   shenshaDict?: Record<string, string>
   /** 月支 → 地支十神/星运，配合 liuyue[].zhi 解析 */

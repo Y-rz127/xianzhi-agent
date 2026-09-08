@@ -376,7 +376,8 @@ def chart_to_api_dict(chart: BaziChart) -> dict[str, Any]:
             "confidence": chart.analysis.confidence,
         },
         "dayun": [
-            {"year": item.ganzhi, "ganzhi": item.ganzhi, "startYear": item.start_year, "endYear": item.end_year,
+            {"index": item.index, "year": item.ganzhi, "ganzhi": item.ganzhi,
+             "startYear": item.start_year, "endYear": item.end_year,
              "startAge": item.start_age, "endAge": item.end_age, **_yun_detail(item)}
             for item in chart.dayun
         ],

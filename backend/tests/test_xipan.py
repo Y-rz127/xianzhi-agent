@@ -181,16 +181,16 @@ def test_dayun_reverse_female():
 def test_liunian_covers_birth_to_last_dayun_with_xiaoyun():
     xp = _chart_xipan("男")
     liunian = xp["liunian"]
-    years = [l["year"] for l in liunian]
+    years = [item["year"] for item in liunian]
     assert years == list(range(2004, 2129))  # 封顶到最后一步大运末年
     first = liunian[0]
     assert (first["year"], first["ganzhi"], first["age"], first["dayunIndex"]) == (2004, "甲申", 1, 0)
     assert first["xiaoyun"] == "乙巳"  # 童限段小运
     # 每年所属大运 index 与大运年份区间一致
     for d in xp["dayun"]:
-        for l in liunian:
-            if l["dayunIndex"] == d["index"]:
-                assert d["startYear"] <= l["year"] <= d["endYear"]
+        for ln in liunian:
+            if ln["dayunIndex"] == d["index"]:
+                assert d["startYear"] <= ln["year"] <= d["endYear"]
 
 
 def test_liunian_carries_branch_god_and_changsheng():
@@ -335,8 +335,10 @@ def test_chart_api_payload_contains_xipan():
         "liunian",
         "liuyue",
         "liuyueShensha",
+        "liunianShensha",
         "shenshaDict",
         "monthMeta",
+        "ganzhiMeta",
         "snapshot",
         "relations",
         "wuxingState",
@@ -344,6 +346,64 @@ def test_chart_api_payload_contains_xipan():
         "note",
     }
     assert payload["pillars"][1]["ganzhi"] == "庚午"
+
+
+def test_liunian_shensha_covers_every_dayun():
+    """流年神煞按干支索引：切到任何一步大运的十年都取得到（旧实现只覆盖当前大运）。"""
+    xp = _chart_xipan("男")
+    index = xp["liunianShensha"]
+    assert len(index) <= 60, "流年神煞按干支去重，最多 60 条"
+    for ln in xp["liunian"]:
+        assert ln["ganzhi"] in index, f"{ln['year']} 的流年干支 {ln['ganzhi']} 查不到神煞"
+    # 非当前大运的十年也要能算出神煞（此前是空的）
+    other = [ln for ln in xp["liunian"] if ln["dayunIndex"] != xp["current"]["dayunIndex"]]
+    assert any(index[ln["ganzhi"]] for ln in other), "其他大运的流年应当也能算出神煞"
+
+
+def test_ganzhi_meta_matches_snapshot_columns():
+    """ganzhiMeta 必须与后端 snapshot 已算出的大运/流年列一致——前端靠它重拼任意选择的表。"""
+    xp = _chart_xipan("男")
+    meta = xp["ganzhiMeta"]
+    assert len(meta) == 60
+    fields = ("shishen", "gan", "zhi", "hiddenStems", "shishenZhi", "changsheng", "zizuo", "xunkong", "nayin")
+    for col in xp["snapshot"]["columns"]:
+        if col["name"] not in ("大运", "流年"):
+            continue
+        entry = meta[col["ganzhi"]]
+        assert {f: entry[f] for f in fields} == {f: col[f] for f in fields}, col["name"]
+
+
+def test_payload_carries_fields_frontend_selection_depends_on():
+    """契约：前端「选中态 + 去重查表」依赖的字段必须都在。
+
+    这类字段一旦缺失，表现不是报错而是界面静默显示错误内容（例如 chart.dayun 少了 index
+    会让折叠态匹配不到任何一项、退回显示全部大运），所以在此钉死。
+    """
+    payload = chart_to_api_dict(build_bazi_chart(BIRTH, "男", liunian_start_year=2026, liunian_years=1))
+    xp = payload["xipan"]
+
+    for d in payload["dayun"]:
+        assert isinstance(d.get("index"), int), "chart.dayun 必须带 index（前端 isSameDayun 的首选依据）"
+        assert d.get("ganzhi") and d.get("startYear") is not None
+    # chart.dayun 不含童限，与 xipan.dayun 的 index>0 段必须逐项对齐
+    assert [(d["index"], d["ganzhi"], d["startYear"]) for d in payload["dayun"]] == [
+        (d["index"], d["ganzhi"], d["startYear"]) for d in xp["dayun"] if d["index"] > 0
+    ]
+    for l in xp["liunian"]:
+        assert isinstance(l.get("dayunIndex"), int) and l.get("year") and l.get("ganzhi")
+    for m in xp["liuyue"]:
+        assert m.get("year") and m.get("zhi") and m.get("ganzhi")
+
+    # 逐行出现的键，必须都能在去重附表里查到
+    assert {m["ganzhi"] for m in xp["liuyue"]} <= set(xp["liuyueShensha"])
+    assert {l["ganzhi"] for l in xp["liunian"]} <= set(xp["liunianShensha"])
+    assert {m["zhi"] for m in xp["liuyue"]} <= set(xp["monthMeta"])
+    used_gz = {l["ganzhi"] for l in xp["liunian"]} | {d["ganzhi"] for d in xp["dayun"] if d["index"] > 0}
+    assert used_gz <= set(xp["ganzhiMeta"])
+    # 神煞名都要能在 shenshaDict 里取到说明（流月/流年两处查表共用）
+    names = {n for lst in xp["liuyueShensha"].values() for n in lst}
+    names |= {n for lst in xp["liunianShensha"].values() for n in lst}
+    assert names <= set(xp["shenshaDict"])
 
 
 def test_relations_match_professional_software():

@@ -25,7 +25,7 @@
         </view>
       </scroll-view>
 
-      <scroll-view class="page-body" :key="activeTab" scroll-y :scroll-top="bodyScrollTop">
+      <scroll-view class="page-body" :key="activeTab" scroll-y>
         <!-- 命盘：四柱 -->
         <view class="section section-flush" v-if="activeTab === 'paipan'">
           <view class="bazi-table bazi-table-4">
@@ -391,10 +391,10 @@
             <view class="section inner" v-if="dayunShenshaList.length">
               <view class="section-title-row">
                 <text class="section-title flat">大运神煞</text>
-                <text class="ss-toggle" @tap="showAllDayunShensha = !showAllDayunShensha">{{ showAllDayunShensha ? '只看当运 ▲' : '查看全部大运 ▼' }}</text>
+                <text class="ss-toggle" @tap="showAllDayunShensha = !showAllDayunShensha">{{ showAllDayunShensha ? '只看所选大运 ▲' : '全部大运 ▼' }}</text>
               </view>
-              <view v-for="d in dayunShenshaList" :key="d.ganzhi + d.range" :class="['ss-row', d.isCurrent && 'ss-cur-row']">
-                <view :class="['ss-gz-col', d.isCurrent && 'ss-gz-cur']">
+              <view v-for="d in dayunShenshaList" :key="d.ganzhi + d.range" :class="['ss-row', d.isSel && 'ss-cur-row']">
+                <view :class="['ss-gz-col', (d.isSel || d.isCurrent) && 'ss-gz-cur']">
                   <text class="ss-gz-main">{{ d.ganzhi }}</text>
                   <text class="ss-gz-sub">{{ d.rangeShort }}</text>
                 </view>
@@ -407,10 +407,10 @@
             <view class="section inner">
               <view class="section-title-row">
                 <text class="section-title flat">流年神煞</text>
-                <text class="ss-toggle" @tap="showAllYearShensha = !showAllYearShensha">{{ showAllYearShensha ? '只看当年 ▲' : '该运全部流年 ▼' }}</text>
+                <text class="ss-toggle" @tap="showAllYearShensha = !showAllYearShensha">{{ showAllYearShensha ? '只看所选流年 ▲' : '该运全部流年 ▼' }}</text>
               </view>
-              <view v-for="y in yearShenshaList" :key="y.year" class="ss-row">
-                <text :class="['ss-gz', y.isCurrent && 'ss-gz-cur']">{{ y.year }} {{ y.gz }}</text>
+              <view v-for="y in yearShenshaList" :key="y.year" :class="['ss-row', y.isSel && 'ss-cur-row']">
+                <text :class="['ss-gz', (y.isSel || y.isCurrent) && 'ss-gz-cur']">{{ y.year }} {{ y.gz }}</text>
                 <view class="ss-list">
                   <text v-for="(s, i) in y.list" :key="i" :class="['ss-tag', 'ss-' + classifyShensha(s)]" @tap="showShenshaDesc(s)">{{ s.name }}</text>
                 </view>
@@ -421,7 +421,7 @@
             <view class="section inner" v-if="monthShenshaRows.length">
               <view class="section-title-row">
                 <text class="section-title flat">流月神煞</text>
-                <text class="ss-toggle" @tap="showAllMonthShensha = !showAllMonthShensha">{{ showAllMonthShensha ? '只看当月 ▲' : '该年全部流月 ▼' }}</text>
+                <text class="ss-toggle" @tap="showAllMonthShensha = !showAllMonthShensha">{{ showAllMonthShensha ? '只看所选流月 ▲' : '该年全部流月 ▼' }}</text>
               </view>
               <view
                 v-for="mo in monthShenshaRows"
@@ -525,7 +525,7 @@
 import { ref, computed, watch } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import { useTheme } from '@/composables/useTheme'
-import { getChart, generateFullReport, downloadReport, downloadFullReportPdf, type ChartData, type Pillar, type WuxingItem, type DayunItem, type ShenshaItem, type LiuNianItem, type XiPanData, type XiPanLiuYue, type XiPanRelationGroup } from '@/api'
+import { getChart, generateFullReport, downloadReport, downloadFullReportPdf, isSameDayun, collapseBySelection, type ChartData, type Pillar, type WuxingItem, type DayunItem, type ShenshaItem, type LiuNianItem, type XiPanData, type XiPanLiuYue, type XiPanRelationGroup } from '@/api'
 import MarkdownRender from '@/components/MarkdownRender/MarkdownRender.vue'
 
 const { themeClass } = useTheme()
@@ -538,13 +538,9 @@ const tabs: { key: TabKey; label: string }[] = [
 ]
 const activeTab = ref<TabKey>('paipan')
 
-// 切 tab 回到顶部：scroll-view 由 :key 重建归零；这里再兜两层——
-// 1) 不能用 nextTick，两次赋值会被合并下发，原生层看到值没变就不滚
-// 2) 全局 page 是 min-height:100vh，页面级滚动也要一起归零
-const bodyScrollTop = ref(0)
+// 切 tab 回到顶部：scroll-view 由 :key 重建确定性归零；
+// 再兜一层页面级滚动（全局 page 是 min-height:100vh，页面本身也可能被滚走）
 watch(activeTab, () => {
-  bodyScrollTop.value = 1
-  setTimeout(() => { bodyScrollTop.value = 0 }, 50)
   try { uni.pageScrollTo({ scrollTop: 0, duration: 0 }) } catch {}
 })
 
@@ -578,28 +574,54 @@ const zhiColor = (c: string) => zhiWx[c] || '#e5e7eb'
 const pillars = computed<Pillar[]>(() => chart.value?.pillars || [])
 const wuxing = computed<WuxingItem[]>(() => chart.value?.wuxing || [])
 const dayun = computed<DayunItem[]>(() => chart.value?.dayun || [])
-const liunian = computed<LiuNianItem[]>(() => chart.value?.liunian || [])
 const warnings = computed<string[]>(() => chart.value?.warnings || [])
 const xipan = computed<XiPanData | null>(() => chart.value?.xipan || null)
 const maxWuxing = computed(() => Math.max(...wuxing.value.map((w) => w.count), 1))
 
-// 专业细盘当前快照列重排：四柱在前，大运/流年放到右侧
+// 专业细盘快照列顺序：四柱在前，大运/流年放到右侧
 const SNAP_ORDER = ['年柱', '月柱', '日柱', '时柱', '大运', '流年']
+
+// 点选后命盘大表实际展示的大运/流年干支（童限段无干支，以该年小运代位）
+const snapDayunGz = computed(() => {
+  const xp = xipan.value
+  if (!xp) return ''
+  const dy = xp.dayun.find((d) => d.index === selectedDayunIndex.value)
+  if (!dy) return ''
+  return dy.ganzhi.length === 2 ? dy.ganzhi : xp.liunian.find((l) => l.year === selectedYear.value)?.xiaoyun || ''
+})
+const snapLiunianGz = computed(() =>
+  xipan.value?.liunian.find((l) => l.year === selectedYear.value)?.ganzhi || '')
+
+// 命盘大表的大运/流年两列跟随用户点选：字段查 ganzhiMeta（60 干支纯函数表，与后端 snapshot 逐字段一致）
 const snapColumns = computed(() => {
-  const cols = xipan.value?.snapshot?.columns || []
-  return [...cols].sort((a, b) => {
-    const ia = SNAP_ORDER.indexOf(a.name)
-    const ib = SNAP_ORDER.indexOf(b.name)
-    return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib)
-  })
+  const xp = xipan.value
+  if (!xp) return []
+  const cols = [...(xp.snapshot?.columns || []).filter((c) => SNAP_ORDER.indexOf(c.name) < 4)]
+  const meta = xp.ganzhiMeta || {}
+  const col = (name: string, gz: string) => {
+    const m = meta[gz]
+    return {
+      name,
+      ganzhi: gz || '—',
+      shishen: m?.shishen || '',
+      gan: m?.gan || '',
+      zhi: m?.zhi || '',
+      hiddenStems: m?.hiddenStems || [],
+      shishenZhi: m?.shishenZhi || [],
+      changsheng: m?.changsheng || '',
+      zizuo: m?.zizuo || '',
+      xunkong: m?.xunkong || '',
+      nayin: m?.nayin || '',
+    }
+  }
+  cols.push(col('大运', snapDayunGz.value))
+  cols.push(col('流年', snapLiunianGz.value))
+  return cols
 })
 
 const currentYear = new Date().getFullYear()
 const currentDayun = computed(() =>
   dayun.value.find((d) => d.startYear <= currentYear && (d.endYear || d.startYear + 9) >= currentYear) || dayun.value[0]
-)
-const currentLiuNian = computed(() =>
-  liunian.value.find((l) => String(l.year) === String(currentYear)) || null
 )
 
 interface MainCol {
@@ -670,7 +692,10 @@ function selectDayun(index: number) {
 }
 function selectYear(year: number) {
   selectedYear.value = year
-  selectedLiuyueGz.value = ''
+  // 换流年默认落在该年第一个流月（立春），与「点大运落到该运首年」同规则；
+  // 之后只有用户点别的流月才切换
+  const first = xipan.value?.liuyue.find((m) => m.year === year)
+  selectedLiuyueGz.value = first?.ganzhi || ''
 }
 function selectLiuyue(m: XiPanLiuYue) {
   selectedLiuyueGz.value = m.ganzhi
@@ -791,41 +816,41 @@ const yuanjuRows = computed(() => relRows(xipan.value?.relations?.yuanju))
 // === 神煞列表（截图式：四柱/大运/流年） ===
 const dayunShenshaRaw = computed(() => {
   const cur = currentDayun.value
+  const sel = xipan.value?.dayun.find((d) => d.index === selectedDayunIndex.value)
   return (chart.value?.dayun || []).map((d) => ({
     ganzhi: d.ganzhi,
     range: `${d.startYear}-${d.endYear || d.startYear + 9}（${d.startAge}-${d.endAge || d.startAge + 9}岁）`,
     rangeShort: `${d.startYear}-${d.endYear || d.startYear + 9}`,
-    isCurrent: !!(cur && d.ganzhi === cur.ganzhi && String(d.startYear) === String(cur.startYear)),
+    isCurrent: isSameDayun(d, cur),
+    isSel: isSameDayun(d, sel),
     list: d.shensha || [],
   }))
 })
-// 大运神煞折叠控制，默认只显示当前所在的大运
+// 大运神煞折叠控制，默认只显示当前选中的那一步大运
 const showAllDayunShensha = ref(false)
 const dayunShenshaList = computed(() => {
-  if (showAllDayunShensha.value) return dayunShenshaRaw.value
-  const current = dayunShenshaRaw.value.filter((d) => d.isCurrent)
-  return current.length ? current : dayunShenshaRaw.value
+  const rows = dayunShenshaRaw.value
+  return collapseBySelection(rows, rows.filter((d) => d.isSel), showAllDayunShensha.value, selectedDayunIndex.value >= 0)
 })
-// 流年神煞：展示当前选中大运覆盖的所有流年
-// xipan.liunian 是完整流年（含每运全部年份），chart.liunian 只返回部分年份的神煞，按 year 合并
+// 流年神煞：查 xipan.liunianShensha[干支]（60 条覆盖全部流年）+ shenshaDict[名] 取说明
+// 旧实现按 year 合并顶层 chart.liunian，而那里只有当前大运十年有神煞，切别的运就空白
 const showAllYearShensha = ref(false)
 const yearShenshaList = computed(() => {
   const xp = xipan.value
   if (!xp) return []
-  const shenshaByYear = new Map<string, ShenshaItem[]>()
-  for (const l of chart.value?.liunian || []) {
-    shenshaByYear.set(String(l.year), l.shensha || [])
-  }
+  const index = xp.liunianShensha || {}
+  const dict = xp.shenshaDict || {}
   const rows = xp.liunian
     .filter((l) => l.dayunIndex === selectedDayunIndex.value)
     .map((l) => ({
       year: l.year,
       gz: l.ganzhi,
       isCurrent: String(l.year) === String(xp.current.year),
-      list: shenshaByYear.get(String(l.year)) || [],
+      isSel: l.year === selectedYear.value,
+      list: (index[l.ganzhi] || []).map((name) => ({ name, description: dict[name] || '' })),
     }))
     .sort((a, b) => Number(a.year) - Number(b.year))
-  return showAllYearShensha.value ? rows : rows.filter((y) => y.isCurrent)
+  return collapseBySelection(rows, rows.filter((y) => y.isSel), showAllYearShensha.value, selectedYear.value > 0)
 })
 
 // 流月神煞：展示选中流年的 12 个节气月，点击流月格可聚焦对应行
@@ -847,9 +872,7 @@ const monthShenshaRows = computed(() => {
         description: (xp.shenshaDict || {})[name] || '',
       })),
     }))
-  if (showAllMonthShensha.value) return rows
-  const focused = rows.filter((m) => m.isSelected || m.isCurrent)
-  return focused.length ? focused : rows
+  return collapseBySelection(rows, rows.filter((m) => m.isSelected), showAllMonthShensha.value, !!selectedLiuyueGz.value)
 })
 
 // 五行旺相休囚死的取色 class：用 ASCII 数字避免 WXSS 对中文 class 做 `\XXXX` 转义导致编译失败
@@ -883,21 +906,21 @@ const shenshaByPillar = computed(() => {
   return groups
 })
 
-// 当前快照表神煞行：四柱 + 当前大运 + 当前流年 全部融进同一张表格
+// 快照表神煞行：四柱 + 点选的大运 + 点选的流年，与上方列内容同源
 const snapShenshaMap = computed(() => {
   const xp = xipan.value
   const map: Record<string, (ShenshaItem & { _cat: string })[]> = {}
   for (const name of ['年柱', '月柱', '日柱', '时柱']) {
     map[name] = shenshaByPillar.value[name] || []
   }
-  if (xp?.current?.dayun) {
-    const ds = dayunShenshaRaw.value.find((d) => d.ganzhi === xp.current!.dayun)
-    map['大运'] = ds ? ds.list.map((s) => ({ ...s, _cat: classifyShensha(s) })) : []
-  }
-  if (xp?.current?.liunian) {
-    const ys = yearShenshaList.value.find((y) => y.gz === xp.current!.liunian)
-    map['流年'] = ys ? ys.list.map((s) => ({ ...s, _cat: classifyShensha(s) })) : []
-  }
+  const tag = (s: ShenshaItem) => ({ ...s, _cat: classifyShensha(s) })
+  if (!xp) return map
+  const ds = dayunShenshaRaw.value.find((d) => d.ganzhi === snapDayunGz.value)
+  map['大运'] = (ds?.list || []).map(tag)
+  const dict = xp.shenshaDict || {}
+  map['流年'] = (xp.liunianShensha?.[snapLiunianGz.value] || [])
+    .map((name) => ({ name, description: dict[name] || '' }))
+    .map(tag)
   return map
 })
 
@@ -1119,7 +1142,6 @@ onLoad((options: any) => {
   display: flex;
   flex-direction: column;
   height: 100vh;
-  overflow: hidden;
   background: $color-paper;
 }
 .navbar {
@@ -1194,7 +1216,10 @@ onLoad((options: any) => {
   background: $color-vermilion;
 }
 
-.page-body { flex: 1; padding: 6rpx 28rpx 0; box-sizing: border-box; }
+/* height:0 + flex:1 + min-height:0：把高度交给 flex 算法。
+   小程序里 flex 子项默认 min-height:auto，会被内容撑到全高，scroll-view 自身没有
+   可滚余量（表现为一直接着页面在滚、内部 scroll-y 不生效）。 */
+.page-body { flex: 1; height: 0; min-height: 0; padding: 6rpx 28rpx 0; box-sizing: border-box; }
 .section { margin-bottom: 32rpx; }
 .section.inner { margin-bottom: 36rpx; }
 /* 表格贴顶：无标题的首个 section 不留上间距 */
@@ -1240,7 +1265,6 @@ onLoad((options: any) => {
   background: $color-vermilion;
   border-radius: 3rpx;
 }
-.section-hint { font-size: 20rpx; color: $color-ink-light; font-weight: normal; margin-left: 8rpx; letter-spacing: 1rpx; }
 
 /* 四柱表格 */
 .bazi-table {
@@ -1279,13 +1303,6 @@ onLoad((options: any) => {
 .bt-fu-click { color: $color-ink; transition: opacity 0.15s; }
 .bt-fu-click:active { opacity: 0.6; }
 
-.ps-tag { font-size: 22rpx; padding: 3rpx 12rpx; border-radius: 8rpx; line-height: 1.6; opacity: 0.85; }
-.ps-tag:active { opacity: 1; transform: scale(0.96); }
-.ps-good { color: #38a169; background: rgba(56,161,105,0.1); }
-.ps-bad { color: #c53030; background: rgba(197,48,48,0.1); }
-.ps-love { color: #b83280; background: rgba(184,50,128,0.1); }
-.ps-career { color: #2b6cb0; background: rgba(43,108,176,0.1); }
-.ps-other { color: #718096; background: rgba(113,128,150,0.1); }
 
 /* 命盘六列：当前大运/流年列高亮 */
 .bt-cur-head { background: rgba(212, 175, 55, 0.18); color: #8a6d3b; font-weight: 700; }
@@ -1309,7 +1326,6 @@ onLoad((options: any) => {
 .an-row { display: flex; align-items: flex-start; gap: 16rpx; padding: 12rpx 0; border-bottom: 1rpx dashed $color-border; }
 .an-row:last-child { border-bottom: none; }
 .an-label { flex: 0 0 72rpx; font-size: 24rpx; color: $color-ink-light; padding-top: 6rpx; }
-.an-value { flex: 1; min-width: 0; font-size: 26rpx; color: $color-ink; line-height: 1.5; }
 .an-tags { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; gap: 10rpx; }
 .an-tag {
   font-size: 22rpx; line-height: 1.5; padding: 4rpx 12rpx; border-radius: 8rpx;
@@ -1317,10 +1333,6 @@ onLoad((options: any) => {
 }
 
 /* 神煞按柱竖向排列：4 列网格 */
-.ss-grid { display: flex; gap: 16rpx; }
-.ss-col { flex: 1; min-width: 0; background: $color-paper-warm; border: 1rpx solid $color-border; border-radius: 12rpx; padding: 14rpx 8rpx; display: flex; flex-direction: column; align-items: center; gap: 8rpx; box-sizing: border-box; }
-.ss-col-head { font-size: 26rpx; font-weight: 700; color: $color-ink; letter-spacing: 2rpx; padding-bottom: 8rpx; border-bottom: 1rpx dashed $color-border; width: 100%; text-align: center; }
-.ss-col-list { width: 100%; display: flex; flex-direction: column; align-items: center; gap: 8rpx; }
 .ss-empty { font-size: 22rpx; color: $color-ink-lighter; padding: 6rpx 0; }
 .ss-tag { font-size: 22rpx; padding: 4rpx 14rpx; border-radius: 8rpx; line-height: 1.5; color: #718096; background: rgba(113,128,150,0.1); transition: transform 0.15s, opacity 0.15s; }
 .ss-tag:active { opacity: 0.7; transform: scale(0.96); }
@@ -1429,38 +1441,7 @@ onLoad((options: any) => {
 .wuxing-count { font-size: 26rpx; color: $color-ink-light; }
 
 /* 大运 */
-.dayun-grid { display: flex; flex-wrap: wrap; justify-content: center; gap: 12rpx; box-sizing: border-box; }
-.dayun-card {
-  flex: 0 0 calc((100% - 24rpx) / 3);
-  width: calc((100% - 24rpx) / 3);
-  background: $color-bg-card;
-  border-radius: 12rpx;
-  padding: 12rpx 6rpx;
-  text-align: center;
-  border: 1rpx solid $color-border;
-  box-sizing: border-box;
-  min-width: 0;
-}
-.dayun-card-clickable { transition: transform 0.2s, border-color 0.2s, box-shadow 0.2s; }
-.dayun-card-clickable:active { transform: scale(0.97); border-color: $color-primary; box-shadow: 0 4rpx 16rpx rgba(212, 175, 55, 0.2); }
-.dayun-year { display: block; font-size: 32rpx; font-weight: bold; color: $color-ink; font-family: $font-family-display; margin-bottom: 4rpx; letter-spacing: 2rpx; }
-.dayun-range { display: block; font-size: 22rpx; color: $color-ink-light; margin-bottom: 2rpx; }
-.dayun-age { display: block; font-size: 22rpx; color: $color-ink-lighter; }
 
-.consult-grid { display: flex; gap: 12rpx; box-sizing: border-box; }
-.consult-card { flex: 1; min-width: 0; background: $color-bg-card; border-radius: 12rpx; padding: 16rpx 12rpx; border: 1rpx solid $color-border; box-sizing: border-box; }
-.consult-label { display: block; font-size: 24rpx; color: $color-ink-light; margin-bottom: 6rpx; }
-.consult-main { display: block; font-size: 32rpx; color: $color-vermilion; font-weight: 700; font-family: $font-family-display; margin-bottom: 4rpx; }
-.consult-sub { display: block; font-size: 24rpx; color: $color-ink-light; }
-.consult-note { margin-top: 12rpx; padding: 14rpx 16rpx; background: $color-paper-warm; border: 1rpx solid $color-border; border-left: 4rpx solid $color-vermilion; border-radius: 8rpx; color: $color-ink; font-size: 26rpx; line-height: 1.55; }
-.liunian-strip { display: flex; flex-wrap: wrap; gap: 10rpx; margin-top: 12rpx; box-sizing: border-box; }
-.liunian-pill { width: calc(33.33% - 7rpx); padding: 12rpx 10rpx; background: $color-bg-card; border: 1rpx solid $color-border; border-radius: 10rpx; box-sizing: border-box; min-width: 0; }
-.liunian-pill-clickable { transition: transform 0.2s, border-color 0.2s, box-shadow 0.2s; }
-.liunian-pill-clickable:active { transform: scale(0.97); border-color: $color-primary; box-shadow: 0 4rpx 16rpx rgba(212, 175, 55, 0.2); }
-.ln-year, .ln-gz, .ln-dy { display: block; text-align: center; }
-.ln-year { font-size: 24rpx; color: $color-ink-light; }
-.ln-gz { font-size: 30rpx; color: $color-ink; font-family: $font-family-display; font-weight: 700; margin: 4rpx 0; }
-.ln-dy { font-size: 24rpx; color: $color-ink-light; }
 .warning-list { display: flex; flex-direction: column; gap: 8rpx; margin-top: 12rpx; }
 .warning-item { padding: 12rpx 14rpx; background: $color-paper-warm; border: 1rpx solid $color-border; border-left: 4rpx solid $state-warning; border-radius: 8rpx; color: $color-ink; font-size: 26rpx; line-height: 1.5; }
 
@@ -1508,37 +1489,13 @@ onLoad((options: any) => {
 
 .xp-dayun-scroll { width: 100%; white-space: nowrap; }
 .xp-dayun-strip { display: inline-flex; gap: 14rpx; padding: 4rpx 2rpx 8rpx; }
-.xp-dayun-chip {
-  flex-shrink: 0; width: 168rpx;
-  display: flex; flex-direction: column; align-items: center; gap: 4rpx;
-  padding: 16rpx 8rpx; border-radius: 12rpx;
-  background: $color-bg-card; border: 1rpx solid $color-border; box-sizing: border-box;
-  transition: transform 0.15s;
-}
-.xp-dayun-chip:active { transform: scale(0.96); }
 .xp-dayun-chip.active { border-color: $color-vermilion; background: rgba(184, 72, 60, 0.07); }
 .xp-dayun-chip.now { border-color: rgba(184, 72, 60, 0.5); }
-.xp-dy-gz { font-size: 32rpx; font-weight: 700; color: $color-ink; letter-spacing: 4rpx; font-family: $font-family-display; }
 .xp-dayun-chip.active .xp-dy-gz { color: $color-vermilion; }
-.xp-dy-shishen { font-size: 22rpx; color: $color-vermilion; }
-.xp-dy-meta { font-size: 20rpx; color: $color-ink-light; }
 
-.xp-ln-strip { display: flex; flex-wrap: wrap; gap: 12rpx; }
-.xp-ln-chip {
-  width: calc(33.33% - 8rpx);
-  display: flex; flex-direction: column; align-items: center; gap: 4rpx;
-  padding: 14rpx 8rpx; border-radius: 12rpx;
-  background: $color-bg-card; border: 1rpx solid $color-border; box-sizing: border-box;
-  transition: transform 0.15s;
-}
-.xp-ln-chip:active { transform: scale(0.96); }
 .xp-ln-chip.active { border-color: $color-vermilion; background: rgba(184, 72, 60, 0.07); }
 .xp-ln-chip.now { border-color: rgba(184, 72, 60, 0.5); }
-.xp-ln-year { font-size: 24rpx; color: $color-ink-light; }
-.xp-ln-gz { font-size: 32rpx; font-weight: 700; color: $color-ink; letter-spacing: 4rpx; font-family: $font-family-display; }
 .xp-ln-chip.active .xp-ln-gz { color: $color-vermilion; }
-.xp-ln-shishen { font-size: 22rpx; color: $color-vermilion; }
-.xp-ln-meta { font-size: 20rpx; color: $color-ink-light; }
 
 .xipan-note {
   padding: 14rpx 16rpx;

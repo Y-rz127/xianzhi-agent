@@ -13,10 +13,13 @@ export type {
   SessionMessage, ShenshaItem, TarotRecord, WuxingItem, XzUser,
   XiPanColumn, XiPanCurrent, XiPanDaYun, XiPanData, XiPanLiuNian,
   XiPanLiuYue, XiPanQiYun, XiPanRelationGroup, XiPanRelations, XiPanSiLing,
-  XiPanSnapshot, XiPanWuxingState, XiPanMonthMeta,
+  XiPanSnapshot, XiPanWuxingState, XiPanMonthMeta, XiPanGanzhiMeta,
 } from '@shared/api'
 export type { SessionBirthInfo as BirthInfo } from '@shared/api'
-export { parseDayun, parsePillars, parseShensha, parseWuxing } from '@shared/api'
+export {
+  parseDayun, parsePillars, parseShensha, parseWuxing,
+  isSameDayun, collapseBySelection,
+} from '@shared/api'
 import type {
   AnswerFeedbackPayload, BaziProfile, ChartCase, ChartData, ChatSession,
   FavoriteCase, HehunParams, SessionMessage, TarotCard, TarotRecord, XzUser,
