@@ -1,5 +1,6 @@
 <template>
   <div class="chart-detail-page">
+    <div v-if="reportNotice" class="report-notice" role="status">{{ reportNotice }}</div>
     <header class="page-header">
       <button class="back-btn" @click="goBack" aria-label="返回">← 返回</button>
       <div class="page-title display-font">命盘详情</div>
@@ -29,7 +30,9 @@
         <div v-if="activeTab === 'pillars'" class="tab-panel" role="tabpanel">
           <div class="section-title-row">
             <span class="section-title">四柱命盘</span>
-            <span v-if="chart.mingGong || chart.shenGong" class="gong-info">
+            <span v-if="chart.taiYuan || chart.mingGong || chart.shenGong" class="chart-gong-summary">
+              <template v-if="chart.taiYuan">胎元 {{ chart.taiYuan }}</template>
+              <template v-if="chart.taiYuan && (chart.mingGong || chart.shenGong)"> · </template>
               <template v-if="chart.mingGong">命宫 {{ chart.mingGong }}</template>
               <template v-if="chart.mingGong && chart.shenGong"> · </template>
               <template v-if="chart.shenGong">身宫 {{ chart.shenGong }}</template>
@@ -170,73 +173,82 @@
         <!-- 细盘：时间层级 -->
         <div v-if="activeTab === 'xipan'" class="tab-panel" role="tabpanel">
           <div v-if="xipan" class="xipan-section">
+            <!-- 当前快照：流年+大运叠加四柱 -->
+            <div class="section-block">
+              <div class="chart-grid xp-snapshot">
+                <div class="cg-row cg-head">
+                  <div class="cg-label"></div>
+                  <div v-for="c in snapColumns" :key="'sh-' + c.name" :class="['cg-cell cg-col-head', c.name === '日柱' ? 'day-master' : '']">{{ c.name }}</div>
+                </div>
+                <div class="cg-row">
+                  <div class="cg-label">主星</div>
+                  <div v-for="c in snapColumns" :key="'sm-' + c.name" :class="['cg-cell', c.name === '日柱' ? 'day-master' : '']">{{ c.shishen || '—' }}</div>
+                </div>
+                <div class="cg-row">
+                  <div class="cg-label">天干</div>
+                  <div v-for="c in snapColumns" :key="'sg-' + c.name" :class="['cg-cell', c.name === '日柱' ? 'day-master' : '']">
+                    <span class="xp-gan" :style="{ color: ganColor(c.gan) }">{{ c.gan || '—' }}</span>
+                  </div>
+                </div>
+                <div class="cg-row">
+                  <div class="cg-label">地支</div>
+                  <div v-for="c in snapColumns" :key="'sz-' + c.name" :class="['cg-cell', c.name === '日柱' ? 'day-master' : '']">
+                    <span class="xp-gan" :style="{ color: zhiColor(c.zhi) }">{{ c.zhi || '—' }}</span>
+                  </div>
+                </div>
+                <div class="cg-row">
+                  <div class="cg-label">藏干</div>
+                  <div v-for="c in snapColumns" :key="'sc-' + c.name" :class="['cg-cell cg-multi', c.name === '日柱' ? 'day-master' : '']">
+                    <span v-for="(g, i) in c.hiddenStems" :key="'sc-' + c.name + '-' + i" class="cang-item" :style="{ color: ganColor(g) }">{{ g }}</span>
+                  </div>
+                </div>
+                <div class="cg-row">
+                  <div class="cg-label">副星</div>
+                  <div v-for="c in snapColumns" :key="'sf-' + c.name" :class="['cg-cell cg-multi', c.name === '日柱' ? 'day-master' : '']">
+                    <span v-for="(s, i) in c.shishenZhi" :key="'sf-' + c.name + '-' + i" class="fu-item">{{ s }}</span>
+                  </div>
+                </div>
+                <div class="cg-row">
+                  <div class="cg-label">星运</div>
+                  <div v-for="c in snapColumns" :key="'scs-' + c.name" :class="['cg-cell', c.name === '日柱' ? 'day-master' : '']">{{ c.changsheng || '—' }}</div>
+                </div>
+                <div class="cg-row">
+                  <div class="cg-label">自坐</div>
+                  <div v-for="c in snapColumns" :key="'szz-' + c.name" :class="['cg-cell', c.name === '日柱' ? 'day-master' : '']">{{ c.zizuo || '—' }}</div>
+                </div>
+                <div class="cg-row">
+                  <div class="cg-label">空亡</div>
+                  <div v-for="c in snapColumns" :key="'sxk-' + c.name" :class="['cg-cell', c.name === '日柱' ? 'day-master' : '']">{{ c.xunkong || '—' }}</div>
+                </div>
+                <div class="cg-row">
+                  <div class="cg-label">纳音</div>
+                  <div v-for="c in snapColumns" :key="'sny-' + c.name" :class="['cg-cell', c.name === '日柱' ? 'day-master' : '']">{{ c.nayin || '—' }}</div>
+                </div>
+                <div class="cg-row">
+                  <div class="cg-label">神煞</div>
+                  <div v-for="c in snapColumns" :key="'sss-' + c.name" class="cg-cell cg-multi cg-tags">
+                    <span
+                      v-for="(s, i) in (snapShenshaMap[c.name] || [])"
+                      :key="'sss-' + c.name + '-' + i"
+                      class="ps-tag"
+                      :class="['ps-' + s._cat, { 'ps-active': activeShensha === s }]"
+                      @click.stop="toggleShensha(s)"
+                    >{{ s.name }}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
             <!-- 起运 -->
             <div class="xp-qiyun">
               <div class="xp-qiyun-main">
                 <span class="xp-qiyun-tag">起运</span>
                 <span class="xp-qiyun-after">{{ xipan.qiyun.after }}</span>
                 <span class="xp-qiyun-dir">{{ xipan.qiyun.direction }}</span>
+                <span class="xp-qiyun-current">{{ xipan.snapshot.label }} · {{ xipan.current.year }}年 {{ xipan.current.age }}虚岁</span>
               </div>
               <div class="xp-qiyun-sub">
                 交运 {{ xipan.qiyun.startDate }} · {{ xipan.qiyun.jieqi }}后{{ xipan.qiyun.daysAfterJieqi }}天 · 逢{{ xipan.qiyun.gan }}年交运
-              </div>
-            </div>
-
-            <!-- 当前快照：流年+大运叠加四柱 -->
-            <div class="section-block">
-              <div class="section-title-row">
-                <span class="section-title">当前快照</span>
-                <span class="gong-info">{{ xipan.snapshot.label }} · {{ xipan.current.year }}年 {{ xipan.current.age }}虚岁</span>
-              </div>
-              <div class="chart-grid xp-snapshot">
-                <div class="cg-row cg-head">
-                  <div class="cg-label"></div>
-                  <div v-for="c in xipan.snapshot.columns" :key="'sh-' + c.name" :class="['cg-cell cg-col-head', c.name === '日柱' ? 'day-master' : '']">{{ c.name }}</div>
-                </div>
-                <div class="cg-row">
-                  <div class="cg-label">主星</div>
-                  <div v-for="c in xipan.snapshot.columns" :key="'sm-' + c.name" :class="['cg-cell', c.name === '日柱' ? 'day-master' : '']">{{ c.shishen || '—' }}</div>
-                </div>
-                <div class="cg-row">
-                  <div class="cg-label">天干</div>
-                  <div v-for="c in xipan.snapshot.columns" :key="'sg-' + c.name" :class="['cg-cell', c.name === '日柱' ? 'day-master' : '']">
-                    <span class="xp-gan" :style="{ color: ganColor(c.gan) }">{{ c.gan || '—' }}</span>
-                  </div>
-                </div>
-                <div class="cg-row">
-                  <div class="cg-label">地支</div>
-                  <div v-for="c in xipan.snapshot.columns" :key="'sz-' + c.name" :class="['cg-cell', c.name === '日柱' ? 'day-master' : '']">
-                    <span class="xp-gan" :style="{ color: zhiColor(c.zhi) }">{{ c.zhi || '—' }}</span>
-                  </div>
-                </div>
-                <div class="cg-row">
-                  <div class="cg-label">藏干</div>
-                  <div v-for="c in xipan.snapshot.columns" :key="'sc-' + c.name" :class="['cg-cell cg-multi', c.name === '日柱' ? 'day-master' : '']">
-                    <span v-for="(g, i) in c.hiddenStems" :key="'sc-' + c.name + '-' + i" class="cang-item" :style="{ color: ganColor(g) }">{{ g }}</span>
-                  </div>
-                </div>
-                <div class="cg-row">
-                  <div class="cg-label">副星</div>
-                  <div v-for="c in xipan.snapshot.columns" :key="'sf-' + c.name" :class="['cg-cell cg-multi', c.name === '日柱' ? 'day-master' : '']">
-                    <span v-for="(s, i) in c.shishenZhi" :key="'sf-' + c.name + '-' + i" class="fu-item">{{ s }}</span>
-                  </div>
-                </div>
-                <div class="cg-row">
-                  <div class="cg-label">星运</div>
-                  <div v-for="c in xipan.snapshot.columns" :key="'scs-' + c.name" :class="['cg-cell', c.name === '日柱' ? 'day-master' : '']">{{ c.changsheng || '—' }}</div>
-                </div>
-                <div class="cg-row">
-                  <div class="cg-label">自坐</div>
-                  <div v-for="c in xipan.snapshot.columns" :key="'szz-' + c.name" :class="['cg-cell', c.name === '日柱' ? 'day-master' : '']">{{ c.zizuo || '—' }}</div>
-                </div>
-                <div class="cg-row">
-                  <div class="cg-label">空亡</div>
-                  <div v-for="c in xipan.snapshot.columns" :key="'sxk-' + c.name" :class="['cg-cell', c.name === '日柱' ? 'day-master' : '']">{{ c.xunkong || '—' }}</div>
-                </div>
-                <div class="cg-row">
-                  <div class="cg-label">纳音</div>
-                  <div v-for="c in xipan.snapshot.columns" :key="'sny-' + c.name" :class="['cg-cell', c.name === '日柱' ? 'day-master' : '']">{{ c.nayin || '—' }}</div>
-                </div>
               </div>
             </div>
 
@@ -268,6 +280,8 @@
                 >
                   <span class="xp-dy-gz">{{ d.ganzhi }}</span>
                   <span v-if="d.shishen" class="xp-dy-shishen">{{ d.shishen }}</span>
+                  <span class="xp-dy-meta">副星{{ d.shishenZhi?.[0] || '—' }}</span>
+                  <span class="xp-dy-meta">星运{{ d.changsheng || '—' }}</span>
                   <span class="xp-dy-meta">{{ d.startAge }}-{{ d.endAge }}岁</span>
                   <span class="xp-dy-meta">{{ d.startYear }}-{{ d.endYear }}</span>
                 </button>
@@ -290,8 +304,9 @@
                 >
                   <span class="xp-ln-year">{{ l.year }}</span>
                   <span class="xp-ln-gz">{{ l.ganzhi }}</span>
-                  <span class="xp-ln-shishen">{{ l.shishen }}</span>
+                  <span class="xp-ln-shishen">{{ l.shishen }}{{ l.shishenZhi?.[0] ? '·' + l.shishenZhi[0] : '' }}</span>
                   <span class="xp-ln-meta">{{ l.age }}岁{{ l.xiaoyun ? ' · 小运' + l.xiaoyun : '' }}</span>
+                  <span class="xp-ln-meta">星运{{ l.changsheng || '—' }}</span>
                 </button>
               </div>
             </div>
@@ -304,12 +319,116 @@
                   v-for="m in liuyueOfYear"
                   :key="m.zhi"
                   class="xp-ly-cell"
-                  :class="{ now: isCurrentLiuyue(m) }"
+                  :class="{ now: isCurrentLiuyue(m), sel: selectedLiuyueGz === m.ganzhi }"
+                  @click="selectLiuyue(m)"
                 >
                   <div class="xp-ly-jie">{{ m.jieqi }}</div>
                   <div class="xp-ly-date">{{ m.date }}</div>
                   <div class="xp-ly-gz">{{ m.ganzhi }}</div>
-                  <div class="xp-ly-shishen">{{ m.shishen }}</div>
+                  <div class="xp-ly-shishen">{{ m.shishen }}{{ xipan.monthMeta?.[m.zhi]?.shishenZhi?.[0] ? '·' + xipan.monthMeta[m.zhi].shishenZhi[0] : '' }}</div>
+                  <div class="xp-ly-date">星运{{ xipan.monthMeta?.[m.zhi]?.changsheng || '—' }}</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 大运神煞（折叠：默认只看点选的那一步） -->
+            <div class="section-block" v-if="dayunShenshaList.length">
+              <div class="section-title-row">
+                <span class="section-title">大运神煞</span>
+                <button class="ss-toggle" @click="showAllDayunShensha = !showAllDayunShensha">{{ showAllDayunShensha ? '只看所选大运 ▲' : '全部大运 ▼' }}</button>
+              </div>
+              <div v-for="d in dayunShenshaList" :key="d.ganzhi + d.range" :class="['ss-row', d.isSel && 'ss-cur-row']">
+                <div :class="['ss-sec-gz', (d.isSel || d.isCurrent) && 'ss-gz-cur']">
+                  <div>{{ d.ganzhi }}</div>
+                  <div class="ss-sec-sub">{{ d.range }}</div>
+                </div>
+                <div class="ss-sec-tags">
+                  <span
+                    v-for="(s, i) in d.list"
+                    :key="'dss-' + d.ganzhi + '-' + i"
+                    class="ps-tag"
+                    :class="['ps-' + classifyShensha(s), { 'ps-active': activeShensha === s }]"
+                    @click.stop="toggleShensha(s)"
+                  >{{ s.name }}</span>
+                  <span v-if="!d.list.length" class="ss-sec-empty">—</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- 流年神煞（折叠：默认只看点选的那一年） -->
+            <div class="section-block" v-if="yearShenshaList.length">
+              <div class="section-title-row">
+                <span class="section-title">流年神煞</span>
+                <button class="ss-toggle" @click="showAllYearShensha = !showAllYearShensha">{{ showAllYearShensha ? '只看所选流年 ▲' : '该运全部流年 ▼' }}</button>
+              </div>
+              <div v-for="y in yearShenshaList" :key="y.year" :class="['ss-row', y.isSel && 'ss-cur-row']">
+                <div :class="['ss-sec-gz', (y.isSel || y.isCurrent) && 'ss-gz-cur']">
+                  <div>{{ y.year }}年</div>
+                  <div class="ss-sec-sub">{{ y.gz }}</div>
+                </div>
+                <div class="ss-sec-tags">
+                  <span
+                    v-for="(s, i) in y.list"
+                    :key="'yss-' + y.year + '-' + i"
+                    class="ps-tag"
+                    :class="['ps-' + classifyShensha(s), { 'ps-active': activeShensha === s }]"
+                    @click.stop="toggleShensha(s)"
+                  >{{ s.name }}</span>
+                  <span v-if="!y.list.length" class="ss-sec-empty">—</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- 流月神煞（折叠：默认只看点选的那个流月） -->
+            <div class="section-block" v-if="monthShenshaList.length">
+              <div class="section-title-row">
+                <span class="section-title">流月神煞</span>
+                <button class="ss-toggle" @click="showAllMonthShensha = !showAllMonthShensha">{{ showAllMonthShensha ? '只看所选流月 ▲' : '该年全部流月 ▼' }}</button>
+              </div>
+              <div v-for="m in monthShenshaList" :key="m.gz" :class="['ss-row', m.isSel && 'ss-cur-row']">
+                <div :class="['ss-sec-gz', (m.isSel || m.isCurrent) && 'ss-gz-cur']">
+                  <div>{{ m.jieqi }}</div>
+                  <div class="ss-sec-sub">{{ m.date }} · {{ m.gz }}</div>
+                </div>
+                <div class="ss-sec-tags">
+                  <span
+                    v-for="(s, i) in m.list"
+                    :key="'mss-' + m.gz + '-' + i"
+                    class="ps-tag"
+                    :class="['ps-' + classifyShensha(s), { 'ps-active': activeShensha === s }]"
+                    @click.stop="toggleShensha(s)"
+                  >{{ s.name }}</span>
+                  <span v-if="!m.list.length" class="ss-sec-empty">—</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- 岁运分析（大运 · 流年 · 流月 叠加原局） -->
+            <div class="section-block" v-if="suiyunRows.length">
+              <div class="section-title-row">
+                <span class="section-title">岁运分析</span>
+                <span class="gong-info">{{ xipan.relations?.suiyun.label }}</span>
+              </div>
+              <div v-for="row in suiyunRows" :key="'sy' + row.label" class="an-row">
+                <span class="an-label">{{ row.label }}</span>
+                <div class="an-tags">
+                  <span v-if="!row.items.length" class="ss-sec-empty">—</span>
+                  <span v-for="(it, i) in row.items" :key="i" class="an-tag">{{ it }}</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- 原局分析（四柱内部关系） -->
+            <div class="section-block" v-if="yuanjuRows.length">
+              <div class="section-title-row">
+                <span class="section-title">原局分析</span>
+                <span class="gong-info">{{ xipan.relations?.yuanju.label }}</span>
+              </div>
+              <div v-for="row in yuanjuRows" :key="'yj' + row.label" class="an-row">
+                <span class="an-label">{{ row.label }}</span>
+                <div class="an-tags">
+                  <span v-if="!row.items.length" class="ss-sec-empty">—</span>
+                  <span v-for="(it, i) in row.items" :key="i" class="an-tag">{{ it }}</span>
                 </div>
               </div>
             </div>
@@ -391,8 +510,8 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from "vue"
 import { useRoute, useRouter } from "vue-router"
-import type { Pillar, WuxingItem, DayunItem, ShenshaItem, LiuNianItem, ChartAnalysis, ChartData, XiPanData, XiPanLiuYue } from "../api/index.ts"
-import { getChart, downloadReport, generateFullReport, downloadFullReportPDF } from "../api/index.ts"
+import type { Pillar, WuxingItem, DayunItem, ShenshaItem, LiuNianItem, ChartAnalysis, ChartData, XiPanData, XiPanLiuYue, XiPanRelationGroup } from "../api/index.ts"
+import { getChart, downloadReport, generateFullReport, downloadFullReportPDF, isSameDayun, collapseBySelection } from "../api/index.ts"
 import MarkdownRender from "../components/MarkdownRender.vue"
 
 type TabKey = 'pillars' | 'wuxing' | 'dayun' | 'liunian' | 'xipan' | 'report'
@@ -403,8 +522,6 @@ const router = useRouter()
 const tabs = [
   { key: 'pillars' as TabKey, label: '四柱' },
   { key: 'wuxing' as TabKey, label: '五行' },
-  { key: 'dayun' as TabKey, label: '大运' },
-  { key: 'liunian' as TabKey, label: '流年' },
   { key: 'xipan' as TabKey, label: '细盘' },
   { key: 'report' as TabKey, label: '报告' },
 ]
@@ -462,11 +579,13 @@ const hasConsultationContext = computed(() =>
 // === 细盘选中联动 ===
 const selectedDayunIndex = ref(-1)
 const selectedYear = ref(0)
+const selectedLiuyueGz = ref('')
 
 watch(xipan, (xp) => {
   if (xp) {
     selectedDayunIndex.value = xp.current.dayunIndex
     selectedYear.value = xp.current.year
+    selectedLiuyueGz.value = xp.current.liuyue || ''
   }
 })
 
@@ -492,11 +611,29 @@ function selectDayun(index: number) {
 }
 function selectYear(year: number) {
   selectedYear.value = year
+  // 换流年默认落在该年第一个流月（立春），与「点大运落到该运首年」同规则
+  const first = xipan.value?.liuyue.find(m => m.year === year)
+  selectedLiuyueGz.value = first?.ganzhi || ''
+}
+function selectLiuyue(m: XiPanLiuYue) {
+  selectedLiuyueGz.value = m.ganzhi
 }
 function isCurrentLiuyue(m: XiPanLiuYue): boolean {
   const xp = xipan.value
   return !!xp && selectedYear.value === xp.current.year && m.ganzhi === xp.current.liuyue
 }
+
+// === 岁运 / 原局分析（后端 relations 引擎，六栏口径对齐专业排盘软件） ===
+function relRows(g?: XiPanRelationGroup) {
+  if (!g) return []
+  return [
+    { label: '天干', items: g.gan || [] },
+    { label: '地支', items: g.zhi || [] },
+    { label: '整柱', items: g.zhu || [] },
+  ]
+}
+const suiyunRows = computed(() => relRows(xipan.value?.relations?.suiyun))
+const yuanjuRows = computed(() => relRows(xipan.value?.relations?.yuanju))
 
 // 五行旺相休囚死的取色 class：用 ASCII 数字避免中文 class 被转义
 const XS_STATE_KEY: Record<string, number> = { 旺: 0, 相: 1, 休: 2, 囚: 3, 死: 4 }
@@ -533,6 +670,122 @@ const shenshaByPillar = computed(() => {
     ;(groups[pillarName] ||= []).push(tagged)
   }
   return groups
+})
+
+// === 细盘神煞联动（对照小程序端） ===
+
+// 点选后命盘大表实际展示的大运/流年干支（童限段无干支，以该年小运代位）
+const snapDayunGz = computed(() => {
+  const xp = xipan.value
+  if (!xp) return ''
+  const dy = xp.dayun.find(d => d.index === selectedDayunIndex.value)
+  if (!dy) return ''
+  return dy.ganzhi.length === 2 ? dy.ganzhi : xp.liunian.find(l => l.year === selectedYear.value)?.xiaoyun || ''
+})
+const snapLiunianGz = computed(() =>
+  xipan.value?.liunian.find(l => l.year === selectedYear.value)?.ganzhi || '')
+
+// 大运神煞（折叠：默认只看点选的那一步）
+const showAllDayunShensha = ref(false)
+const dayunShenshaRows = computed(() => {
+  const cur = currentDayun.value
+  const sel = xipan.value?.dayun.find(d => d.index === selectedDayunIndex.value)
+  return (chart.value?.dayun || []).map(d => ({
+    ganzhi: d.ganzhi,
+    range: `${d.startYear}-${d.endYear || d.startYear + 9}（${d.startAge}-${d.endAge || d.startAge + 9}岁）`,
+    isCurrent: isSameDayun(d, cur),
+    isSel: isSameDayun(d, sel),
+    list: (d.shensha || []).map(s => ({ ...s, _cat: classifyShensha(s) })),
+  }))
+})
+const dayunShenshaList = computed(() =>
+  collapseBySelection(dayunShenshaRows.value, dayunShenshaRows.value.filter(d => d.isSel), showAllDayunShensha.value, selectedDayunIndex.value >= 0))
+
+// 流年神煞（折叠：默认只看点选的那一年）——查 liunianShensha[干支]，60 条覆盖全部流年
+const showAllYearShensha = ref(false)
+const yearShenshaList = computed(() => {
+  const xp = xipan.value
+  if (!xp) return []
+  const index = xp.liunianShensha || {}
+  const dict = xp.shenshaDict || {}
+  const rows = xp.liunian
+    .filter(l => l.dayunIndex === selectedDayunIndex.value)
+    .map(l => ({
+      year: l.year,
+      gz: l.ganzhi,
+      isCurrent: String(l.year) === String(xp.current.year),
+      isSel: l.year === selectedYear.value,
+      list: (index[l.ganzhi] || []).map(name => ({
+        name,
+        description: dict[name] || '',
+        _cat: classifyShensha({ name, description: dict[name] || '' }),
+      })),
+    }))
+    .sort((a, b) => Number(a.year) - Number(b.year))
+  return collapseBySelection(rows, rows.filter(y => y.isSel), showAllYearShensha.value, selectedYear.value > 0)
+})
+
+// 流月神煞（折叠：默认只看点选的那个流月）——查 liuyueShensha[干支]
+const showAllMonthShensha = ref(false)
+const monthShenshaList = computed(() => {
+  const xp = xipan.value
+  if (!xp) return []
+  const dict = xp.shenshaDict || {}
+  const rows = xp.liuyue
+    .filter(m => m.year === selectedYear.value)
+    .map(m => ({
+      jieqi: m.jieqi,
+      date: m.date,
+      gz: m.ganzhi,
+      isCurrent: isCurrentLiuyue(m),
+      isSel: selectedLiuyueGz.value === m.ganzhi,
+      list: (xp.liuyueShensha?.[m.ganzhi] || []).map(name => ({
+        name,
+        description: dict[name] || '',
+        _cat: classifyShensha({ name, description: dict[name] || '' }),
+      })),
+    }))
+  return collapseBySelection(rows, rows.filter(m => m.isSel), showAllMonthShensha.value, !!selectedLiuyueGz.value)
+})
+
+// 命盘大表的大运/流年两列跟随点选：字段查 ganzhiMeta（60 干支纯函数表，与后端 snapshot 逐字段一致）
+const snapColumns = computed(() => {
+  const xp = xipan.value
+  if (!xp) return []
+  const cols = [...(xp.snapshot?.columns || []).filter(c => ['年柱', '月柱', '日柱', '时柱'].includes(c.name))]
+  const meta = xp.ganzhiMeta || {}
+  const col = (name: string, gz: string) => ({
+    name,
+    ganzhi: gz || '—',
+    shishen: meta[gz]?.shishen || '',
+    gan: meta[gz]?.gan || '',
+    zhi: meta[gz]?.zhi || '',
+    hiddenStems: meta[gz]?.hiddenStems || [],
+    shishenZhi: meta[gz]?.shishenZhi || [],
+    changsheng: meta[gz]?.changsheng || '',
+    zizuo: meta[gz]?.zizuo || '',
+    xunkong: meta[gz]?.xunkong || '',
+    nayin: meta[gz]?.nayin || '',
+  })
+  cols.push(col('大运', snapDayunGz.value))
+  cols.push(col('流年', snapLiunianGz.value))
+  return cols
+})
+
+// 快照表神煞行：四柱 + 点选的大运 + 点选的流年
+const snapShenshaMap = computed(() => {
+  const map: Record<string, TaggedShensha[]> = {}
+  for (const name of ['年柱', '月柱', '日柱', '时柱']) {
+    map[name] = shenshaByPillar.value[name] || []
+  }
+  const tag = (s: ShenshaItem) => ({ ...s, _cat: classifyShensha(s) })
+  const xp = xipan.value
+  if (!xp) return map
+  map['大运'] = (dayunShenshaRows.value.find(d => d.ganzhi === snapDayunGz.value)?.list || []).map(tag)
+  const dict = xp.shenshaDict || {}
+  map['流年'] = (xp.liunianShensha?.[snapLiunianGz.value] || [])
+    .map(name => tag({ name, description: dict[name] || '' }))
+  return map
 })
 
 // === 大运/流年详情浮层 ===
@@ -637,18 +890,32 @@ function fallbackCopy(text: string) {
 // === 报告 ===
 const reportContent = ref("")
 const reportLoading = ref(false)
+const reportNotice = ref("")
+let reportNoticeTimer: ReturnType<typeof setTimeout> | undefined
 
-const handleDownload = () => {
-  if (birthTime.value && gender.value) downloadReport(birthTime.value, gender.value)
+const showReportNotice = (message: string) => {
+  reportNotice.value = message
+  if (reportNoticeTimer) clearTimeout(reportNoticeTimer)
+  reportNoticeTimer = setTimeout(() => { reportNotice.value = "" }, 3000)
+}
+
+const handleDownload = async () => {
+  if (!birthTime.value || !gender.value) return
+  showReportNotice("正在生成 PDF，完成后会自动下载")
+  await downloadReport(birthTime.value, gender.value)
+  showReportNotice("PDF 已开始下载")
 }
 
 const generateReport = async () => {
   if (!birthTime.value || !gender.value || reportLoading.value) return
   reportLoading.value = true
+  showReportNotice("正在生成完整报告，请稍候")
   try {
     reportContent.value = await generateFullReport(birthTime.value, gender.value)
+    showReportNotice("完整报告生成完成")
   } catch {
     reportContent.value = "报告生成失败，请稍后重试。"
+    showReportNotice("完整报告生成失败")
   } finally {
     reportLoading.value = false
   }
@@ -665,8 +932,11 @@ const downloadMarkdown = () => {
   URL.revokeObjectURL(url)
 }
 
-const downloadFullPDF = () => {
-  if (birthTime.value && gender.value) downloadFullReportPDF(birthTime.value, gender.value)
+const downloadFullPDF = async () => {
+  if (!birthTime.value || !gender.value) return
+  showReportNotice("正在生成完整 PDF，完成后会自动下载")
+  await downloadFullReportPDF(birthTime.value, gender.value)
+  showReportNotice("完整 PDF 已开始下载")
 }
 
 const goBack = () => {
@@ -699,16 +969,22 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
 }
+.report-notice { position: fixed; top: 76px; left: 50%; transform: translateX(-50%); z-index: 30;
+  padding: 10px 18px; border: 1px solid var(--border); border-radius: 8px;
+  background: rgba(12,18,32,0.96); color: var(--text); box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+  font-size: 13px; white-space: nowrap; }
 .page-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 14px 24px;
   border-bottom: 1px solid var(--border);
-  background: rgba(255,255,255,0.02);
+  background: rgba(12,18,32,0.98);
+  backdrop-filter: blur(14px);
   position: sticky;
   top: 0;
-  z-index: 10;
+  z-index: 20;
+  flex-shrink: 0;
 }
 .back-btn { padding: 8px 14px; background: transparent; border: 1px solid var(--border); border-radius: 6px;
   color: var(--text-dim); cursor: pointer; font-size: 13px; transition: all 0.2s; }
@@ -720,7 +996,7 @@ onMounted(async () => {
 .page-state { padding: 80px 20px; text-align: center; color: var(--text-dim); font-size: 14px; }
 
 .tab-bar { display: flex; gap: 4px; padding: 10px 24px 0; border-bottom: 1px solid var(--border);
-  background: rgba(255,255,255,0.02); position: sticky; top: 57px; z-index: 9; overflow-x: auto; }
+  background: rgba(12,18,32,0.98); backdrop-filter: blur(14px); position: sticky; top: 57px; z-index: 19; overflow-x: auto; }
 .tab-btn { padding: 10px 18px; background: transparent; border: none; border-bottom: 2px solid transparent;
   color: var(--text-dim); font-size: 14px; cursor: pointer; transition: all 0.2s; white-space: nowrap; }
 .tab-btn:hover { color: var(--text); }
@@ -737,6 +1013,8 @@ onMounted(async () => {
   margin-bottom: 14px; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
 .section-hint { font-size: 11px; color: var(--text-muted); letter-spacing: normal; font-weight: normal; }
 .gong-info { font-size: 11px; color: var(--text-dim); letter-spacing: normal; }
+.chart-gong-summary { display: block; max-width: 100%; color: var(--accent-light); font-family: "STKaiti", "KaiTi", "DFKai-SB", serif;
+  font-size: 15px; font-weight: 600; letter-spacing: 1px; line-height: 1.6; text-align: right; }
 
 /* 四柱表格（复用 modal 版网格） */
 .chart-grid { display: block; border: 1px solid var(--border); border-radius: 10px; overflow: hidden;
@@ -776,7 +1054,7 @@ onMounted(async () => {
   border: 1px solid var(--border); }
 .dayun-year { font-size: 16px; font-weight: bold; color: var(--accent-light); margin-bottom: 4px; }
 .dayun-range { font-size: 10px; color: var(--text-dim); margin-bottom: 2px; }
-.dayun-age { font-size: 10px; color: rgba(138,155,176,0.6); }
+.dayun-age { font-size: 10px; color: rgba(138,155,176,0.6); white-space: nowrap; }
 .consult-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 10px; }
 .consult-card { background: rgba(255,255,255,0.03); border: 1px solid var(--border); border-radius: 10px; padding: 10px; min-width: 0; }
 .consult-card.wide { grid-column: span 3; }
@@ -795,7 +1073,7 @@ onMounted(async () => {
 .liunian-pill em { font-style: normal; color: var(--accent); text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* 神煞 */
-.ps-tag { font-size: 9px; padding: 1px 5px; border-radius: 4px; line-height: 1.6; cursor: pointer;
+.ps-tag { font-size: 11px; padding: 1px 5px; border-radius: 4px; line-height: 1.6; cursor: pointer;
   transition: all 0.2s; white-space: nowrap; user-select: none; display: inline-block; }
 .ps-tag:hover { filter: brightness(1.2); }
 .ps-active { outline: 1px solid currentColor; }
@@ -830,6 +1108,28 @@ onMounted(async () => {
 .detail-row { display: flex; align-items: center; gap: 12px; padding: 6px 10px; border-radius: 8px; background: rgba(255,255,255,0.03); }
 .detail-label { font-size: 12px; color: var(--text-muted); min-width: 40px; text-align: right; }
 .detail-value { font-size: 14px; color: var(--text); font-weight: 500; }
+
+/* 细盘神煞折叠区块（对照小程序端） */
+.ss-row { display: flex; align-items: flex-start; gap: 12px; padding: 9px 4px; border-bottom: 1px dashed var(--border); }
+.ss-row:last-child { border-bottom: none; }
+.ss-row.ss-cur-row { background: rgba(212, 175, 55, 0.08); border-radius: 8px; padding: 9px 6px; }
+.ss-sec-gz { flex: 0 0 94px; min-width: 94px; font-size: 13px; font-weight: 600; color: var(--text); letter-spacing: 1px; }
+.ss-sec-gz.ss-gz-cur { color: var(--accent-light); }
+.ss-sec-sub { font-size: 10px; color: var(--text-muted); font-weight: 400; margin-top: 2px; white-space: nowrap; }
+.ss-sec-tags { flex: 1; display: flex; flex-wrap: wrap; gap: 6px; }
+.ss-sec-empty { font-size: 11px; color: var(--text-muted); }
+.ss-toggle { background: transparent; border: none; color: var(--accent-light); font-size: 11px; cursor: pointer; padding: 2px 4px; }
+.ss-toggle:hover { color: var(--accent); }
+.ss-row .ps-tag { font-size: 12px; padding: 2px 7px; }
+.xp-ly-cell { cursor: pointer; }
+.xp-ly-cell.sel { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); background: rgba(212, 175, 55, 0.07); }
+
+/* 岁运 / 原局分析：左标签 + 关系标签流 */
+.an-row { display: flex; align-items: flex-start; gap: 10px; padding: 7px 2px; border-bottom: 1px dashed var(--border); }
+.an-row:last-child { border-bottom: none; }
+.an-label { flex: 0 0 36px; font-size: 12px; color: var(--text-muted); padding-top: 3px; }
+.an-tags { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.an-tag { font-size: 11px; line-height: 1.5; padding: 2px 8px; border-radius: 4px; color: var(--text); background: rgba(212, 175, 55, 0.08); border: 1px solid var(--border); }
 .detail-shensha-section { margin-bottom: 14px; }
 .detail-shensha-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .detail-shensha-tag { font-size: 11px; padding: 3px 10px; border-radius: 4px; background: rgba(212,175,55,0.1);
@@ -850,6 +1150,7 @@ onMounted(async () => {
   padding: 2px 10px; border: 1px solid rgba(212,175,55,0.35); border-radius: 4px; }
 .xp-qiyun-after { font-size: 15px; color: var(--text); font-weight: 600; }
 .xp-qiyun-dir { font-size: 12px; color: var(--accent); }
+.xp-qiyun-current { margin-left: auto; color: var(--text-dim); font-size: 12px; white-space: nowrap; }
 .xp-qiyun-sub { font-size: 12px; color: var(--text-dim); line-height: 1.6; }
 
 .xp-state-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 26px; }
@@ -926,5 +1227,6 @@ onMounted(async () => {
   .xp-state-row { grid-template-columns: 1fr; }
   .tab-bar { top: 53px; }
   .page-body { padding: 20px 14px 30px; }
+  .xp-qiyun-current { margin-left: 0; width: 100%; }
 }
 </style>

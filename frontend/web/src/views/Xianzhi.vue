@@ -202,6 +202,24 @@
     </div>
 
     <Teleport to="body">
+      <div v-if="pendingDeleteSessionId" class="case-modal-overlay" @click.self="cancelDeleteSession">
+        <div class="case-modal confirm-modal" role="dialog" aria-modal="true" aria-labelledby="delete-session-title">
+          <div class="case-modal-header">
+            <div id="delete-session-title" class="case-modal-title">删除会话</div>
+            <button class="modal-close" @click="cancelDeleteSession" aria-label="关闭">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+          </div>
+          <div class="case-modal-body confirm-modal-body">
+            <p>确定要删除这个会话吗？</p>
+            <p class="confirm-modal-hint">删除后无法恢复。</p>
+          </div>
+          <div class="case-modal-footer">
+            <button class="btn" @click="cancelDeleteSession" aria-label="取消删除">取消</button>
+            <button class="btn btn-danger" @click="confirmDeleteSession" aria-label="确认删除">确认删除</button>
+          </div>
+        </div>
+      </div>
       <div v-if="showCaseModal" class="case-modal-overlay" @click.self="closeCaseModal">
         <div class="case-modal">
           <div class="case-modal-header">
@@ -276,6 +294,7 @@ const appSidebarOpen = ref(false)
 const sessions = ref<ChatSession[]>([])
 const chartCases = ref<ChartCase[]>([])
 const showCaseModal = ref(false)
+const pendingDeleteSessionId = ref<string | null>(null)
 const caseModalMode = ref<"save" | "manual">("save")
 const caseName = ref("")
 const caseTags = ref("")
@@ -556,9 +575,21 @@ const exportChat = () => {
 }
 
 const useExample = (ex: string) => { input.value = ex }
-const openChartDetail = () => {
-  const bi = lastBirthInfo.value
-  if (!bi?.time || !bi.gender) return
+const syncSessionBirthInfo = async () => {
+  if (lastBirthInfo.value?.time && lastBirthInfo.value.gender) return lastBirthInfo.value
+  const bi = await getSessionBirthInfo(conversationId.value)
+  if (!bi.time || !bi.gender) return null
+  lastBirthInfo.value = { time: zhiHourToHHMM(bi.time), gender: bi.gender }
+  await fetchChartData(lastBirthInfo.value.time, lastBirthInfo.value.gender)
+  return lastBirthInfo.value
+}
+
+const openChartDetail = async () => {
+  const bi = await syncSessionBirthInfo()
+  if (!bi?.time || !bi.gender) {
+    showToast("还没有识别到完整出生时间，请先提供年月日时和性别")
+    return
+  }
   router.push({
     path: "/chart-detail",
     query: {
@@ -612,9 +643,25 @@ const loadSession = async (s: ChatSession) => {
   scrollToBottom()
 }
 
-const deleteSessionItem = async (id: string) => {
-  await deleteSessionApi("xianzhi", id)
-  loadSessions()
+const deleteSessionItem = (id: string) => {
+  pendingDeleteSessionId.value = id
+}
+
+const cancelDeleteSession = () => {
+  pendingDeleteSessionId.value = null
+}
+
+const confirmDeleteSession = async () => {
+  const id = pendingDeleteSessionId.value
+  if (!id) return
+  try {
+    await deleteSessionApi("xianzhi", id)
+    cancelDeleteSession()
+    await loadSessions()
+    showToast("会话已删除")
+  } catch {
+    showToast("删除会话失败，请稍后重试")
+  }
 }
 
 const loadChartCases = async () => {
@@ -729,13 +776,13 @@ function safeFileName(value: string): string {
   return (value || "命例").replace(/[\\/:*?"<>|]/g, "_").slice(0, 40)
 }
 
-const send = () => {
+const send = async () => {
   if (!input.value.trim() || loading.value) return
   const userMsg = input.value
   messages.value.push({ role: "user", content: userMsg })
   input.value = ""
   loading.value = true
-  tryExtractBirth(userMsg)
+  await tryExtractBirth(userMsg)
   const aiMsg: SessionMessage = { role: "assistant", content: "" }
   messages.value.push(aiMsg)
   scrollToBottom()
@@ -751,7 +798,7 @@ const send = () => {
   chatWithXianzhi(userMsg, conversationId.value, {
     onMessage: (data) => { aiMsg.content += data; scrollToBottom() },
     onError: () => { aiMsg.content += "\n[连接中断]"; loading.value = false },
-    onDone: () => { loading.value = false; scrollToBottom(); loadSessions(); loadChartCases() },
+    onDone: () => { loading.value = false; scrollToBottom(); syncSessionBirthInfo(); loadSessions(); loadChartCases() },
     // 后端从 LLM 工具调用中提取到出生信息时回调（覆盖自然语言输入场景）
     onChartContext: async (birthTime, gender, birthPlaceStr) => {
       if (!birthTime || !gender) return
@@ -1003,6 +1050,10 @@ textarea:disabled { opacity: 0.5; cursor: not-allowed; }
   color: var(--text-dim); cursor: pointer; }
 .modal-close:hover { border-color: var(--danger); color: var(--danger); }
 .case-modal-body { padding: 20px; }
+.confirm-modal-body p { margin: 0; color: var(--text); font-size: 14px; line-height: 1.6; }
+.confirm-modal-body .confirm-modal-hint { margin-top: 6px; color: var(--text-dim); font-size: 12px; }
+.confirm-modal .btn-danger { background: rgba(220, 80, 80, 0.16); border-color: rgba(220, 80, 80, 0.45); color: #ff9b9b; }
+.confirm-modal .btn-danger:hover { background: rgba(220, 80, 80, 0.28); border-color: #e66b6b; color: #ffd0d0; }
 .form-row { margin-bottom: 16px; }
 .form-row label { display: block; font-size: 12px; color: var(--text-dim); margin-bottom: 6px; }
 .form-row input,

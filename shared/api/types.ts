@@ -264,6 +264,7 @@ export interface ChartData {
   liunianText?: string
   mingGong?: string
   shenGong?: string
+  taiYuan?: string
   xipan?: XiPanData
 }
 

@@ -98,6 +98,13 @@
             <text class="section-title flat">基本信息</text>
             <text class="gong-info">{{ birthTime }} · {{ gender }}命</text>
           </view>
+          <view class="gong-summary display-font" v-if="chart.taiYuan || chart.mingGong || chart.shenGong">
+            <text v-if="chart.taiYuan">胎元 {{ chart.taiYuan }}</text>
+            <text v-if="chart.taiYuan && (chart.mingGong || chart.shenGong)"> · </text>
+            <text v-if="chart.mingGong">命宫 {{ chart.mingGong }}</text>
+            <text v-if="(chart.taiYuan || chart.mingGong) && chart.shenGong"> · </text>
+            <text v-if="chart.shenGong">身宫 {{ chart.shenGong }}</text>
+          </view>
           <view v-if="wuxing.length" class="wuxing-grid">
             <view v-for="w in wuxing" :key="w.name" class="wuxing-item">
               <view class="wuxing-bar-container">
@@ -1083,11 +1090,16 @@ function handleDownloadPdf() {
     uni.showToast({ title: '缺少出生信息', icon: 'none' })
     return
   }
+  uni.showToast({ title: '正在生成 PDF，请稍候', icon: 'none', duration: 2000 })
   downloadReport(birthTime.value, gender.value)
 }
 
 function downloadFullPdf() {
-  if (!birthTime.value || !gender.value) return
+  if (!birthTime.value || !gender.value) {
+    uni.showToast({ title: '缺少出生信息', icon: 'none' })
+    return
+  }
+  uni.showToast({ title: '正在生成完整 PDF，请稍候', icon: 'none', duration: 2000 })
   downloadFullReportPdf(birthTime.value, gender.value)
 }
 
@@ -1095,11 +1107,14 @@ async function generateReport() {
   if (!birthTime.value || !gender.value || reportLoading.value) return
   reportLoading.value = true
   reportContent.value = ''
+  uni.showToast({ title: '正在生成完整报告，请稍候', icon: 'none', duration: 2000 })
   try {
     const res = await generateFullReport(birthTime.value, gender.value)
     reportContent.value = (res as any).content || ''
+    uni.showToast({ title: '完整报告生成完成', icon: 'success' })
   } catch (e: any) {
     reportContent.value = `报告生成失败：${e?.message || '请稍后重试'}`
+    uni.showToast({ title: '完整报告生成失败', icon: 'none' })
   } finally {
     reportLoading.value = false
   }
@@ -1235,6 +1250,7 @@ onLoad((options: any) => {
 .section-title.flat { border-bottom: none; padding-bottom: 0; margin-bottom: 0; }
 .section-title.flat::before { bottom: 0; }
 .gong-info { font-size: 24rpx; color: $color-ink-light; }
+.gong-summary { margin: 4rpx 0 18rpx; text-align: right; font-size: 28rpx; font-weight: 600; color: $color-primary; letter-spacing: 1rpx; line-height: 1.6; }
 /* 基本信息：日主/调候文字（放大版） */
 .basic-row { margin-top: 10rpx; }
 .basic-info { font-size: 30rpx; color: $color-ink-light; line-height: 1.6; }
@@ -1422,7 +1438,7 @@ onLoad((options: any) => {
 .strip-sel { background: rgba(184, 72, 60, 0.1); }
 .sc-year { font-size: 24rpx; font-weight: 600; color: $color-ink; line-height: 1.35; }
 .sc-jie { font-size: 22rpx; font-weight: 600; color: $color-ink; line-height: 1.35; }
-.sc-age { font-size: 20rpx; color: $color-ink-light; line-height: 1.35; }
+.sc-age { font-size: 20rpx; color: $color-ink-light; line-height: 1.35; white-space: nowrap; }
 .sc-gz { display: flex; flex-direction: row; align-items: baseline; justify-content: center; }
 .sc-gan { font-size: 38rpx; font-weight: bold; font-family: $font-family-display; line-height: 1.3; }
 .sc-ss { font-size: 20rpx; color: $color-ink-light; margin-left: 2rpx; }

@@ -1,4 +1,5 @@
 """先知（Xianzhi）相关接口。"""
+
 from __future__ import annotations
 
 import asyncio
@@ -16,7 +17,15 @@ from app.db import repository as repo
 router = APIRouter(prefix="/xianzhi", tags=["Xianzhi"])
 
 
-def _mount_chart_context(agent, birth_time: str | None, gender: str | None, sect: int = 2, yun_sect: int = 1, user_id: str = "", birth_place: str = ""):
+def _mount_chart_context(
+    agent,
+    birth_time: str | None,
+    gender: str | None,
+    sect: int = 2,
+    yun_sect: int = 1,
+    user_id: str = "",
+    birth_place: str = "",
+):
     if birth_time and gender:
         try:
             agent.set_chart_context(birth_time, gender, sect, yun_sect, user_id, birth_place=birth_place)
@@ -100,7 +109,9 @@ async def ws_chat_with_xianzhi(websocket: WebSocket):
             data = await websocket.receive_json()
             # 客户端可能发非对象 JSON（如数组），校验避免 .get 抛 AttributeError 断连
             if not isinstance(data, dict):
-                if not await _safe_ws_send(websocket, {"type": "error", "data": "消息格式错误：应为 JSON 对象"}):
+                if not await _safe_ws_send(
+                    websocket, {"type": "error", "data": "消息格式错误：应为 JSON 对象"}
+                ):
                     break
                 continue
             message = data.get("message", "")
@@ -118,7 +129,9 @@ async def ws_chat_with_xianzhi(websocket: WebSocket):
                 if u:
                     uid = u["id"]
             if is_message_too_long(message):
-                if not await _safe_ws_send(websocket, {"type": "error", "data": message_too_long_text(message)}):
+                if not await _safe_ws_send(
+                    websocket, {"type": "error", "data": message_too_long_text(message)}
+                ):
                     break
                 continue
             try:
@@ -154,10 +167,13 @@ async def ws_chat_with_xianzhi(websocket: WebSocket):
                     ws_payload = {"birth_time": bi.get("time"), "gender": bi.get("gender")}
                     if bi.get("place"):
                         ws_payload["birth_place"] = bi["place"]
-                    await _safe_ws_send(websocket, {
-                        "type": "chart_context",
-                        "data": ws_payload,
-                    })
+                    await _safe_ws_send(
+                        websocket,
+                        {
+                            "type": "chart_context",
+                            "data": ws_payload,
+                        },
+                    )
                 if client_alive:
                     await _safe_ws_send(websocket, {"type": "done"})
     except WebSocketDisconnect:
@@ -250,12 +266,23 @@ async def get_xianzhi_session_messages(session_id: str, token: str = Query(None)
 
 
 @router.get("/sessions/{session_id}/birth-info")
-async def get_xianzhi_session_birth_info(session_id: str, token: str = Query(None)):
+async def get_xianzhi_session_birth_info(
+    session_id: str,
+    token: str = Query(None),
+    app_ctx: AppContext = Depends(app_context_dependency),
+):
     """从会话历史中的排盘工具调用提取出生信息，供前端恢复命盘上下文。
 
     出生信息属敏感个人数据，有归属的会话需本人 token。
     """
     await _check_session_access(session_id, token)
+    try:
+        agent, _ = app_ctx.get_xianzhi(session_id)
+        current = getattr(agent, "_last_birth_info", None) or {}
+        if current.get("time") and current.get("gender"):
+            return {"time": current["time"], "gender": current["gender"]}
+    except Exception:
+        pass
     info = await repo.get_birth_info_from_session(session_id)
     return info or {"time": None, "gender": None}
 
@@ -264,10 +291,13 @@ async def get_xianzhi_session_birth_info(session_id: str, token: str = Query(Non
 async def cache_stats():
     """获取排盘缓存统计。"""
     from app.tools.cache import bazi_cache
+
     return bazi_cache.stats()
 
 
-def _compute_chart_payload(birth_time: str, gender: str, sect: int, yun_sect: int, longitude: float | None) -> dict:
+def _compute_chart_payload(
+    birth_time: str, gender: str, sect: int, yun_sect: int, longitude: float | None
+) -> dict:
     """同步排盘流水线（标准化 → 校验 → 排盘 → 格式化），输入非法抛 ValueError。"""
     from app.domain.bazi_engine import (
         build_bazi_chart,
@@ -280,23 +310,37 @@ def _compute_chart_payload(birth_time: str, gender: str, sect: int, yun_sect: in
         parse_gender,
     )
     from app.domain.time_parse import _normalize_birth_time
+
     # 标准化出生时间（支持公历+时辰、农历、节日等格式，与 bazi_chart 工具入口一致）
     birth_time = _normalize_birth_time(birth_time)
     parse_birth(birth_time)
     parse_gender(gender)
-    chart = build_bazi_chart(birth_time, gender, sect=sect, yun_sect=yun_sect, dayun_count=12, liunian_years=5, longitude=longitude, liunian_cover_dayun=True)
+    chart = build_bazi_chart(
+        birth_time,
+        gender,
+        sect=sect,
+        yun_sect=yun_sect,
+        dayun_count=12,
+        liunian_years=5,
+        longitude=longitude,
+        liunian_cover_dayun=True,
+    )
     payload = chart_to_api_dict(chart)
-    payload.update({
-        "chartText": format_chart_text(chart),
-        "analysisText": format_analysis_text(chart, "整体命盘"),
-        "dayunText": format_dayun_text(chart),
-        "liunianText": format_liunian_text(chart),
-    })
+    payload.update(
+        {
+            "chartText": format_chart_text(chart),
+            "analysisText": format_analysis_text(chart, "整体命盘"),
+            "dayunText": format_dayun_text(chart),
+            "liunianText": format_liunian_text(chart),
+        }
+    )
     return payload
 
 
 @router.get("/chart")
-async def get_chart(birth_time: str, gender: str, sect: int = 2, yun_sect: int = 1, longitude: float | None = None):
+async def get_chart(
+    birth_time: str, gender: str, sect: int = 2, yun_sect: int = 1, longitude: float | None = None
+):
     """直接排盘，返回四柱/五行/大运/流年等结构化数据。
 
     Args:
@@ -312,7 +356,9 @@ async def get_chart(birth_time: str, gender: str, sect: int = 2, yun_sect: int =
         return payload
     try:
         # 排盘为同步重计算，放到线程池避免阻塞事件循环
-        payload = await asyncio.to_thread(_compute_chart_payload, birth_time, gender, sect, yun_sect, longitude)
+        payload = await asyncio.to_thread(
+            _compute_chart_payload, birth_time, gender, sect, yun_sect, longitude
+        )
         bazi_cache.set(birth_time, gender, payload, sect, yun_sect, cache_tool)
         return payload
     except ValueError as e:
@@ -331,6 +377,7 @@ async def infer_bazi_dates(payload: dict):
     返回: {"pillars": "...", "candidates": [{"birth_time", "ganzhi", "shi_chen"}, ...]}
     """
     from app.domain.bazi_engine import find_birth_dates_from_pillars
+
     pillars = (payload.get("pillars") or "").strip()
     gender = (payload.get("gender") or "男").strip() or "男"
     top_n = int(payload.get("top_n") or 3)
@@ -371,7 +418,9 @@ async def submit_report_task(payload: dict, request: Request):
         raise HTTPException(status_code=400, detail="birth_time 和 gender 必填")
 
     ip = request.client.host if request.client else "unknown"
-    verdict = await rate_limit_allow(f"task-submit:{kind}:{ip}", _REPORT_TASK_SUBMIT_LIMIT, _REPORT_TASK_SUBMIT_WINDOW)
+    verdict = await rate_limit_allow(
+        f"task-submit:{kind}:{ip}", _REPORT_TASK_SUBMIT_LIMIT, _REPORT_TASK_SUBMIT_WINDOW
+    )
     if verdict is False:
         raise HTTPException(status_code=429, detail="提交过于频繁，请稍后再试")
 
