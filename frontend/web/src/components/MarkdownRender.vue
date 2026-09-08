@@ -66,7 +66,7 @@ onMounted(() => { hljs.highlightAll() })
 <style scoped>
 .markdown-content { line-height: 1.8; color: var(--text); font-size: 14px; }
 .markdown-content :deep(h1), .markdown-content :deep(h2), .markdown-content :deep(h3), .markdown-content :deep(h4) { margin-top: 18px; margin-bottom: 10px; }
-.markdown-content :deep(p) { margin: 6px 0; }
+.markdown-content :deep(p) { margin: 0; }
 .markdown-content :deep(ul), .markdown-content :deep(ol) { margin: 8px 0; }
 .markdown-content :deep(code) { background: rgba(212,175,55,0.1); padding: 2px 6px; border-radius: 4px; font-size: 13px; color: var(--accent-light); font-family: "Consolas", monospace; }
 .markdown-content :deep(pre) { background: rgba(0,0,0,0.4); padding: 14px; border-radius: 10px; overflow-x: auto; margin: 12px 0; border: 1px solid var(--border); }

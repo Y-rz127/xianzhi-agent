@@ -243,7 +243,7 @@
 
 <script setup lang="ts">
 defineOptions({ name: 'Xianzhi' })
-import { ref, nextTick, computed, onMounted, onActivated, onUnmounted } from "vue"
+import { ref, nextTick, computed, onMounted, onActivated, onUnmounted, watch } from "vue"
 import { chatWithXianzhi, downloadReport, parsePillars, parseWuxing, parseDayun, parseShensha, fetchSessions, deleteSession as deleteSessionApi, getSessionMessages, getSessionBirthInfo, fetchChartCases, createChartCase, deleteChartCase, getChart, inferBaziDates, submitAnswerFeedback, transcribeAudio, type ChatSession, type SessionMessage, type ChartCase, type ChartData, type SSECallbacks } from "../api/index.ts"
 import { matchCityByName } from "../utils/region-data.ts"
 import BaziCard from "../components/BaziCard.vue"
@@ -298,6 +298,24 @@ const visibleMessages = computed(() => {
 
 const currentExamples = ["男，1990-05-20 14:30，排盘并分析事业", "女，1995-08-15 08:00，看近五年运势", "什么是七杀？有什么含义？", "用神怎么取？"]
 const placeholderText = "说说你的出生时间，或直接请教命理问题…"
+const draftStorageKey = (id: string) => `xianzhi-draft:${id}`
+
+const loadDraft = (id: string) => {
+  try {
+    return localStorage.getItem(draftStorageKey(id)) || ""
+  } catch {
+    return ""
+  }
+}
+
+const saveDraft = (id: string, value: string) => {
+  try {
+    if (value) localStorage.setItem(draftStorageKey(id), value)
+    else localStorage.removeItem(draftStorageKey(id))
+  } catch { }
+}
+
+watch(input, (value) => saveDraft(conversationId.value, value))
 
 const toggleVoiceRecording = async () => {
   if (isProcessingVoice.value) return
@@ -515,13 +533,14 @@ const formatContent = (text: string) => {
 }
 
 const newSession = () => {
+  saveDraft(conversationId.value, input.value)
   conversationId.value = "web-xianzhi-" + Date.now()
   messages.value = []
   lastBirthInfo.value = null
   chartData.value = null
   birthPlace.value = ""
   birthLongitude.value = 0
-  input.value = ""
+  input.value = loadDraft(conversationId.value)
   loadSessions()
 }
 
@@ -567,7 +586,9 @@ const loadSessions = async () => {
 
 const loadSession = async (s: ChatSession) => {
   if (!s?.id) return
+  saveDraft(conversationId.value, input.value)
   conversationId.value = s.id
+  input.value = loadDraft(s.id)
   messages.value = await getSessionMessages("xianzhi", s.id)
   visibleCount.value = pageSize
   // 从后端恢复命盘上下文（支持农历/节日/时辰等自然语言输入场景）
