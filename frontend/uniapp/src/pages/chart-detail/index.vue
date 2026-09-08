@@ -25,7 +25,7 @@
         </view>
       </scroll-view>
 
-      <scroll-view class="page-body" scroll-y :scroll-top="bodyScrollTop">
+      <scroll-view class="page-body" :key="activeTab" scroll-y :scroll-top="bodyScrollTop">
         <!-- 命盘：四柱 -->
         <view class="section section-flush" v-if="activeTab === 'paipan'">
           <view class="bazi-table bazi-table-4">
@@ -522,7 +522,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, nextTick } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import { useTheme } from '@/composables/useTheme'
 import { getChart, generateFullReport, downloadReport, downloadFullReportPdf, type ChartData, type Pillar, type WuxingItem, type DayunItem, type ShenshaItem, type LiuNianItem, type XiPanData, type XiPanLiuYue, type XiPanRelationGroup } from '@/api'
@@ -538,11 +538,14 @@ const tabs: { key: TabKey; label: string }[] = [
 ]
 const activeTab = ref<TabKey>('paipan')
 
-// 切 tab 回到顶部：否则内容短的 tab 会沿用上一个 tab 的滚动位置，表格看着不贴顶
+// 切 tab 回到顶部：scroll-view 由 :key 重建归零；这里再兜两层——
+// 1) 不能用 nextTick，两次赋值会被合并下发，原生层看到值没变就不滚
+// 2) 全局 page 是 min-height:100vh，页面级滚动也要一起归零
 const bodyScrollTop = ref(0)
 watch(activeTab, () => {
   bodyScrollTop.value = 1
-  nextTick(() => { bodyScrollTop.value = 0 })
+  setTimeout(() => { bodyScrollTop.value = 0 }, 50)
+  try { uni.pageScrollTo({ scrollTop: 0, duration: 0 }) } catch {}
 })
 
 const statusBarHeight = ref(20)
@@ -1116,6 +1119,7 @@ onLoad((options: any) => {
   display: flex;
   flex-direction: column;
   height: 100vh;
+  overflow: hidden;
   background: $color-paper;
 }
 .navbar {
