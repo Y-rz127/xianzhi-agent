@@ -62,16 +62,6 @@
           </div>
         </div>
         <div class="header-right">
-          <div class="sect-selector">
-            <select id="sect-select" name="sect-select" aria-label="日柱精度" v-model="sect" class="sect-select">
-              <option :value="2">精确2</option>
-              <option :value="1">精确1</option>
-            </select>
-            <select id="yun-sect-select" name="yun-sect-select" aria-label="大运精度" v-model="yunSect" class="sect-select">
-              <option :value="1">天数时辰</option>
-              <option :value="2">分钟数</option>
-            </select>
-          </div>
           <button class="btn header-btn btn-accent" @click="openChartDetail" title="命盘详情">
             <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0z"/><path d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
             命盘
@@ -911,13 +901,6 @@ onUnmounted(() => {
 .header-right { display: flex; align-items: center; gap: 10px; }
 .header-btn { padding: 7px 12px; font-size: 12px; }
 
-.sect-selector { display: flex; gap: 8px; margin-right: 10px; }
-.sect-select { padding: 6px 10px; font-size: 12px; background: rgba(255,255,255,0.04);
-  border: 1px solid var(--border); border-radius: 8px; color: var(--text-dim); outline: none;
-  cursor: pointer; }
-.sect-select:focus { border-color: var(--accent); color: var(--text); }
-.sect-select option { background: #0f1520; color: var(--text); }
-
 .messages { flex: 1; overflow-y: auto; padding: 8px; min-height: 0; }
 .messages::-webkit-scrollbar { width: 10px; }
 .messages::-webkit-scrollbar-track { background: rgba(255,255,255,0.03); border-radius: 5px; margin: 4px 0; }
@@ -1081,7 +1064,6 @@ textarea:disabled { opacity: 0.5; cursor: not-allowed; }
   .header-right { margin-left: 0; flex-wrap: wrap; gap: 4px; justify-content: flex-end; }
   .header-btn { padding: 5px 8px; font-size: 11px; min-width: 34px; }
   .header-btn span { display: none; }
-  .sect-select { padding: 4px 6px; font-size: 11px; }
   .msg-body { max-width: 88%; }
   .msg.user .msg-body { max-width: 88%; }
   .empty-icon { width: 60px; height: 60px; font-size: 28px; }

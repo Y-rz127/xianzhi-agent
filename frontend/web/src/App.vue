@@ -137,6 +137,10 @@ let resizeStartX = 0
 let resizeStartWidth = 288
 
 function onResizeStart(e: MouseEvent) {
+  if (sidebarCollapsed.value) {
+    sidebarCollapsed.value = false
+    emitAppSidebarState()
+  }
   isResizing.value = true
   resizeStartX = e.clientX
   resizeStartWidth = sidebarWidth.value
