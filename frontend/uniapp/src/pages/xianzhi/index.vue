@@ -514,6 +514,26 @@ function genConversationId(): string {
   return `mp-xianzhi__${uid || 'guest'}__${Date.now()}`
 }
 const conversationId = ref(genConversationId())
+const draftStorageKey = (id: string) => `XZ_DRAFT_${id}`
+
+function loadDraft(sessionId: string): string {
+  if (!sessionId) return ''
+  try {
+    return uni.getStorageSync(draftStorageKey(sessionId)) || ''
+  } catch {
+    return ''
+  }
+}
+
+function saveDraft(sessionId: string, value: string) {
+  if (!sessionId) return
+  try {
+    if (value) uni.setStorageSync(draftStorageKey(sessionId), value)
+    else uni.removeStorageSync(draftStorageKey(sessionId))
+  } catch {}
+}
+
+watch(inputText, (value) => saveDraft(conversationId.value, value))
 
 // 历史会话抽屉
 const showHistoryDrawer = ref(false)
@@ -569,7 +589,9 @@ function closeHistoryDrawer() {
 
 async function switchToSession(session: ChatSession) {
   if (!session?.id) return
+  saveDraft(conversationId.value, inputText.value)
   conversationId.value = session.id
+  inputText.value = loadDraft(session.id)
   try {
     // 先恢复本地出生地/经度：必须在排盘之前，否则与 openChartDetail 的 cache key 不一致，
     // 同一次排盘会被算两遍（无存档时显式清空，避免沿用上一个会话的值）
@@ -800,9 +822,10 @@ function goHehun() {
 
 /** 新建会话：生成新会话ID并清空命盘上下文 */
 function newSession() {
+  saveDraft(conversationId.value, inputText.value)
   conversationId.value = genConversationId()
   messages.value.splice(0, messages.value.length)
-  inputText.value = ''
+  inputText.value = loadDraft(conversationId.value)
   lastBirthInfo.value = null
   chartData.value = null
   birthDate.value = ''
@@ -888,6 +911,8 @@ async function submitFeedback() {
 function formatContent(text: string): string {
   if (!text) return ''
   return text
+    .replace(/\r\n/g, '\n')
+    .replace(/\n{2,}/g, '\n')
     .replace(/\[思考\]\s*/g, '【思考】 ')
     .replace(/\[行动\]\s*/g, '【行动】 ')
     .replace(/\[观察\]\s*/g, '【观察】 ')
