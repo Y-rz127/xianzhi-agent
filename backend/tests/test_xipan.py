@@ -389,16 +389,16 @@ def test_payload_carries_fields_frontend_selection_depends_on():
     assert [(d["index"], d["ganzhi"], d["startYear"]) for d in payload["dayun"]] == [
         (d["index"], d["ganzhi"], d["startYear"]) for d in xp["dayun"] if d["index"] > 0
     ]
-    for l in xp["liunian"]:
-        assert isinstance(l.get("dayunIndex"), int) and l.get("year") and l.get("ganzhi")
+    for ln in xp["liunian"]:
+        assert isinstance(ln.get("dayunIndex"), int) and ln.get("year") and ln.get("ganzhi")
     for m in xp["liuyue"]:
         assert m.get("year") and m.get("zhi") and m.get("ganzhi")
 
     # 逐行出现的键，必须都能在去重附表里查到
     assert {m["ganzhi"] for m in xp["liuyue"]} <= set(xp["liuyueShensha"])
-    assert {l["ganzhi"] for l in xp["liunian"]} <= set(xp["liunianShensha"])
+    assert {ln["ganzhi"] for ln in xp["liunian"]} <= set(xp["liunianShensha"])
     assert {m["zhi"] for m in xp["liuyue"]} <= set(xp["monthMeta"])
-    used_gz = {l["ganzhi"] for l in xp["liunian"]} | {d["ganzhi"] for d in xp["dayun"] if d["index"] > 0}
+    used_gz = {ln["ganzhi"] for ln in xp["liunian"]} | {d["ganzhi"] for d in xp["dayun"] if d["index"] > 0}
     assert used_gz <= set(xp["ganzhiMeta"])
     # 神煞名都要能在 shenshaDict 里取到说明（流月/流年两处查表共用）
     names = {n for lst in xp["liuyueShensha"].values() for n in lst}

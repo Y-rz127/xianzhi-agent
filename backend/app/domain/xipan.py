@@ -713,16 +713,18 @@ def build_xipan(
     day_master: str,
     direction: str,
     today: datetime.date | None = None,
+    dayun_count: int = 12,
 ) -> dict[str, Any]:
     """构建时间层级细盘：起运/大运/流年/流月/当前快照/月令旺衰/司令。
 
-    yun 为 lunar_python EightChar.getYun() 产物；today 可注入以便测试。
+    yun 为 lunar_python EightChar.getYun() 产物；today 可注入以便测试；
+    dayun_count 必须与调用方 chart.dayun 的步数一致，否则前端按 index/干支对齐时会缺项。
     """
     today = today or datetime.date.today()
     birth_solar = yun.getLunar().getSolar()
     birth_year = birth_solar.getYear()
 
-    dayun_list = _build_dayun_list(yun, day_master)
+    dayun_list = _build_dayun_list(yun, day_master, dayun_count)
     end_year = max((d["endYear"] for d in dayun_list), default=birth_year + 80)
     liunian_list, year_dayun, xiaoyun = _build_liunian_list(yun, day_master, end_year, segments=len(dayun_list))
     liuyue_list, liuyue_extras = _build_liuyue_list(birth_year, end_year, day_master, pillars, gender_int)

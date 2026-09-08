@@ -214,7 +214,7 @@ def build_bazi_chart(
     gender: str,
     sect: int = 2,
     yun_sect: int = 1,
-    dayun_count: int = 8,
+    dayun_count: int = 12,
     liunian_years: int = 5,
     liunian_start_year: int | None = None,
     longitude: float | None = None,
@@ -275,7 +275,7 @@ def build_bazi_chart(
             start_year = min(start_year, cur_dyun.start_year)
             liunian_end = max(liunian_end, cur_dyun.end_year)
     liunian = _build_liunian(yun, dayun, start_year, liunian_end - start_year + 1, day_master_gan, pillars, gender_int)
-    xipan = build_xipan(yun, pillars, gender_int, day_master_gan, dayun_direction)
+    xipan = build_xipan(yun, pillars, gender_int, day_master_gan, dayun_direction, dayun_count=dayun_count)
 
     warnings = [
         "流年干支采用立春口径；具体到立春前后的事件判断，应结合准确日期时刻。",
