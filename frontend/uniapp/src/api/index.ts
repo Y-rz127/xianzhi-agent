@@ -3,8 +3,9 @@
  * 后端路由前缀: /api/ai
  * 基址来自 config.ts，运行时可调用 setConfig({ apiBase }) 覆盖（小程序切局域网 IP 用）
  */
-import { getConfig, resolveWsBase } from '@/config'
+import { getConfig } from '@/config'
 import { getToken } from '@/utils/storage'
+import { interpretLiuYaoStreamWS, interpretZiWeiStreamWS, hehunStreamWS } from '@/api/chat'
 
 // R11 共享 API 层：数据模型/文本解析器/端点常量与 Web 端共用，统一在仓库根 shared/api 维护
 export type {
@@ -107,70 +108,13 @@ export const interpretLiuYaoStream = (params: {
   onMessage: (chunk: string) => void
   onComplete?: () => void
   onError?: (err: any) => void
-}) => {
-  const wsUrl = resolveWsBase() + '/api/ai/liuyao/ws'
-  return new Promise<void>((resolve, reject) => {
-    const socketTask = uni.connectSocket({
-      url: wsUrl,
-      success: () => {
-        console.log('[LiuYao-WS] 连接成功')
-      },
-      fail: (err) => {
-        console.error('[LiuYao-WS] 连接失败:', err)
-        params.onError?.(err)
-        reject(err)
-      }
-    })
-
-    socketTask.onOpen(() => {
-      console.log('[LiuYao-WS] 已打开，发送参数')
-      socketTask.send({
-        data: JSON.stringify({
-          question: params.question,
-          result: params.result
-        }),
-        success: () => {
-          console.log('[LiuYao-WS] 参数已发送')
-        },
-        fail: (err) => {
-          console.error('[LiuYao-WS] 发送失败:', err)
-        }
-      })
-    })
-
-    socketTask.onMessage((res: any) => {
-      try {
-        const msg = JSON.parse(res.data as string)
-        if (msg.type === 'message') {
-          let msgData = msg.data
-          if (typeof msgData !== 'string') {
-            console.warn('[LiuYao-WS] message data is not string:', typeof msgData)
-            msgData = typeof msgData === 'object' ? JSON.stringify(msgData) : String(msgData || '')
-          }
-          params.onMessage(msgData)
-        } else if (msg.type === 'done') {
-          console.log('[LiuYao-WS] 解读完成')
-          params.onComplete?.()
-          resolve()
-        } else if (msg.type === 'error') {
-          console.error('[LiuYao-WS] 服务端错误:', msg.detail)
-          params.onError?.(new Error(msg.detail))
-          reject(new Error(msg.detail))
-        }
-      } catch (e) {
-        console.error('[LiuYao-WS] 消息解析失败:', e, res.data)
-      }
-    })
-
-    socketTask.onError((err: any) => {
-      console.error('[LiuYao-WS] WebSocket 错误:', err)
-      params.onError?.(err)
-      reject(err)
-    })
-
-    socketTask.close({})
+}) => new Promise<void>((resolve) => {
+  interpretLiuYaoStreamWS(params.question, params.result, {
+    onMessage: params.onMessage,
+    onDone: () => { params.onComplete?.(); resolve() },
+    onError: (err: string) => params.onError?.(new Error(err)),
   })
-}
+})
 
 /* ============ 每日黄历（只读，无需登录） ============ */
 
@@ -241,74 +185,20 @@ export const interpretZiWeiStream = (params: {
   onMessage: (chunk: string) => void
   onComplete?: () => void
   onError?: (err: any) => void
-} & ZiWeiCastParams & { focus?: string }) => {
-  const wsUrl = resolveWsBase() + '/api/ai/ziwei/ws'
-  return new Promise<void>((resolve, reject) => {
-    const socketTask = uni.connectSocket({
-      url: wsUrl,
-      success: () => {
-        console.log('[ZiWei-WS] 连接成功')
-      },
-      fail: (err) => {
-        console.error('[ZiWei-WS] 连接失败:', err)
-        params.onError?.(err)
-        reject(err)
-      }
-    })
-
-    socketTask.onOpen(() => {
-      console.log('[ZiWei-WS] 已打开，发送参数')
-      socketTask.send({
-        data: JSON.stringify({
-          date: params.date,
-          time_index: params.time_index,
-          gender: params.gender,
-          calendar: params.calendar || 'solar',
-          leap: params.leap || false,
-          focus: params.focus || ''
-        }),
-        success: () => {
-          console.log('[ZiWei-WS] 参数已发送')
-        },
-        fail: (err) => {
-          console.error('[ZiWei-WS] 发送失败:', err)
-        }
-      })
-    })
-
-    socketTask.onMessage((res: any) => {
-      try {
-        const msg = JSON.parse(res.data as string)
-        if (msg.type === 'message') {
-          let msgData = msg.data
-          if (typeof msgData !== 'string') {
-            console.warn('[ZiWei-WS] message data is not string:', typeof msgData)
-            msgData = typeof msgData === 'object' ? JSON.stringify(msgData) : String(msgData || '')
-          }
-          params.onMessage(msgData)
-        } else if (msg.type === 'done') {
-          console.log('[ZiWei-WS] 解读完成')
-          params.onComplete?.()
-          resolve()
-        } else if (msg.type === 'error') {
-          console.error('[ZiWei-WS] 服务端错误:', msg.detail)
-          params.onError?.(new Error(msg.detail))
-          reject(new Error(msg.detail))
-        }
-      } catch (e) {
-        console.error('[ZiWei-WS] 消息解析失败:', e, res.data)
-      }
-    })
-
-    socketTask.onError((err: any) => {
-      console.error('[ZiWei-WS] WebSocket 错误:', err)
-      params.onError?.(err)
-      reject(err)
-    })
-
-    socketTask.close({})
+} & ZiWeiCastParams & { focus?: string }) => new Promise<void>((resolve) => {
+  interpretZiWeiStreamWS({
+    date: params.date,
+    time_index: params.time_index,
+    gender: params.gender,
+    calendar: params.calendar || 'solar',
+    leap: params.leap || false,
+    focus: params.focus || '',
+  }, {
+    onMessage: params.onMessage,
+    onDone: () => { params.onComplete?.(); resolve() },
+    onError: (err: string) => params.onError?.(new Error(err)),
   })
-}
+})
 
 function put<T = any>(url: string, data?: any): Promise<T> {
   return request<T>({ url: withToken(url), method: 'PUT', data, header: { 'Content-Type': 'application/json' } })
@@ -355,75 +245,21 @@ export const hehunStream = (params: HehunParams & {
   onMessage: (chunk: string) => void
   onComplete?: () => void
   onError?: (err: any) => void
-}) => {
-  const wsUrl = resolveWsBase() + '/api/ai/xianzhi/hehun/ws'
-  return new Promise<void>((resolve, reject) => {
-    const socketTask = uni.connectSocket({
-      url: wsUrl,
-      success: () => {
-        console.log('[HeHun-WS] 连接成功')
-      },
-      fail: (err) => {
-        console.error('[HeHun-WS] 连接失败:', err)
-        params.onError?.(err)
-        reject(err)
-      }
-    })
-
-    socketTask.onOpen(() => {
-      console.log('[HeHun-WS] 已打开，发送参数')
-      socketTask.send({
-        data: JSON.stringify({
-          birthTimeA: params.birthTimeA,
-          genderA: params.genderA,
-          birthTimeB: params.birthTimeB,
-          genderB: params.genderB,
-          sect: params.sect ?? 2,
-          longitudeA: params.longitudeA,
-          longitudeB: params.longitudeB,
-        }),
-        success: () => {
-          console.log('[HeHun-WS] 参数已发送')
-        },
-        fail: (err) => {
-          console.error('[HeHun-WS] 发送失败:', err)
-        }
-      })
-    })
-
-    socketTask.onMessage((res: any) => {
-      try {
-        const msg = JSON.parse(res.data as string)
-        if (msg.type === 'message') {
-          let msgData = msg.data
-          if (typeof msgData !== 'string') {
-            console.warn('[HeHun-WS] message data is not string:', typeof msgData)
-            msgData = typeof msgData === 'object' ? JSON.stringify(msgData) : String(msgData || '')
-          }
-          params.onMessage(msgData)
-        } else if (msg.type === 'done') {
-          console.log('[HeHun-WS] 分析完成')
-          params.onComplete?.()
-          resolve()
-        } else if (msg.type === 'error') {
-          console.error('[HeHun-WS] 服务端错误:', msg.detail)
-          params.onError?.(new Error(msg.detail))
-          reject(new Error(msg.detail))
-        }
-      } catch (e) {
-        console.error('[HeHun-WS] 消息解析失败:', e, res.data)
-      }
-    })
-
-    socketTask.onError((err: any) => {
-      console.error('[HeHun-WS] WebSocket 错误:', err)
-      params.onError?.(err)
-      reject(err)
-    })
-
-    socketTask.close({})
+}) => new Promise<void>((resolve) => {
+  hehunStreamWS({
+    birthTimeA: params.birthTimeA,
+    genderA: params.genderA,
+    birthTimeB: params.birthTimeB,
+    genderB: params.genderB,
+    sect: params.sect ?? 2,
+    longitudeA: params.longitudeA,
+    longitudeB: params.longitudeB,
+  }, {
+    onMessage: params.onMessage,
+    onDone: () => { params.onComplete?.(); resolve() },
+    onError: (err: string) => params.onError?.(new Error(err)),
   })
-}
+})
 
 export const getCacheStats = () => get('/ai/xianzhi/cache_stats')
 

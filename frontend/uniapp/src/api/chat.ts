@@ -68,6 +68,7 @@ export function closeAllWS() {
   try { wx.closeSocket() } catch { }
   currentChatActive = false
   currentTarotActive = false
+  currentStreamActive = false
 }
 
 /**
@@ -258,4 +259,81 @@ export function interpretTarotWS(opts: { spread: 'daily' | 'three_card' | 'relat
   setTimeout(() => { if (!sent && !doneOrError && isMine()) doSend() }, 500)
 
   return null as any
+}
+
+/* ═══════════════════════════════════════════════════════
+ * 六爻 / 紫微 / 合婚 流式解读 — 复用 wx 全局 WS API
+ * ═══════════════════════════════════════════════════════ */
+
+export interface StreamCallbacks {
+  onMessage: (chunk: string) => void
+  onDone: () => void
+  onError: (err: string) => void
+}
+
+let currentStreamActive = false
+
+function startStreamWS(path: string, payload: Record<string, any>, cb: StreamCallbacks) {
+  try { wx.closeSocket() } catch { }
+  currentStreamActive = false
+  const myId = ++wsConnId
+  const url = resolveWsBase() + wsPath(path)
+
+  let receivedMessage = false, doneOrError = false, sent = false
+  function isMine() { return wsConnId === myId }
+
+  function doSend() {
+    if (sent || doneOrError) return
+    sent = true
+    wx.sendSocketMessage({
+      data: JSON.stringify(payload),
+      fail: (err: any) => { if (!doneOrError && isMine()) { doneOrError = true; cb.onError(extractErrMsg(err, '发送失败')) } },
+    })
+  }
+
+  wx.onSocketOpen(() => { if (!isMine()) return; currentStreamActive = true; doSend() })
+
+  wx.onSocketMessage((res: any) => {
+    if (!isMine() || !currentStreamActive) return
+    receivedMessage = true
+    try {
+      const d = JSON.parse(res.data as string)
+      if (d.type === 'message') {
+        let msgData = d.data
+        if (typeof msgData !== 'string') {
+          msgData = typeof msgData === 'object' ? JSON.stringify(msgData) : String(msgData || '')
+        }
+        cb.onMessage(msgData)
+      } else if (d.type === 'done') {
+        doneOrError = true; cb.onDone(); currentStreamActive = false
+      } else if (d.type === 'error') {
+        doneOrError = true; cb.onError(d.detail || d.data || '解读失败'); currentStreamActive = false
+      }
+    } catch { if (!doneOrError) { doneOrError = true; cb.onError('解析失败') } }
+  })
+
+  wx.onSocketError((err: any) => {
+    if (!isMine()) return
+    if (!receivedMessage && !doneOrError) { doneOrError = true; cb.onError(extractErrMsg(err, '连接错误')) }
+    currentStreamActive = false
+  })
+  wx.onSocketClose(() => { if (!isMine()) return; currentStreamActive = false })
+
+  uni.connectSocket({ url, complete: () => { } })
+  setTimeout(() => { if (!sent && !doneOrError && isMine()) doSend() }, 500)
+}
+
+/** 六爻流式解读 */
+export function interpretLiuYaoStreamWS(question: string, result: any, cb: StreamCallbacks) {
+  startStreamWS('/api/ai/liuyao/ws', { question, result }, cb)
+}
+
+/** 紫微斗数流式解读 */
+export function interpretZiWeiStreamWS(params: Record<string, any>, cb: StreamCallbacks) {
+  startStreamWS('/api/ai/ziwei/ws', params, cb)
+}
+
+/** 合婚流式分析 */
+export function hehunStreamWS(params: Record<string, any>, cb: StreamCallbacks) {
+  startStreamWS('/api/ai/xianzhi/hehun/ws', params, cb)
 }
