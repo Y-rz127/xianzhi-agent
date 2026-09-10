@@ -8,7 +8,7 @@
       </div>
     </Transition>
 
-    <!-- 自定义确认弹窗 -->
+    <!-- 自定义确认弹窗：取消案例沉淀 -->
     <Transition name="modal">
       <div v-if="pendingUnpromote" class="modal-mask" @click.self="cancelUnpromote">
         <div class="modal-box">
@@ -25,6 +25,27 @@
             <button class="modal-btn primary danger" :disabled="unpromoting" @click="confirmUnpromote">
               {{ unpromoting ? '处理中…' : '确认取消' }}
             </button>
+          </div>
+        </div>
+      </div>
+    </Transition>
+
+    <!-- 自定义确认弹窗：删除回答反馈 -->
+    <Transition name="modal">
+      <div v-if="pendingDelete" class="modal-mask" @click.self="cancelDelete">
+        <div class="modal-box code-confirm-box">
+          <div class="modal-title">
+            <span class="modal-title-text">删除回答反馈</span>
+            <button class="modal-close" @click="cancelDelete" :disabled="deleting">×</button>
+          </div>
+          <div class="modal-body delete-confirm-body">
+            <p>确定删除这条回答反馈记录吗？</p>
+          </div>
+          <div class="modal-actions delete-confirm-actions">
+            <button class="modal-btn primary" :disabled="deleting" @click="confirmDelete">
+              {{ deleting ? '处理中…' : '确定' }}
+            </button>
+            <button class="modal-btn" :disabled="deleting" @click="cancelDelete">取消</button>
           </div>
         </div>
       </div>
@@ -78,6 +99,7 @@
           <span class="time">{{ formatTime(item.created_at) }}</span>
           <span class="session">{{ item.conversation_id || "无会话" }}</span>
           <span class="card-actions">
+            <button class="act-btn danger delete" @click="openDelete(item)">删除</button>
             <button v-if="!item.reviewed" class="act-btn" @click="doReview(item)">审核</button>
             <template v-if="item.rating === 'up' && item.reviewed">
               <button v-if="!item.case_id" class="act-btn promote" @click="doPromote(item)">转案例</button>
@@ -103,7 +125,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue"
-import { answerFeedbackSftExportUrl, answerFeedbackDpoExportUrl, fetchAnswerFeedbacks, reviewAnswerFeedback, promoteAnswerToCase, unpromoteAnswerToCase, type AnswerFeedbackItem } from "@/api"
+import { answerFeedbackSftExportUrl, answerFeedbackDpoExportUrl, fetchAnswerFeedbacks, deleteAnswerFeedback, reviewAnswerFeedback, promoteAnswerToCase, unpromoteAnswerToCase, type AnswerFeedbackItem } from "@/api"
 
 const items = ref<AnswerFeedbackItem[]>([])
 const loading = ref(false)
@@ -112,6 +134,10 @@ const ratingFilter = ref<"" | "up" | "down">("")
 // 取消案例沉淀自定义弹窗状态
 const pendingUnpromote = ref<AnswerFeedbackItem | null>(null)
 const unpromoting = ref(false)
+
+// 删除回答反馈自定义确认弹窗状态
+const pendingDelete = ref<AnswerFeedbackItem | null>(null)
+const deleting = ref(false)
 
 const toastMessage = ref('')
 const toastType = ref<'success' | 'error'>('success')
@@ -151,6 +177,32 @@ function exportSft() {
 
 function exportDpo() {
   window.open(answerFeedbackDpoExportUrl(500), "_blank")
+}
+
+function openDelete(item: AnswerFeedbackItem) {
+  pendingDelete.value = item
+}
+
+function cancelDelete() {
+  pendingDelete.value = null
+}
+
+async function confirmDelete() {
+  const item = pendingDelete.value
+  if (!item) return
+
+  deleting.value = true
+  try {
+    await deleteAnswerFeedback(item.id)
+    items.value = items.value.filter(x => x.id !== item.id)
+    pendingDelete.value = null
+    showToast("回答反馈已删除", "success")
+  } catch (e: any) {
+    console.error("删除回答反馈失败", e)
+    showToast(`删除失败: ${e.message || e}`, "error")
+  } finally {
+    deleting.value = false
+  }
 }
 
 async function doReview(item: AnswerFeedbackItem) {

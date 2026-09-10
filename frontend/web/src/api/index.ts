@@ -125,7 +125,7 @@ async function runReportTask(kind: string, body: Record<string, string>): Promis
   }
   const { task_id } = await res.json()
   const deadline = Date.now() + TASK_POLL_TIMEOUT
-  for (;;) {
+  for (; ;) {
     await new Promise((resolve) => setTimeout(resolve, TASK_POLL_INTERVAL))
     const sres = await apiFetch(`${API_BASE}/ai/xianzhi/report/tasks/${task_id}`)
     if (!sres.ok) throw new Error(`任务状态查询失败 ${sres.status}`)
@@ -752,6 +752,17 @@ export function answerFeedbackSftExportUrl(rating: "up" | "down" = "up", limit =
 export function answerFeedbackDpoExportUrl(limit = 500): string {
   const params = new URLSearchParams({ limit: String(limit) })
   return withApiKey(`${API_BASE}/ai/feedback/answers/export/dpo?${params.toString()}`)
+}
+
+export async function deleteAnswerFeedback(fid: string): Promise<{ ok: boolean }> {
+  const res = await apiFetch(`${API_BASE}/ai/feedback/answers/${fid}`, {
+    method: "DELETE",
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: "删除失败" }))
+    throw new Error(err.detail || "删除失败")
+  }
+  return res.json()
 }
 
 export async function reviewAnswerFeedback(fid: string): Promise<{ ok: boolean }> {

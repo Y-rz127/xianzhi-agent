@@ -1,4 +1,5 @@
 """命例收藏 / 塔罗记录 / 问题反馈 / 答案反馈与训练样本导出，按 user_id 隔离。"""
+
 from __future__ import annotations
 
 import json
@@ -47,18 +48,20 @@ def list_favorites(user_id: str) -> list:
         ).fetchall()
         for r in rows_cases:
             chart_data = r[5] if isinstance(r[5], dict) else _safe_json(r[5]) if r[5] else {}
-            result.append({
-                "caseId": str(r[0]),
-                "title": r[1] or "",
-                "name": r[1] or "",
-                "source": "cases",
-                "birthTime": r[3] or "",
-                "gender": r[4] or "",
-                "tags": list(r[2] or []),
-                "chartData": chart_data,
-                "bazi": extract_bazi_brief(chart_data),
-                "createdAt": str(r[6]) if r[6] else "",
-            })
+            result.append(
+                {
+                    "caseId": str(r[0]),
+                    "title": r[1] or "",
+                    "name": r[1] or "",
+                    "source": "cases",
+                    "birthTime": r[3] or "",
+                    "gender": r[4] or "",
+                    "tags": list(r[2] or []),
+                    "chartData": chart_data,
+                    "bazi": extract_bazi_brief(chart_data),
+                    "createdAt": str(r[6]) if r[6] else "",
+                }
+            )
 
         # 兼容联 chart_cases 表（用户反馈转换的结构化案例库）
         rows_chart = conn.execute(
@@ -72,18 +75,20 @@ def list_favorites(user_id: str) -> list:
             (user_id,),
         ).fetchall()
         for r in rows_chart:
-            result.append({
-                "caseId": str(r[0]),
-                "title": r[1] or "",
-                "source": r[2] or "",
-                "question": r[3] or "",
-                "analysis": r[4] or "",
-                "domains": list(r[5] or []),
-                "features": r[6] if not isinstance(r[6], str) else _safe_json(r[6]),
-                "rating": r[7] or 4,
-                "verified": bool(r[8]) if r[8] is not None else True,
-                "createdAt": str(r[9]) if r[9] else "",
-            })
+            result.append(
+                {
+                    "caseId": str(r[0]),
+                    "title": r[1] or "",
+                    "source": r[2] or "",
+                    "question": r[3] or "",
+                    "analysis": r[4] or "",
+                    "domains": list(r[5] or []),
+                    "features": r[6] if not isinstance(r[6], str) else _safe_json(r[6]),
+                    "rating": r[7] or 4,
+                    "verified": bool(r[8]) if r[8] is not None else True,
+                    "createdAt": str(r[9]) if r[9] else "",
+                }
+            )
 
     result.sort(key=lambda x: x.get("createdAt", ""), reverse=True)
     return result
@@ -161,9 +166,7 @@ def delete_tarot_record(user_id: str, rid: str) -> bool:
     """删除一条塔罗记录；返回是否成功删除。"""
     _ensure_tables()
     with get_pool().connection() as conn:
-        cur = conn.execute(
-            "DELETE FROM tarot_records WHERE user_id = %s AND id = %s", (user_id, rid)
-        )
+        cur = conn.execute("DELETE FROM tarot_records WHERE user_id = %s AND id = %s", (user_id, rid))
         return cur.rowcount > 0
 
 
@@ -210,9 +213,7 @@ def delete_feedback(fid: str) -> bool:
     """删除一条反馈；返回是否成功删除。"""
     _ensure_tables()
     with get_pool().connection() as conn:
-        result = conn.execute(
-            "DELETE FROM feedback WHERE id = %s", (fid,)
-        )
+        result = conn.execute("DELETE FROM feedback WHERE id = %s", (fid,))
         return result.rowcount > 0
 
 
@@ -270,10 +271,18 @@ def list_answer_feedback(limit: int = 200, rating: str | None = None) -> list:
             """,
             params,
         ).fetchall()
-        return [
-            {**_answer_feedback_from_row(r), "user_nickname": r[12] if r[12] else None}
-            for r in rows
-        ]
+        return [{**_answer_feedback_from_row(r), "user_nickname": r[12] if r[12] else None} for r in rows]
+
+
+def delete_answer_feedback(fid: str) -> bool:
+    """删除一条回答反馈；返回是否成功删除。"""
+    _ensure_tables()
+    with get_pool().connection() as conn:
+        cur = conn.execute(
+            "DELETE FROM answer_feedback WHERE id = %s",
+            (fid,),
+        )
+        return cur.rowcount > 0
 
 
 def export_sft_samples(limit: int = 1000, rating: str = "up") -> list[dict]:
@@ -286,29 +295,34 @@ def export_sft_samples(limit: int = 1000, rating: str = "up") -> list[dict]:
         if not question or not answer:
             continue
         chart_snapshot = item.get("chart_snapshot") or {}
-        samples.append({
-            "id": item["id"],
-            "messages": [
-                {
-                    "role": "system",
-                    "content": "你是先知，精通八字命理。请以系统排盘事实为准，结合命理规则和案例经验，给出克制、具体、可复核的分析。",
+        samples.append(
+            {
+                "id": item["id"],
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": "你是先知，精通八字命理。请以系统排盘事实为准，结合命理规则和案例经验，给出克制、具体、可复核的分析。",
+                    },
+                    {
+                        "role": "user",
+                        "content": json.dumps(
+                            {
+                                "question": question,
+                                "chart_snapshot": chart_snapshot,
+                            },
+                            ensure_ascii=False,
+                        ),
+                    },
+                    {"role": "assistant", "content": answer},
+                ],
+                "metadata": {
+                    "conversation_id": item.get("conversation_id", ""),
+                    "rating": item.get("rating", ""),
+                    "reason": item.get("reason", ""),
+                    "created_at": item.get("created_at", ""),
                 },
-                {
-                    "role": "user",
-                    "content": json.dumps({
-                        "question": question,
-                        "chart_snapshot": chart_snapshot,
-                    }, ensure_ascii=False),
-                },
-                {"role": "assistant", "content": answer},
-            ],
-            "metadata": {
-                "conversation_id": item.get("conversation_id", ""),
-                "rating": item.get("rating", ""),
-                "reason": item.get("reason", ""),
-                "created_at": item.get("created_at", ""),
-            },
-        })
+            }
+        )
     return samples
 
 
@@ -376,20 +390,45 @@ def _extract_case_features(chart: dict) -> dict:
     fr = chart.get("features", {}) or {}
     wx = cd.get("wuxing") if isinstance(cd.get("wuxing"), dict) else {}
     return {
-        "day_master": _first(fr.get("day_master"), cd.get("dayMaster"), cd.get("day_master"),
-                             chart.get("day_master"), wx.get("day_master"), wx.get("dayMaster"), default=""),
-        "day_master_wuxing": _first(fr.get("day_master_wuxing"), cd.get("dayMasterWuxing"),
-                                    cd.get("day_master_wuxing"), chart.get("day_master_wuxing"),
-                                    wx.get("day_master_wuxing"), wx.get("dayMasterWuxing"), default=""),
-        "strength": _first(fr.get("strength"), cd.get("strength"), chart.get("strength"),
-                           wx.get("strength"), default=""),
+        "day_master": _first(
+            fr.get("day_master"),
+            cd.get("dayMaster"),
+            cd.get("day_master"),
+            chart.get("day_master"),
+            wx.get("day_master"),
+            wx.get("dayMaster"),
+            default="",
+        ),
+        "day_master_wuxing": _first(
+            fr.get("day_master_wuxing"),
+            cd.get("dayMasterWuxing"),
+            cd.get("day_master_wuxing"),
+            chart.get("day_master_wuxing"),
+            wx.get("day_master_wuxing"),
+            wx.get("dayMasterWuxing"),
+            default="",
+        ),
+        "strength": _first(
+            fr.get("strength"), cd.get("strength"), chart.get("strength"), wx.get("strength"), default=""
+        ),
         "pattern": _first(fr.get("pattern"), cd.get("pattern"), chart.get("pattern"), default=""),
-        "useful_god": _first(fr.get("useful_god"), cd.get("usefulGod"), cd.get("useful_god"),
-                             chart.get("useful_god"), default=""),
-        "key_traits": _first(fr.get("key_traits"), cd.get("keyTraits"), cd.get("key_traits"),
-                             chart.get("key_traits"), default=[]),
-        "combinations": _first(fr.get("combinations"), cd.get("combinations"),
-                               chart.get("combinations"), default=[]),
+        "useful_god": _first(
+            fr.get("useful_god"),
+            cd.get("usefulGod"),
+            cd.get("useful_god"),
+            chart.get("useful_god"),
+            default="",
+        ),
+        "key_traits": _first(
+            fr.get("key_traits"),
+            cd.get("keyTraits"),
+            cd.get("key_traits"),
+            chart.get("key_traits"),
+            default=[],
+        ),
+        "combinations": _first(
+            fr.get("combinations"), cd.get("combinations"), chart.get("combinations"), default=[]
+        ),
         "clashes": _first(fr.get("clashes"), cd.get("clashes"), chart.get("clashes"), default=[]),
         "sects": _first(fr.get("sects"), cd.get("sects"), chart.get("sects"), default=[]),
     }
@@ -399,17 +438,24 @@ def _refill_features_by_rechart(chart: dict, feats: dict) -> None:
     """特征全空但有出生信息时，重新排盘回填（仅回填仍为空的字段）。"""
     if feats["day_master"]:
         return
-    birth_time = _first(chart.get("birth_time"),
-                        (chart.get("birthInfo") or {}).get("time"),
-                        (chart.get("chartData") or {}).get("birth_time"), default="")
-    gender = _first(chart.get("gender"),
-                    (chart.get("birthInfo") or {}).get("gender"),
-                    (chart.get("chartData") or {}).get("gender"), default="")
+    birth_time = _first(
+        chart.get("birth_time"),
+        (chart.get("birthInfo") or {}).get("time"),
+        (chart.get("chartData") or {}).get("birth_time"),
+        default="",
+    )
+    gender = _first(
+        chart.get("gender"),
+        (chart.get("birthInfo") or {}).get("gender"),
+        (chart.get("chartData") or {}).get("gender"),
+        default="",
+    )
     if not birth_time or not gender:
         return
     try:
         # 延迟导入避免 user_records -> bazi_engine 的循环依赖
         from app.domain.bazi_engine import build_bazi_chart
+
         bazi = build_bazi_chart(birth_time, gender, sect=2, yun_sect=1, dayun_count=10, liunian_years=8)
         feats["day_master"] = bazi.wuxing.day_master or ""
         feats["day_master_wuxing"] = bazi.wuxing.day_master_wuxing or ""
@@ -504,7 +550,9 @@ def unpromote_answer_to_case(fid: str) -> bool:
     if deleted:
         log.info("案例沉淀已取消: fid={} case_id={}", fid, case_id)
     else:
-        log.info("案例沉淀取消（chart_cases 中无对应行，仅清空 case_id 引用）: fid={} case_id={}", fid, case_id)
+        log.info(
+            "案例沉淀取消（chart_cases 中无对应行，仅清空 case_id 引用）: fid={} case_id={}", fid, case_id
+        )
     return True
 
 
@@ -542,12 +590,14 @@ def export_dpo_samples(limit: int = 500) -> list[dict]:
     samples: list[dict] = []
     for entry in grouped.values():
         if entry["up"] and entry["down"]:
-            samples.append({
-                "prompt": entry["question"],
-                "chosen": entry["up"],
-                "rejected": entry["down"],
-                "metadata": {
-                    "chart_snapshot": entry["chart_snapshot"] or {},
-                },
-            })
+            samples.append(
+                {
+                    "prompt": entry["question"],
+                    "chosen": entry["up"],
+                    "rejected": entry["down"],
+                    "metadata": {
+                        "chart_snapshot": entry["chart_snapshot"] or {},
+                    },
+                }
+            )
     return samples

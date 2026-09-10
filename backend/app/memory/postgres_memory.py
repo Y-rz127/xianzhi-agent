@@ -6,6 +6,7 @@ psycopg.Connection 非线程安全，全局单连接在并发下会互相干扰�
 注意 PostgresChatMessageHistory 的 table_name/session_id 是位置参数，
 连接需传 psycopg.Connection 对象（sync_connection）。
 """
+
 from __future__ import annotations
 
 import json
@@ -37,6 +38,7 @@ def _ensure_schema():
         try:
             with pool.connection() as conn:
                 from langchain_postgres import PostgresChatMessageHistory
+
                 PostgresChatMessageHistory.create_tables(conn, settings.memory_table_name)
                 # 会话元数据表：持久化 UUID -> conversation_id 映射
                 conn.execute("""
@@ -52,12 +54,16 @@ def _ensure_schema():
                 # 兼容旧部署：补充 user_id / 会话摘要列
                 conn.execute("ALTER TABLE session_metadata ADD COLUMN IF NOT EXISTS user_id TEXT")
                 conn.execute("ALTER TABLE session_metadata ADD COLUMN IF NOT EXISTS summary TEXT DEFAULT ''")
-                conn.execute("ALTER TABLE session_metadata ADD COLUMN IF NOT EXISTS last_summary_msg_count INT DEFAULT 0")
+                conn.execute(
+                    "ALTER TABLE session_metadata ADD COLUMN IF NOT EXISTS last_summary_msg_count INT DEFAULT 0"
+                )
                 # 会话列表/消息查询的高频过滤列，避免每次全表扫描
-                conn.execute("""
+                conn.execute(
+                    """
                     CREATE INDEX IF NOT EXISTS idx_message_store_session_created
                     ON {} (session_id, created_at DESC)
-                """.format(settings.memory_table_name))
+                """.format(settings.memory_table_name)
+                )
                 log.info("PG 记忆表已就绪: {}", settings.memory_table_name)
             _schema_ready = True
         except Exception as e:
@@ -99,6 +105,7 @@ class PostgresChatMemory:
     def _history(self, conversation_id: str, conn):
         """基于给定连接构造 PostgresChatMessageHistory 实例（session_uuid 隔离）。"""
         from langchain_postgres import PostgresChatMessageHistory
+
         session_uuid = self._to_uuid(conversation_id)
         return PostgresChatMessageHistory(
             self.table_name,
@@ -148,7 +155,8 @@ class PostgresChatMemory:
             module = _extract_module(conversation_id)
             with _get_pool().connection() as conn:
                 user_id = _extract_user_id(conversation_id)
-                conn.execute("""
+                conn.execute(
+                    """
                     INSERT INTO session_metadata (session_id, conversation_id, module, user_id)
                     VALUES (%s, %s, %s, %s)
                     ON CONFLICT (session_id) DO UPDATE
@@ -156,7 +164,9 @@ class PostgresChatMemory:
                         module = EXCLUDED.module,
                         user_id = EXCLUDED.user_id,
                         updated_at = CURRENT_TIMESTAMP
-                """, (session_uuid, conversation_id, module, user_id))
+                """,
+                    (session_uuid, conversation_id, module, user_id),
+                )
                 history = self._history(conversation_id, conn)
                 for m in messages:
                     history.add_message(m)
@@ -256,7 +266,7 @@ def _strip_user_input_boundary(content: str) -> str:
     prefix = "\n--- USER INPUT BEGIN ---\n"
     suffix = "\n--- USER INPUT END ---\n"
     if content.startswith(prefix) and content.endswith(suffix):
-        return content[len(prefix):-len(suffix)]
+        return content[len(prefix) : -len(suffix)]
     return content
 
 
@@ -353,21 +363,19 @@ def get_session_info(prefix: str = "", user_id: str = None) -> list:
                     else:
                         msg_obj = last_msg_raw
                     if isinstance(msg_obj, dict):
-                        last_msg_text = (
-                            msg_obj.get("content")
-                            or msg_obj.get("data", {}).get("content")
-                            or ""
-                        )
+                        last_msg_text = msg_obj.get("content") or msg_obj.get("data", {}).get("content") or ""
                 except Exception:
                     last_msg_text = str(last_msg_raw)[:50]
-            sessions.append({
-                "id": conversation_id,
-                "title": last_msg_text[:30] if last_msg_text else "新会话",
-                "lastMessage": last_msg_text[:50] if last_msg_text else "",
-                "firstTime": str(row[5]) if row[5] else "",
-                "lastTime": str(row[6]) if row[6] else "",
-                "messageCount": row[7],
-            })
+            sessions.append(
+                {
+                    "id": conversation_id,
+                    "title": last_msg_text[:30] if last_msg_text else "新会话",
+                    "lastMessage": last_msg_text[:50] if last_msg_text else "",
+                    "firstTime": str(row[5]) if row[5] else "",
+                    "lastTime": str(row[6]) if row[6] else "",
+                    "messageCount": row[7],
+                }
+            )
         return sessions
     except Exception:
         log.exception("获取会话列表失败")
@@ -380,8 +388,7 @@ def _resolve_session_uuid(session_id: str) -> str:
     try:
         with _get_pool().connection() as conn:
             row = conn.execute(
-                "SELECT session_id FROM session_metadata WHERE conversation_id = %s",
-                (session_id,)
+                "SELECT session_id FROM session_metadata WHERE conversation_id = %s", (session_id,)
             ).fetchone()
         if row:
             return str(row[0])
@@ -411,11 +418,19 @@ def get_session_owner(session_id: str) -> str:
 
 
 def delete_session(session_id: str):
-    """删除指定会话的所有消息。"""
+    """删除指定会话的所有消息，并清理其摘要记忆元数据。"""
     try:
         session_uuid = _resolve_session_uuid(session_id)
         with _get_pool().connection() as conn:
             conn.execute("DELETE FROM message_store WHERE session_id = %s", (session_uuid,))
+            conn.execute(
+                """
+                UPDATE session_metadata
+                SET summary = '', last_summary_msg_count = 0, updated_at = CURRENT_TIMESTAMP
+                WHERE session_id = %s
+                """,
+                (session_uuid,),
+            )
             conn.execute("DELETE FROM session_metadata WHERE session_id = %s", (session_uuid,))
     except Exception:
         # 删除失败重抛，API 层返回 5xx，不向用户假装删除成功
@@ -433,10 +448,13 @@ def get_messages(session_id: str) -> list:
     try:
         session_uuid = _resolve_session_uuid(session_id)
         with _get_pool().connection() as conn:
-            cur = conn.execute("""
+            cur = conn.execute(
+                """
                 SELECT message, created_at FROM message_store
                 WHERE session_id = %s ORDER BY created_at
-            """, (session_uuid,))
+            """,
+                (session_uuid,),
+            )
             rows = cur.fetchall()
         messages = []
         for row in rows:
@@ -454,11 +472,13 @@ def get_messages(session_id: str) -> list:
             role = "user" if raw_role == "human" else "assistant"
             if role == "user":
                 content = _strip_user_input_boundary(content)
-            messages.append({
-                "role": role,
-                "content": content,
-                "time": str(row[1]) if row[1] else "",
-            })
+            messages.append(
+                {
+                    "role": role,
+                    "content": content,
+                    "time": str(row[1]) if row[1] else "",
+                }
+            )
         return messages
     except Exception:
         log.exception("获取会话消息失败: {}", session_id)
@@ -479,10 +499,13 @@ def get_birth_info_from_session(session_id: str) -> dict | None:
     try:
         session_uuid = _resolve_session_uuid(session_id)
         with _get_pool().connection() as conn:
-            cur = conn.execute("""
+            cur = conn.execute(
+                """
                 SELECT message FROM message_store
                 WHERE session_id = %s ORDER BY created_at
-            """, (session_uuid,))
+            """,
+                (session_uuid,),
+            )
             rows = cur.fetchall()
         for row in reversed(rows):  # 逆序：取最近一次排盘
             msg = row[0]
@@ -498,6 +521,7 @@ def get_birth_info_from_session(session_id: str) -> dict | None:
                     if bt and gd:
                         try:
                             from app.domain.time_parse import _normalize_birth_time
+
                             bt = _normalize_birth_time(bt)
                         except Exception:
                             pass

@@ -1,4 +1,5 @@
 """问题反馈（登录用户带 user_id，未登录可匿名提交）。"""
+
 from __future__ import annotations
 
 import json
@@ -85,7 +86,9 @@ async def _try_extract_fact(uid, body, chart_snapshot, answer, rating):
     extract_uid = uid or body.get("conversation_id", "") or "anonymous"
     try:
         await _extract_fact_to_profile(
-            extract_uid, birth_time, gender,
+            extract_uid,
+            birth_time,
+            gender,
             body.get("conversation_id", ""),
             body.get("question", ""),
             answer,
@@ -97,7 +100,9 @@ async def _try_extract_fact(uid, body, chart_snapshot, answer, rating):
         log.warning("提取断事知识失败（不影响主流程）: {}", e)
 
 
-async def _extract_fact_to_profile(user_id, birth_time, gender, conversation_id, question, answer, rating, reason, chart_data):
+async def _extract_fact_to_profile(
+    user_id, birth_time, gender, conversation_id, question, answer, rating, reason, chart_data
+):
     """从反馈中提取断事知识，存入命盘画像和断事知识库。"""
     pid = await repo.upsert_chart_profile(user_id, birth_time, gender, chart_data, interaction_count=1)
     answer_snippet = answer[:500] if answer else ""
@@ -118,7 +123,9 @@ async def _extract_fact_to_profile(user_id, birth_time, gender, conversation_id,
         stats["down"] = (stats.get("down") or 0) + (1 if rating == "down" else 0)
         stats["total"] = stats["up"] + stats["down"]
         await repo.update_chart_profile_stats(user_id, birth_time, gender, feedback_stats=stats)
-    log.info("断事知识已提取: user={} chart={}:{} rating={} profile={}", user_id, birth_time, gender, rating, pid)
+    log.info(
+        "断事知识已提取: user={} chart={}:{} rating={} profile={}", user_id, birth_time, gender, rating, pid
+    )
 
 
 @router.delete("/{fid}", dependencies=[Depends(require_admin)])
@@ -178,6 +185,21 @@ async def export_answer_feedback_sft(
         )
     except Exception as e:
         log.exception("导出 SFT 样本失败")
+        raise HTTPException(status_code=500, detail=client_error(e))
+
+
+@router.delete("/answers/{fid}", dependencies=[Depends(require_admin)])
+async def delete_answer_feedback(fid: str):
+    """删除一条回答反馈；不存在返回 404。"""
+    try:
+        ok = await repo.delete_answer_feedback(fid)
+        if not ok:
+            raise HTTPException(status_code=404, detail="回答反馈不存在")
+        return {"ok": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.exception("删除回答反馈失败")
         raise HTTPException(status_code=500, detail=client_error(e))
 
 

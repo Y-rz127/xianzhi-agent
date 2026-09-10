@@ -11,6 +11,7 @@ SQL 与表结构保持不变，同步实现继续供线程内场景（agent 工�
     from app.db import repository as repo
     user = await repo.get_by_token(token)
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -65,6 +66,7 @@ add_answer_feedback = _async(user_records.add_answer_feedback)
 add_favorite = _async(user_records.add_favorite)
 add_feedback = _async(user_records.add_feedback)
 add_tarot_record = _async(user_records.add_tarot_record)
+delete_answer_feedback = _async(user_records.delete_answer_feedback)
 delete_feedback = _async(user_records.delete_feedback)
 delete_tarot_record = _async(user_records.delete_tarot_record)
 export_dpo_samples = _async(user_records.export_dpo_samples)
