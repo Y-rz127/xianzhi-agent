@@ -52,7 +52,9 @@ class Settings(BaseSettings):
     # API 鉴权：逗号分隔的 API Key 列表，为空表示关闭鉴权（本地开发默认）
     api_keys: str = Field(default="", alias="API_KEYS")
     # 限流：单 IP 每分钟最大请求数（0=不限流）
-    rate_limit_per_minute: int = Field(default=60, alias="RATE_LIMIT_PER_MINUTE")
+    # 默认 300：开发机上所有客户端共用 127.0.0.1 一个桶，60 太紧（一次切会话+排盘就能打满，
+    # 表现为 /metrics 与 WS 握手连片 429）；生产经 RATE_LIMIT_PER_MINUTE 覆盖。
+    rate_limit_per_minute: int = Field(default=300, alias="RATE_LIMIT_PER_MINUTE")
     # 经可信代理（CDN/CLB）部署时开启：从 X-Forwarded-For 取真实客户端 IP
     # 前提是容器仅能经网关访问（CloudBase 默认如此），否则该头可被客户端伪造
     trust_proxy_headers: bool = Field(default=False, alias="TRUST_PROXY_HEADERS")

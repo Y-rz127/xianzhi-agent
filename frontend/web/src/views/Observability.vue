@@ -434,7 +434,7 @@ async function savePrice() {
 onMounted(() => {
   loadMetrics()
   loadChain()
-  timer = setInterval(loadMetrics, 5000)
+  timer = setInterval(loadMetrics, 7000)    // 每 7 秒刷新一次
 })
 
 onUnmounted(() => {

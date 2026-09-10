@@ -342,7 +342,6 @@ class ReviewerWorker:
 
         # === 短路：调用方声明跳过 LLM 深审（闲聊/题外话等无 LLM 深审价值的场景）===
         if skip_llm:
-            log.info("[Reviewer] 调用方指定 skip_llm，跳过 LLM 深审，仅依赖正则快筛 ✓")
             return FactCheckResult(ok=True, source="regex")
 
         # === 第2层：LLM 深审 ===
@@ -423,8 +422,6 @@ class ReviewerWorker:
             issues = [str(i) for i in issues_raw if str(i).strip()] if isinstance(issues_raw, list) else []
             if not passed:
                 log.info("[Reviewer] LLM 深审发现问题: {} 条 issue", len(issues))
-            else:
-                log.info("[Reviewer] LLM 深审通过 ✓")
             return FactCheckResult(ok=passed, issues=issues, source="llm")
         except Exception as e:
             log.warning("[Reviewer] LLM 审核失败，降级为纯正则通过: {}", e)

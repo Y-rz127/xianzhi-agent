@@ -20,6 +20,9 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 from app.core.config import settings
 
 # 豁免路径：健康检查、文档、静态资源不限流不鉴权
+# 可观测性只读接口也豁免：Observability 页 5 秒一轮询 /metrics，本机所有客户端共用
+# 127.0.0.1 一个桶，轮询叠加正常流量极易打满配额，连 WS 握手都会被误伤。
+# 注意：RateLimitMiddleware 在外层、ApiKeyAuthMiddleware 在内层，豁免限流不绕过鉴权。
 _EXEMPT_PREFIXES = (
     "/api/ai/health",
     "/health",
@@ -27,6 +30,8 @@ _EXEMPT_PREFIXES = (
     "/redoc",
     "/openapi.json",
     "/api/ai/admin/accounts/login",
+    "/api/ai/metrics",
+    "/api/ai/observability/",
     "/assets/",
     "/static/",
     "/favicon",

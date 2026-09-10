@@ -5,6 +5,7 @@
 - 客户端参数类错误（400 参数非法、鉴权失败）不降级，直接抛出
 - 每链位模型独立熔断（per-model circuit），失败主模型不会连累备选
 """
+
 from __future__ import annotations
 
 import threading
@@ -36,7 +37,9 @@ def _retryable(exc: Exception) -> bool:
     if "BadRequestError" in name or "NotFoundError" in name:
         # 模型不存在/无权限属可降级错误；其余 400/404 是请求本身的问题，换模型也会一样失败
         msg = str(exc).lower()
-        return "model" in msg and ("not exist" in msg or "not found" in msg or "does not exist" in msg or "no access" in msg)
+        return "model" in msg and (
+            "not exist" in msg or "not found" in msg or "does not exist" in msg or "no access" in msg
+        )
     if "ReadTimeout" in name or "ConnectError" in name or "RemoteProtocolError" in name:
         return True
     return False
@@ -100,7 +103,9 @@ class FailoverModel:
 
     def bind_tools(self, tools: Any, **kwargs: Any) -> "FailoverModel":
         # ReAct 路径绑定工具：只对主模型绑定（bind_tools 与降级链合并的复杂度不值得引入）
-        return FailoverModel(self._primary.bind_tools(tools, **kwargs), self._factory, bound=dict(self._bound))
+        return FailoverModel(
+            self._primary.bind_tools(tools, **kwargs), self._factory, bound=dict(self._bound)
+        )
 
     def with_config(self, config: Any = None, **kwargs: Any) -> "FailoverModel":
         return FailoverModel(self._primary, self._factory, bound=dict(self._bound))
@@ -133,7 +138,9 @@ class FailoverModel:
             except Exception as exc:
                 if not _retryable(exc):
                     raise
-                log.warning("[failover] 链路第 {} 个模型 {} 失败: {}", idx + 1, getattr(model, "model_name", "?"), exc)
+                log.warning(
+                    "[failover] 链路第 {} 个模型 {} 失败: {}", idx + 1, getattr(model, "model_name", "?"), exc
+                )
                 last_error = exc
         raise ModelUnavailableError(f"降级链全部模型均不可用: {last_error}")
 
@@ -152,7 +159,12 @@ class FailoverModel:
             except Exception as exc:
                 if not _retryable(exc):
                     raise
-                log.warning("[failover] 链路第 {} 个模型 {} 流式失败: {}", idx + 1, getattr(model, "model_name", "?"), exc)
+                log.warning(
+                    "[failover] 链路第 {} 个模型 {} 流式失败: {}",
+                    idx + 1,
+                    getattr(model, "model_name", "?"),
+                    exc,
+                )
                 last_error = exc
         raise ModelUnavailableError(f"降级链全部模型均不可用: {last_error}")
 
@@ -167,6 +179,11 @@ class FailoverModel:
             except Exception as exc:
                 if not _retryable(exc):
                     raise
-                log.warning("[failover] 链路第 {} 个模型 {} 流式失败: {}", idx + 1, getattr(model, "model_name", "?"), exc)
+                log.warning(
+                    "[failover] 链路第 {} 个模型 {} 流式失败: {}",
+                    idx + 1,
+                    getattr(model, "model_name", "?"),
+                    exc,
+                )
                 last_error = exc
         raise ModelUnavailableError(f"降级链全部模型均不可用: {last_error}")

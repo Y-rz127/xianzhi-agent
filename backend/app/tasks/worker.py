@@ -4,6 +4,7 @@
 - 同步生成逻辑经 asyncio.to_thread 执行（不阻塞事件循环）
 - LLM 并发仍受 ThrottledModel 全局信号量约束（报告与聊天共享 DashScope 配额）
 """
+
 from __future__ import annotations
 
 import asyncio

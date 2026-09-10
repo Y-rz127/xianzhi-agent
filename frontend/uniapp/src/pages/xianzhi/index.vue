@@ -96,7 +96,7 @@
         <view class="msg-body">
           <!-- 排盘可视化组件：优先用后端直排盘数据（保证四柱完整），否则从回答文本解析 -->
 
-          <view class="msg-text" :class="{ thinking: isThinking(msg.content) }">
+          <view class="msg-text" :class="{ thinking: isThinking(msg.content) }" @longpress="copyMessage(msg)">
             <!-- AI 消息：用纯 text 渲染（uni-app mp-weixin 的 rich-text 渲染不可靠，曾导致内容为空），保留换行 -->
             <text v-if="msg.role === 'assistant' && msg.content" class="msg-content" :user-select="true">{{ formatContent(msg.content) }}</text>
             <text v-else-if="!msg.content" class="typing">推演中…</text>
@@ -905,6 +905,23 @@ async function submitFeedback() {
     delete feedbackState.value[key]
     delete feedbackReasons.value[key]
   }
+}
+
+function copyMessage(msg: Message) {
+  const text = formatContent(msg?.content || '')
+  if (!text.trim()) {
+    uni.showToast({ title: '没有可复制的内容', icon: 'none' })
+    return
+  }
+  uni.setClipboardData({
+    data: text,
+    success: () => {
+      uni.showToast({ title: '已复制', icon: 'none' })
+    },
+    fail: () => {
+      uni.showToast({ title: '复制失败', icon: 'none' })
+    },
+  })
 }
 
 /** 格式化显示内容：处理 ReAct 标记 */
