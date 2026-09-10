@@ -208,7 +208,7 @@
 
 <script setup lang="ts">
 import { ref, computed, reactive, watch } from 'vue'
-import { hehun, createAiInterpretationRecord } from '@/api'
+import { hehunStream, createAiInterpretationRecord } from '@/api'
 import { useTheme } from '@/composables/useTheme'
 import { regionData, type City } from '@/utils/region-data'
 
@@ -369,7 +369,7 @@ async function onAnalyze() {
   loading.value = true
   result.value = ''
   try {
-    const res = await hehun({
+    await hehunStream({
       birthTimeA: `${a.date} ${a.time}`,
       genderA: a.gender,
       birthTimeB: `${b.date} ${b.time}`,
@@ -377,26 +377,33 @@ async function onAnalyze() {
       sect,
       longitudeA: a.longitude || undefined,
       longitudeB: b.longitude || undefined,
+      onMessage: (chunk: string) => {
+        result.value += chunk
+      },
+      onComplete: async () => {
+        try {
+          await createAiInterpretationRecord({
+            source: 'hehun',
+            question: '',
+            payload: {
+              birthTimeA: `${a.date} ${a.time}`,
+              genderA: a.gender,
+              birthTimeB: `${b.date} ${b.time}`,
+              genderB: b.gender,
+              sect,
+              longitudeA: a.longitude || undefined,
+              longitudeB: b.longitude || undefined,
+            },
+            interpretation: result.value,
+          })
+        } catch {
+          // 用户私有记录保存是增强能力，失败不阻断分析主体
+        }
+      },
+      onError: (e: any) => {
+        uni.showToast({ title: e.message || '分析失败', icon: 'none' })
+      }
     })
-    result.value = res.result || '无结果'
-    try {
-      await createAiInterpretationRecord({
-        source: 'hehun',
-        question: '',
-        payload: {
-          birthTimeA: `${a.date} ${a.time}`,
-          genderA: a.gender,
-          birthTimeB: `${b.date} ${b.time}`,
-          genderB: b.gender,
-          sect,
-          longitudeA: a.longitude || undefined,
-          longitudeB: b.longitude || undefined,
-        },
-        interpretation: result.value,
-      })
-    } catch {
-      // 用户私有记录保存是增强能力，失败不阻断分析主体
-    }
   } catch (e: any) {
     uni.showToast({ title: e.message || '分析失败', icon: 'none' })
   } finally {

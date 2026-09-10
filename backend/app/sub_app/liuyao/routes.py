@@ -1,15 +1,88 @@
 """六爻占卜相关接口。"""
+
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+import json
+
+from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.agent.prompts import LIUYAO_SYSTEM_PROMPT
 from app.api.context import get_app_context
 from app.core.llm_throttle import llm_tag
-from app.sub_app.liuyao.liuyao_app import cast
+from app.core.logger import log
+from app.sub_app.liuyao.liuyao_app import cast, interpret_stream as liuyao_interpret_stream
 
 router = APIRouter(prefix="/liuyao", tags=["LiuYao"])
+
+
+def _normalize_ws_payload_text(data) -> str:
+    """归一化 WebSocket 消息中的文本字段（兼容多种格式）。"""
+    if data is None:
+        return ""
+    if isinstance(data, str):
+        return data.strip()
+    if isinstance(data, dict):
+        for key in ("text", "content", "delta", "result"):
+            val = data.get(key)
+            if val and isinstance(val, str) and val.strip():
+                return val.strip()
+        if "choices" in data and isinstance(data["choices"], list):
+            choice = data["choices"][0] if data["choices"] else {}
+            delta = choice.get("delta", {})
+            if isinstance(delta, dict) and delta.get("content"):
+                return str(delta["content"]).strip()
+        for val in data.values():
+            if (
+                isinstance(val, str)
+                and len(val) > 20
+                and not val.startswith("<")
+                and "object at 0x" not in val
+            ):
+                return val.strip()
+        return ""
+    text = str(data)
+    if len(text) > 200 or "<__" in text or "object at 0x" in text:
+        return ""
+    return text.strip()
+
+
+@router.websocket("/ws")
+async def ws_liuyao_interpret(websocket: WebSocket):
+    """六爻 AI 解读 WebSocket 流式接口。"""
+    await websocket.accept()
+    try:
+        data = await websocket.receive_text()
+        body = json.loads(data)
+
+        question = str(body.get("question") or "").strip()
+        result = body.get("result")
+        if not question or not isinstance(result, dict):
+            await websocket.send_json({"type": "error", "detail": "请填写问题并先完成起卦"})
+            await websocket.close()
+            return
+
+        await websocket.send_json({"type": "status", "message": "开始解读..."})
+
+        async for text in liuyao_interpret_stream(question, result):
+            payload_text = _normalize_ws_payload_text(text)
+            if payload_text:
+                await websocket.send_json({"type": "message", "data": payload_text})
+
+        await websocket.send_json({"type": "done"})
+    except WebSocketDisconnect:
+        log.info("六爻 WebSocket disconnected")
+    except Exception as e:
+        log.exception("六爻 WebSocket 异常")
+        try:
+            await websocket.send_json({"type": "error", "detail": str(e)})
+        except Exception:
+            pass
+    finally:
+        try:
+            await websocket.close()
+        except Exception:
+            pass
 
 
 @router.post("/cast")
@@ -48,8 +121,10 @@ async def interpret_liuyao(body: dict):
         moving_text = "无（静卦）"
     else:
         moving_text = "；".join(
-            f"第{i}爻（老阳，阳动变阴）" if (lines.get(i) or {}).get("value") == 9
-            else f"第{i}爻（老阴，阴动变阳）" if (lines.get(i) or {}).get("value") == 6
+            f"第{i}爻（老阳，阳动变阴）"
+            if (lines.get(i) or {}).get("value") == 9
+            else f"第{i}爻（老阴，阴动变阳）"
+            if (lines.get(i) or {}).get("value") == 6
             else f"第{i}爻"
             for i in moving
         )

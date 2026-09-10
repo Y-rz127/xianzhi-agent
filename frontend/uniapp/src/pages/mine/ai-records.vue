@@ -33,9 +33,10 @@
         </view>
         <text class="card-sub">{{ r.createdAt }}</text>
         <view v-if="expanded === r.id" class="detail">
-          <text class="detail-text">{{ r.interpretation }}</text>
+          <text class="detail-text" :user-select="true">{{ r.interpretation }}</text>
         </view>
         <view class="card-actions">
+          <text class="action-btn copy" @tap.stop="onCopy(r)">复制</text>
           <text class="action-btn danger" @tap.stop="onDelete(r)">删除</text>
         </view>
       </view>
@@ -79,6 +80,19 @@ function goBack() { uni.navigateBack({ fail: () => uni.reLaunch({ url: '/pages/m
 function toggle(r: AiInterpretationRecord) { expanded.value = expanded.value === r.id ? '' : r.id }
 function sourceName(s: string) {
   return s === 'tarot' ? '塔罗' : s === 'liuyao' ? '六爻' : s === 'ziwei' ? '紫微斗数' : s === 'hehun' ? '合婚分析' : s
+}
+
+function onCopy(r: AiInterpretationRecord) {
+  const text = String(r?.interpretation || '').trim()
+  if (!text) {
+    uni.showToast({ title: '没有可复制的内容', icon: 'none' })
+    return
+  }
+  uni.setClipboardData({
+    data: text,
+    success: () => uni.showToast({ title: '已复制', icon: 'none' }),
+    fail: () => uni.showToast({ title: '复制失败', icon: 'none' }),
+  })
 }
 
 function onDelete(r: AiInterpretationRecord) {
@@ -136,6 +150,7 @@ function onDelete(r: AiInterpretationRecord) {
   font-size: 23rpx; padding: 10rpx 22rpx; border-radius: 18rpx;
   background: rgba(107,123,142,0.06); border: 1rpx solid $color-border; color: $color-ink-light;
 }
+.action-btn.copy { color: $color-primary; background: rgba(107,123,142,0.08); border-color: rgba(107,123,142,0.2); }
 .action-btn.danger { color: $color-vermilion; background: rgba(184,72,60,0.04); border-color: rgba(184,72,60,0.2); }
 .bottom-spacer { height: 50rpx; }
 </style>

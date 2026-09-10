@@ -96,7 +96,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onBeforeUnmount } from 'vue'
-import { castLiuYao, interpretLiuYao, createAiInterpretationRecord, type LiuYaoResult } from '@/api'
+import { castLiuYao, interpretLiuYaoStream, createAiInterpretationRecord, type LiuYaoResult } from '@/api'
 import { useTheme } from '@/composables/useTheme'
 
 
@@ -179,19 +179,30 @@ async function doInterpret() {
     return
   }
   interpreting.value = true
+  interpretation.value = ''
   try {
-    const response = await interpretLiuYao(question.value, result.value)
-    interpretation.value = response.interpretation
-    try {
-      await createAiInterpretationRecord({
-        source: 'liuyao',
-        question: question.value,
-        payload: { method: result.value.method, lines: result.value.lines, movingLines: result.value.movingLines },
-        interpretation: interpretation.value,
-      })
-    } catch {
-      // 用户私有记录保存是增强能力，失败不阻断解读主体
-    }
+    await interpretLiuYaoStream({
+      question: question.value,
+      result: result.value,
+      onMessage: (chunk: string) => {
+        interpretation.value += chunk
+      },
+      onComplete: async () => {
+        try {
+          await createAiInterpretationRecord({
+            source: 'liuyao',
+            question: question.value,
+            payload: { method: result.value?.method, lines: result.value?.lines, movingLines: result.value?.movingLines },
+            interpretation: interpretation.value,
+          })
+        } catch {
+          // 用户私有记录保存是增强能力，失败不阻断解读主体
+        }
+      },
+      onError: (e: any) => {
+        uni.showToast({ title: e.message || '解读失败', icon: 'none' })
+      }
+    })
   } catch (e: any) {
     uni.showToast({ title: e.message || '解读失败', icon: 'none' })
   } finally {

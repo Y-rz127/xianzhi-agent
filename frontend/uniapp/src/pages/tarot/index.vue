@@ -117,7 +117,8 @@
         <view v-if="interpretation || interpreting" class="meaning-block">
           <text class="meaning-title">塔罗师解读</text>
           <view class="meaning-text">
-            <MarkdownRender v-if="interpretation" :content="interpretation" />
+            <!-- 临时方案：用原生 text 替代 MarkdownRender（rich-text 渲染问题） -->
+            <text v-if="interpretation" class="interpretation-text" :user-select="true">{{ interpretation }}</text>
             <text v-else-if="interpreting" class="typing">解读中…</text>
           </view>
         </view>
@@ -667,6 +668,14 @@ function saveRecord() {
 .typing {
   color: var(--x-tarot-gold);
   font-style: italic;
+}
+
+.interpretation-text {
+  font-size: 30rpx;
+  line-height: 1.7;
+  color: var(--x-tarot-text);
+  white-space: pre-wrap;
+  word-break: break-all;
 }
 
 .bottom-spacer {

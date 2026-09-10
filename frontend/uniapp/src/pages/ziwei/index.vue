@@ -161,7 +161,7 @@
 
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { getZiWeiChart, interpretZiWei, createAiInterpretationRecord, type ZiWeiChart, type ZiWeiPalace } from '@/api'
+import { getZiWeiChart, interpretZiWeiStream, createAiInterpretationRecord, type ZiWeiChart, type ZiWeiPalace } from '@/api'
 import { useTheme } from '@/composables/useTheme'
 
 const { themeClass } = useTheme()
@@ -267,18 +267,29 @@ async function doCast() {
 
 async function doInterpret() {
   interpreting.value = true
+  interpretation.value = ''
   try {
-    interpretation.value = await interpretZiWei(castParams())
-    try {
-      await createAiInterpretationRecord({
-        source: 'ziwei',
-        question: '',
-        payload: castParams(),
-        interpretation: interpretation.value,
-      })
-    } catch {
-      // 用户私有记录保存是增强能力，失败不阻断解读主体
-    }
+    await interpretZiWeiStream({
+      ...castParams(),
+      onMessage: (chunk: string) => {
+        interpretation.value += chunk
+      },
+      onComplete: async () => {
+        try {
+          await createAiInterpretationRecord({
+            source: 'ziwei',
+            question: '',
+            payload: castParams(),
+            interpretation: interpretation.value,
+          })
+        } catch {
+          // 用户私有记录保存是增强能力，失败不阻断解读主体
+        }
+      },
+      onError: (e: any) => {
+        uni.showToast({ title: e.message || '解读失败', icon: 'none' })
+      }
+    })
   } catch (e: any) {
     uni.showToast({ title: e.message || '解读失败', icon: 'none' })
   } finally {

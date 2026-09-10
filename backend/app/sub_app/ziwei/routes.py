@@ -1,7 +1,10 @@
 """紫微斗数相关接口（排盘只读；解读走既有 LLM；鉴权/限流由全局中间件处理）。"""
+
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+import json
+
+from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.agent.prompts import ZIWEI_SYSTEM_PROMPT
@@ -14,11 +17,101 @@ from app.sub_app.ziwei import ziwei_app
 router = APIRouter(prefix="/ziwei", tags=["ZiWei"])
 
 
+def _normalize_ws_payload_text(data) -> str:
+    """归一化 WebSocket 消息中的文本字段（兼容多种格式）。"""
+    if data is None:
+        return ""
+    if isinstance(data, str):
+        return data.strip()
+    if isinstance(data, dict):
+        for key in ("text", "content", "delta", "result"):
+            val = data.get(key)
+            if val and isinstance(val, str) and val.strip():
+                return val.strip()
+        if "choices" in data and isinstance(data["choices"], list):
+            choice = data["choices"][0] if data["choices"] else {}
+            delta = choice.get("delta", {})
+            if isinstance(delta, dict) and delta.get("content"):
+                return str(delta["content"]).strip()
+        for val in data.values():
+            if (
+                isinstance(val, str)
+                and len(val) > 20
+                and not val.startswith("<")
+                and "object at 0x" not in val
+            ):
+                return val.strip()
+        return ""
+    text = str(data)
+    if len(text) > 200 or "<__" in text or "object at 0x" in text:
+        return ""
+    return text.strip()
+
+
+@router.websocket("/ws")
+async def ws_ziwei_interpret(websocket: WebSocket):
+    """紫微斗数 AI 简批 WebSocket 流式接口。"""
+    await websocket.accept()
+    try:
+        data = await websocket.receive_text()
+        body = json.loads(data)
+
+        date = str(body.get("date") or "").strip()
+        gender = str(body.get("gender") or "").strip()
+        calendar = str(body.get("calendar") or "solar").strip()
+        try:
+            time_index = int(body.get("time_index"))
+        except (TypeError, ValueError):
+            await websocket.send_json({"type": "error", "detail": "需提供合法的时辰序号 time_index(0~12)"})
+            await websocket.close()
+            return
+        leap = bool(body.get("leap", False))
+        focus = str(body.get("focus") or "").strip()
+
+        if not date or not gender:
+            await websocket.send_json({"type": "error", "detail": "需提供出生日期与性别"})
+            await websocket.close()
+            return
+
+        await websocket.send_json({"type": "status", "message": "开始解读..."})
+
+        async for text in ziwei_app.interpret_stream(
+            date=date,
+            time_index=time_index,
+            gender=gender,
+            calendar=calendar,
+            leap=leap,
+            focus=focus,
+        ):
+            payload_text = _normalize_ws_payload_text(text)
+            if payload_text:
+                await websocket.send_json({"type": "message", "data": payload_text})
+
+        await websocket.send_json({"type": "done"})
+    except WebSocketDisconnect:
+        log.info("紫微 WebSocket disconnected")
+    except Exception as e:
+        log.exception("紫微 WebSocket 异常")
+        try:
+            await websocket.send_json({"type": "error", "detail": str(e)})
+        except Exception:
+            pass
+    finally:
+        try:
+            await websocket.close()
+        except Exception:
+            pass
+
+
 def _cast_or_400(date: str, time_index: int, gender: str, calendar: str, leap: bool) -> dict:
     try:
         if calendar == "lunar":
-            return ziwei_app.cast_chart_dict(lunar_date=date, leap=leap, time_index=time_index, gender=gender, calendar="lunar")
-        return ziwei_app.cast_chart_dict(solar_date=date, time_index=time_index, gender=gender, calendar="solar")
+            return ziwei_app.cast_chart_dict(
+                lunar_date=date, leap=leap, time_index=time_index, gender=gender, calendar="lunar"
+            )
+        return ziwei_app.cast_chart_dict(
+            solar_date=date, time_index=time_index, gender=gender, calendar="solar"
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:  # noqa: BLE001

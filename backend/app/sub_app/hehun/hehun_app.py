@@ -6,9 +6,12 @@
 
 from __future__ import annotations
 
+from typing import Any, Generator
+
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.agent.prompts import HEHUN_SYSTEM_PROMPT
+from app.api.context import get_app_context
 from app.core.llm_throttle import llm_tag
 from app.core.logger import log
 from app.tools.text_clean import clean_think_tags
@@ -54,8 +57,13 @@ def analyze(
     chat_model 为 None（如未初始化）或解读失败时回退规则结果。
     """
     base_result = rule_basis(
-        birth_time_a, gender_a, birth_time_b, gender_b,
-        sect=sect, longitude_a=longitude_a, longitude_b=longitude_b,
+        birth_time_a,
+        gender_a,
+        birth_time_b,
+        gender_b,
+        sect=sect,
+        longitude_a=longitude_a,
+        longitude_b=longitude_b,
     )
     if not base_result or base_result.startswith("合婚失败") or chat_model is None:
         return base_result
@@ -78,3 +86,83 @@ def analyze(
     except Exception as e:
         log.warning("合婚 LLM 解读失败，返回规则结果: {}", e)
         return base_result
+
+
+def _normalize_chunk_text(raw_content: Any) -> str:
+    """归一化 LLM 流式返回的 chunk 文本（兼容多种格式）。"""
+    if raw_content is None:
+        return ""
+    if isinstance(raw_content, str):
+        text = raw_content.strip()
+        return text if text else ""
+    if isinstance(raw_content, list):
+        texts = []
+        for item in raw_content:
+            if isinstance(item, dict) and item.get("text"):
+                texts.append(item["text"])
+            elif isinstance(item, str):
+                texts.append(item)
+        text = " ".join(texts).strip()
+        return text if text else ""
+    if isinstance(raw_content, dict):
+        for key in ("text", "content", "delta", "result"):
+            val = raw_content.get(key)
+            if val and isinstance(val, str) and val.strip():
+                return val.strip()
+        for val in raw_content.values():
+            if isinstance(val, str) and len(val) > 20 and not val.startswith("<"):
+                return val.strip()
+        return ""
+    text = str(raw_content)
+    if len(text) > 200 or "<__" in text or "object at 0x" in text:
+        return ""
+    return text.strip()
+
+
+async def analyze_stream(
+    birth_time_a: str,
+    gender_a: str,
+    birth_time_b: str,
+    gender_b: str,
+    sect: int = 2,
+    longitude_a: float | None = None,
+    longitude_b: float | None = None,
+) -> Generator[str, None, None]:
+    """流式合婚分析：先拿规则基础数据，再由 LLM 流式返回综合解读。"""
+    base_result = rule_basis(
+        birth_time_a,
+        gender_a,
+        birth_time_b,
+        gender_b,
+        sect=sect,
+        longitude_a=longitude_a,
+        longitude_b=longitude_b,
+    )
+    if not base_result or base_result.startswith("合婚失败"):
+        yield base_result
+        return
+
+    messages = [
+        SystemMessage(content=HEHUN_SYSTEM_PROMPT),
+        HumanMessage(
+            content=(
+                "以下是系统根据双方出生时间自动排盘生成的合婚基础数据，"
+                "请基于这些事实进行综合解读，给出缘分分析和合婚建议：\n\n"
+                f"{base_result}"
+            )
+        ),
+    ]
+    try:
+        has_any_chunk = False
+        with llm_tag("hehun"):
+            async for chunk in get_app_context().chat_model.astream(messages):
+                text = _normalize_chunk_text(getattr(chunk, "content", None))
+                if text:
+                    has_any_chunk = True
+                    yield clean_think_tags(text)
+        if not has_any_chunk:
+            log.warning("合婚 LLM 返回空片段")
+            yield base_result
+    except Exception as e:
+        log.exception("合婚 LLM 流式解读失败，返回规则结果")
+        yield base_result

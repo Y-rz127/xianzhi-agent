@@ -1,6 +1,13 @@
 """紫微斗数子应用核心：组装领域引擎，供 REST 路由与 Agent 工具共用。"""
+
 from __future__ import annotations
 
+from typing import Any, Generator
+
+from app.agent.prompts import ZIWEI_SYSTEM_PROMPT
+from app.api.context import get_app_context
+from app.core.llm_throttle import llm_tag
+from app.core.logger import log
 from app.domain.ziwei import engine
 
 
@@ -15,8 +22,12 @@ def cast_chart_dict(
 ) -> dict:
     """排盘并返回 snake_case 命盘 dict（非法参数抛 ValueError）。"""
     chart = engine.cast_chart(
-        solar_date=solar_date, lunar_date=lunar_date, leap=leap,
-        time_index=time_index, gender=gender, calendar=calendar,
+        solar_date=solar_date,
+        lunar_date=lunar_date,
+        leap=leap,
+        time_index=time_index,
+        gender=gender,
+        calendar=calendar,
     )
     return chart.to_dict()
 
@@ -39,13 +50,20 @@ def build_chart_summary(chart: dict, focus: str = "") -> str:
     """把命盘 dict 压成结构化文本，作为 LLM 解读的事实源（不虚构、可追溯）。"""
     lines = [
         "【基本信息】性别{}，阳历{}，{}（{}），{}，{}，命宫在{}宫，身宫在{}宫。".format(
-            chart["gender"], chart["solar_date"], chart["lunar_date"],
-            chart["time_name"], chart["time_range"], chart["five_elements_class"],
-            chart["earthly_branch_of_soul"], chart["earthly_branch_of_body"],
+            chart["gender"],
+            chart["solar_date"],
+            chart["lunar_date"],
+            chart["time_name"],
+            chart["time_range"],
+            chart["five_elements_class"],
+            chart["earthly_branch_of_soul"],
+            chart["earthly_branch_of_body"],
         ),
         "【四柱】年{} 月{} 日{} 时{}。".format(
-            chart["four_pillars"]["yearly"], chart["four_pillars"]["monthly"],
-            chart["four_pillars"]["daily"], chart["four_pillars"]["hourly"],
+            chart["four_pillars"]["yearly"],
+            chart["four_pillars"]["monthly"],
+            chart["four_pillars"]["daily"],
+            chart["four_pillars"]["hourly"],
         ),
         "【命主】{}，【身主】{}。".format(chart["soul_star"], chart["body_star"]),
         "【十二宫】（寅宫起，逐宫列主星/亮度/四化，括号内为辅煞与重要杂曜、大限年龄段）",
@@ -53,15 +71,91 @@ def build_chart_summary(chart: dict, focus: str = "") -> str:
     for p in chart["palaces"]:
         majors = "、".join(_star_text(s) for s in p["major_stars"]) or "空宫（借对宫主星）"
         support = [s["name"] for s in p["minor_stars"]]
-        support += [s["name"] for s in p["adjective_stars"] if s["type"] in ("soft", "tough", "lucun", "tianma")]
+        support += [
+            s["name"] for s in p["adjective_stars"] if s["type"] in ("soft", "tough", "lucun", "tianma")
+        ]
         support_txt = "、".join(support) if support else "—"
         body = "身宫" if p["is_body"] else ""
         dec = "{}~{}岁".format(*p["decadal"]["range"]) if p["decadal"] else "—"
         lines.append(
             "  {}（{}{}）：{}；辅煞杂曜：{}；大限{}。".format(
                 _palace_label(p["name"]), p["heavenly_stem"], p["earthly_branch"], majors, support_txt, dec
-            ) + (f"〔{body}〕" if body else "")
+            )
+            + (f"〔{body}〕" if body else "")
         )
     if focus:
         lines.append(f"【问测重点】{focus}")
     return "\n".join(lines)
+
+
+def _normalize_chunk_text(raw_content: Any) -> str:
+    """归一化 LLM 流式返回的 chunk 文本（兼容多种格式）。"""
+    if raw_content is None:
+        return ""
+    if isinstance(raw_content, str):
+        text = raw_content.strip()
+        return text if text else ""
+    if isinstance(raw_content, list):
+        texts = []
+        for item in raw_content:
+            if isinstance(item, dict) and item.get("text"):
+                texts.append(item["text"])
+            elif isinstance(item, str):
+                texts.append(item)
+        text = " ".join(texts).strip()
+        return text if text else ""
+    if isinstance(raw_content, dict):
+        for key in ("text", "content", "delta", "result"):
+            val = raw_content.get(key)
+            if val and isinstance(val, str) and val.strip():
+                return val.strip()
+        for val in raw_content.values():
+            if isinstance(val, str) and len(val) > 20 and not val.startswith("<"):
+                return val.strip()
+        return ""
+    text = str(raw_content)
+    if len(text) > 200 or "<__" in text or "object at 0x" in text:
+        return ""
+    return text.strip()
+
+
+async def interpret_stream(
+    date: str,
+    time_index: int,
+    gender: str,
+    calendar: str = "solar",
+    leap: bool = False,
+    focus: str = "",
+) -> Generator[str, None, None]:
+    """流式 AI 简批：后端按参数重排盘，拼结构化命盘摘要入 prompt，通过 LLM 流式返回。"""
+    chart = cast_chart_dict(
+        solar_date=date if calendar == "solar" else None,
+        lunar_date=date if calendar == "lunar" else None,
+        leap=leap,
+        time_index=time_index,
+        gender=gender,
+        calendar=calendar,
+    )
+    summary = build_chart_summary(chart, focus)
+    prompt = (
+        "请为以下紫微斗数命盘做整体简批，并重点讲命宫、财帛、官禄三宫：\n\n"
+        f"{summary}\n\n"
+        "请严格按系统提示的结构：格局基调 → 命/财/官三宫逐宫 → 三方四正综合 → 一条建议。"
+    )
+    from langchain_core.messages import HumanMessage, SystemMessage
+
+    msgs = [SystemMessage(content=ZIWEI_SYSTEM_PROMPT), HumanMessage(content=prompt)]
+    try:
+        has_any_chunk = False
+        with llm_tag("ziwei"):
+            async for chunk in get_app_context().chat_model.astream(msgs):
+                text = _normalize_chunk_text(getattr(chunk, "content", None))
+                if text:
+                    has_any_chunk = True
+                    yield text
+        if not has_any_chunk:
+            log.warning("紫微 LLM 返回空片段")
+            yield "\n\n[AI 解读暂不可用]\n\n"
+    except Exception as e:
+        log.exception("紫微 LLM 解读失败")
+        yield f"\n\n[AI 解读暂不可用：{type(e).__name__}]\n\n"
