@@ -23,6 +23,7 @@ export const EP = {
   PROFILES: '/ai/profiles',
   FAVORITES: '/ai/favorites',
   TAROT_RECORDS: '/ai/tarot_records',
+  AI_INTERPRETATION_RECORDS: '/ai/ai_interpretation_records',
   FEEDBACK: '/ai/feedback',
   FEEDBACK_ANSWER: '/ai/feedback/answer',
   ME: '/ai/me',

@@ -161,7 +161,7 @@
 
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { getZiWeiChart, interpretZiWei, type ZiWeiChart, type ZiWeiPalace } from '@/api'
+import { getZiWeiChart, interpretZiWei, createAiInterpretationRecord, type ZiWeiChart, type ZiWeiPalace } from '@/api'
 import { useTheme } from '@/composables/useTheme'
 
 const { themeClass } = useTheme()
@@ -269,6 +269,16 @@ async function doInterpret() {
   interpreting.value = true
   try {
     interpretation.value = await interpretZiWei(castParams())
+    try {
+      await createAiInterpretationRecord({
+        source: 'ziwei',
+        question: '',
+        payload: castParams(),
+        interpretation: interpretation.value,
+      })
+    } catch {
+      // 用户私有记录保存是增强能力，失败不阻断解读主体
+    }
   } catch (e: any) {
     uni.showToast({ title: e.message || '解读失败', icon: 'none' })
   } finally {

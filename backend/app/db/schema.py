@@ -1,4 +1,5 @@
 """用户私有数据共享工具：惰性建表 / 错误埋点 / JSON 容错。"""
+
 from __future__ import annotations
 
 import json
@@ -44,9 +45,7 @@ def _do_ensure_tables():
             )
             """
         )
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_profiles_user ON bazi_profiles(user_id)"
-        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_profiles_user ON bazi_profiles(user_id)")
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS chart_favorites (
@@ -58,9 +57,7 @@ def _do_ensure_tables():
             )
             """
         )
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_fav_user ON chart_favorites(user_id)"
-        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_fav_user ON chart_favorites(user_id)")
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS tarot_records (
@@ -74,8 +71,25 @@ def _do_ensure_tables():
             )
             """
         )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_tarot_user ON tarot_records(user_id)")
         conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_tarot_user ON tarot_records(user_id)"
+            """
+            CREATE TABLE IF NOT EXISTS ai_interpretation_records (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                user_id TEXT NOT NULL,
+                source TEXT NOT NULL,
+                question TEXT DEFAULT '',
+                payload JSONB,
+                interpretation TEXT DEFAULT '',
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_ai_interpretation_user ON ai_interpretation_records(user_id)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_ai_interpretation_source ON ai_interpretation_records(source)"
         )
         conn.execute(
             """
@@ -106,24 +120,12 @@ def _do_ensure_tables():
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_answer_feedback_created ON answer_feedback(created_at DESC)"
         )
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_answer_feedback_rating ON answer_feedback(rating)"
-        )
-        conn.execute(
-            "ALTER TABLE answer_feedback ADD COLUMN IF NOT EXISTS reviewed BOOLEAN DEFAULT FALSE"
-        )
-        conn.execute(
-            "ALTER TABLE answer_feedback ADD COLUMN IF NOT EXISTS reviewed_by TEXT DEFAULT ''"
-        )
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_answer_feedback_reviewed ON answer_feedback(reviewed)"
-        )
-        conn.execute(
-            "ALTER TABLE answer_feedback ADD COLUMN IF NOT EXISTS case_id TEXT DEFAULT NULL"
-        )
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_answer_feedback_case ON answer_feedback(case_id)"
-        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_answer_feedback_rating ON answer_feedback(rating)")
+        conn.execute("ALTER TABLE answer_feedback ADD COLUMN IF NOT EXISTS reviewed BOOLEAN DEFAULT FALSE")
+        conn.execute("ALTER TABLE answer_feedback ADD COLUMN IF NOT EXISTS reviewed_by TEXT DEFAULT ''")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_answer_feedback_reviewed ON answer_feedback(reviewed)")
+        conn.execute("ALTER TABLE answer_feedback ADD COLUMN IF NOT EXISTS case_id TEXT DEFAULT NULL")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_answer_feedback_case ON answer_feedback(case_id)")
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS chart_profiles (
@@ -143,12 +145,8 @@ def _do_ensure_tables():
             )
             """
         )
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_chart_profiles_user ON chart_profiles(user_id)"
-        )
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_chart_profiles_hash ON chart_profiles(chart_hash)"
-        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_chart_profiles_user ON chart_profiles(user_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_chart_profiles_hash ON chart_profiles(chart_hash)")
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS chart_facts (
@@ -166,15 +164,9 @@ def _do_ensure_tables():
             )
             """
         )
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_chart_facts_profile ON chart_facts(chart_profile_id)"
-        )
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_chart_facts_user ON chart_facts(user_id)"
-        )
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_chart_facts_confidence ON chart_facts(confidence)"
-        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_chart_facts_profile ON chart_facts(chart_profile_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_chart_facts_user ON chart_facts(user_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_chart_facts_confidence ON chart_facts(confidence)")
         # 命理库八字命例（cases 表）：bio/analysis/keypoints/domains 承载解读文案，
         # 替代已废弃的 markdown 种子文档
         conn.execute(
@@ -202,18 +194,10 @@ def _do_ensure_tables():
             ("keypoints", "TEXT DEFAULT ''"),
             ("domains", "TEXT[] DEFAULT '{}'"),
         ]:
-            conn.execute(
-                f"ALTER TABLE cases ADD COLUMN IF NOT EXISTS {col} {col_type}"
-            )
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_cases_tags ON cases USING GIN (tags)"
-        )
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_cases_domains ON cases USING GIN (domains)"
-        )
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_cases_updated ON cases(updated_at DESC)"
-        )
+            conn.execute(f"ALTER TABLE cases ADD COLUMN IF NOT EXISTS {col} {col_type}")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_cases_tags ON cases USING GIN (tags)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_cases_domains ON cases USING GIN (domains)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_cases_updated ON cases(updated_at DESC)")
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS chart_cases (
@@ -233,12 +217,8 @@ def _do_ensure_tables():
             )
             """
         )
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_chart_cases_domains ON chart_cases USING GIN (domains)"
-        )
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_chart_cases_rating ON chart_cases(rating DESC)"
-        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_chart_cases_domains ON chart_cases USING GIN (domains)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_chart_cases_rating ON chart_cases(rating DESC)")
 
 
 def _safe_json(s: str):
@@ -247,5 +227,3 @@ def _safe_json(s: str):
         return json.loads(s)
     except Exception:
         return {}
-
-

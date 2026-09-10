@@ -45,13 +45,13 @@
         <text class="entry-hint">{{ favorites.length ? `共 ${favorites.length} 条收藏` : '还没有收藏' }}</text>
       </view>
 
-      <!-- 塔罗记录 -->
-      <view v-if="user" class="card entry-card" @tap="uniApp.navigateTo({ url: '/pages/mine/tarots' })">
+      <!-- AI 解读记录 -->
+      <view v-if="user" class="card entry-card" @tap="uniApp.navigateTo({ url: '/pages/mine/ai-records' })">
         <view class="entry-head">
-          <view class="card-title-row"><text class="card-dot">✦</text><text class="card-title">塔罗记录</text></view>
+          <view class="card-title-row"><text class="card-dot">✦</text><text class="card-title">AI 解读记录</text></view>
           <text class="entry-arrow">›</text>
         </view>
-        <text class="entry-hint">{{ tarots.length ? `共 ${tarots.length} 条记录` : '还没有塔罗记录' }}</text>
+        <text class="entry-hint">{{ aiRecords.length ? `共 ${aiRecords.length} 条记录` : '还没有 AI 解读记录' }}</text>
       </view>
 
       <!-- 通用链接 -->
@@ -76,7 +76,7 @@ import { requireLogin } from '@/utils/authGuard'
 import {
   fetchProfiles,
   fetchFavorites,
-  fetchTarotRecords,
+  fetchAiInterpretationRecords,
   updateMe,
 } from '@/api'
 
@@ -103,7 +103,7 @@ try {
 const user = ref<any>(null)
 const profiles = ref<any[]>([])
 const favorites = ref<any[]>([])
-const tarots = ref<any[]>([])
+const aiRecords = ref<any[]>([])
 
 const avatarText = computed(() => (user.value?.nickname ? user.value.nickname.slice(0, 1) : '☯'))
 
@@ -113,17 +113,17 @@ onShow(() => {
   if (user.value) {
     loadProfiles()
     loadFavorites()
-    loadTarots()
+    loadAiRecords()
   } else {
     profiles.value = []
     favorites.value = []
-    tarots.value = []
+    aiRecords.value = []
   }
 })
 
 async function loadProfiles() { try { profiles.value = await fetchProfiles() } catch { profiles.value = [] } }
 async function loadFavorites() { try { favorites.value = await fetchFavorites() } catch { favorites.value = [] } }
-async function loadTarots() { try { tarots.value = await fetchTarotRecords() } catch { tarots.value = [] } }
+async function loadAiRecords() { try { aiRecords.value = await fetchAiInterpretationRecords() } catch { aiRecords.value = [] } }
 
 function goLogin() { uni.navigateTo({ url: '/pages/login/index' }) }
 function goAbout() { uni.navigateTo({ url: '/pages/about/index' }) }
@@ -160,7 +160,7 @@ function onLogout() {
     user.value = null
     profiles.value = []
     favorites.value = []
-    tarots.value = []
+    aiRecords.value = []
     uni.showToast({ title: '已退出', icon: 'none' })
   }})
 }

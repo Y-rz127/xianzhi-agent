@@ -24,19 +24,30 @@
     },
     {
       "path": "pages/liuyao/index",
-      "style": { "navigationStyle": "custom", "navigationBarTitleText": "六爻算卦" }
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "六爻算卦"
+      }
     },
     {
       "path": "pages/huangli/index",
-      "style": { "navigationStyle": "custom", "navigationBarTitleText": "每日黄历" }
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "每日黄历"
+      }
     },
     {
       "path": "pages/ziwei/index",
-      "style": { "navigationStyle": "custom", "navigationBarTitleText": "紫微斗数" }
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "紫微斗数"
+      }
     },
     {
       "path": "pages/settings/index",
-      "style": { "navigationBarTitleText": "" }
+      "style": {
+        "navigationBarTitleText": ""
+      }
     },
     {
       "path": "pages/chart-cases/index",
@@ -61,47 +72,73 @@
     },
     {
       "path": "pages/login/index",
-      "style": { "navigationBarTitleText": "账号" }
+      "style": {
+        "navigationBarTitleText": "账号"
+      }
     },
     {
       "path": "pages/mine/profile-edit",
-      "style": { "navigationBarTitleText": "八字档案" }
+      "style": {
+        "navigationBarTitleText": "八字档案"
+      }
     },
     {
       "path": "pages/mine/profiles",
-      "style": { "navigationStyle": "custom", "navigationBarTitleText": "我的八字档案" }
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "我的八字档案"
+      }
     },
     {
       "path": "pages/mine/favorites",
-      "style": { "navigationStyle": "custom", "navigationBarTitleText": "命例收藏" }
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "命例收藏"
+      }
     },
     {
       "path": "pages/mine/sessions",
-      "style": { "navigationStyle": "custom", "navigationBarTitleText": "我的对话" }
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "我的对话"
+      }
     },
     {
-      "path": "pages/mine/tarots",
-      "style": { "navigationStyle": "custom", "navigationBarTitleText": "塔罗记录" }
+      "path": "pages/mine/ai-records",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "AI 解读记录"
+      }
     },
     {
       "path": "pages/feedback/index",
-      "style": { "navigationBarTitleText": "问题反馈" }
+      "style": {
+        "navigationBarTitleText": "问题反馈"
+      }
     },
     {
       "path": "pages/about/index",
-      "style": { "navigationBarTitleText": "" }
+      "style": {
+        "navigationBarTitleText": ""
+      }
     },
     {
       "path": "pages/legal/disclaimer",
-      "style": { "navigationBarTitleText": "免责声明" }
+      "style": {
+        "navigationBarTitleText": "免责声明"
+      }
     },
     {
       "path": "pages/legal/privacy",
-      "style": { "navigationBarTitleText": "隐私政策" }
+      "style": {
+        "navigationBarTitleText": "隐私政策"
+      }
     },
     {
       "path": "pages/legal/terms",
-      "style": { "navigationBarTitleText": "服务条款" }
+      "style": {
+        "navigationBarTitleText": "服务条款"
+      }
     }
   ],
   "globalStyle": {

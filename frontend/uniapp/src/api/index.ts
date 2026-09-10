@@ -243,7 +243,7 @@ const TASK_POLL_TIMEOUT = 15 * 60 * 1000
 async function runReportTask<T extends ReportTaskStatus>(kind: string, params: Record<string, any>): Promise<T> {
   const { task_id } = await post<{ task_id: string }>('/ai/xianzhi/report/tasks', { kind, ...params })
   const deadline = Date.now() + TASK_POLL_TIMEOUT
-  for (;;) {
+  for (; ;) {
     await new Promise((resolve) => setTimeout(resolve, TASK_POLL_INTERVAL))
     const t = await get<T>(`/ai/xianzhi/report/tasks/${task_id}`)
     if (t.status === 'done') return t
@@ -401,12 +401,21 @@ export const removeFavorite = (caseId: string) => del(`${EP.FAVORITES}/${caseId}
 export const favoriteStatus = (caseId: string) =>
   get<{ favorited: boolean }>(`${EP.FAVORITES}/${caseId}/status`)
 
-/* ============ 塔罗记录（按用户隔离） ============ */
+/* ============ 通用 AI 解读记录（按用户隔离，仅小程序侧） ============ */
 
-export const fetchTarotRecords = () => get<TarotRecord[]>(EP.TAROT_RECORDS)
-export const createTarotRecord = (r: { spread: string; question?: string; cards: TarotCard[]; interpretation: string }) =>
-  post<{ id: string }>(EP.TAROT_RECORDS, r)
-export const deleteTarotRecord = (id: string) => del(`${EP.TAROT_RECORDS}/${id}`)
+export interface AiInterpretationRecord {
+  id: string
+  source: string
+  question: string
+  payload: Record<string, unknown>
+  interpretation: string
+  createdAt: string
+}
+
+export const fetchAiInterpretationRecords = () => get<AiInterpretationRecord[]>(EP.AI_INTERPRETATION_RECORDS)
+export const createAiInterpretationRecord = (r: { source: string; question?: string; payload?: Record<string, unknown>; interpretation: string }) =>
+  post<{ id: string }>(EP.AI_INTERPRETATION_RECORDS, r)
+export const deleteAiInterpretationRecord = (id: string) => del(`${EP.AI_INTERPRETATION_RECORDS}/${id}`)
 
 /* ============ 我的聚合 + 我的对话 ============ */
 

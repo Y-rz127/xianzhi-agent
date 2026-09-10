@@ -169,6 +169,55 @@ class TestDeleteAnswerFeedback:
         assert any("DELETE FROM answer_feedback" in sql and "WHERE id = %s" in sql for sql, _ in calls)
 
 
+class TestAiInterpretationRecords:
+    """通用 AI 解读记录必须落到用户私有记录表的一条标准写入语句。"""
+
+    def test_add_ai_interpretation_record_runs_sql(self, monkeypatch):
+        from app.db import user_records
+
+        calls = []
+
+        class FakeCursor:
+            rowcount = 1
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def execute(self, sql, params=None):
+                calls.append((sql, params))
+                return self
+
+        class FakeConn:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def execute(self, sql, params=None):
+                calls.append((sql, params))
+                return FakeCursor()
+
+        class FakePool:
+            def connection(self):
+                return FakeConn()
+
+        monkeypatch.setattr(user_records, "_ensure_tables", lambda: None)
+        monkeypatch.setattr(user_records, "get_pool", lambda: FakePool())
+
+        user_records.add_ai_interpretation_record(
+            "unit-test-user",
+            "liuyao",
+            "这次工作变动应当如何准备？",
+            {"source": "liuyao"},
+            "解读文案",
+        )
+        assert any("INSERT INTO ai_interpretation_records" in sql for sql, _ in calls)
+
+
 class TestRecordErrorMetric:
     """内部错误埋点：降级路径也必须可观测。"""
 

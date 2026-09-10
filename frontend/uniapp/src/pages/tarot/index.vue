@@ -144,7 +144,7 @@ import { useTheme } from '@/composables/useTheme'
 const { themeClass } = useTheme()
 // 塔罗两阶段：draw 抽牌 + interpret AI 流式解读
 import { drawTarotCards, interpretTarotWS, closeAllWS } from '@/api/chat'
-import { createTarotRecord } from '@/api'
+import { createAiInterpretationRecord } from '@/api'
 import { isLoggedIn } from '@/utils/storage'
 
 function goBack() {
@@ -312,7 +312,7 @@ function resetDivine() {
   interpretation.value = ''
 }
 
-/** 解读完成后保存记录（登录用户才保存，便于「我的-塔罗记录」回溯） */
+/** 解读完成后保存记录（登录用户才保存，统一写入通用 AI 解读记录表） */
 function saveRecord() {
   if (!isLoggedIn()) return
   if (!interpretation.value) return
@@ -325,10 +325,10 @@ function saveRecord() {
     isReversed: c.isReversed,
     meaning: c.meaning,
   }))
-  createTarotRecord({
-    spread: selectedSpread.value,
+  createAiInterpretationRecord({
+    source: 'tarot',
     question: question.value,
-    cards: payload,
+    payload: { spread: selectedSpread.value, cards: payload },
     interpretation: interpretation.value,
   }).catch(() => {})
 }
