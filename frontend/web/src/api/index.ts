@@ -11,7 +11,7 @@ export {
   EP, parseDayun, parsePillars, parseShensha, parseWuxing,
   isSameDayun, collapseBySelection,
 } from "@shared/api"
-import type { AnswerFeedbackPayload, BaziCandidate, BaziProfile, ChartCase, ChartData, ChatOptions, ChatSession, FavoriteCase, SessionBirthInfo, SessionMessage, TarotRecord } from "@shared/api"
+import type { AnswerFeedbackPayload, BaziCandidate, BaziProfile, ChartCase, ChartData, ChatOptions, ChatSession, FavoriteCase, SessionBirthInfo, SessionMessage, TarotCard } from "@shared/api"
 import { EP } from "@shared/api"
 
 const API_BASE = import.meta.env.VITE_API_BASE

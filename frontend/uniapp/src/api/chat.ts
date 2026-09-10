@@ -65,7 +65,7 @@ let currentTarotActive = false
 let wsConnId = 0
 
 export function closeAllWS() {
-  try { wx.closeSocket() } catch {}
+  try { wx.closeSocket() } catch { }
   currentChatActive = false
   currentTarotActive = false
 }
@@ -74,7 +74,7 @@ export function closeAllWS() {
  * 通用 WS 连接 — 使用 wx 全局 API（真机兼容）
  */
 function connectChatWS(path: string, payload: Record<string, any>, cb: ChatWSCallbacks): UniApp.SocketTask | null {
-  try { wx.closeSocket() } catch {}
+  try { wx.closeSocket() } catch { }
   currentChatActive = false
   const myId = ++wsConnId
 
@@ -133,7 +133,7 @@ function connectChatWS(path: string, payload: Record<string, any>, cb: ChatWSCal
   })
 
   // uni.connectSocket 发起连接（走 uni-app 域名绕过），wx 全局回调收消息（真机稳定）
-  uni.connectSocket({ url, complete: () => {} })
+  uni.connectSocket({ url, complete: () => { } })
 
   setTimeout(() => {
     if (!sent && !doneOrError && isMine()) {
@@ -167,7 +167,7 @@ export interface TarotInterpretCallbacks { onMessage: (chunk: string) => void; o
 
 /** 塔罗抽牌 */
 export function drawTarotCards(spread: 'daily' | 'three_card' | 'relationship' | 'decision' | 'celtic_cross', cb: TarotDrawCallbacks) {
-  try { wx.closeSocket() } catch {}
+  try { wx.closeSocket() } catch { }
   currentTarotActive = false
   const myId = ++wsConnId
   const url = resolveWsBase() + wsPath('/api/ai/tarot/ws')
@@ -203,7 +203,7 @@ export function drawTarotCards(spread: 'daily' | 'three_card' | 'relationship' |
   })
   wx.onSocketClose(() => { if (!isMine()) return; currentTarotActive = false })
 
-  uni.connectSocket({ url, complete: () => {} })
+  uni.connectSocket({ url, complete: () => { } })
   setTimeout(() => { if (!sent && !doneOrError && isMine()) doSend() }, 500)
 
   return null as any
@@ -211,7 +211,7 @@ export function drawTarotCards(spread: 'daily' | 'three_card' | 'relationship' |
 
 /** 塔罗解读 */
 export function interpretTarotWS(opts: { spread: 'daily' | 'three_card' | 'relationship' | 'decision' | 'celtic_cross'; question?: string; cards: any[] }, cb: TarotInterpretCallbacks) {
-  try { wx.closeSocket() } catch {}
+  try { wx.closeSocket() } catch { }
   currentTarotActive = false
   const myId = ++wsConnId
   const url = resolveWsBase() + wsPath('/api/ai/tarot/ws')
@@ -235,7 +235,13 @@ export function interpretTarotWS(opts: { spread: 'daily' | 'three_card' | 'relat
     receivedMessage = true
     try {
       const d = JSON.parse(res.data as string)
-      if (d.type === 'message') cb.onMessage(d.data)
+      if (d.type === 'message') {
+        let msgData = d.data
+        if (typeof msgData !== 'string') {
+          msgData = typeof msgData === 'object' ? JSON.stringify(msgData) : String(msgData || '')
+        }
+        cb.onMessage(msgData)
+      }
       else if (d.type === 'done') { doneOrError = true; cb.onDone(); currentTarotActive = false }
       else if (d.type === 'error') { doneOrError = true; cb.onError(d.data || '解读失败'); currentTarotActive = false }
     } catch { if (!doneOrError) { doneOrError = true; cb.onError('解析失败') } }
@@ -248,7 +254,7 @@ export function interpretTarotWS(opts: { spread: 'daily' | 'three_card' | 'relat
   })
   wx.onSocketClose(() => { if (!isMine()) return; currentTarotActive = false })
 
-  uni.connectSocket({ url, complete: () => {} })
+  uni.connectSocket({ url, complete: () => { } })
   setTimeout(() => { if (!sent && !doneOrError && isMine()) doSend() }, 500)
 
   return null as any

@@ -524,6 +524,12 @@ class TarotApp:
         某些模型流下，chunk.content 可能是 str，也可能是 list[dict] 或 dict。
         直接 yield list/object 会让 WebSocket 前端收到结构化载荷，表现为
         只显示标题 "塔罗师解读" 而没有正文。这里强制扁平化成可展示的文本。
+
+        支持的输入格式：
+          - str: 直接返回
+          - list[str|dict]: 递归提取并拼接
+          - dict: 提取 text/content/delta 字段
+          - LangChain MessageChunk 对象: 提取 .content 属性
         """
         if content is None:
             return ""
@@ -538,16 +544,31 @@ class TarotApp:
             return "".join(parts)
         if isinstance(content, dict):
             # 常见 OpenAI 兼容流式块：{"type": "text", "text": "..."}
-            if "text" in content and isinstance(content["text"], str):
-                return content["text"]
-            if "content" in content:
-                return TarotApp._normalize_chunk_text(content["content"])
-            if "type" in content and content.get("type") == "text" and isinstance(content.get("text"), str):
-                return content["text"]
-            return ""
+            # 或 Anthropic 格式：{"type": "content_block_delta", "delta": {"type": "text_delta", "text": "..."}}
+            for key in ("text", "content", "delta"):
+                val = content.get(key)
+                if isinstance(val, str) and val:
+                    return val
+                if isinstance(val, (list, dict)):
+                    nested = TarotApp._normalize_chunk_text(val)
+                    if nested:
+                        return nested
+            # 兜底：检查所有字符串值（取最长的那个）
+            best = ""
+            for val in content.values():
+                if isinstance(val, str) and len(val) > len(best):
+                    best = val
+            return best if len(best) > 10 else ""
+        # 处理 LangChain AIMessageChunk 或其他对象
+        if hasattr(content, "content"):
+            return TarotApp._normalize_chunk_text(getattr(content, "content"))
         if hasattr(content, "text"):
             return TarotApp._normalize_chunk_text(getattr(content, "text"))
-        return str(content)
+        # 最后兜底：转成字符串，但过滤掉对象 repr
+        s = str(content).strip()
+        if s and not s.startswith("<") and len(s) < 10000:
+            return s
+        return ""
 
     def _fallback_reading(self, question: str, spread: SpreadKey, cards: list[dict]) -> list[str]:
         """LLM 不可用时，基于牌面基础信息给出解读。"""
