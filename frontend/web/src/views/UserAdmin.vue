@@ -12,7 +12,7 @@
         </div>
         <div>
           <h2 class="text-glow-soft">用户管理</h2>
-          <div class="header-info">查看注册用户及其八字档案、收藏、塔罗与对话数据</div>
+          <div class="header-info">查看注册用户及其八字档案、收藏、通用 AI 解读记录与对话数据</div>
         </div>
       </div>
       <div class="header-actions">
@@ -34,7 +34,7 @@
             <th>昵称</th>
             <th>八字档案</th>
             <th>收藏</th>
-            <th>塔罗</th>
+            <th>AI 解读</th>
             <th>会话</th>
             <th>最近活跃</th>
             <th>注册时间</th>
@@ -50,7 +50,7 @@
             </td>
             <td>{{ u.stats.profiles }}</td>
             <td>{{ u.stats.favorites }}</td>
-            <td>{{ u.stats.tarotRecords }}</td>
+            <td>{{ u.stats.aiInterpretationRecords }}</td>
             <td>{{ u.stats.sessions }}</td>
             <td class="cell-dim">{{ fmt(u.lastActiveAt) }}</td>
             <td class="cell-dim">{{ fmt(u.createdAt) }}</td>
@@ -92,11 +92,11 @@
         </section>
 
         <section class="block">
-          <h4>塔罗记录（{{ detail?.tarotRecords.length || 0 }}）</h4>
-          <div v-if="!detail?.tarotRecords.length" class="block-empty">暂无</div>
-          <div v-for="t in detail?.tarotRecords" :key="t.id" class="item">
-            <div class="item-title">{{ t.spread }} <span class="cell-dim">· {{ t.createdAt }}</span></div>
-            <div class="cell-dim" v-if="t.question">问题：{{ t.question }}</div>
+          <h4>AI 解读记录（{{ detail?.aiInterpretationRecords.length || 0 }}）</h4>
+          <div v-if="!detail?.aiInterpretationRecords.length" class="block-empty">暂无</div>
+          <div v-for="r in detail?.aiInterpretationRecords" :key="r.id" class="item">
+            <div class="item-title">{{ r.source || 'unknown' }} <span class="cell-dim">· {{ r.createdAt }}</span></div>
+            <div class="cell-dim" v-if="r.question">问题：{{ r.question }}</div>
           </div>
         </section>
 

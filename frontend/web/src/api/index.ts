@@ -652,14 +652,14 @@ export interface AdminUser {
   avatar: string
   createdAt: string
   lastActiveAt: string
-  stats: { profiles: number; favorites: number; tarotRecords: number; sessions: number }
+  stats: { profiles: number; favorites: number; aiInterpretationRecords: number; sessions: number }
 }
 
 export interface AdminUserDetail {
   user: { id: string; nickname: string; avatar: string }
   profiles: BaziProfile[]
   favorites: FavoriteCase[]
-  tarotRecords: TarotRecord[]
+  aiInterpretationRecords: any[]
   sessions: ChatSession[]
 }
 

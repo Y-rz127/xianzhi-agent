@@ -10,7 +10,7 @@ import { getToken } from '@/utils/storage'
 export type {
   AnswerFeedbackPayload, BaziProfile, ChartAnalysis, ChartCase, ChartData,
   ChatSession, DayunItem, FavoriteCase, HehunParams, LiuNianItem, Pillar,
-  SessionMessage, ShenshaItem, TarotRecord, WuxingItem, XzUser,
+  SessionMessage, ShenshaItem, WuxingItem, XzUser,
   XiPanColumn, XiPanCurrent, XiPanDaYun, XiPanData, XiPanLiuNian,
   XiPanLiuYue, XiPanQiYun, XiPanRelationGroup, XiPanRelations, XiPanSiLing,
   XiPanSnapshot, XiPanWuxingState, XiPanMonthMeta, XiPanGanzhiMeta,
@@ -22,7 +22,7 @@ export {
 } from '@shared/api'
 import type {
   AnswerFeedbackPayload, BaziProfile, ChartCase, ChartData, ChatSession,
-  FavoriteCase, HehunParams, SessionMessage, TarotCard, TarotRecord, XzUser,
+  FavoriteCase, HehunParams, SessionMessage, TarotCard, XzUser,
 } from '@shared/api'
 import type { SessionBirthInfo } from '@shared/api'
 import { EP, profileBody } from '@shared/api'
@@ -420,7 +420,7 @@ export const deleteAiInterpretationRecord = (id: string) => del(`${EP.AI_INTERPR
 /* ============ 我的聚合 + 我的对话 ============ */
 
 export const fetchMyOverview = () =>
-  get<{ user: XzUser; stats: { profiles: number; favorites: number; tarotRecords: number; sessions: number } }>(EP.ME)
+  get<{ user: XzUser; stats: { profiles: number; favorites: number; aiInterpretationRecords: number; sessions: number } }>(EP.ME)
 export const fetchMySessions = () => get<ChatSession[]>(EP.SESSIONS_MINE)
 
 /* ============ 问题反馈 ============ */

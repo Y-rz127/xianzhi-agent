@@ -60,20 +60,6 @@ def _do_ensure_tables():
         conn.execute("CREATE INDEX IF NOT EXISTS idx_fav_user ON chart_favorites(user_id)")
         conn.execute(
             """
-            CREATE TABLE IF NOT EXISTS tarot_records (
-                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                user_id TEXT NOT NULL,
-                spread TEXT NOT NULL,
-                question TEXT DEFAULT '',
-                cards JSONB,
-                interpretation TEXT DEFAULT '',
-                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-            )
-            """
-        )
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_tarot_user ON tarot_records(user_id)")
-        conn.execute(
-            """
             CREATE TABLE IF NOT EXISTS ai_interpretation_records (
                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                 user_id TEXT NOT NULL,

@@ -333,15 +333,6 @@ export interface TarotCard {
   [key: string]: unknown
 }
 
-export interface TarotRecord {
-  id: string
-  spread: string
-  question: string
-  cards: TarotCard[]
-  interpretation: string
-  createdAt: string
-}
-
 export interface AnswerFeedbackPayload {
   conversation_id: string
   question?: string

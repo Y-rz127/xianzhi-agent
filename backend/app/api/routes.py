@@ -16,7 +16,6 @@ from app.api.me import router as me_router
 from app.api.observability import router as observability_router
 from app.api.profiles import router as profiles_router
 from app.api.rag import mgmt_router as rag_mgmt_router
-from app.api.tarot_records import router as tarot_records_router
 from app.api.ai_interpretation_records import router as ai_interpretation_records_router
 from app.api.xianzhi import router as xianzhi_router
 from app.sub_app.hehun.routes import router as hehun_router
@@ -39,7 +38,6 @@ router.include_router(ziwei_router)
 router.include_router(observability_router)
 router.include_router(profiles_router)
 router.include_router(favorites_router)
-router.include_router(tarot_records_router)
 router.include_router(ai_interpretation_records_router)
 router.include_router(feedback_router)
 router.include_router(me_router)

@@ -89,6 +89,16 @@ class TestMemoryWriteReraise:
         assert broken_memory.get("unit-test-conv") == []
 
 
+class TestLegacyTarotRecordRouteRemoval:
+    """旧塔罗记录表专用路由必须从共享 API 栈中剥离，统一走通用 AI 解读记录表。"""
+
+    def test_tarot_records_route_is_not_registered(self):
+        from app.api.routes import router
+
+        paths = [getattr(r, "path", "") for r in router.routes]
+        assert not any(p == "/tarot_records" or p.startswith("/tarot_records/") for p in paths)
+
+
 class TestDeleteSessionSummaryCleanup:
     """会话删除时必须把摘要状态元数据也一起碎片化清理，避免历史摘要残留。"""
 

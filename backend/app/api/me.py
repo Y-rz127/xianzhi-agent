@@ -1,4 +1,5 @@
 """聚合接口：当前用户的资料 + 各模块数据量统计。"""
+
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -13,7 +14,7 @@ router = APIRouter(prefix="/me", tags=["Me"])
 
 @router.get("")
 async def my_overview(current_user: dict = Depends(get_current_user)):
-    """聚合返回当前用户的资料与各模块数据量统计（档案/收藏/塔罗/会话）。"""
+    """聚合返回当前用户的资料与各模块数据量统计（档案/收藏/通用 AI 解读记录/会话）。"""
     uid = current_user["id"]
     try:
         sessions = await repo.get_session_info(prefix="mp-xianzhi", user_id=uid)
@@ -26,7 +27,7 @@ async def my_overview(current_user: dict = Depends(get_current_user)):
             "stats": {
                 "profiles": len(await repo.list_profiles(uid)),
                 "favorites": len(await repo.list_favorites(uid)),
-                "tarotRecords": len(await repo.list_tarot_records(uid)),
+                "aiInterpretationRecords": len(await repo.list_ai_interpretation_records(uid)),
                 "sessions": len(sessions),
             },
         }
