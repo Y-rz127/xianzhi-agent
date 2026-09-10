@@ -1,4 +1,5 @@
 """塔罗占卜应用：78 张牌组、后端抽牌（Fisher-Yates 洗牌）、LLM 流式解读（带 fallback）。"""
+
 from __future__ import annotations
 
 import random
@@ -13,16 +14,25 @@ from app.core.logger import log
 
 # 牌组数据
 
+
 class TarotCard:
     __slots__ = ("name", "name_en", "emblem", "arcana", "suit", "meaning", "reversed_meaning")
 
-    def __init__(self, name: str, name_en: str, emblem: str, arcana: str,
-                 suit: str, meaning: str, reversed_meaning: str):
+    def __init__(
+        self,
+        name: str,
+        name_en: str,
+        emblem: str,
+        arcana: str,
+        suit: str,
+        meaning: str,
+        reversed_meaning: str,
+    ):
         self.name = name
         self.name_en = name_en
         self.emblem = emblem
         self.arcana = arcana  # "major" | "minor"
-        self.suit = suit       # "major" | "wands" | "cups" | "swords" | "pentacles"
+        self.suit = suit  # "major" | "wands" | "cups" | "swords" | "pentacles"
         self.meaning = meaning
         self.reversed_meaning = reversed_meaning
 
@@ -40,77 +50,210 @@ class TarotCard:
 
 # 22 张大阿卡纳
 _MAJOR_ARCANA: list[TarotCard] = [
-    TarotCard("愚者", "The Fool", "☆", "major", "major",
-              "新的开始、冒险、天真无邪。是时候勇敢迈出第一步，相信宇宙的指引。",
-              "鲁莽、犹豫不决。你需要停下来重新审视当前的处境，不要盲目行动。"),
-    TarotCard("魔术师", "The Magician", "✦", "major", "major",
-              "创造力、技能、意志力。你拥有实现目标所需的一切资源，现在是行动的时候。",
-              "欺骗、能力不足。你可能在浪费自己的才华，或被表象迷惑。"),
-    TarotCard("女祭司", "The High Priestess", "☽", "major", "major",
-              "直觉、潜意识、神秘。静下心来倾听内心的声音，答案就在你心中。",
-              "忽视直觉、情绪封闭。你与内心的连接被切断，需要重新建立信任。"),
-    TarotCard("女皇", "The Empress", "♔", "major", "major",
-              "丰饶、母性、感官享受。创造力与滋养的能量充沛，享受生活的美好。",
-              "依赖、停滞。过度依赖他人或物质享受，忽视了内在成长。"),
-    TarotCard("皇帝", "The Emperor", "⚔", "major", "major",
-              "权威、秩序、掌控。建立规则和结构，用理性与纪律引导自己。",
-              "专制、失控。你可能过于强势，或缺乏自律导致混乱。"),
-    TarotCard("教皇", "The Hierophant", "✠", "major", "major",
-              "传统、导师、精神指引。遵循传统智慧，寻求导师或制度的帮助。",
-              "叛逆、盲目追随。你可能被困在陈规中，或盲目追随权威。"),
-    TarotCard("恋人", "The Lovers", "♥", "major", "major",
-              "爱情、选择、和谐。面临重要抉择，跟随内心做出真诚的决定。",
-              "分离、错误选择。关系中可能出现裂痕，需要真诚沟通。"),
-    TarotCard("战车", "The Chariot", "⚡", "major", "major",
-              "胜利、意志力、前进。克服困难，通过坚定的意志力取得胜利。",
-              "失控、失败。你可能失去了方向，需要重新掌控局面。"),
-    TarotCard("力量", "Strength", "♌", "major", "major",
-              "勇气、耐心、内在力量。以柔克刚，用爱与耐心驯服内心的野兽。",
-              "软弱、恐惧。你被恐惧支配，需要找回内在的力量。"),
-    TarotCard("隐士", "The Hermit", "✶", "major", "major",
-              "内省、孤独、智慧。退一步反思，寻找内心的光明与真理。",
-              "孤立、逃避。过度的孤独变成了逃避，需要重新连接外界。"),
-    TarotCard("命运之轮", "Wheel of Fortune", "☸", "major", "major",
-              "命运、转折、机遇。命运的齿轮转动，好运即将到来，抓住机会。",
-              "厄运、停滞。你可能处于低谷，但变化是必然的，保持信念。"),
-    TarotCard("正义", "Justice", "⚖", "major", "major",
-              "公正、真相、因果。种瓜得瓜，真理必将显现，做出公正的决定。",
-              "不公、逃避责任。你可能在逃避应承担的责任或真相。"),
-    TarotCard("倒吊人", "The Hanged Man", "〰", "major", "major",
-              "牺牲、换个视角、等待。暂停行动，换个角度看问题，会有新的领悟。",
-              "固执、无谓牺牲。你不愿改变视角，导致停滞不前。"),
-    TarotCard("死神", "Death", "☠", "major", "major",
-              "结束、转变、重生。旧的不去新的不来，接受改变，迎接新生。",
-              "抗拒改变、停滞。你拒绝放手，导致无法获得新的成长。"),
-    TarotCard("节制", "Temperance", "≈", "major", "major",
-              "平衡、调和、耐心。寻找中庸之道，调和内在的矛盾，保持平衡。",
-              "失衡、过度。你可能在某个方面走极端，需要回归平衡。"),
-    TarotCard("恶魔", "The Devil", "♄", "major", "major",
-              "束缚、欲望、阴影。直面内心的欲望和恐惧，认识自己的阴暗面。",
-              "解脱、觉醒。你正在摆脱束缚，看清真相，获得自由。"),
-    TarotCard("高塔", "The Tower", "▲", "major", "major",
-              "突变、崩塌、觉醒。突如其来的改变打破旧有结构，虽然痛苦但是必要的。",
-              "抗拒改变、危机延迟。你在逃避不可避免的改变，但终究要面对。"),
-    TarotCard("星星", "The Star", "★", "major", "major",
-              "希望、灵感、治愈。黑暗中看到了光芒，保持信念，未来充满希望。",
-              "绝望、失去信心。你可能感到迷茫，但希望从未真正离开。"),
-    TarotCard("月亮", "The Moon", "☾", "major", "major",
-              "幻觉、恐惧、潜意识。面对内心的恐惧，穿越迷雾方能看清真相。",
-              "恐惧消散、真相显现。迷雾正在散去，真相即将揭晓。"),
-    TarotCard("太阳", "The Sun", "☀", "major", "major",
-              "快乐、成功、活力。阳光普照，一切顺利，享受生命的美好时刻。",
-              "暂时的阴霾、热情减退。快乐被暂时遮蔽，但太阳终会再次升起。"),
-    TarotCard("审判", "Judgement", "♫", "major", "major",
-              "觉醒、重生、召唤。听到内心的召唤，做出改变，迎接新生。",
-              "拒绝觉醒、自我怀疑。你忽视了内心的召唤，需要重新审视。"),
-    TarotCard("世界", "The World", "⬡", "major", "major",
-              "完成、圆满、成就。一个周期的圆满结束，你已经达成了目标。",
-              "未完成、拖延。你接近完成但尚未达成，需要最后一步努力。"),
+    TarotCard(
+        "愚者",
+        "The Fool",
+        "☆",
+        "major",
+        "major",
+        "新的开始、冒险、天真无邪。是时候勇敢迈出第一步，相信宇宙的指引。",
+        "鲁莽、犹豫不决。你需要停下来重新审视当前的处境，不要盲目行动。",
+    ),
+    TarotCard(
+        "魔术师",
+        "The Magician",
+        "✦",
+        "major",
+        "major",
+        "创造力、技能、意志力。你拥有实现目标所需的一切资源，现在是行动的时候。",
+        "欺骗、能力不足。你可能在浪费自己的才华，或被表象迷惑。",
+    ),
+    TarotCard(
+        "女祭司",
+        "The High Priestess",
+        "☽",
+        "major",
+        "major",
+        "直觉、潜意识、神秘。静下心来倾听内心的声音，答案就在你心中。",
+        "忽视直觉、情绪封闭。你与内心的连接被切断，需要重新建立信任。",
+    ),
+    TarotCard(
+        "女皇",
+        "The Empress",
+        "♔",
+        "major",
+        "major",
+        "丰饶、母性、感官享受。创造力与滋养的能量充沛，享受生活的美好。",
+        "依赖、停滞。过度依赖他人或物质享受，忽视了内在成长。",
+    ),
+    TarotCard(
+        "皇帝",
+        "The Emperor",
+        "⚔",
+        "major",
+        "major",
+        "权威、秩序、掌控。建立规则和结构，用理性与纪律引导自己。",
+        "专制、失控。你可能过于强势，或缺乏自律导致混乱。",
+    ),
+    TarotCard(
+        "教皇",
+        "The Hierophant",
+        "✠",
+        "major",
+        "major",
+        "传统、导师、精神指引。遵循传统智慧，寻求导师或制度的帮助。",
+        "叛逆、盲目追随。你可能被困在陈规中，或盲目追随权威。",
+    ),
+    TarotCard(
+        "恋人",
+        "The Lovers",
+        "♥",
+        "major",
+        "major",
+        "爱情、选择、和谐。面临重要抉择，跟随内心做出真诚的决定。",
+        "分离、错误选择。关系中可能出现裂痕，需要真诚沟通。",
+    ),
+    TarotCard(
+        "战车",
+        "The Chariot",
+        "⚡",
+        "major",
+        "major",
+        "胜利、意志力、前进。克服困难，通过坚定的意志力取得胜利。",
+        "失控、失败。你可能失去了方向，需要重新掌控局面。",
+    ),
+    TarotCard(
+        "力量",
+        "Strength",
+        "♌",
+        "major",
+        "major",
+        "勇气、耐心、内在力量。以柔克刚，用爱与耐心驯服内心的野兽。",
+        "软弱、恐惧。你被恐惧支配，需要找回内在的力量。",
+    ),
+    TarotCard(
+        "隐士",
+        "The Hermit",
+        "✶",
+        "major",
+        "major",
+        "内省、孤独、智慧。退一步反思，寻找内心的光明与真理。",
+        "孤立、逃避。过度的孤独变成了逃避，需要重新连接外界。",
+    ),
+    TarotCard(
+        "命运之轮",
+        "Wheel of Fortune",
+        "☸",
+        "major",
+        "major",
+        "命运、转折、机遇。命运的齿轮转动，好运即将到来，抓住机会。",
+        "厄运、停滞。你可能处于低谷，但变化是必然的，保持信念。",
+    ),
+    TarotCard(
+        "正义",
+        "Justice",
+        "⚖",
+        "major",
+        "major",
+        "公正、真相、因果。种瓜得瓜，真理必将显现，做出公正的决定。",
+        "不公、逃避责任。你可能在逃避应承担的责任或真相。",
+    ),
+    TarotCard(
+        "倒吊人",
+        "The Hanged Man",
+        "〰",
+        "major",
+        "major",
+        "牺牲、换个视角、等待。暂停行动，换个角度看问题，会有新的领悟。",
+        "固执、无谓牺牲。你不愿改变视角，导致停滞不前。",
+    ),
+    TarotCard(
+        "死神",
+        "Death",
+        "☠",
+        "major",
+        "major",
+        "结束、转变、重生。旧的不去新的不来，接受改变，迎接新生。",
+        "抗拒改变、停滞。你拒绝放手，导致无法获得新的成长。",
+    ),
+    TarotCard(
+        "节制",
+        "Temperance",
+        "≈",
+        "major",
+        "major",
+        "平衡、调和、耐心。寻找中庸之道，调和内在的矛盾，保持平衡。",
+        "失衡、过度。你可能在某个方面走极端，需要回归平衡。",
+    ),
+    TarotCard(
+        "恶魔",
+        "The Devil",
+        "♄",
+        "major",
+        "major",
+        "束缚、欲望、阴影。直面内心的欲望和恐惧，认识自己的阴暗面。",
+        "解脱、觉醒。你正在摆脱束缚，看清真相，获得自由。",
+    ),
+    TarotCard(
+        "高塔",
+        "The Tower",
+        "▲",
+        "major",
+        "major",
+        "突变、崩塌、觉醒。突如其来的改变打破旧有结构，虽然痛苦但是必要的。",
+        "抗拒改变、危机延迟。你在逃避不可避免的改变，但终究要面对。",
+    ),
+    TarotCard(
+        "星星",
+        "The Star",
+        "★",
+        "major",
+        "major",
+        "希望、灵感、治愈。黑暗中看到了光芒，保持信念，未来充满希望。",
+        "绝望、失去信心。你可能感到迷茫，但希望从未真正离开。",
+    ),
+    TarotCard(
+        "月亮",
+        "The Moon",
+        "☾",
+        "major",
+        "major",
+        "幻觉、恐惧、潜意识。面对内心的恐惧，穿越迷雾方能看清真相。",
+        "恐惧消散、真相显现。迷雾正在散去，真相即将揭晓。",
+    ),
+    TarotCard(
+        "太阳",
+        "The Sun",
+        "☀",
+        "major",
+        "major",
+        "快乐、成功、活力。阳光普照，一切顺利，享受生命的美好时刻。",
+        "暂时的阴霾、热情减退。快乐被暂时遮蔽，但太阳终会再次升起。",
+    ),
+    TarotCard(
+        "审判",
+        "Judgement",
+        "♫",
+        "major",
+        "major",
+        "觉醒、重生、召唤。听到内心的召唤，做出改变，迎接新生。",
+        "拒绝觉醒、自我怀疑。你忽视了内心的召唤，需要重新审视。",
+    ),
+    TarotCard(
+        "世界",
+        "The World",
+        "⬡",
+        "major",
+        "major",
+        "完成、圆满、成就。一个周期的圆满结束，你已经达成了目标。",
+        "未完成、拖延。你接近完成但尚未达成，需要最后一步努力。",
+    ),
 ]
 
 
-def _minor(suit: str, suit_cn: str, emblem: str, theme: str, rev_theme: str,
-           numbers: list[tuple[str, str, str]]) -> list[TarotCard]:
+def _minor(
+    suit: str, suit_cn: str, emblem: str, theme: str, rev_theme: str, numbers: list[tuple[str, str, str]]
+) -> list[TarotCard]:
     """批量生成某花色小阿卡纳的 14 张牌。
 
     numbers: [(牌名, 正位含义, 逆位含义), ...] 共 14 项
@@ -124,28 +267,68 @@ def _minor(suit: str, suit_cn: str, emblem: str, theme: str, rev_theme: str,
 
 # 权杖 Wands 🔥 - 行动、激情、创造
 _WANDS = _minor(
-    "wands", "Wands", "🜂", "行动与激情", "冲动与耗竭",
+    "wands",
+    "Wands",
+    "🜂",
+    "行动与激情",
+    "冲动与耗竭",
     [
-        ("权杖王牌", "新行动的萌芽，灵感火花点燃，充满动力与热情。", "拖延、缺乏方向。热情被熄灭，需要重新点燃内在火焰。"),
+        (
+            "权杖王牌",
+            "新行动的萌芽，灵感火花点燃，充满动力与热情。",
+            "拖延、缺乏方向。热情被熄灭，需要重新点燃内在火焰。",
+        ),
         ("权杖二", "规划与抉择，站在十字路口展望未来。", "犹豫不决、恐惧未知。不敢迈出舒适区，错失良机。"),
         ("权杖三", "远见与扩展，计划开始展现成果，眺望远方。", "目光短浅、阻碍。计划受阻，需要调整方向。"),
-        ("权杖四", "庆祝、稳定、归属感。收获阶段性成果，值得欢庆。", "动荡、缺乏归属。过渡期不稳，需要重建根基。"),
+        (
+            "权杖四",
+            "庆祝、稳定、归属感。收获阶段性成果，值得欢庆。",
+            "动荡、缺乏归属。过渡期不稳，需要重建根基。",
+        ),
         ("权杖五", "竞争、冲突、思想碰撞。良性竞争激发潜能。", "内耗、无谓争斗。冲突失去建设性，需要停止。"),
-        ("权杖六", "胜利、认可、荣耀。努力获得回报，受到赞誉。", "失败、失去认可。寻求外界认同而忽视内在价值。"),
-        ("权杖七", "捍卫、坚守立场。守护已得的成果，迎接挑战。", "压力过大、孤军奋战。感到力不从心，需要支援。"),
-        ("权杖八", "快速变化、消息来临。事情加速推进，保持敏捷。", "混乱、方向不明。变化太快失去掌控，需要聚焦。"),
+        (
+            "权杖六",
+            "胜利、认可、荣耀。努力获得回报，受到赞誉。",
+            "失败、失去认可。寻求外界认同而忽视内在价值。",
+        ),
+        (
+            "权杖七",
+            "捍卫、坚守立场。守护已得的成果，迎接挑战。",
+            "压力过大、孤军奋战。感到力不从心，需要支援。",
+        ),
+        (
+            "权杖八",
+            "快速变化、消息来临。事情加速推进，保持敏捷。",
+            "混乱、方向不明。变化太快失去掌控，需要聚焦。",
+        ),
         ("权杖九", "坚韧、最后防线。坚持到最后，胜利在望。", "疲惫、防御过当。过度紧张消耗精力，需要放松。"),
         ("权杖十", "重担、责任。承担过多，接近极限。", "放下重担、转嫁责任。学会拒绝，释放压力。"),
-        ("权杖侍从", "探索、学习新事物。充满好奇与热情的初学者。", "半途而废、注意力分散。缺乏专注，需要深耕。"),
-        ("权杖骑士", "冒险、进取、冲劲十足。追寻梦想的行动派。", "鲁莽、三分钟热度。行动前缺乏思考，容易燃尽。"),
-        ("权杖皇后", "热情、自信、魅力四射。用温暖感染他人。", "嫉妒、控制欲。热情变成占有，需要给彼此空间。"),
+        (
+            "权杖侍从",
+            "探索、学习新事物。充满好奇与热情的初学者。",
+            "半途而废、注意力分散。缺乏专注，需要深耕。",
+        ),
+        (
+            "权杖骑士",
+            "冒险、进取、冲劲十足。追寻梦想的行动派。",
+            "鲁莽、三分钟热度。行动前缺乏思考，容易燃尽。",
+        ),
+        (
+            "权杖皇后",
+            "热情、自信、魅力四射。用温暖感染他人。",
+            "嫉妒、控制欲。热情变成占有，需要给彼此空间。",
+        ),
         ("权杖国王", "领导力、远见、魄力。天生的领袖与开拓者。", "专横、自负。权力使人盲目，需要谦逊。"),
     ],
 )
 
 # 圣杯 Cups 💧 - 情感、关系、直觉
 _CUPS = _minor(
-    "cups", "Cups", "🜄", "情感与关系", "情绪失衡",
+    "cups",
+    "Cups",
+    "🜄",
+    "情感与关系",
+    "情绪失衡",
     [
         ("圣杯王牌", "新情感萌芽，爱意涌动，心灵打开。", "情感封闭、压抑。感受被堵塞，需要释放。"),
         ("圣杯二", "相互吸引、 partnership、心灵契合。", "关系破裂、误解。双方渐行渐远，需要重新连接。"),
@@ -166,7 +349,11 @@ _CUPS = _minor(
 
 # 宝剑 Swords 💨 - 思维、真相、冲突
 _SWORDS = _minor(
-    "swords", "Swords", "🜁", "思维与真相", "冲突与混乱",
+    "swords",
+    "Swords",
+    "🜁",
+    "思维与真相",
+    "冲突与混乱",
     [
         ("宝剑王牌", "清晰、决断、真相显现。突破性的洞察。", "混乱、错误判断。思绪不清，需要冷静。"),
         ("宝剑二", "僵局、平衡、回避选择。蒙眼站在十字路口。", "打破僵局、做出决定。不再逃避，直面真相。"),
@@ -187,7 +374,11 @@ _SWORDS = _minor(
 
 # 星币 Pentacles 🌍 - 物质、财富、现实
 _PENTACLES = _minor(
-    "pentacles", "Pentacles", "🜃", "物质与现实", "匮乏与停滞",
+    "pentacles",
+    "Pentacles",
+    "🜃",
+    "物质与现实",
+    "匮乏与停滞",
     [
         ("星币王牌", "新机会、物质丰盛、机遇降临。", "错失机会、匮乏。需要把握眼前的良机。"),
         ("星币二", "平衡、灵活、多任务处理。", "失衡、应接不暇。需要专注，减少分散。"),
@@ -245,12 +436,24 @@ SPREADS: dict[str, dict] = {
         "name": "凯尔特十字",
         "desc": "十张牌全面梳理问题、阻力与发展方向",
         "count": 10,
-        "positions": ["现状", "挑战", "显意识", "潜意识", "过去", "近期未来", "你的状态", "环境影响", "希望与担忧", "结果趋势"],
+        "positions": [
+            "现状",
+            "挑战",
+            "显意识",
+            "潜意识",
+            "过去",
+            "近期未来",
+            "你的状态",
+            "环境影响",
+            "希望与担忧",
+            "结果趋势",
+        ],
     },
 }
 
 
 # 业务类
+
 
 class TarotApp:
     def __init__(self, chat_model: BaseChatModel):
@@ -280,8 +483,7 @@ class TarotApp:
             pos = positions[i] if i < len(positions) else f"位置{i + 1}"
             orientation = "逆位" if c["isReversed"] else "正位"
             card_lines.append(
-                f"位置「{pos}」：{orientation} {c['name']}（{c['nameEn']}）\n"
-                f"  牌义：{c['meaning']}"
+                f"位置「{pos}」：{orientation} {c['name']}（{c['nameEn']}）\n  牌义：{c['meaning']}"
             )
         cards_text = "\n".join(card_lines)
 
@@ -301,7 +503,7 @@ class TarotApp:
             has_any_chunk = False
             with llm_tag("tarot"):
                 async for chunk in self.chat_model.astream(msgs):
-                    text = chunk.content
+                    text = self._normalize_chunk_text(getattr(chunk, "content", None))
                     if text:
                         has_any_chunk = True
                         yield text
@@ -315,9 +517,39 @@ class TarotApp:
             for piece in self._fallback_reading(question, spread, cards):
                 yield piece
 
-    def _fallback_reading(
-        self, question: str, spread: SpreadKey, cards: list[dict]
-    ) -> list[str]:
+    @staticmethod
+    def _normalize_chunk_text(content: object) -> str:
+        """把 LangChain/LLM 流式返回的 content 统一归一化为纯文本片段。
+
+        某些模型流下，chunk.content 可能是 str，也可能是 list[dict] 或 dict。
+        直接 yield list/object 会让 WebSocket 前端收到结构化载荷，表现为
+        只显示标题 "塔罗师解读" 而没有正文。这里强制扁平化成可展示的文本。
+        """
+        if content is None:
+            return ""
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            parts: list[str] = []
+            for item in content:
+                text = TarotApp._normalize_chunk_text(item)
+                if text:
+                    parts.append(text)
+            return "".join(parts)
+        if isinstance(content, dict):
+            # 常见 OpenAI 兼容流式块：{"type": "text", "text": "..."}
+            if "text" in content and isinstance(content["text"], str):
+                return content["text"]
+            if "content" in content:
+                return TarotApp._normalize_chunk_text(content["content"])
+            if "type" in content and content.get("type") == "text" and isinstance(content.get("text"), str):
+                return content["text"]
+            return ""
+        if hasattr(content, "text"):
+            return TarotApp._normalize_chunk_text(getattr(content, "text"))
+        return str(content)
+
+    def _fallback_reading(self, question: str, spread: SpreadKey, cards: list[dict]) -> list[str]:
         """LLM 不可用时，基于牌面基础信息给出解读。"""
         spread_info = SPREADS.get(spread, SPREADS["daily"])
         positions = spread_info["positions"]

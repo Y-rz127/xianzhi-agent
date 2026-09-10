@@ -228,6 +228,49 @@ class TestAiInterpretationRecords:
         assert any("INSERT INTO ai_interpretation_records" in sql for sql, _ in calls)
 
 
+class TestTarotStreamChunkNormalization:
+    """塔罗流式解读必须把模型产出的文本片段标准化为纯字符串片段，避免 WS 端收到结构化 list/对象并且页面只看到标题。"""
+
+    def test_tarot_divine_stream_flattens_content_blocks(self):
+        import asyncio
+
+        from app.sub_app.tarot.tarot_app import TarotApp
+
+        class FakeChunk:
+            content = [
+                {"type": "text", "text": "先看到"},
+                {"type": "text", "text": "未来"},
+            ]
+
+        class FakeModel:
+            async def astream(self, msgs):
+                yield FakeChunk()
+
+        async def _collect():
+            app = TarotApp(chat_model=FakeModel())
+            out = []
+            async for piece in app.divine_stream(
+                "问卜",
+                "daily",
+                [
+                    {
+                        "name": "愚者",
+                        "nameEn": "The Fool",
+                        "emblem": "☆",
+                        "arcana": "major",
+                        "suit": "major",
+                        "meaning": "启程",
+                        "isReversed": False,
+                    }
+                ],
+            ):
+                out.append(piece)
+            return out
+
+        result = asyncio.run(_collect())
+        assert result == ["先看到未来"]
+
+
 class TestRecordErrorMetric:
     """内部错误埋点：降级路径也必须可观测。"""
 
