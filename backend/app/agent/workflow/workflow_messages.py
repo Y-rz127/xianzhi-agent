@@ -327,7 +327,7 @@ def fact_block(chart: BaziChart, intent: QuestionIntent) -> str:
             liunian_items.sort(key=lambda x: x.year)
     else:
         current_year = today.year
-        liunian_items = [item for item in chart.liunian if current_year <= item.year <= current_year + 3]
+        liunian_items = [item for item in chart.liunian if current_year <= item.year <= current_year + 10]
         if not liunian_items:
             liunian_items = chart.liunian[:4]
     # 流年每年一行（含绑定大运 + 4 字段），避免 ； 串
@@ -384,6 +384,7 @@ def _build_domain_brief_inject(chart: BaziChart, intent: QuestionIntent) -> str:
 
 def build_sui_section(chart: BaziChart, intent: QuestionIntent) -> str:
     """岁运关系注入文本（generate 与 Reviewer 共用，保证同源一致）。"""
+    today = _dt.date.today()
     items: list[SuiRelations] = []
     for d in resolve_target_dayuns(chart, intent.target_dayun):
         if len(d.ganzhi) == 2:
@@ -402,10 +403,16 @@ def build_sui_section(chart: BaziChart, intent: QuestionIntent) -> str:
             items.append(relations_for(chart, liunian_ganzhi=gz, label=gz, is_tongxian=True))
     # 流年指认时自动推导所在大运，注入大运×原局关系（否则大模型只知流年所在大运干支，
     # 却不知该大运与原局的合/冲/害/刑/引动等关系）
-    if not items and intent.target_years:
+    # 无指认时也注入当前大运×原局关系，否则开放性问题（如"啥时候遇到正缘"）完全无岁运关系
+    if not items:
+        target_years_set = set(intent.target_years)
+        if not target_years_set:
+            cur_dy = [d for d in chart.dayun if d.start_year <= today.year <= d.end_year]
+            if cur_dy:
+                target_years_set = {today.year}
         seen_gz = set()
         for ln in chart.liunian or []:
-            if ln.year in set(intent.target_years) and len(ln.dayun_ganzhi or "") == 2:
+            if ln.year in target_years_set and len(ln.dayun_ganzhi or "") == 2:
                 gz = ln.dayun_ganzhi
                 if gz not in seen_gz:
                     seen_gz.add(gz)
@@ -422,6 +429,11 @@ def build_sui_section(chart: BaziChart, intent: QuestionIntent) -> str:
     # 岁运关系流年上限：取实际需要的流年数，不超过 _MAX_LIUNIAN_LINES 防 prompt 爆炸
     sui_max = min(len(explicit) + len(derived), _MAX_LIUNIAN_LINES)
     target_years_sui = (explicit + derived)[:sui_max]
+    # 无指认时补入今年~今年+10年的流年关系（11年），否则开放性问题完全无流年关系
+    if not target_years_sui and not intent.target_dayun:
+        target_years_sui = sorted(
+            {item.year for item in chart.liunian if today.year <= item.year <= today.year + 10}
+        )[:11]
     # chart.liunian 可能不够覆盖目标年份，按需补建
     sui_chart = chart
     missing_sui = sorted(set(target_years_sui) - {item.year for item in chart.liunian})
