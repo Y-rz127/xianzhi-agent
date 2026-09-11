@@ -161,11 +161,14 @@ class WorkerResult:
 （"你命盘有X""年柱X"），纯术语定义放行，避免误杀理论问答。
 
 **第 2 层：LLM 深审（1 次调用）**——正则全通过后，用
-`prompts.REVIEWER_SYSTEM`（实测 1241 字）做深度审核，维度覆盖：
+`prompts.REVIEWER_SYSTEM`（实测 2090 字）做深度审核，维度覆盖：
 逻辑自洽、断法准确性、知识一致性、古籍真实性（识别检索未提供的**伪造古文句子**，
-正则只能查书名）、表达质量、事实复查、十神事实复查、神煞事实复查、
+正则只能查书名）、表达质量、事实复查、十神事实复查（含"天干/地支分述不算混淆""先查副星字段"、
+"漏提不等于出错"三条防误判口径）、神煞事实复查、
 表述宽容度（倾向性/方向性描述放行，仅绝对化确证词与凭空捏造判问题）、
-审核范围边界（对话连贯的"之前我断过"不判幻觉）。输出 JSON
+审核范围边界（对话连贯的"之前我断过"不判幻觉）、
+岁运关系一致性（与【岁运关系】段对齐，未描述关系不记问题）、
+生克断言必须有据（"某十神克/坏某十神"须有检索依据，反例："劫财不克印"）。输出 JSON
 `{"pass": bool, "issues": [...]}`；返回非 JSON 或 LLM 异常时降级为通过
 （`source="regex_fallback"`），不影响主流程。
 
@@ -187,7 +190,7 @@ class WorkerResult:
 | `WORKER_PREAMBLE_TEMPLATE` | Worker 专属断法统一抬头（防绝对化） | — |
 | `CHITCHAT_SYSTEM` | 闲聊短路专属 prompt | 581 |
 | `TAROT/LIUYAO/ZIWEI/HEHUN/REPORT_*_PROMPT` | 塔罗/六爻/紫微/合婚/报告各子应用系统提示 | — |
-| `REVIEWER_SYSTEM` | LLM 深审提示（10 维度） | 1241 |
+| `REVIEWER_SYSTEM` | LLM 深审提示（12 维度） | 2090 |
 | `domain_sysprompt` | LLM 意图拆解提示（输出 domain/queries/needs_chart/对方生辰 JSON） | 1221 |
 | `reflect_sysprompt` | Reflextion 修复改写器提示 | 241 |
 

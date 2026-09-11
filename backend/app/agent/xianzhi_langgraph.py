@@ -133,6 +133,8 @@ def create_xianzhi_graph(workflow):
             )
             for i, issue in enumerate(review.issues, 1):
                 log.warning("[Reviewer]   issue[{}]: {}", i, issue)
+            # 落被审原稿：此前只记字数，误判无法复盘（前端只显示修复稿，原稿会永久丢失）
+            log.warning("[Reviewer] 被审原稿 ({}字):\n{}", len(raw), raw)
         return {"issues": review.issues, "final_answer": raw if review.ok else ""}
 
     def repair_node(state: XianzhiGraphState) -> XianzhiGraphState:
@@ -166,6 +168,8 @@ def create_xianzhi_graph(workflow):
             getattr(worker, "label", "?"),
             len(repaired),
         )
+        # 与 check_node 的「被审原稿」配对，便于复盘误判与改动效果
+        log.info("[Reflextion] 修复稿 ({}字):\n{}", len(repaired), repaired)
         second_chart = getattr(intent, "second_chart", None)
         facts_text = compact_facts(state["chart_context"].chart, intent)
         # 修复后先走 regex 快筛（零 LLM 调用），通过则信任修复，不再全量 LLM 重审

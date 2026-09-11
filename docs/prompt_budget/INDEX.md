@@ -99,7 +99,7 @@ LangGraph 图：classify → chart(扩盘) → retrieve(知识检索) → genera
 | Workflow 基础 System（ORACLE_BASE + FACT_REDLINE 拼接） | 1823 | workflow_messages.py:74 |
 | `WORKFLOW_FACT_REDLINE`（Workflow 事实红线段） | 563 | prompts.py:43 |
 | Worker 通用断法抬头 `WORKER_PREAMBLE_TEMPLATE` | 87 | prompts.py:38 |
-| `REVIEWER_SYSTEM`（LLM 深审） | 1241 | prompts.py:330 |
+| `REVIEWER_SYSTEM`（LLM 深审，12 维度） | 2090 | prompts.py:362 |
 | `reflect_sysprompt`（修复器） | 241 | prompts.py:390 |
 | 摘要 System（「你是会话摘要助手…」） | 25 | summarizer.py:64 |
 | 摘要 Human 固定模板 `_SUMMARY_PROMPT`（去插值） | 246 | summarizer.py:19 |
