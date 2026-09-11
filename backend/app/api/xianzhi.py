@@ -178,6 +178,12 @@ async def ws_chat_with_xianzhi(websocket: WebSocket):
                     await _safe_ws_send(websocket, {"type": "done"})
     except WebSocketDisconnect:
         log.info("WebSocket disconnected")
+    except RuntimeError as e:
+        if "not connected" in str(e):
+            log.info("WebSocket connection lost (client disconnected)")
+        else:
+            log.exception("WebSocket runtime error")
+            await _safe_ws_send(websocket, {"type": "error", "data": client_error(e)})
     except Exception as e:
         log.exception("WebSocket error")
         await _safe_ws_send(websocket, {"type": "error", "data": client_error(e)})

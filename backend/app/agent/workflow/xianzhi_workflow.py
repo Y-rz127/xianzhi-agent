@@ -166,7 +166,13 @@ class XianzhiWorkflow:
                 other_gender=other_gender,
                 target_dayun=target_dayun,
             )
-            log.info("[LLM拆解] domain={} needs_chart={} target_dayun={} queries={}", domain, needs_chart, target_dayun, list(queries))
+            log.info(
+                "[LLM拆解] domain={} needs_chart={} target_dayun={} queries={}",
+                domain,
+                needs_chart,
+                target_dayun,
+                list(queries),
+            )
             return intent
         except Exception as e:
             log.warning("[LLM拆解] 失败，fallback到关键词分类: {}", e)
@@ -220,7 +226,10 @@ class XianzhiWorkflow:
                     if ob_n != chart_context.birth_time:
                         # 经度透传：对方命盘与用户命盘使用同一出生地做真太阳时校正
                         other_ctx = build_chart_context(
-                            ob_n, og, chart_context.sect, chart_context.yun_sect,
+                            ob_n,
+                            og,
+                            chart_context.sect,
+                            chart_context.yun_sect,
                             longitude=chart_context.longitude,
                         )
                         basis = self._build_match_basis(chart_context, other_ctx)
@@ -296,5 +305,5 @@ class XianzhiWorkflow:
     def _invoke(self, messages):
         return invoke(self.chat_model, messages)
 
-    def check_facts(self, answer, chart, other_chart=None, needs_chart=True):
-        return check_facts(answer, chart, other_chart, needs_chart)
+    def check_facts(self, answer, chart, other_chart=None, needs_chart=True, facts_text=""):
+        return check_facts(answer, chart, other_chart, needs_chart, facts_text)

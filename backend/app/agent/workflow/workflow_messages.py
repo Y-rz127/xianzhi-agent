@@ -429,6 +429,7 @@ def check_facts(
     chart: BaziChart,
     other_chart: BaziChart | None = None,
     needs_chart: bool = True,
+    facts_text: str = "",
 ) -> FactCheckResult:
     """校验回答中的四柱/大运/流年/十神/神煞是否与系统排盘一致。
 
@@ -438,6 +439,9 @@ def check_facts(
             - True（默认）：严格校验十神/神煞的存在性与柱位归属，禁止凭空捏造
             - False（理论/术语解释场景）：仅校验**归属断言**（"你命盘有X""年柱X"等绑定命盘的表述），
               纯术语解释（"红鸾主喜庆""正财代表求财"）不受限，避免误杀理论问答。
+        facts_text: 发给 LLM 的命盘事实文本（compact_facts 输出）。
+            审核员从中提取 LLM 可见的十神/神煞，确保与 LLM 看到的一致，
+            避免流年/大运神煞被误判为"排盘事实中无"。
     """
     issues: list[str] = []
     year_to_gz: dict[int, str] = {item.year: item.ganzhi for item in chart.liunian}
@@ -614,6 +618,17 @@ def check_facts(
                 actual_shensha_all.add(name)
                 if pillar:
                     actual_shensha_by_pillar.setdefault(pillar, set()).add(name)
+
+    # 从 LLM 可见的事实文本中补充十神/神煞（流年/大运/岁运关系中的），
+    # 确保审核员与 LLM 看到一致的命盘信息，避免流年神煞被误判为"排盘事实中无"
+    if facts_text:
+        _FT_SHISHEN = {"正财", "偏财", "正官", "七杀", "正印", "偏印", "比肩", "劫财", "食神", "伤官"}
+        for ss in _FT_SHISHEN:
+            if ss in facts_text:
+                actual_shishen.add(ss)
+        for name in _SHENSHA_NAMES:
+            if name in facts_text:
+                actual_shensha_all.add(name)
 
     _SENT_SPLIT = re.compile(r"[。；;！!？?\n\r]")
     _NEG_TOKENS = (

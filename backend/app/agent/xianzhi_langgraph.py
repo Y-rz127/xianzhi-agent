@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any, TypedDict
 
-from app.agent.workflow.workflow_messages import build_sui_section
+from app.agent.workflow.workflow_messages import build_sui_section, compact_facts
 from app.agent.workflow.xianzhi_workflow import (
     WORKERS,
     DomainWorker,
@@ -103,6 +103,7 @@ def create_xianzhi_graph(workflow):
         needs_chart = _intent_needs_chart(intent)
         log.info("[Reviewer] 开始审核 {} Worker 产出 ({}字)...", getattr(worker, "label", "?"), len(raw))
         second_chart = getattr(intent, "second_chart", None)
+        facts_text = compact_facts(state["chart_context"].chart, intent)
         review = workflow._reviewer.review(
             raw,
             state["chart_context"].chart,
@@ -114,6 +115,7 @@ def create_xianzhi_graph(workflow):
             skip_llm=is_chitchat,
             needs_chart=needs_chart,
             sui_text=build_sui_section(state["chart_context"].chart, intent),
+            facts_text=facts_text,
         )
         if review.ok:
             log.info(
@@ -163,6 +165,7 @@ def create_xianzhi_graph(workflow):
             len(repaired),
         )
         second_chart = getattr(intent, "second_chart", None)
+        facts_text = compact_facts(state["chart_context"].chart, intent)
         # 修复后先走 regex 快筛（零 LLM 调用），通过则信任修复，不再全量 LLM 重审
         regex_issues = workflow._reviewer._regex_review(
             repaired,
@@ -171,6 +174,7 @@ def create_xianzhi_graph(workflow):
             workflow.check_facts,
             second_chart.chart if second_chart else None,
             needs_chart,
+            facts_text,
         )
         if not regex_issues:
             log.info(
@@ -194,6 +198,7 @@ def create_xianzhi_graph(workflow):
             ctx=state["chart_context"],
             needs_chart=needs_chart,
             sui_text=build_sui_section(state["chart_context"].chart, intent),
+            facts_text=facts_text,
         )
         if repaired_review.ok:
             log.info("[Reflextion] {} Worker 修复后通过校验 ✓", getattr(worker, "label", "?"))

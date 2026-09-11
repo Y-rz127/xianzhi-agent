@@ -338,6 +338,7 @@ class ReviewerWorker:
         skip_llm: bool = False,
         needs_chart: bool = True,
         sui_text: str = "",
+        facts_text: str = "",
     ) -> FactCheckResult:
         """两层审核：正则快筛 → LLM 深审。
 
@@ -353,9 +354,12 @@ class ReviewerWorker:
             needs_chart: 当前回答是否属于"绑定命盘分析"场景（命盘分析/合婚/流年大运推演等）。
                 True 时十神/神煞存在性严格校验；False（理论问答）时仅校验归属断言。
             sui_text: 岁运关系注入文本（与生成路径同源，供 LLM 维度11校验关系一致性）。
+            facts_text: 发给 LLM 的命盘事实文本，审核员从中提取可见十神/神煞。
         """
         # === 第1层：正则快筛 ===
-        regex_issues = self._regex_review(answer, chart, knowledge, fact_checker, second_chart, needs_chart)
+        regex_issues = self._regex_review(
+            answer, chart, knowledge, fact_checker, second_chart, needs_chart, facts_text
+        )
         if regex_issues:
             log.info(
                 "[Reviewer] 正则快筛发现问题，跳过 LLM 审核（省 1 次调用）: {} 条 issue", len(regex_issues)
@@ -373,16 +377,16 @@ class ReviewerWorker:
         return self._llm_review(answer, chart, knowledge, user_prompt, ctx, second_chart, sui_text)
 
     def _regex_review(
-        self, answer, chart, knowledge, fact_checker, second_chart, needs_chart: bool
+        self, answer, chart, knowledge, fact_checker, second_chart, needs_chart: bool, facts_text: str = ""
     ) -> list[str]:
         """第1层：正则快筛（原有三重校验，零 LLM 调用）。"""
         issues: list[str] = []
 
         # 1) 事实校验（四柱/大运/流年/十神/神煞）
-        fact_result = fact_checker(answer, chart, second_chart, needs_chart)
+        fact_result = fact_checker(answer, chart, second_chart, needs_chart, facts_text)
         issues.extend(fact_result.issues)
         if second_chart is not None:
-            fact_result2 = fact_checker(answer, second_chart, chart, needs_chart)
+            fact_result2 = fact_checker(answer, second_chart, chart, needs_chart, facts_text)
             issues.extend(fact_result2.issues)
 
         # 2) 古籍真实性校验
@@ -414,7 +418,9 @@ class ReviewerWorker:
 
         return issues
 
-    def _llm_review(self, answer, chart, knowledge, user_prompt, ctx, second_chart, sui_text: str = "") -> FactCheckResult:
+    def _llm_review(
+        self, answer, chart, knowledge, user_prompt, ctx, second_chart, sui_text: str = ""
+    ) -> FactCheckResult:
         """第2层：LLM 深度审核。"""
         facts = format_fact_context(chart)
         if second_chart is not None:
