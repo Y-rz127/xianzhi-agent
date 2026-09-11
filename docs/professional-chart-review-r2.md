@@ -15,7 +15,7 @@
 | `backend/app/domain/chart_builder.py` | +2 行 | `chart_to_api_dict` 挂 `xipan` 字段 |
 | `backend/app/domain/bazi_engine.py` | +1 行 | import 转发 |
 | `backend/tests/test_xipan.py` | 新增 157 行 | 10 个用例 |
-| `shared/api/types.ts` | +44 行 | `XiPanPalace/Relation/Combos/Adjustment/Data` |
+| `frontend/shared/api/types.ts` | +44 行 | `XiPanPalace/Relation/Combos/Adjustment/Data` |
 | `frontend/web/src/api/index.ts` | +3/-1 | 类型 re-export |
 | `frontend/web/src/components/BaziModal.vue` | +131 行 | 新增「细盘」tab |
 | `frontend/web/src/views/Xianzhi.vue` | +1 行 | 传 `:xipan` |
@@ -33,7 +33,7 @@
 | `tests/test_xipan.py` | **10 passed**（0.16s） |
 | 回归 `test_bazi.py` + `test_knowledge_docs.py` | **91 passed**，零回归 |
 | `vue-tsc --noEmit`（web 全量） | **通过，0 error** |
-| 类型契约一致性 | 后端 `build_xipan` 输出字段 ↔ `shared/api/types.ts` **完全对齐** |
+| 类型契约一致性 | 后端 `build_xipan` 输出字段 ↔ `frontend/shared/api/types.ts` **完全对齐** |
 | 数据链路 | `_compute_chart_payload` → `chart_to_api_dict` → `xipan` ✅ 前端能拿到 |
 | tables 常量类型 | `GAN_HE`/`LIU_HE` 是 `dict[frozenset,str]`、`HIDDEN_STEMS` 是 `dict[str,tuple[tuple,]]` — 与 xipan 用法**全部匹配** |
 | 常量重复定义 | `LIU_HE`/`GAN_HE`/`HIDDEN_STEMS` 均**唯一定义**，无覆盖风险 |

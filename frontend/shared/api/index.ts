@@ -2,7 +2,7 @@
  * 共享 API 层统一出口（R11）。
  *
  * 使用方式：
- * - Web（frontend/web/）：`import { ... } from '@shared/api'`（vite/tsconfig 别名 @shared → 仓库根 shared/）
+ * - Web（frontend/web/）：`import { ... } from '@shared/api'`（vite/tsconfig 别名 @shared → frontend/shared/）
  * - 小程序（frontend/uniapp/）：同上
  *
  * 约束：本目录为纯 TypeScript，禁止引用 DOM / fetch / uni.* 等平台 API；

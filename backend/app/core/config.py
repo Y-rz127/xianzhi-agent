@@ -3,14 +3,21 @@
 from pathlib import Path
 from typing import Optional
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# 后端根目录（backend/）：本文件位于 backend/app/core/config.py，向上三级即达。
+# 用于把 .env、运行时数据目录与日志目录锚定到代码位置，而非进程的当前工作目录 ——
+# 否则从仓库根目录执行 pytest 时，相对路径会把记忆文件/向量库/日志写到根目录去。
+BACKEND_ROOT = Path(__file__).resolve().parents[2]
 
 
 class Settings(BaseSettings):
     """应用配置模型，字段均通过 alias 支持环境变量覆盖，便于容器化部署。"""
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=str(BACKEND_ROOT / ".env"), env_file_encoding="utf-8", extra="ignore"
+    )
 
     # 大模型
     dashscope_url: str = Field(
@@ -87,6 +94,9 @@ class Settings(BaseSettings):
     # 搜索 API
     search_api_key: str = Field(default="", alias="SEARCH_API_KEY")
 
+    # 运行时数据根目录（绝对路径；memory/vector_db/命例回退 JSON 均落在此目录下）
+    data_dir: Path = Field(default=BACKEND_ROOT / "data", alias="DATA_DIR")
+
     # 记忆
     memory_dir: Path = Field(default=Path("./data/memory"), alias="MEMORY_DIR")
     # 记忆存储类型：file | postgres
@@ -138,6 +148,27 @@ class Settings(BaseSettings):
     # 微信小程序登录
     wechat_appid: str = Field(default="", alias="WECHAT_APPID")
     wechat_secret: str = Field(default="", alias="WECHAT_SECRET")
+
+    @model_validator(mode="after")
+    def _anchor_paths_to_backend_root(self):
+        """把相对路径类配置锚定到 backend/ 根目录，消除对进程工作目录的依赖。
+
+        - ``Path`` 类型字段（data/memory/vector_db）：语义就是文件系统路径，
+          只要不是绝对路径就锚定。注意 pydantic 已把 ``./data/memory`` 规范化成
+          ``data/memory``，前导 ``./`` 在此不可见，只能靠 is_absolute 判断。
+        - ``embedding_local_model`` 是字符串，既可能是 ``./models/...`` 这类显式
+          相对路径（锚定），也可能是 ``sentence-transformers`` 这类 HuggingFace
+          裸模型名（原样保留，由 transformers 自行解析）。
+        """
+        for name in ("data_dir", "memory_dir", "vector_db_dir"):
+            value = getattr(self, name)
+            if value is not None and not Path(value).is_absolute():
+                setattr(self, name, (BACKEND_ROOT / value).resolve())
+
+        local_model = self.embedding_local_model
+        if local_model and str(local_model).startswith(("./", "../", ".\\", "..\\")):
+            self.embedding_local_model = str((BACKEND_ROOT / local_model).resolve())
+        return self
 
     def pg_dsn(self, timeout: int = 5) -> str:
         """容器与数据库不在同一网络平面时连接会长时间挂起、拖垮启动，统一兜底追加 connect_timeout。"""

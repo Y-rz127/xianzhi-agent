@@ -234,15 +234,15 @@ frontend/uniapp/src/
 - **错误边界**：组件级 try/catch + ErrorBoundary
 - **虚拟滚动**：流年 100 年用 `<recycle-scroller>` 或自实现
 - **懒加载**：干支关系图层默认折叠，点击展开
-- **TypeScript**：`shared/types/chart.ts` 定义完整类型，前后端共用
+- **TypeScript**：`frontend/shared/types/chart.ts` 定义完整类型，前后端共用
 
 ### 4.3 小程序
 - **分包加载**：chart-detail 作独立 chunk
 - **API 重试**：失败 1 次后等待 1s 重试，最多 3 次
 
 ### 4.4 跨端一致性
-- **字段类型定义**放 `shared/types/chart.ts`
-- **字段常量**（五行颜色、纳音、神煞分类）放 `shared/constants/chart.ts`
+- **字段类型定义**放 `frontend/shared/types/chart.ts`
+- **字段常量**（五行颜色、纳音、神煞分类）放 `frontend/shared/constants/chart.ts`
 
 ---
 
@@ -355,8 +355,8 @@ frontend/uniapp/src/
 - [ ] 文案不要"为求安全而通篇模糊"
 
 ### 6.5 跨端复用
-- [ ] 字段类型定义放 `shared/types/chart.ts`，前后端共用
-- [ ] 字段常量放 `shared/constants/chart.ts`
+- [ ] 字段类型定义放 `frontend/shared/types/chart.ts`，前后端共用
+- [ ] 字段常量放 `frontend/shared/constants/chart.ts`
 
 ### 6.6 单测覆盖
 - [ ] 与本验收 §5.4 一一对应

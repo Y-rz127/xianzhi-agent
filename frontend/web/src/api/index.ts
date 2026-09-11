@@ -1,4 +1,4 @@
-// R11 共享 API 层：数据模型/文本解析器/端点常量与小程序端共用，统一在仓库根 shared/api 维护
+// R11 共享 API 层：数据模型/文本解析器/端点常量与小程序端共用，统一在 frontend/shared/api 维护
 export type {
   AnswerFeedbackPayload, BaziCandidate, ChartAnalysis, ChartCase, ChartData,
   ChatOptions, ChatSession, DayunItem, LiuNianItem, Pillar, SessionBirthInfo,

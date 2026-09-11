@@ -295,8 +295,8 @@ xianzhi-agent/
 ├── frontend/                    # 前端
 │   ├── web/                     # Web 前端（Vue3 + Vite）
 │   │   └── src/views/           # 先知/合婚/塔罗/六爻/黄历/命例库/管理后台等
-│   └── uniapp/                  # 小程序前端（UniApp，聊天抽屉含合婚/塔罗/六爻/黄历/紫微入口）
-├── shared/                      # Web 与小程序共享 API 层（数据模型/端点常量/解析器）
+│   ├── uniapp/                  # 小程序前端（UniApp，聊天抽屉含合婚/塔罗/六爻/黄历/紫微入口）
+│   └── shared/                  # Web 与小程序共享 API 层（数据模型/端点常量/解析器）
 ├── docs/                        # 多 Agent 架构 / code review / 持续学习路线图
 ├── 学习资料/                     # 智能体开发学习笔记
 └── docker-compose.yml           # 编排（api=backend/ 镜像，frontend=frontend/web/ 镜像）

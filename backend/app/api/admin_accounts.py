@@ -7,13 +7,15 @@ import hmac
 import json
 import os
 import uuid
-from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
 
+from app.core.config import settings
+
 router = APIRouter(prefix="/admin/accounts", tags=["Admin Accounts"])
 
-ADMIN_DATA_FILE = Path("./data/admin_accounts.json")
+# 用绝对路径，避免从仓库根目录启动/跑测试时把账号文件写到别处
+ADMIN_DATA_FILE = settings.data_dir / "admin_accounts.json"
 
 # 账号数据保存在本地 JSON，因此哈希格式必须带上算法、迭代次数和盐值，
 # 以便后续调整参数而不破坏已有账户。

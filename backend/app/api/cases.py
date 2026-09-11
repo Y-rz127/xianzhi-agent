@@ -9,21 +9,21 @@ import asyncio
 import json
 import uuid
 from datetime import datetime
-from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 
 from app.api.common import client_error
 from app.api.deps import require_admin
+from app.core.config import settings
 from app.core.logger import log
 from app.db.pool import get_pool
 from app.domain.bazi_engine import extract_bazi_brief
 
 router = APIRouter(prefix="/cases", tags=["Cases"])
 
-# PostgreSQL 不可用时回退到本地 JSON 文件存储
-_fallback_file = Path("./data/cases.json")
+# PostgreSQL 不可用时回退到本地 JSON 文件存储（绝对路径，不随工作目录漂移）
+_fallback_file = settings.data_dir / "cases.json"
 
 _table_ready = False
 _pg_unavailable = False

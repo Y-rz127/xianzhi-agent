@@ -7,7 +7,7 @@ import { getConfig } from '@/config'
 import { getToken } from '@/utils/storage'
 import { interpretLiuYaoStreamWS, interpretZiWeiStreamWS, hehunStreamWS } from '@/api/chat'
 
-// R11 共享 API 层：数据模型/文本解析器/端点常量与 Web 端共用，统一在仓库根 shared/api 维护
+// R11 共享 API 层：数据模型/文本解析器/端点常量与 Web 端共用，统一在 frontend/shared/api 维护
 export type {
   AnswerFeedbackPayload, BaziProfile, ChartAnalysis, ChartCase, ChartData,
   ChatSession, DayunItem, FavoriteCase, HehunParams, LiuNianItem, Pillar,
@@ -265,7 +265,7 @@ export const getCacheStats = () => get('/ai/xianzhi/cache_stats')
 
 export const getHealth = () => get<{ status: string; rag_ready: boolean }>('/ai/health')
 
-/* ============ 直排盘结构化数据（类型见 shared/api/types） ============ */
+/* ============ 直排盘结构化数据（类型见 frontend/shared/api/types） ============ */
 
 export const getChart = (birthTime: string, gender: string, sect = 2, yunSect = 1, longitude?: number) =>
   get<ChartData>(EP.CHART, {
@@ -359,7 +359,7 @@ export const downloadFullReportPdf = (birthTime: string, gender: string, section
     ...(sections?.length ? { sections: sections.join(',') } : {}),
   })
 
-/* ============ 命例管理（类型见 shared/api/types） ============ */
+/* ============ 命例管理（类型见 frontend/shared/api/types） ============ */
 
 export const fetchChartCases = () => get<ChartCase[]>(EP.CASES)
 
@@ -417,9 +417,9 @@ export const getSessionBirthInfo = async (id: string): Promise<SessionBirthInfo>
   }
 }
 
-/* ============ 文本解析工具：已上收至 shared/api/parsers（顶部重导出） ============ */
+/* ============ 文本解析工具：已上收至 frontend/shared/api/parsers（顶部重导出） ============ */
 
-/* ============ 账号登录（类型见 shared/api/types） ============ */
+/* ============ 账号登录（类型见 frontend/shared/api/types） ============ */
 
 export const register = (nickname: string, password: string) =>
   post<{ token: string; user: XzUser }>(EP.AUTH_REGISTER, { nickname, password })

@@ -90,7 +90,7 @@ def birth_place_to_longitude(place: Optional[str]) -> float:
     匹配优先级：
     1. 省级行政区划词后的城市段（"四川省成都市" → "成都"）；
     2. 从左到右的后缀子串，最长优先（"四川成都" → "成都"、"呼和浩特" → "呼和浩特"）。
-    城市经度数据见 app/domain/city_longitude.py（与前端 shared/utils/region-data.ts 同源）。
+    城市经度数据见 app/domain/city_longitude.py（与前端 frontend/shared/utils/region-data.ts 同源）。
     """
     if not place:
         return 0.0
