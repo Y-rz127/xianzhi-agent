@@ -622,8 +622,7 @@ def check_facts(
     # 从 LLM 可见的事实文本中补充十神/神煞（流年/大运/岁运关系中的），
     # 确保审核员与 LLM 看到一致的命盘信息，避免流年神煞被误判为"排盘事实中无"
     if facts_text:
-        _FT_SHISHEN = {"正财", "偏财", "正官", "七杀", "正印", "偏印", "比肩", "劫财", "食神", "伤官"}
-        for ss in _FT_SHISHEN:
+        for ss in _SHISHEN_NAMES:
             if ss in facts_text:
                 actual_shishen.add(ss)
         for name in _SHENSHA_NAMES:
