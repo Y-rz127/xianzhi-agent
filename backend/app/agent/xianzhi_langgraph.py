@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from typing import Any, TypedDict
 
+from app.agent.workflow.workflow_messages import build_sui_section
 from app.agent.workflow.xianzhi_workflow import (
     WORKERS,
     DomainWorker,
@@ -112,6 +113,7 @@ def create_xianzhi_graph(workflow):
             ctx=state["chart_context"],
             skip_llm=is_chitchat,
             needs_chart=needs_chart,
+            sui_text=build_sui_section(state["chart_context"].chart, intent),
         )
         if review.ok:
             log.info(
@@ -191,6 +193,7 @@ def create_xianzhi_graph(workflow):
             user_prompt=state["user_prompt"],
             ctx=state["chart_context"],
             needs_chart=needs_chart,
+            sui_text=build_sui_section(state["chart_context"].chart, intent),
         )
         if repaired_review.ok:
             log.info("[Reflextion] {} Worker 修复后通过校验 ✓", getattr(worker, "label", "?"))

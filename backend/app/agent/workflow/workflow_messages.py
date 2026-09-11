@@ -14,6 +14,8 @@ from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 
 from app.agent.core.base_agent import _wrap_user_input
 from app.agent.prompts import (
+    DOMAIN_PROCEDURE_TEMPLATE,
+    DOMAIN_STEP_FOCUS,
     ORACLE_BASE_SYSTEM,
     WORKER_PREAMBLE_TEMPLATE,
     WORKFLOW_FACT_REDLINE,
@@ -38,13 +40,25 @@ from app.domain.bazi_engine import (
     GAN_HE,
     GAN_WUXING,
     BaziChart,
+    SuiRelations,
     _compute_shensha,
+    build_domain_brief,
+    current_sui,
+    effective_target_years,
+    format_sui_relations,
+    liunian_relations,
+    liuyue_line,
     parse_gender,
+    relations_for,
+    resolve_target_dayuns,
 )
 from app.tools.text_clean import clean_think_tags, strip_user_input_boundary
 
 # 工作流生成/修复产出长文本（含思维链），60s 默认超时不够，单独放宽
 _WORKFLOW_LLM_TIMEOUT = 180.0
+
+# 岁运关系段流年行上限：明确点名年份优先，大运区间换算的大范围年份据此截断
+_SUI_MAX_LIUNIAN = 6
 
 
 def build_messages(
@@ -76,6 +90,11 @@ def build_messages(
     if worker.expertise_prompt:
         preamble = WORKER_PREAMBLE_TEMPLATE.format(领域=worker.label)
         system += "\n" + preamble + "\n" + worker.expertise_prompt
+    # 分析规程：仅注入领域简报时追加（闲聊等零注入场景不塞规程）
+    if _build_domain_brief_inject(ctx.chart, intent):
+        system += "\n\n" + DOMAIN_PROCEDURE_TEMPLATE.format(
+            领域=worker.label, 聚焦点=DOMAIN_STEP_FOCUS.get(intent.domain, "")
+        )
     human = (
         f"【用户问题】\n{_wrap_user_input(user_prompt)}\n\n"
         f"【识别意图】\n领域={intent.label}; 目标年份={intent.target_years or '未指定'}; 置信度={intent.confidence}\n\n"
@@ -94,6 +113,7 @@ def build_messages(
         f"【命理规则检索】\n{knowledge}\n\n"
         f"【输出要求】\n{length_rule}\n"
         "如果提到具体年份，必须同时核对该年流年干支和所在大运。"
+        "岁运关系一律引用【岁运关系】段，不得自行编排天克地冲/岁运并临；流月干支以该段流月行为准。"
     )
     return [SystemMessage(content=system), HumanMessage(content=human)]
 
@@ -140,13 +160,19 @@ def build_repair_messages(
     """Reflextion 修复消息：带上 Worker 专属断法，让 LLM 基于 issues 反思修复。"""
     if worker is None:
         worker = WORKERS.get(intent.domain, WORKERS["general"])
-    facts = "" if worker.skip_facts else compact_facts(ctx.chart, intent)
+    skip = worker.skip_facts and not intent.needs_chart
+    facts = "" if skip else compact_facts(ctx.chart, intent)
     # Reflextion 改写器：带上 Worker 专属断法，确保修复后仍符合领域规范
     sys_content = reflect_sysprompt
 
     if worker.expertise_prompt:
         preamble = WORKER_PREAMBLE_TEMPLATE.format(领域=worker.label)
         sys_content += "\n" + preamble + "\n" + worker.expertise_prompt
+    # 分析规程与生成路径同 gate：注入领域简报时追加
+    if not skip and _build_domain_brief_inject(ctx.chart, intent):
+        sys_content += "\n\n" + DOMAIN_PROCEDURE_TEMPLATE.format(
+            领域=worker.label, 聚焦点=DOMAIN_STEP_FOCUS.get(intent.domain, "")
+        )
     return [
         SystemMessage(content=sys_content),
         HumanMessage(
@@ -273,8 +299,10 @@ def fact_block(chart: BaziChart, intent: QuestionIntent) -> str:
         f"星运[{item.changsheng or '—'}] 神煞[{'、'.join(s['name'] for s in item.shensha) or '—'}]"
         for item in chart.dayun
     ]
-    if intent.target_years:
-        liunian_items = [item for item in chart.liunian if item.year in set(intent.target_years)]
+    # 流年选择：显式年份 ∪ 大运指认换算年份（硬上限 12 行）；无目标走当前年+3 年兜底
+    years = effective_target_years(chart, intent.target_years, intent.target_dayun)[:12]
+    if years:
+        liunian_items = [item for item in chart.liunian if item.year in set(years)]
     else:
         current_year = today.year
         liunian_items = [item for item in chart.liunian if current_year <= item.year <= current_year + 3]
@@ -321,13 +349,56 @@ def fact_block(chart: BaziChart, intent: QuestionIntent) -> str:
     )
 
 
+def _build_domain_brief_inject(chart: BaziChart, intent: QuestionIntent) -> str:
+    """领域简报注入文本；needs_chart 且该 domain 有投影映射时非空，否则空串。"""
+    if not intent.needs_chart:
+        return ""
+    return build_domain_brief(chart, intent.domain)
+
+
+def build_sui_section(chart: BaziChart, intent: QuestionIntent) -> str:
+    """岁运关系注入文本（generate 与 Reviewer 共用，保证同源一致）。"""
+    items: list[SuiRelations] = []
+    for d in resolve_target_dayuns(chart, intent.target_dayun):
+        if len(d.ganzhi) == 2:
+            items.append(relations_for(
+                chart,
+                dayun_ganzhi=d.ganzhi,
+                label=f"第{d.index}步{d.ganzhi}({d.start_year}-{d.end_year})",
+            ))
+    # 童限期（未交大运）：指认「当前」时 chart.dayun 无步骤覆盖今年，resolve 返回空，
+    # 以当年小运作岁柱占位，避免岁运关系整段落空。
+    if not items and (intent.target_dayun or "").strip() in ("当前", "現在"):
+        gz, is_tongxian = current_sui(chart)
+        if is_tongxian and len(gz) == 2:
+            items.append(relations_for(chart, liunian_ganzhi=gz, label=gz, is_tongxian=True))
+    # 流年关系：明确点名年份优先，大运区间换算年份补足剩余名额（上限约束注入长度）
+    explicit = sorted(set(intent.target_years))
+    derived = [y for y in effective_target_years(chart, intent.target_years, intent.target_dayun)
+               if y not in set(explicit)]
+    items += liunian_relations(chart, (explicit + derived)[:_SUI_MAX_LIUNIAN])
+    parts = [format_sui_relations(items)]
+    known = {item.year for item in chart.liunian}
+    for year in intent.target_years[:2]:
+        if year in known:
+            parts.append(liuyue_line(chart, year))
+    return "\n".join(p for p in parts if p)
+
+
 def compact_facts(chart: BaziChart, intent: QuestionIntent) -> str:
-    """命盘事实块（含合婚双盘时追加对方盘事实）。"""
+    """命盘事实块（含合婚双盘、领域投影、岁运关系）。"""
     facts = fact_block(chart, intent)
     # 合婚双盘：追加对方命盘事实
     second = getattr(intent, "second_chart", None)
     if second is not None:
         facts += "\n\n【对方命盘事实】\n" + fact_block(second.chart, intent)
+    # 领域投影 + 岁运关系：仅 needs_chart 且该领域有简报时注入
+    brief = _build_domain_brief_inject(chart, intent)
+    if brief:
+        facts += f"\n\n【本领域盘面要素 · {intent.label}】\n{brief}"
+        sui = build_sui_section(chart, intent)
+        if sui:
+            facts += f"\n\n【岁运关系】\n{sui}"
     return facts
 
 

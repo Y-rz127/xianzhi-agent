@@ -147,6 +147,7 @@ class XianzhiWorkflow:
             needs_chart = bool(data.get("needs_chart", False))
             other_birth_time = str(data.get("other_birth_time", "") or "").strip()
             other_gender = str(data.get("other_gender", "") or "").strip()
+            target_dayun = str(data.get("target_dayun", "") or "").strip()
             # 年份提取复用原逻辑
             years = sorted({int(y) for y in re.findall(r"(?:19|20)\d{2}", user_prompt)})
             today = _dt.date.today()
@@ -168,8 +169,9 @@ class XianzhiWorkflow:
                 queries=queries,
                 other_birth_time=other_birth_time,
                 other_gender=other_gender,
+                target_dayun=target_dayun,
             )
-            log.info("[LLM拆解] domain={} needs_chart={} queries={}", domain, needs_chart, list(queries))
+            log.info("[LLM拆解] domain={} needs_chart={} target_dayun={} queries={}", domain, needs_chart, target_dayun, list(queries))
             return intent
         except Exception as e:
             log.warning("[LLM拆解] 失败，fallback到关键词分类: {}", e)

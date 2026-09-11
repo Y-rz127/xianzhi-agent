@@ -461,7 +461,7 @@ def _refill_features_by_rechart(chart: dict, feats: dict) -> None:
         # 延迟导入避免 user_records -> bazi_engine 的循环依赖
         from app.domain.bazi_engine import build_bazi_chart
 
-        bazi = build_bazi_chart(birth_time, gender, sect=2, yun_sect=1, dayun_count=10, liunian_years=8)
+        bazi = build_bazi_chart(birth_time, gender, sect=2, yun_sect=1, dayun_count=12, liunian_years=8)
         feats["day_master"] = bazi.wuxing.day_master or ""
         feats["day_master_wuxing"] = bazi.wuxing.day_master_wuxing or ""
         feats["strength"] = bazi.wuxing.strength or ""

@@ -1,8 +1,13 @@
 import datetime as dt
+from dataclasses import replace
 
 from langchain_core.language_models.fake_chat_models import FakeListChatModel
 
-from app.agent.workflow.workflow_messages import fact_block
+from app.agent.workflow.workflow_messages import (
+    build_sui_section,
+    compact_facts,
+    fact_block,
+)
 from app.agent.workflow.workflow_retrieval import build_theory_queries
 from app.agent.workflow.xianzhi_workflow import (
     XianzhiWorkflow,
@@ -209,3 +214,64 @@ def test_fact_block_exposes_special_pattern_and_useful_hint():
     assert sp_lines, "事实块缺少「特殊格局:」行"
     sp_val = sp_lines[0].split("特殊格局:", 1)[1].strip()
     assert sp_val in ("无", "专旺", "从格")
+
+
+def test_compact_facts_injects_domain_brief_and_sui():
+    """needs_chart 且领域有投影映射时，事实块应携带【本领域盘面要素】与【岁运关系】。"""
+    ctx = build_chart_context("1990-05-20 14:30", MALE)
+    intent = replace(
+        classify_question("今年感情怎么样？", today=dt.date(2026, 7, 5)),
+        needs_chart=True,
+    )
+
+    facts = compact_facts(ctx.chart, intent)
+
+    assert intent.domain == "love"
+    assert "【本领域盘面要素 · 恋爱感情】" in facts
+    assert "【岁运关系】" in facts
+
+
+def test_compact_facts_omits_projection_for_theory():
+    """零投影领域（理论解释）即使 needs_chart=True 也不注入领域要素/岁运关系段。"""
+    ctx = build_chart_context("1990-05-20 14:30", MALE)
+    intent = replace(
+        classify_question("用神是什么意思", today=dt.date(2026, 7, 5)),
+        needs_chart=True,
+    )
+
+    facts = compact_facts(ctx.chart, intent)
+
+    assert "【本领域盘面要素" not in facts
+    assert "【岁运关系】" not in facts
+
+
+def test_build_sui_section_binds_explicit_year():
+    """点名超出默认流年区间的年份时，扩盘后岁运段仍应含该年岁运。"""
+    workflow = XianzhiWorkflow(chat_model=None)
+    ctx = build_chart_context("1990-05-20 14:30", MALE)
+    intent = replace(
+        classify_question("2036年财运怎么样？", today=dt.date(2026, 7, 5)),
+        needs_chart=True,
+    )
+    chart = workflow._extend_chart_if_needed(ctx, intent).chart
+
+    sui = build_sui_section(chart, intent)
+
+    assert "2036" in sui
+
+
+def test_build_sui_section_tongxian_placeholder():
+    """童限期（未交大运）指认「当前」时，岁运段以当年小运占位并标注未交大运。"""
+    from app.domain.chart_builder import build_bazi_chart
+
+    chart = build_bazi_chart("2020-06-15 10:00", MALE, liunian_years=3, liunian_start_year=2026)
+    intent = replace(
+        classify_question("我现在的运势怎么样", today=dt.date(2026, 7, 5)),
+        needs_chart=True,
+        target_dayun="当前",
+    )
+
+    sui = build_sui_section(chart, intent)
+
+    assert "童限期" in sui
+    assert "未交大运" in sui

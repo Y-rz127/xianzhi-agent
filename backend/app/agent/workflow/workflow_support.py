@@ -51,6 +51,43 @@ YEAR_GANZHI_RE = re.compile(
 )
 
 
+# 大运指认兜底识别（LLM 拆解失败时用，只识别显式表达，不猜）
+_DAYUN_SEQ_RE = re.compile(r"第\s*([一二三四五六七八九十]+|\d{1,2})\s*[步運运]")
+_DAYUN_AGE_RE = re.compile(r"(\d{1,2})\s*[-~到至]\s*(\d{1,2})\s*岁")
+_DAYUN_GANZHI_RE = re.compile(r"([甲乙丙丁戊己庚辛壬癸][子丑寅卯辰巳午未申酉戌亥])\s*(?:大)?运")
+
+_CN_DIGITS = {"一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9}
+
+
+def _normalize_seq(raw: str) -> str:
+    """中文/阿拉伯大运序号 → 阿拉伯数字串（'三'→'3'、'十二'→'12'）。"""
+    raw = raw.strip()
+    if raw.isdigit():
+        return str(int(raw))
+    if raw == "十":
+        return "10"
+    if raw.startswith("十"):
+        return str(10 + _CN_DIGITS.get(raw[1:], 0))
+    if "十" in raw:
+        a, b = raw.split("十", 1)
+        return str(_CN_DIGITS.get(a, 0) * 10 + _CN_DIGITS.get(b, 0))
+    return str(_CN_DIGITS.get(raw, 0))
+
+
+def _detect_target_dayun(text: str) -> str:
+    """从文本提取大运指认 spec（'' 未指定），规则与 yun_relations._resolve_spec 对齐。"""
+    m = _DAYUN_SEQ_RE.search(text)
+    if m:
+        return _normalize_seq(m.group(1))
+    m = _DAYUN_AGE_RE.search(text)
+    if m:
+        return f"{int(m.group(1))}-{int(m.group(2))}"
+    m = _DAYUN_GANZHI_RE.search(text)
+    if m:
+        return m.group(1)
+    return ""
+
+
 _ALL_BAZI_SIGNALS = (
     "八字",
     "命理",
@@ -234,13 +271,14 @@ def classify_question(text: str, today: _dt.date | None = None) -> QuestionInten
         target_years=years,
         wants_report=wants_report,
         confidence=round(confidence, 2),
+        target_dayun=_detect_target_dayun(text),
     )
 
 
 def build_chart_context(
     birth_time: str, gender: str, sect: int = 2, yun_sect: int = 1, user_id: str = "", longitude: float = 0.0
 ) -> WorkflowChartContext:
-    """根据出生时间/性别/流派构造 WorkflowChartContext（大运 10 柱、流年 8 年）。
+    """根据出生时间/性别/流派构造 WorkflowChartContext（大运 12 柱、流年 8 年）。
 
     Args:
         birth_time: 出生时间（公历/农历/时辰/节日格式均可）
@@ -258,7 +296,7 @@ def build_chart_context(
         gender,
         sect=sect,
         yun_sect=yun_sect,
-        dayun_count=10,
+        dayun_count=12,
         liunian_years=8,
         longitude=longitude or None,
     )

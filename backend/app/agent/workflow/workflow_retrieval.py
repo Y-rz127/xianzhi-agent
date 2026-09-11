@@ -18,7 +18,7 @@ from app.agent.workflow.workflow_support import (
     _OTHER_BIRTH_RE2,
 )
 from app.core.logger import log
-from app.domain.bazi_engine import build_bazi_chart
+from app.domain.bazi_engine import build_bazi_chart, effective_target_years
 from app.rag.retrieval import (
     DOMAIN_RULE_QUERIES,
     detect_theory_topic,
@@ -178,16 +178,17 @@ def build_duxing_queries(
 
 
 def extend_chart_if_needed(ctx: WorkflowChartContext, intent: QuestionIntent) -> WorkflowChartContext:
-    """按需扩展命盘流年覆盖范围以覆盖 intent.target_years（合婚/跨年流年查询用）。"""
-    if not intent.target_years:
+    """按需扩展命盘流年覆盖范围以覆盖目标年份（含大运指认换算出的年份区间）。"""
+    years = effective_target_years(ctx.chart, intent.target_years, intent.target_dayun)
+    if not years:
         return ctx
     known_years = {item.year for item in ctx.chart.liunian}
-    if all(year in known_years for year in intent.target_years):
-        log.debug("[扩盘] 目标年份 {} 已在流年范围内，无需扩盘", intent.target_years)
+    if all(year in known_years for year in years):
+        log.debug("[扩盘] 目标年份 {} 已在流年范围内，无需扩盘", years)
         return ctx
-    start = min(min(intent.target_years), _dt.date.today().year)
-    end = max(max(intent.target_years), _dt.date.today().year)
-    log.info("[扩盘] 流年范围不足，扩展至 {}~{} (目标年份={})", start, end, intent.target_years)
+    start = min(min(years), _dt.date.today().year)
+    end = max(max(years), _dt.date.today().year)
+    log.info("[扩盘] 流年范围不足，扩展至 {}~{} (目标年份={})", start, end, years)
     chart = build_bazi_chart(
         ctx.birth_time,
         ctx.gender,

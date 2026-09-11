@@ -39,6 +39,7 @@ from app.domain.chart_format import (  # noqa: F401
     format_fact_context,
     format_liunian_text,
 )
+from app.domain.domain_brief import build_domain_brief  # noqa: F401
 from app.domain.models import (  # noqa: F401
     BaziChart,
     BirthInfo,
@@ -56,3 +57,14 @@ from app.domain.tables import (  # noqa: F401  (私有表显式重导出，* 不
     _ZHI_SEQ,
 )
 from app.domain.xipan import build_xipan, ten_god, zizuo  # noqa: F401
+from app.domain.yun_relations import (  # noqa: F401
+    SuiRelations,
+    current_sui,
+    dayun_relations,
+    effective_target_years,
+    format_sui_relations,
+    liunian_relations,
+    liuyue_line,
+    relations_for,
+    resolve_target_dayuns,
+)

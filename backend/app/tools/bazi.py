@@ -14,14 +14,19 @@ from lunar_python import Lunar, Solar
 from app.domain.bazi_engine import (
     GZ_WUXING,
     build_bazi_chart,
+    build_domain_brief,
+    dayun_relations,
     format_analysis_text,
     format_chart_text,
     format_dayun_text,
     format_fact_context,
     format_liunian_text,
+    format_sui_relations,
+    liunian_relations,
     parse_birth,
     parse_gender,
 )
+
 # 时间解析（农历/节日/时辰智能解析与出生时间标准化）已下沉到领域层 app/domain/time_parse.py，
 # 此处重导入以保持本模块对外引用不变（app.agent.xianzhi 仍从本模块导入 _normalize_birth_time）
 from app.domain.time_parse import (
@@ -32,6 +37,7 @@ from app.domain.time_parse import (
     _parse_cn_day,
     _parse_zhi_hour,
 )
+from app.rag.retrieval import detect_domain
 from app.tools.cache import bazi_cache
 
 # 携带 birth_time/gender 参数的排盘工具名：agent 会话内出生信息提取与
@@ -160,25 +166,30 @@ def bazi_chart(birth_time: str, gender: str, sect: int = 2, yun_sect: int = 1) -
 
 @tool
 def bazi_analysis(birth_time: str, gender: str, question: str = "整体运势", sect: int = 2) -> str:
-    """对八字进行基础五行与十神分析。
+    """对八字进行基础五行与十神分析，并按 question 识别领域附带该领域的盘面要素。
 
     Args:
         birth_time: 同 bazi_chart
         gender: 同 bazi_chart
-        question: 分析方向，如事业、感情、财运、健康
+        question: 分析方向，如事业、感情、财运、健康；会据此识别领域并附领域盘面要素
         sect: 日柱计算流派，1=按日期精确，2=按日期精确2（默认）
 
     Returns:
-        五行分布、日主强弱、十神关系、用神建议
+        五行分布、日主强弱、十神关系、用神建议，以及对应领域的盘面要素
     """
     try:
         birth_time = _normalize_birth_time(birth_time)
-        cache_tool = "analysis:{}".format(question or "整体运势")
+        domain = detect_domain(question or "")
+        cache_tool = "analysis:{}:{}".format(domain, question or "整体运势")
         cached = bazi_cache.get(birth_time, gender, sect, 1, cache_tool)
         if cached:
             return cached
         chart = build_bazi_chart(birth_time, gender, sect=sect, yun_sect=1)
         result = format_analysis_text(chart, question)
+        if domain:
+            brief = build_domain_brief(chart, domain)
+            if brief:
+                result += "\n\n" + brief
         bazi_cache.set(birth_time, gender, result, sect, 1, cache_tool)
         return result
     except Exception as e:
@@ -186,49 +197,55 @@ def bazi_analysis(birth_time: str, gender: str, question: str = "整体运势", 
 
 
 @tool
-def bazi_dayun(birth_time: str, gender: str, count: int = 8, yun_sect: int = 1) -> str:
-    """推算大运（每10年一柱）。
+def bazi_dayun(birth_time: str, gender: str, count: int = 12, yun_sect: int = 1) -> str:
+    """推算大运（每10年一柱），并附每步大运与原局的干支关系。
 
     Args:
         birth_time: 同 bazi_chart
         gender: 同 bazi_chart（决定大运顺逆排）
-        count: 推算多少柱大运，默认8柱（80年）
+        count: 推算多少柱大运，默认12柱（120年）
         yun_sect: 大运计算流派，1=按天数和时辰数（默认，3天1年），2=按分钟数
 
     Returns:
-        起运信息 + 每柱大运的干支、年份区间、岁数
+        起运信息 + 每柱大运的干支、年份区间、岁数，及每步大运与原局的关系
     """
     try:
         birth_time = _normalize_birth_time(birth_time)
-        cached = bazi_cache.get(birth_time, gender, 2, yun_sect, "dayun")
+        cache_tool = "dayun:{}".format(count)
+        cached = bazi_cache.get(birth_time, gender, 2, yun_sect, cache_tool)
         if cached:
             return cached
         chart = build_bazi_chart(birth_time, gender, yun_sect=yun_sect, dayun_count=count)
         result = format_dayun_text(chart)
-        bazi_cache.set(birth_time, gender, result, 2, yun_sect, "dayun")
+        relations = dayun_relations(chart)
+        if relations:
+            result += "\n\n【大运与原局关系】\n" + format_sui_relations(relations)
+        bazi_cache.set(birth_time, gender, result, 2, yun_sect, cache_tool)
         return result
     except Exception as e:
         return "大运推算失败: {}".format(e)
 
 
 @tool
-def bazi_liunian(birth_time: str, gender: str, years: int = 10, yun_sect: int = 1) -> str:
-    """推算流年（逐年干支）。
+def bazi_liunian(birth_time: str, gender: str, years: int = 10, yun_sect: int = 1, start_year: int | None = None) -> str:
+    """推算流年（逐年干支），并附每一年与所在大运、原局的岁运关系。
 
     Args:
         birth_time: 同 bazi_chart
         gender: 同 bazi_chart
-        years: 推算多少年，默认10年（从当前年份开始往后）
+        years: 推算多少年，默认10年
         yun_sect: 大运计算流派，1=按天数和时辰数（默认），2=按分钟数
+        start_year: 起算公历年，默认当前年份；问过去某年请显式传入
 
     Returns:
-        每年的干支、年份、虚岁
+        每年的干支、年份、虚岁、所在大运，及该年与大运/原局的岁运关系
     """
     try:
         birth_time = _normalize_birth_time(birth_time)
         current_year = datetime.date.today().year
-        # 缓存 key 含 years 与起始年，避免跨年后命中旧流年
-        cache_tool = "liunian:{}:{}".format(years, current_year)
+        base_year = start_year or current_year
+        # 缓存 key 含 years 与起始年，避免跨年/起算年不同而读错缓存
+        cache_tool = "liunian:{}:{}:{}".format(base_year, years, current_year)
         cached = bazi_cache.get(birth_time, gender, 2, yun_sect, cache_tool)
         if cached:
             return cached
@@ -238,9 +255,13 @@ def bazi_liunian(birth_time: str, gender: str, years: int = 10, yun_sect: int = 
             yun_sect=yun_sect,
             dayun_count=12,
             liunian_years=years,
-            liunian_start_year=current_year,
+            liunian_start_year=base_year,
         )
         result = format_liunian_text(chart)
+        year_seq = list(range(base_year, base_year + years))
+        relations = liunian_relations(chart, year_seq)
+        if relations:
+            result += "\n\n【流年岁运关系】\n" + format_sui_relations(relations)
         bazi_cache.set(birth_time, gender, result, 2, yun_sect, cache_tool)
         return result
     except Exception as e:
@@ -454,7 +475,7 @@ def bazi_hehun(birth_time_a: str, gender_a: str, birth_time_b: str, gender_b: st
 
 
 @tool
-def bazi_full(birth_time: str, gender: str, sect: int = 2, yun_sect: int = 1) -> str:
+def bazi_full(birth_time: str, gender: str, sect: int = 2, yun_sect: int = 1, domain: str = "") -> str:
     """完整排盘：四柱 + 五行 + 十神 + 纳音 + 神煞 + 大运 + 流年。
 
     一次性输出全部命理基础数据，适合需要全面分析时调用。
@@ -464,14 +485,22 @@ def bazi_full(birth_time: str, gender: str, sect: int = 2, yun_sect: int = 1) ->
         gender: 同 bazi_chart
         sect: 日柱计算流派，1=按日期精确，2=按日期精确2（默认）
         yun_sect: 大运计算流派，1=按天数和时辰数（默认），2=按分钟数
+        domain: 分析领域（如 career/wealth/love/marriage/health/study/social/family/
+            personality/appearance/migration/children/liunian/match/general），
+            给定则附带该领域的盘面要素；留空则不附
 
     Returns:
-        完整的八字命盘信息
+        完整的八字命盘信息（含指定领域盘面要素）
     """
     try:
         birth_time = _normalize_birth_time(birth_time)
         chart = build_bazi_chart(birth_time, gender, sect=sect, yun_sect=yun_sect)
-        return format_fact_context(chart)
+        result = format_fact_context(chart)
+        if domain:
+            brief = build_domain_brief(chart, domain)
+            if brief:
+                result += "\n\n" + brief
+        return result
     except Exception as e:
         return "完整排盘失败: {}".format(e)
 

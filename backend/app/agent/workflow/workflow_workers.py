@@ -337,6 +337,7 @@ class ReviewerWorker:
         ctx: Any = None,
         skip_llm: bool = False,
         needs_chart: bool = True,
+        sui_text: str = "",
     ) -> FactCheckResult:
         """两层审核：正则快筛 → LLM 深审。
 
@@ -351,6 +352,7 @@ class ReviewerWorker:
             skip_llm: 跳过 LLM 深审，仅依赖正则
             needs_chart: 当前回答是否属于"绑定命盘分析"场景（命盘分析/合婚/流年大运推演等）。
                 True 时十神/神煞存在性严格校验；False（理论问答）时仅校验归属断言。
+            sui_text: 岁运关系注入文本（与生成路径同源，供 LLM 维度11校验关系一致性）。
         """
         # === 第1层：正则快筛 ===
         regex_issues = self._regex_review(answer, chart, knowledge, fact_checker, second_chart, needs_chart)
@@ -368,7 +370,7 @@ class ReviewerWorker:
         if self._chat_model is None:
             return FactCheckResult(ok=True, source="regex")
 
-        return self._llm_review(answer, chart, knowledge, user_prompt, ctx, second_chart)
+        return self._llm_review(answer, chart, knowledge, user_prompt, ctx, second_chart, sui_text)
 
     def _regex_review(
         self, answer, chart, knowledge, fact_checker, second_chart, needs_chart: bool
@@ -412,14 +414,15 @@ class ReviewerWorker:
 
         return issues
 
-    def _llm_review(self, answer, chart, knowledge, user_prompt, ctx, second_chart) -> FactCheckResult:
+    def _llm_review(self, answer, chart, knowledge, user_prompt, ctx, second_chart, sui_text: str = "") -> FactCheckResult:
         """第2层：LLM 深度审核。"""
         facts = format_fact_context(chart)
         if second_chart is not None:
             facts += "\n\n【对方命盘事实】\n" + format_fact_context(second_chart)
+        sui_block = f"\n\n【岁运关系】\n{sui_text}" if sui_text else ""
 
         human_content = (
-            f"【系统排盘事实】\n{facts}\n\n"
+            f"【系统排盘事实】\n{facts}{sui_block}\n\n"
             f"【命理规则检索】\n{knowledge}\n\n"
             f"【用户问题】\n{user_prompt}\n\n"
             f"【待审核回答】\n{answer}"

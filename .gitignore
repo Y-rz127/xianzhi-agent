@@ -14,6 +14,7 @@ dist/
 # 虚拟环境
 .venv/
 .venv_review/
+.venv312/
 venv/
 env/
 ENV/

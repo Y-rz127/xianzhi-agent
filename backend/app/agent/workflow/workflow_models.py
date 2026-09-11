@@ -49,6 +49,7 @@ class QuestionIntent:
     other_gender: str = ""      # match 合婚：对方的性别（男/女）
     second_chart: Any = None    # match 合婚：解析出的对方命盘（WorkflowChartContext）
     match_basis: str = ""       # match 合婚：系统规则合婚基础数据（bazi_hehun 产出）
+    target_dayun: str = ""      # 大运指认：'当前'/'下一步'/序号/年龄区间/干支，''未指定
 
 
 @dataclass
