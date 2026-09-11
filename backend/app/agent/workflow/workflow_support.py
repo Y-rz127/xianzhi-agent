@@ -361,7 +361,7 @@ def build_chart_context(
         sect=sect,
         yun_sect=yun_sect,
         dayun_count=12,
-        liunian_years=8,
+        liunian_years=10,
         longitude=longitude or None,
     )
     return WorkflowChartContext(

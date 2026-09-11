@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import datetime as _dt
 import re
+from dataclasses import replace as _dc_replace
 
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 
@@ -42,6 +43,7 @@ from app.domain.bazi_engine import (
     BaziChart,
     SuiRelations,
     _compute_shensha,
+    build_bazi_chart,
     build_domain_brief,
     current_sui,
     effective_target_years,
@@ -57,10 +59,7 @@ from app.tools.text_clean import clean_think_tags, strip_user_input_boundary
 # 工作流生成/修复产出长文本（含思维链），60s 默认超时不够，单独放宽
 _WORKFLOW_LLM_TIMEOUT = 180.0
 
-# 岁运关系段流年行上限：明确点名年份优先，大运区间换算的大范围年份据此截断
-_SUI_MAX_LIUNIAN = 6
-# fact_block 注入的流年行硬上限（防 30-40 大运/长跨度指认时 prompt 爆炸；
-# 大运关系段由 _SUI_MAX_LIUNIAN=6 控制，流年事实段需更宽，但依然封顶）
+# fact_block 注入的流年行硬上限（防长跨度指认时 prompt 爆炸）
 _MAX_LIUNIAN_LINES = 20
 
 
@@ -314,6 +313,18 @@ def fact_block(chart: BaziChart, intent: QuestionIntent) -> str:
     if years:
         years = years[:_MAX_LIUNIAN_LINES]
         liunian_items = [item for item in chart.liunian if item.year in set(years)]
+        missing_years = sorted(set(years) - {item.year for item in liunian_items})
+        if missing_years:
+            ext_chart = build_bazi_chart(
+                chart.birth.solar,
+                chart.birth.gender,
+                sect=chart.birth.sect,
+                yun_sect=chart.birth.yun_sect,
+                liunian_start_year=min(missing_years),
+                liunian_years=max(missing_years) - min(missing_years) + 1,
+            )
+            liunian_items.extend(item for item in ext_chart.liunian if item.year in set(missing_years))
+            liunian_items.sort(key=lambda x: x.year)
     else:
         current_year = today.year
         liunian_items = [item for item in chart.liunian if current_year <= item.year <= current_year + 3]
@@ -389,6 +400,18 @@ def build_sui_section(chart: BaziChart, intent: QuestionIntent) -> str:
         gz, is_tongxian = current_sui(chart)
         if is_tongxian and len(gz) == 2:
             items.append(relations_for(chart, liunian_ganzhi=gz, label=gz, is_tongxian=True))
+    # 流年指认时自动推导所在大运，注入大运×原局关系（否则大模型只知流年所在大运干支，
+    # 却不知该大运与原局的合/冲/害/刑/引动等关系）
+    if not items and intent.target_years:
+        seen_gz = set()
+        for ln in chart.liunian or []:
+            if ln.year in set(intent.target_years) and len(ln.dayun_ganzhi or "") == 2:
+                gz = ln.dayun_ganzhi
+                if gz not in seen_gz:
+                    seen_gz.add(gz)
+                    d = next((d for d in chart.dayun if d.ganzhi == gz), None)
+                    label = f"第{d.index}步{gz}({d.start_year}-{d.end_year})" if d else gz
+                    items.append(relations_for(chart, dayun_ganzhi=gz, label=label))
     # 流年关系：明确点名年份优先，大运区间换算年份补足剩余名额（上限约束注入长度）
     explicit = sorted(set(intent.target_years))
     derived = [
@@ -396,7 +419,25 @@ def build_sui_section(chart: BaziChart, intent: QuestionIntent) -> str:
         for y in effective_target_years(chart, intent.target_years, intent.target_dayun)
         if y not in set(explicit)
     ]
-    items += liunian_relations(chart, (explicit + derived)[:_SUI_MAX_LIUNIAN])
+    # 岁运关系流年上限：取实际需要的流年数，不超过 _MAX_LIUNIAN_LINES 防 prompt 爆炸
+    sui_max = min(len(explicit) + len(derived), _MAX_LIUNIAN_LINES)
+    target_years_sui = (explicit + derived)[:sui_max]
+    # chart.liunian 可能不够覆盖目标年份，按需补建
+    sui_chart = chart
+    missing_sui = sorted(set(target_years_sui) - {item.year for item in chart.liunian})
+    if missing_sui:
+        ext = build_bazi_chart(
+            chart.birth.solar,
+            chart.birth.gender,
+            sect=chart.birth.sect,
+            yun_sect=chart.birth.yun_sect,
+            liunian_start_year=min(missing_sui),
+            liunian_years=max(missing_sui) - min(missing_sui) + 1,
+        )
+        merged_liunian = list(chart.liunian) + [item for item in ext.liunian if item.year in set(missing_sui)]
+        merged_liunian.sort(key=lambda x: x.year)
+        sui_chart = _dc_replace(chart, liunian=merged_liunian)
+    items += liunian_relations(sui_chart, target_years_sui)
     parts = [format_sui_relations(items)]
     known = {item.year for item in chart.liunian}
     # 流年指认：每一年展开 12 流月（最多 2 年，避免 prompt 爆炸）

@@ -34,8 +34,16 @@ _PALACE_LABEL = {
 }
 
 _CN_NUM = {
-    "一": 1, "二": 2, "三": 3, "四": 4, "五": 5,
-    "六": 6, "七": 7, "八": 8, "九": 9, "十": 10,
+    "一": 1,
+    "二": 2,
+    "三": 3,
+    "四": 4,
+    "五": 5,
+    "六": 6,
+    "七": 7,
+    "八": 8,
+    "九": 9,
+    "十": 10,
 }
 
 _GANZHI_RE = re.compile(r"[甲乙丙丁戊己庚辛壬癸][子丑寅卯辰巳午未申酉戌亥]")
@@ -45,18 +53,18 @@ _GANZHI_RE = re.compile(r"[甲乙丙丁戊己庚辛壬癸][子丑寅卯辰巳午
 class SuiRelations:
     """一组岁运（可只含大运，或大运 + 流年）与原局及彼此的关系。"""
 
-    label: str = ""           # 展示标识，如 "2027丁未" / "第3步辛未(2028-2037)"
-    ganzhi: str = ""          # 主岁柱干支（优先流年，否则大运）
-    wuxing: str = ""          # 干支五行，如 "火土"（丁未）；确定性事实，不做喜忌判定
-    shishen_gan: str = ""     # 干对日主十神
+    label: str = ""  # 展示标识，如 "2027丁未" / "第3步辛未(2028-2037)"
+    ganzhi: str = ""  # 主岁柱干支（优先流年，否则大运）
+    wuxing: str = ""  # 干支五行，如 "火土"（丁未）；确定性事实，不做喜忌判定
+    shishen_gan: str = ""  # 干对日主十神
     shishen_zhi: list[str] = field(default_factory=list)
-    gan_rel: list[str] = field(default_factory=list)      # 天干：合 / 相克
-    zhi_rel: list[str] = field(default_factory=list)      # 地支：六合/六冲/六害/六破/三刑/三合
-    zhu_rel: list[str] = field(default_factory=list)      # 伏吟 / 反吟（岁运 × 原局）
+    gan_rel: list[str] = field(default_factory=list)  # 天干：合 / 相克
+    zhi_rel: list[str] = field(default_factory=list)  # 地支：六合/六冲/六害/六破/三刑/三合
+    zhu_rel: list[str] = field(default_factory=list)  # 伏吟 / 反吟（岁运 × 原局）
     touched_pillars: list[str] = field(default_factory=list)  # 被引动的原局柱 + 宫位
-    sui_yun_bing_lin: bool = False   # 岁运并临（流年 == 大运）
-    tian_ke_di_chong: bool = False   # 天克地冲（流年 vs 大运）
-    is_tongxian: bool = False        # 童限期，以当年小运代大运
+    sui_yun_bing_lin: bool = False  # 岁运并临（流年 == 大运）
+    tian_ke_di_chong: bool = False  # 天克地冲（流年 vs 大运）
+    is_tongxian: bool = False  # 童限期，以当年小运代大运
 
 
 def _touched_pillars(chart: BaziChart, sui_ganzhis: list[str]) -> list[str]:
@@ -114,11 +122,13 @@ def dayun_relations(chart: BaziChart, limit: int | None = None) -> list[SuiRelat
     for d in dayun:
         if len(d.ganzhi) != 2:
             continue
-        items.append(relations_for(
-            chart,
-            dayun_ganzhi=d.ganzhi,
-            label=f"第{d.index}步{d.ganzhi}({d.start_year}-{d.end_year})",
-        ))
+        items.append(
+            relations_for(
+                chart,
+                dayun_ganzhi=d.ganzhi,
+                label=f"第{d.index}步{d.ganzhi}({d.start_year}-{d.end_year})",
+            )
+        )
     return items
 
 
@@ -131,12 +141,14 @@ def liunian_relations(chart: BaziChart, years: Sequence[int]) -> list[SuiRelatio
         if item is None or len(item.ganzhi) != 2:
             continue
         dy = item.dayun_ganzhi if len(item.dayun_ganzhi or "") == 2 else ""
-        items.append(relations_for(
-            chart,
-            dayun_ganzhi=dy,
-            liunian_ganzhi=item.ganzhi,
-            label=f"{item.year}{item.ganzhi}",
-        ))
+        items.append(
+            relations_for(
+                chart,
+                dayun_ganzhi=dy,
+                liunian_ganzhi=item.ganzhi,
+                label=f"{item.year}{item.ganzhi}",
+            )
+        )
     return items
 
 
@@ -195,7 +207,7 @@ def resolve_target_dayuns(chart: BaziChart, spec: str) -> list[DayunItem]:
         cur = [d for d in chart.dayun if d.start_year <= today_year <= d.end_year]
         if cur:
             i = chart.dayun.index(cur[0])
-            return chart.dayun[i + 1:i + 2]
+            return chart.dayun[i + 1 : i + 2]
         return chart.dayun[:1]  # 童限：下一步 = 第一步大运
     if kind == "age":
         lo, hi = value
@@ -229,10 +241,19 @@ def effective_target_years(
     target_years: Sequence[int],
     target_dayun: str,
 ) -> list[int]:
-    """有效目标年份 = 显式年份 ∪ 大运指认覆盖的年份区间。"""
+    """有效目标年份 = 显式年份 ∪ 大运指认覆盖的年份区间（按年龄区间裁剪）。"""
     years = set(target_years or ())
+    kind, value = _resolve_spec(target_dayun) if target_dayun else ("invalid", None)
+    age_lo, age_hi = None, None
+    if kind == "age":
+        age_lo, age_hi = value
     for d in resolve_target_dayuns(chart, target_dayun):
-        years.update(range(d.start_year, d.end_year + 1))
+        if age_lo is not None:
+            y_lo = d.start_year + max(0, age_lo - d.start_age)
+            y_hi = d.end_year - max(0, d.end_age - age_hi)
+            years.update(range(y_lo, y_hi + 1))
+        else:
+            years.update(range(d.start_year, d.end_year + 1))
     return sorted(years)
 
 
@@ -247,10 +268,7 @@ def liuyue_line(chart: BaziChart, year: int) -> str:
     if not items:
         return ""
     head = f"流月 {year}（节气月，寅月起于立春，非阳历月）:"
-    lines = [head] + [
-        f"  {it['zhi']}月{it['ganzhi']}({it['shishen']}, {it['date']}起)"
-        for it in items
-    ]
+    lines = [head] + [f"  {it['zhi']}月{it['ganzhi']}({it['shishen']}, {it['date']}起)" for it in items]
     return "\n".join(lines)
 
 
