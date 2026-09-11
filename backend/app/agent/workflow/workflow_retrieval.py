@@ -197,8 +197,12 @@ def extend_chart_if_needed(ctx: WorkflowChartContext, intent: QuestionIntent) ->
         dayun_count=12,
         liunian_start_year=start,
         liunian_years=max(1, end - start + 1),
+        longitude=ctx.longitude or None,
     )
-    return WorkflowChartContext(ctx.birth_time, ctx.gender, ctx.sect, ctx.yun_sect, chart, user_id=ctx.user_id)
+    return WorkflowChartContext(
+        ctx.birth_time, ctx.gender, ctx.sect, ctx.yun_sect, chart,
+        user_id=ctx.user_id, longitude=ctx.longitude,
+    )
 
 
 def parse_other_birth(text: str) -> tuple[str, str]:

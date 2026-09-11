@@ -275,3 +275,19 @@ def test_build_sui_section_tongxian_placeholder():
 
     assert "童限期" in sui
     assert "未交大运" in sui
+
+
+def test_extend_chart_if_needed_preserves_longitude():
+    """扩盘重排时必须透传 longitude，避免真太阳时校正丢失。"""
+    workflow = XianzhiWorkflow(chat_model=None)
+    ctx = build_chart_context("1990-05-20 14:30", MALE, longitude=104.07)  # 成都
+    intent = replace(
+        classify_question("2036年财运怎么样？", today=dt.date(2026, 7, 5)),
+        needs_chart=True,
+    )
+
+    extended = workflow._extend_chart_if_needed(ctx, intent)
+
+    assert extended.longitude == 104.07
+    # 真太阳时校正：104.07°E 距 120°E 差 15.93° → 约 +64 分钟；charts.warnings 应有校正提示
+    assert any("真太阳时" in w for w in extended.chart.warnings)
