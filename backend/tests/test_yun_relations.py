@@ -3,6 +3,7 @@
 覆盖：干支关系判定、touched_pillars 宫位归位、大运指认解析（resolve_target_dayuns）、
 童限期、effective_target_years 合并、liuyue_line 流月行。
 """
+
 import datetime as dt
 
 from app.domain.chart_builder import build_bazi_chart
@@ -150,7 +151,6 @@ def test_format_sui_relations_tongxian_placeholder():
 def test_liuyue_line_has_twelve_months():
     chart = _chart()
     line = liuyue_line(chart, 2027)
-    assert line.startswith("流月 2027: ")
-    # 12 个节气月
-    months = [seg for seg in line.split(" ") if "月" in seg and "起)" in seg]
+    assert line.startswith("流月 2027（节气月")
+    months = [ln for ln in line.splitlines() if ln.strip().startswith("月") or (ln.strip() and "起)" in ln)]
     assert len(months) == 12

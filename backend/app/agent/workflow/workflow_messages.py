@@ -59,6 +59,9 @@ _WORKFLOW_LLM_TIMEOUT = 180.0
 
 # 岁运关系段流年行上限：明确点名年份优先，大运区间换算的大范围年份据此截断
 _SUI_MAX_LIUNIAN = 6
+# fact_block 注入的流年行硬上限（防 30-40 大运/长跨度指认时 prompt 爆炸；
+# 大运关系段由 _SUI_MAX_LIUNIAN=6 控制，流年事实段需更宽，但依然封顶）
+_MAX_LIUNIAN_LINES = 20
 
 
 def build_messages(
@@ -290,28 +293,37 @@ def fact_block(chart: BaziChart, intent: QuestionIntent) -> str:
     shensha_by_pillar: dict[str, list[str]] = {}
     for _s in shensha_all:
         shensha_by_pillar.setdefault(_s.get("pillar") or "全局", []).append(_s["name"])
-    shensha_line = "；".join(
-        f"{p.name}:{'、'.join(shensha_by_pillar.get(p.name, [])) or '—'}" for p in chart.pillars
+    shensha_line = "\n".join(
+        f"  {p.name}:{'、'.join(shensha_by_pillar.get(p.name, [])) or '—'}" for p in chart.pillars
     )
+    # 大运排序：用户指认的目标大运优先放前，其余按年龄顺序跟在后面（便于 LLM 快速定位）
+    dayun = list(chart.dayun)
+    hit_idxs = {d.index for d in resolve_target_dayuns(chart, intent.target_dayun)}
+    if hit_idxs:
+        dayun.sort(key=lambda d: (0 if d.index in hit_idxs else 1, d.index))
+    # 大运每步一行（避免用 ； 连成长串，便于 LLM 按行命中）
     dayun_lines = [
-        f"{item.ganzhi}({item.shishen_gan}) {item.start_year}-{item.end_year} {item.start_age}-{item.end_age}岁 "
-        f"藏干[{'、'.join(item.hidden_stems) or '—'}] 副星[{'、'.join(item.shishen_zhi) or '—'}] "
-        f"星运[{item.changsheng or '—'}] 神煞[{'、'.join(s['name'] for s in item.shensha) or '—'}]"
-        for item in chart.dayun
+        f"  {item.ganzhi}({item.shishen_gan}) {item.start_year}-{item.end_year} {item.start_age}-{item.end_age}岁"
+        f"{'  ← 目标' if item.index in hit_idxs else ''}"
+        f"\n    藏干[{'、'.join(item.hidden_stems) or '—'}] 副星[{'、'.join(item.shishen_zhi) or '—'}]"
+        f"\n    星运[{item.changsheng or '—'}] 神煞[{'、'.join(s['name'] for s in item.shensha) or '—'}]"
+        for item in dayun
     ]
-    # 流年选择：显式年份 ∪ 大运指认换算年份（硬上限 12 行）；无目标走当前年+3 年兜底
-    years = effective_target_years(chart, intent.target_years, intent.target_dayun)[:12]
+    # 流年选择：显式年份 ∪ 大运指认换算年份（去重排序后全量注入，由 _MAX_LIUNIAN_LINES 防爆）
+    years = effective_target_years(chart, intent.target_years, intent.target_dayun)
     if years:
+        years = years[:_MAX_LIUNIAN_LINES]
         liunian_items = [item for item in chart.liunian if item.year in set(years)]
     else:
         current_year = today.year
         liunian_items = [item for item in chart.liunian if current_year <= item.year <= current_year + 3]
         if not liunian_items:
             liunian_items = chart.liunian[:4]
+    # 流年每年一行（含绑定大运 + 4 字段），避免 ； 串
     liunian_lines = [
-        f"{item.year}年:{item.ganzhi}({item.shishen_gan}) {item.age}虚岁 所在大运:{item.dayun_ganzhi or '-'} "
-        f"藏干[{'、'.join(item.hidden_stems) or '—'}] 副星[{'、'.join(item.shishen_zhi) or '—'}] "
-        f"星运[{item.changsheng or '—'}] 神煞[{'、'.join(s['name'] for s in item.shensha) or '—'}]"
+        f"  {item.year}年:{item.ganzhi}({item.shishen_gan}) {item.age}虚岁 所在大运:{item.dayun_ganzhi or '-'}"
+        f"\n    藏干[{'、'.join(item.hidden_stems) or '—'}] 副星[{'、'.join(item.shishen_zhi) or '—'}]"
+        f"\n    星运[{item.changsheng or '—'}] 神煞[{'、'.join(s['name'] for s in item.shensha) or '—'}]"
         for item in liunian_items
     ]
     # 计算用户当前周岁，避免 LLM 自行推算出错
@@ -331,7 +343,8 @@ def fact_block(chart: BaziChart, intent: QuestionIntent) -> str:
             f"出生: {chart.birth.solar}; 性别: {chart.birth.gender}; 农历: {chart.birth.lunar}; 生肖: {chart.birth.shengxiao}",
             f"四柱: {pillars}",
             f"四柱详述:\n{pillar_detail}",
-            f"神煞（按柱）: {shensha_line}",
+            "神煞（按柱）:",
+            shensha_line,
             f"日主: {chart.wuxing.day_master}({chart.wuxing.day_master_wuxing}); 强弱: {chart.wuxing.strength}; 分数: {chart.wuxing.strength_score}",
             f"特殊格局: {chart.wuxing.special_pattern or '无'}",
             f"五行权重: {chart.wuxing.counts}; 最旺: {chart.wuxing.strongest}; 最弱: {chart.wuxing.weakest}",
@@ -342,8 +355,10 @@ def fact_block(chart: BaziChart, intent: QuestionIntent) -> str:
             f"调候: 月令{chart.analysis.season}; {chart.analysis.adjustment}",
             f"判断置信度: {chart.analysis.confidence}",
             f"起运: {chart.start_yun['startDate']} 起; {chart.start_yun['direction']}; 起运年龄 {chart.start_yun['startYear']}年{chart.start_yun['startMonth']}月{chart.start_yun['startDay']}日",
-            "大运: " + "；".join(dayun_lines),
-            "相关流年: " + ("；".join(liunian_lines) if liunian_lines else "未指定"),
+            "大运:",
+            *dayun_lines,
+            "相关流年:",
+            *(liunian_lines or ["  （未指定）"]),
             "口径: " + "；".join(chart.warnings),
         ]
     )
@@ -361,11 +376,13 @@ def build_sui_section(chart: BaziChart, intent: QuestionIntent) -> str:
     items: list[SuiRelations] = []
     for d in resolve_target_dayuns(chart, intent.target_dayun):
         if len(d.ganzhi) == 2:
-            items.append(relations_for(
-                chart,
-                dayun_ganzhi=d.ganzhi,
-                label=f"第{d.index}步{d.ganzhi}({d.start_year}-{d.end_year})",
-            ))
+            items.append(
+                relations_for(
+                    chart,
+                    dayun_ganzhi=d.ganzhi,
+                    label=f"第{d.index}步{d.ganzhi}({d.start_year}-{d.end_year})",
+                )
+            )
     # 童限期（未交大运）：指认「当前」时 chart.dayun 无步骤覆盖今年，resolve 返回空，
     # 以当年小运作岁柱占位，避免岁运关系整段落空。
     if not items and (intent.target_dayun or "").strip() in ("当前", "現在"):
@@ -374,11 +391,16 @@ def build_sui_section(chart: BaziChart, intent: QuestionIntent) -> str:
             items.append(relations_for(chart, liunian_ganzhi=gz, label=gz, is_tongxian=True))
     # 流年关系：明确点名年份优先，大运区间换算年份补足剩余名额（上限约束注入长度）
     explicit = sorted(set(intent.target_years))
-    derived = [y for y in effective_target_years(chart, intent.target_years, intent.target_dayun)
-               if y not in set(explicit)]
+    derived = [
+        y
+        for y in effective_target_years(chart, intent.target_years, intent.target_dayun)
+        if y not in set(explicit)
+    ]
     items += liunian_relations(chart, (explicit + derived)[:_SUI_MAX_LIUNIAN])
     parts = [format_sui_relations(items)]
     known = {item.year for item in chart.liunian}
+    # 流年指认：每一年展开 12 流月（最多 2 年，避免 prompt 爆炸）
+    # 大运指认不展开流月——大运问的是 10 年格局，流年关系已覆盖，月级别仅流年指认时才注入
     for year in intent.target_years[:2]:
         if year in known:
             parts.append(liuyue_line(chart, year))

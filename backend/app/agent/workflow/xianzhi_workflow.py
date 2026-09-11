@@ -10,7 +10,6 @@ R9 拆分：意图/模型/Worker 注册表/Reviewer 已拆至
 
 from __future__ import annotations
 
-import datetime as _dt
 import re
 from dataclasses import replace
 
@@ -56,7 +55,9 @@ from app.agent.workflow.workflow_support import (  # noqa: F401
     _OTHER_BIRTH_RE2,
     GANZHI_RE,
     YEAR_GANZHI_RE,
+    _age_to_years,
     _dedupe_content,
+    _extract_target_years,
     _looks_off_topic,
     _parse_json,
     build_chart_context,
@@ -148,14 +149,8 @@ class XianzhiWorkflow:
             other_birth_time = str(data.get("other_birth_time", "") or "").strip()
             other_gender = str(data.get("other_gender", "") or "").strip()
             target_dayun = str(data.get("target_dayun", "") or "").strip()
-            # 年份提取复用原逻辑
-            years = sorted({int(y) for y in re.findall(r"(?:19|20)\d{2}", user_prompt)})
-            today = _dt.date.today()
-            if "今年" in user_prompt:
-                years.append(today.year)
-            if "明年" in user_prompt:
-                years.append(today.year + 1)
-            years = sorted(set(years))
+            # 年份提取复用 _extract_target_years：4 位年份 + "NN 年" 简写 + "今年/明年" 兜底
+            years = _extract_target_years(user_prompt)
             wants_report = any(
                 w in user_prompt for w in ("完整报告", "详细报告", "全面分析", "完整分析", "从头到尾")
             )
@@ -191,8 +186,15 @@ class XianzhiWorkflow:
         消息并调用模型，最后用 check_facts 做事实一致性校验。
         """
         # 闲聊短路：关键词命中 chitchat 时直接走分类，不调用 LLM 拆解（节省 API 调用+时间）
+        # 例外：用户有「6岁那年」「30岁当时」等年龄指认 + 命理信号词时，强制走拆解路径，
+        # 否则会被误判为 chitchat 短路、扩盘与岁运关系全部丢失。
         _chitchat_kw = detect_domain(user_prompt)
-        if _chitchat_kw == "chitchat":
+        _has_age_cue = bool(
+            chart_context
+            and chart_context.birth_time
+            and _age_to_years(user_prompt, chart_context.birth_time)
+        )
+        if _chitchat_kw == "chitchat" and not _has_age_cue:
             intent = classify_question(user_prompt)
             log.info("[LLM拆解] 闲聊识别，跳过 LLM 拆解 → domain={}", intent.domain)
         elif _looks_off_topic(user_prompt):
@@ -228,6 +230,16 @@ class XianzhiWorkflow:
                         log.info("[match] 解析出的对方命盘与用户自身盘相同，跳过")
                 except Exception as e:
                     log.warning("[match] 解析对方命盘失败: {}", e)
+
+        # ===== 年龄→年份补全：_extract_target_years 不知道 birth_time，
+        # 拿不到「6岁」「35岁那」等年龄指认；挂载 chart_context 后再补一次 =====
+        if chart_context and chart_context.birth_time:
+            age_years = _age_to_years(user_prompt, chart_context.birth_time)
+            if age_years:
+                merged = sorted(set(intent.target_years) | set(age_years))
+                if merged != intent.target_years:
+                    intent = replace(intent, target_years=merged)
+                    log.info("[LLM拆解] 年龄指认补全 target_years={}", merged)
 
         # ===== LangGraph 图编排：分类→扩盘→检索→生成→校验→修复（唯一执行路径） =====
         # 思考模式：主模型 qwen3.8-2.4t-a95b 强制要求 enable_thinking=True（关思考会被 400 拒绝），

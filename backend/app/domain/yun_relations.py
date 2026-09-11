@@ -237,14 +237,21 @@ def effective_target_years(
 
 
 def liuyue_line(chart: BaziChart, year: int) -> str:
-    """某年的 12 节气月一行（月支干支 + 十神 + 交节日期）。"""
+    """某年的 12 节气月，按月分行（便于 LLM 抓取单月）。
+
+    开头注明"节气月（立春起算），非阳历月"，避免 LLM 把"2/3 起的寅月"误解为阳历 2 月。
+    """
     items, _ = _build_liuyue_list(
         year, year, chart.wuxing.day_master, chart.pillars, parse_gender(chart.birth.gender)
     )
     if not items:
         return ""
-    parts = [f"{it['zhi']}月{it['ganzhi']}({it['shishen']},{it['date']}起)" for it in items]
-    return f"流月 {year}: " + " ".join(parts)
+    head = f"流月 {year}（节气月，寅月起于立春，非阳历月）:"
+    lines = [head] + [
+        f"  {it['zhi']}月{it['ganzhi']}({it['shishen']}, {it['date']}起)"
+        for it in items
+    ]
+    return "\n".join(lines)
 
 
 def format_sui_relations(items: Sequence[SuiRelations]) -> str:

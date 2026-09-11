@@ -291,3 +291,124 @@ def test_extend_chart_if_needed_preserves_longitude():
     assert extended.longitude == 104.07
     # 真太阳时校正：104.07°E 距 120°E 差 15.93° → 约 +64 分钟；charts.warnings 应有校正提示
     assert any("真太阳时" in w for w in extended.chart.warnings)
+
+
+def test_extract_target_years_handles_short_year():
+    """「23年」/「24 年」简写应解析为 20NN；「5年」「6岁」等量词不应误识别。"""
+    from app.agent.workflow.workflow_support import _extract_target_years
+
+    today = dt.date(2026, 7, 5)
+    # 短年份：当前年份附近优先 20NN
+    assert _extract_target_years("我23年的运势怎么样", today) == [2023]
+    assert _extract_target_years("24 年会发生什么事", today) == [2024]
+    # 4 位年份照常
+    assert _extract_target_years("2026 财运如何", today) == [2026]
+    # 4 位 + 短年份并存
+    assert _extract_target_years("23年和2025年哪个更适合跳槽", today) == [2023, 2025]
+    # "今年"/"明年"
+    assert _extract_target_years("今年事业", today) == [2026]
+    assert _extract_target_years("明年", today) == [2027]
+    # 量词不应被误识别
+    assert _extract_target_years("事业有5年的积累", today) == []
+    assert _extract_target_years("6岁开始上学", today) == []
+    # 3 位及以上数字带"年"不当作 2 位简写（被 (?<!\d) 阻塞）
+    assert _extract_target_years("2023 年与 1990 年", today) == [1990, 2023]
+
+
+def test_workflow_extends_liunian_for_short_year():
+    """用户说「23年的健康」应触发扩盘至 2023 并注入 2023 流年岁运关系。"""
+    from app.agent.workflow.workflow_support import _extract_target_years
+
+    workflow = XianzhiWorkflow(chat_model=None)
+    ctx = build_chart_context("1990-05-20 14:30", MALE)
+    # 直接验证抽取结果与扩盘/岁运三段链路
+    years = _extract_target_years("我23年的健康情况", today=dt.date(2026, 7, 5))
+    assert years == [2023]
+    intent = replace(
+        classify_question("我23年的健康情况", today=dt.date(2026, 7, 5)),
+        needs_chart=True,
+        target_years=years,
+    )
+    extended = workflow._extend_chart_if_needed(ctx, intent)
+    assert any(item.year == 2023 for item in extended.chart.liunian)
+
+
+def test_age_to_years_resolves_xusui_convention():
+    """虚岁约定：今年虚岁 N → 公历出生年 = today.year - N + 1（命理口径）。"""
+    from app.agent.workflow.workflow_support import _age_to_years
+
+    today = dt.date(2026, 7, 5)
+    birth = "1990-05-20 14:30"
+    # 1990 生，2026 年虚岁 37；37岁→2026-37+1=1990（诞生年）
+    assert _age_to_years("我37岁那年", birth, today) == [1990]
+    # 6 岁 → 2021
+    assert _age_to_years("我6岁时差点溺水", birth, today) == [2021]
+    # 0 岁/200 岁越界 → 跳
+    assert _age_to_years("我0岁", birth, today) == []
+    assert _age_to_years("我200岁", birth, today) == []
+    # 数字后跟岁、但前导数字被 175 阻塞
+    assert _age_to_years("身高175岁的人", birth, today) == []
+    # 出生前不可能的虚岁（对应 solar_year < by）→ 跳
+    assert _age_to_years("我200岁那年", "2010-01-01", today) == []
+    # 出生时间格式容错：YYYY/MM/DD、YYYY年MM月DD日
+    assert _age_to_years("我6岁那年", "1990/05/20", today) == [2021]
+    assert _age_to_years("我6岁那年", "1990年05月20日", today) == [2021]
+
+
+def test_workflow_injects_age_year_into_intent():
+    """问句含「6岁那年」+ 已挂载 chart_context 时，answer 入口应把 2021 补入 target_years
+    并触发扩盘，注入 2021 流年岁运关系。
+    """
+    from app.agent.workflow.workflow_support import build_chart_context
+
+    workflow = XianzhiWorkflow(chat_model=None)
+    ctx = build_chart_context("1990-05-20 14:30", MALE)
+    # 模拟"年龄补全"分支
+    from app.agent.workflow.workflow_support import _age_to_years
+
+    user_prompt = "我6岁那年差点溺水，命里那年有什么劫？"
+    age_years = _age_to_years(user_prompt, "1990-05-20 14:30", today=dt.date(2026, 7, 5))
+    assert age_years == [2021]
+    intent = replace(
+        classify_question(user_prompt, today=dt.date(2026, 7, 5)),
+        needs_chart=True,
+        target_years=age_years,
+    )
+    extended = workflow._extend_chart_if_needed(ctx, intent)
+    # 扩盘到 2021：流年 1996-2030 覆盖；2021 必在
+    assert any(item.year == 2021 for item in extended.chart.liunian)
+    # 扩盘覆盖的流年窗口起止
+    years = sorted({li.year for li in extended.chart.liunian})
+    assert years[0] <= 2021 <= years[-1]
+
+
+def test_fact_block_uses_line_breaks_for_dayun_liunian():
+    """fact_block 大运/流年段按行排版（不再用 ； 连成长串），目标大运置首 + ← 目标 标记。"""
+    import re as _re
+
+    from app.agent.workflow.workflow_retrieval import extend_chart_if_needed
+
+    ctx = build_chart_context("1990-05-20 14:30", MALE, longitude=104.07)
+    intent = replace(
+        classify_question("我30-40岁那步大运的事业运", today=dt.date(2026, 7, 5)),
+        needs_chart=True, target_dayun="30-40",
+    )
+    ext = extend_chart_if_needed(ctx, intent)
+    text = fact_block(ext.chart, intent)
+    m = _re.search(r"大运:\n((?:.+\n){1,60})相关流年:", text)
+    assert m, "fact_block 缺大运段"
+    dayun_block = m.group(1)
+    # 大运每步 3 行；目标大运置前，前 6 行里应同时含甲申/乙酉首行
+    first_six = dayun_block.split("\n")[:6]
+    head_lines = [ln for ln in first_six if not ln.startswith("    ")]
+    assert any("甲申" in ln and "← 目标" in ln for ln in head_lines)
+    assert any("乙酉" in ln and "← 目标" in ln for ln in head_lines)
+    assert _re.search(r"神煞（按柱）:\n  年柱:.+\n  月柱:.+\n  日柱:.+\n  时柱:.+", text), \
+        "神煞段未按柱分行"
+    m_ln = _re.search(r"相关流年:\n((?:.+\n){1,80})口径:", text)
+    assert m_ln, "fact_block 缺相关流年段"
+    liunian_block = m_ln.group(1)
+    lines = liunian_block.rstrip("\n").split("\n")
+    for ln in lines[::3]:
+        assert "；" not in ln, f"流年首行不应有 ；: {ln!r}"
+    assert "2021年:辛丑" in liunian_block

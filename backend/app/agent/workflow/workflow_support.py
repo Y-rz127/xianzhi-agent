@@ -56,7 +56,76 @@ _DAYUN_SEQ_RE = re.compile(r"第\s*([一二三四五六七八九十]+|\d{1,2})\s
 _DAYUN_AGE_RE = re.compile(r"(\d{1,2})\s*[-~到至]\s*(\d{1,2})\s*岁")
 _DAYUN_GANZHI_RE = re.compile(r"([甲乙丙丁戊己庚辛壬癸][子丑寅卯辰巳午未申酉戌亥])\s*(?:大)?运")
 
+# 短年份（2 位 NN 年）：限定 NN ≥ 10 且距今年 ≤ 50 年，避免「5年」「6岁」等量词误识别
+_SHORT_YEAR_RE = re.compile(r"(?<![\d年月日时])(\d{2})\s*年(?!月|日)")
+
+# 年龄指认：NN 岁那年/时/当时/前后 之类的相对时间。NN ∈ [0, 120]
+# 捕获：组1=年龄数字，组2=连接词（"那年"/"时"/"那年"），无组2（如"35岁运势"）也接受
+_AGE_RE = re.compile(r"(?<![\d年大小高])\s*(\d{1,3})\s*岁(?:那年|那年时|那时|当时|时候|前|后|左右)?")
+
 _CN_DIGITS = {"一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9}
+
+
+def _extract_target_years(text: str, today: _dt.date | None = None) -> list[int]:
+    """抽取用户问题中的目标年份：4 位年份 + "NN 年" 简写 → 20NN；"今年/明年" 兜底。
+
+    与 _detect_target_dayun（解析大运指认）配合：拿到 target_years 后可触发扩盘与岁运关系注入。
+    """
+    today = today or _dt.date.today()
+    years: set[int] = set()
+    # 4 位年份（1900-2099）
+    for y in re.findall(r"(?:19|20)\d{2}", text):
+        years.add(int(y))
+    # 2 位简写年份（23年 → 2023）：候选 20NN/19NN，挑距 today 近且 ≤ 50 年的
+    for m in _SHORT_YEAR_RE.finditer(text):
+        nn = int(m.group(1))
+        if nn < 10:
+            continue
+        cand = [base + nn for base in (2000, 1900) if abs(base + nn - today.year) <= 50]
+        if cand:
+            years.add(min(cand, key=lambda y: abs(y - today.year)))
+    # "今年"/"明年" 兜底
+    if "今年" in text:
+        years.add(today.year)
+    if "明年" in text:
+        years.add(today.year + 1)
+    return sorted(years)
+
+
+def _age_to_years(text: str, birth_time: str, today: _dt.date | None = None) -> list[int]:
+    """把「NN 岁那年/时/当时」等年龄指认换算成具体年份；其余文本中的纯年龄不识别。
+
+    口径：周岁 = today.year - birth_year - (today 是否过生日)；
+    虚岁 = 周岁 + 1（传统命理以虚岁为主，LLM 上下文注入的也是虚岁）。
+    命中多条「NN 岁」时全部换算、按年份去重返回。
+
+    Args:
+        text: 用户问题
+        birth_time: 用户出生时间（公历，"YYYY-MM-DD HH:MM"）
+        today: 基准日期（默认今天）
+
+    Returns:
+        换算后的目标年份列表（去重、按升序）；无年龄指认时返回空列表
+    """
+    today = today or _dt.date.today()
+    # 解析出生年/月/日（容错 "1990-05-20"/"1990-05-20 14:30" 等）
+    m = re.search(r"(\d{4})[-年/](\d{1,2})[-月/](\d{1,2})", birth_time or "")
+    if not m:
+        return []
+    by = int(m.group(1))
+    # 虚岁约定：今年虚岁 = today.year - by + 1
+    # 已知虚岁 → 公历出生年 = today.year - 已知虚岁 + 1
+    out: set[int] = set()
+    for am in _AGE_RE.finditer(text):
+        age = int(am.group(1))
+        if age < 1 or age > 120:
+            continue
+        solar_year = today.year - age + 1
+        # 边界 sanity：与出生年差不能 < 0（用户在出生前"几岁"无意义）
+        if solar_year < by:
+            continue
+        out.add(solar_year)
+    return sorted(out)
 
 
 def _normalize_seq(raw: str) -> str:
@@ -181,12 +250,7 @@ def classify_question(text: str, today: _dt.date | None = None) -> QuestionInten
         含 domain/label/target_years 等的 QuestionIntent
     """
     today = today or _dt.date.today()
-    years = sorted({int(y) for y in re.findall(r"(?:19|20)\d{2}", text)})
-    if "今年" in text:
-        years.append(today.year)
-    if "明年" in text:
-        years.append(today.year + 1)
-    years = sorted(set(years))
+    years = _extract_target_years(text, today)
 
     best_domain = "general"
     best_score = 0
