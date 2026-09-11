@@ -176,7 +176,7 @@
               :aria-label="isRecording ? '停止录音' : '语音输入'"
               :title="isRecording ? '停止录音' : '语音输入'"
             >
-              <span v-if="!isRecording && !isProcessingVoice">🎤</span>
+              <svg v-if="!isRecording && !isProcessingVoice" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.4" fill="currentColor" stroke="none"/></svg>
               <span v-else-if="isRecording" class="recording-icon">●</span>
               <span v-else class="processing-icon">⏳</span>
             </button>

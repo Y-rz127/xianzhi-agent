@@ -19,6 +19,7 @@ DOMAIN_LABELS = {
     "social": "社交人际",
     "family": "六亲关系",
     "personality": "性格心性",
+    "appearance": "身材样貌",
     "migration": "方位迁移",
     "naming": "起名改名",
     "auspicious": "择吉择日",

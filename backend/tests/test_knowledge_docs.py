@@ -1233,3 +1233,36 @@ def test_phase4_practical_quotations_present():
         "当逆而逆",
     ]:
         assert quotation in all_text, f"知识库缺失实战辅助原文: {quotation}"
+
+
+def test_doc35_appearance_expanded():
+    """35_身材样貌断法：校验五行形相、十神泄秀、高矮胖瘦、神煞形貌与合规口径。"""
+    text = (KNOWLEDGE_DIR / "35_身材样貌断法.md").read_text(encoding="utf-8")
+    for keyword in [
+        "木瘦金方水主肥",
+        "神相全编",
+        "伪造古籍",
+        "木形",
+        "火形",
+        "土形",
+        "金形",
+        "水形",
+        "伤官泄秀",
+        "食神泄秀",
+        "偏高",
+        "偏矮",
+        "偏丰润",
+        "偏清瘦",
+        "桃花",
+        "红艳煞",
+        "天乙贵人",
+        "魁罡",
+        "六秀日",
+        "九丑日",
+        "形貌轩昂",
+        "三命通会",
+        "不得照搬",
+        "医疗诊断",
+        "引用典籍",
+    ]:
+        assert keyword in text, f"35 缺失关键词: {keyword}"

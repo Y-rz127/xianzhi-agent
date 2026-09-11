@@ -141,7 +141,7 @@
         />
       </view>
       <view :class="['voice-btn', (thinking || voiceBusy) && 'disabled']" @tap="toggleVoice">
-        <text v-if="!recording && !voiceBusy" class="voice-text">🎤</text>
+        <view v-if="!recording && !voiceBusy" class="voice-ring"><view class="voice-ring-core"></view></view>
         <text v-else-if="recording" class="voice-text recording-pulse">●</text>
         <text v-else class="voice-text busy-bounce">⏳</text>
       </view>
@@ -328,23 +328,96 @@ interface BirthInfo { time: string; gender: string }
 const recording = ref(false)
 const voiceBusy = ref(false)
 const recorder: ReturnType<typeof uni.getRecorderManager> | null = uni.getRecorderManager() || null
+let voiceStarting = false          // 已发起 start()，还没等到 onStart
+let voiceStopping = false          // 已发起 stop()，还没等到 onStop
+let startTimer: ReturnType<typeof setTimeout> | null = null
+let stopTimer: ReturnType<typeof setTimeout> | null = null
 function audioAsDataUri(filePath: string): Promise<string> {
   return new Promise((resolve, reject) => uni.getFileSystemManager().readFile({ filePath, encoding: 'base64', success: (res: any) => resolve(`data:audio/mpeg;base64,${res.data}`), fail: reject }))
 }
-async function toggleVoice() {
-  if (thinking.value || voiceBusy.value) return
-  if (recording.value) { recorder?.stop(); return }
-  if (!recorder) { uni.showToast({ title: '当前环境不支持语音输入', icon: 'none' }); return }
-  recording.value = true
-  recorder.start({ duration: 60000, sampleRate: 16000, numberOfChannels: 1, format: 'mp3' })
+function endVoiceSession() {
+  if (startTimer) { clearTimeout(startTimer); startTimer = null }
+  if (stopTimer) { clearTimeout(stopTimer); stopTimer = null }
+  voiceStarting = false
+  voiceStopping = false
+  recording.value = false
 }
+// scope.record 被拒时 start() 会静默失败（onStart / onError 都不回调），必须先确认授权
+async function ensureRecordAuth(): Promise<boolean> {
+  const setting: any = await new Promise<any>((resolve) => uni.getSetting({ success: resolve, fail: () => resolve(null) }))
+  const auth = setting?.authSetting?.['scope.record']
+  if (auth === true) return true
+  if (auth === false) {
+    uni.showModal({
+      title: '需要麦克风权限',
+      content: '请在设置里开启「录音」后重试',
+      confirmText: '去设置',
+      success: (res) => { if (res.confirm) uni.openSetting({}) },
+    })
+    return false
+  }
+  return new Promise<boolean>((resolve) => uni.authorize({ scope: 'scope.record', success: () => resolve(true), fail: () => resolve(false) }))
+}
+async function startVoice() {
+  const r = recorder
+  if (!r) return
+  voiceStarting = true
+  recording.value = true
+  if (!(await ensureRecordAuth())) {
+    endVoiceSession()
+    uni.showToast({ title: '未获得麦克风权限', icon: 'none' })
+    return
+  }
+  if (!voiceStarting) return                     // 授权期间用户已经点了停止
+  try {
+    r.start({ duration: 60000, sampleRate: 16000, numberOfChannels: 1, format: 'mp3' })
+  } catch (e: any) {
+    endVoiceSession()
+    uni.showToast({ title: e?.errMsg || '录音启动失败', icon: 'none' })
+    return
+  }
+  // onStart 迟迟不来说明这次录音压根没起来，回滚界面免得按钮卡死在"录音中"
+  startTimer = setTimeout(() => {
+    if (!voiceStarting) return
+    try { r.stop() } catch (e) {}
+    endVoiceSession()
+    uni.showToast({ title: '录音未能启动，请检查麦克风权限', icon: 'none' })
+  }, 1200)
+}
+function stopVoice() {
+  const r = recorder
+  if (!r || voiceStopping) return
+  voiceStarting = false
+  voiceStopping = true
+  if (startTimer) { clearTimeout(startTimer); startTimer = null }
+  recording.value = false                        // 立刻给反馈，不等 onStop
+  try { r.stop() } catch (e) {}
+  // 录音器没真正启动时 stop() 不会有任何回调，兜底收尾
+  stopTimer = setTimeout(() => {
+    if (!voiceStopping) return
+    endVoiceSession()
+    uni.showToast({ title: '录音已停止', icon: 'none' })
+  }, 1000)
+}
+function toggleVoice() {
+  if (thinking.value || voiceBusy.value) return
+  if (!recorder) { uni.showToast({ title: '当前环境不支持语音输入', icon: 'none' }); return }
+  if (recording.value || voiceStarting || voiceStopping) { stopVoice(); return }
+  void startVoice()
+}
+recorder?.onStart(() => {
+  voiceStarting = false
+  if (startTimer) { clearTimeout(startTimer); startTimer = null }
+  if (!voiceStopping) recording.value = true
+})
 recorder?.onStop(async (res) => {
-  recording.value = false; voiceBusy.value = true
+  endVoiceSession()
+  voiceBusy.value = true
   try { const data = await transcribeAudio(await audioAsDataUri(res.tempFilePath), 'mp3'); inputText.value = inputText.value ? `${inputText.value}${data.text}` : data.text; uni.showToast({ title: '语音已转为文字', icon: 'none' }) }
   catch (e: any) { uni.showToast({ title: e?.message || '语音识别失败', icon: 'none' }) }
   finally { voiceBusy.value = false }
 })
-recorder?.onError(() => { recording.value = false; voiceBusy.value = false; uni.showToast({ title: '录音不可用，请检查授权', icon: 'none' }) })
+recorder?.onError((err: any) => { endVoiceSession(); uni.showToast({ title: err?.errMsg || '录音不可用，请检查授权', icon: 'none' }) })
 
 // 十二时辰 → HH:MM（用于把后端返回的"辰时"等标准化为 time picker 友好的格式）
 const ZHI_HOUR_MAP: Record<string, string> = {
@@ -1755,6 +1828,24 @@ messages.value.push({
   font-size: 48rpx;
   line-height: 1;
   opacity: 0.7;
+}
+/* 语音输入图标：圆环 + 居中圆点 */
+.voice-ring {
+  box-sizing: border-box;
+  width: 36rpx;
+  height: 36rpx;
+  border: 4rpx solid $color-ink;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.7;
+}
+.voice-ring-core {
+  width: 12rpx;
+  height: 12rpx;
+  background: $color-ink;
+  border-radius: 50%;
 }
 .recording-pulse {
   color: #ff4757;
