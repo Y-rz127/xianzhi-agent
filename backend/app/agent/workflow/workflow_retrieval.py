@@ -4,6 +4,7 @@
 从 app/agent/xianzhi_workflow.py 抽离（解耦：把"知识检索"这一单一职责独立成模块），
 行为与原内联实现完全一致。
 """
+
 from __future__ import annotations
 
 import datetime as _dt
@@ -86,16 +87,12 @@ def retrieve_rules(
         # LLM 拆解的 query 可能过短（如"学业 命盘分析"），2-gram 区分度低，
         # 拼接领域核心术语前缀增强检索相关性
         domain_kw = DOMAIN_RULE_QUERIES.get(intent.domain, ("",))[0].split()[0] if intent.domain else ""
-        queries = [
-            f"{domain_kw} {q}" if domain_kw and len(q) < 8 else q
-            for q in intent.queries
-        ]
+        queries = [f"{domain_kw} {q}" if domain_kw and len(q) < 8 else q for q in intent.queries]
         # 不追加 extra_queries / DOMAIN_RULE_QUERIES：固定领域检索词对同领域任何问题
         # 都命中同样片段（与具体问题无关），只会挤占 query 名额并引入噪音；
         # 检索质量交给 LLM 拆解的自适应 query（theory 领域同理，见 build_theory_queries）
-        queries = queries[:4]
-        log.info("[workflow检索] LLM拆解路径 queries={} (共{}条)",
-                 queries, len(queries))
+        queries = queries[:5]
+        log.info("[workflow检索] LLM拆解路径 queries={} (共{}条)", queries, len(queries))
     elif intent.domain == "theory":
         queries, log_meta = build_theory_queries(user_text)
         log.info("[workflow检索] 理论路径 meta={} 构造query数={}", log_meta, len(queries))
@@ -103,8 +100,9 @@ def retrieve_rules(
         queries, log_meta = build_duxing_queries(intent, ctx, worker, user_text)
         log.info("[workflow检索] 断事路径 meta={} 构造query数={}", log_meta, len(queries))
 
-    log.info("[workflow检索] 领域={} 命主={}{} 构造query数={}",
-             intent.domain, day_master, strength, len(queries))
+    log.info(
+        "[workflow检索] 领域={} 命主={}{} 构造query数={}", intent.domain, day_master, strength, len(queries)
+    )
 
     # 检索执行统一走 app.rag.retrieval.retrieve_for_context（与 ReAct 工具路径同一入口/口径）
     hit_docs = retrieve_for_context(
@@ -118,8 +116,9 @@ def retrieve_rules(
         return "（未检索到相关知识）"
     parts: list[str] = []
     for i, (_q, doc) in enumerate(hit_docs, 1):
-        parts.append("[片段{}] (来源:{}):\n{}".format(
-            i, doc.metadata.get("source", "未知"), doc.page_content))
+        parts.append(
+            "[片段{}] (来源:{}):\n{}".format(i, doc.metadata.get("source", "未知"), doc.page_content)
+        )
     return "\n\n".join(parts)
 
 
@@ -200,8 +199,13 @@ def extend_chart_if_needed(ctx: WorkflowChartContext, intent: QuestionIntent) ->
         longitude=ctx.longitude or None,
     )
     return WorkflowChartContext(
-        ctx.birth_time, ctx.gender, ctx.sect, ctx.yun_sect, chart,
-        user_id=ctx.user_id, longitude=ctx.longitude,
+        ctx.birth_time,
+        ctx.gender,
+        ctx.sect,
+        ctx.yun_sect,
+        chart,
+        user_id=ctx.user_id,
+        longitude=ctx.longitude,
     )
 
 
@@ -227,10 +231,13 @@ def build_match_basis(self_ctx: WorkflowChartContext, other_ctx: WorkflowChartCo
     """复用规则合婚工具 bazi_hehun，生成双盘基础数据，作为 LLM 综合判断的锚点。"""
     try:
         from app.tools.bazi import bazi_hehun
+
         # bazi_hehun 是 @tool 装饰的 StructuredTool，需用 .func 取底层函数直接调用
         base = bazi_hehun.func(
-            self_ctx.birth_time, self_ctx.gender,
-            other_ctx.birth_time, other_ctx.gender,
+            self_ctx.birth_time,
+            self_ctx.gender,
+            other_ctx.birth_time,
+            other_ctx.gender,
             self_ctx.sect,
         )
         if base and not base.startswith("合婚分析失败"):

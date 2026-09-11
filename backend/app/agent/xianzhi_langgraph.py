@@ -7,7 +7,9 @@ langgraph 为硬依赖（requirements.txt）：导入失败会在 XianzhiWorkflo
 
 from __future__ import annotations
 
-from typing import Any, TypedDict
+from typing import TypedDict
+
+from langchain_core.messages import BaseMessage
 
 from app.agent.workflow.workflow_messages import build_sui_section, compact_facts
 from app.agent.workflow.xianzhi_workflow import (
@@ -26,7 +28,7 @@ class XianzhiGraphState(TypedDict, total=False):
 
     user_prompt: str
     chart_context: WorkflowChartContext
-    history: list[Any]
+    history: list[BaseMessage]
     summary: str
     intent: QuestionIntent
     worker: DomainWorker

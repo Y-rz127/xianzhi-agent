@@ -54,10 +54,11 @@ from app.domain.bazi_engine import (
     relations_for,
     resolve_target_dayuns,
 )
+from app.core.config import settings as _settings
 from app.tools.text_clean import clean_think_tags, strip_user_input_boundary
 
 # 工作流生成/修复产出长文本（含思维链），60s 默认超时不够，单独放宽
-_WORKFLOW_LLM_TIMEOUT = 180.0
+_WORKFLOW_LLM_TIMEOUT = _settings.workflow_llm_timeout
 
 # fact_block 注入的流年行硬上限（防长跨度指认时 prompt 爆炸）
 _MAX_LIUNIAN_LINES = 20
@@ -327,7 +328,7 @@ def fact_block(chart: BaziChart, intent: QuestionIntent) -> str:
             liunian_items.sort(key=lambda x: x.year)
     else:
         current_year = today.year
-        liunian_items = [item for item in chart.liunian if current_year <= item.year <= current_year + 10]
+        liunian_items = [item for item in chart.liunian if current_year <= item.year <= current_year + 9]
         if not liunian_items:
             liunian_items = chart.liunian[:4]
     # 流年每年一行（含绑定大运 + 4 字段），避免 ； 串
@@ -376,7 +377,7 @@ def fact_block(chart: BaziChart, intent: QuestionIntent) -> str:
 
 
 def _build_domain_brief_inject(chart: BaziChart, intent: QuestionIntent) -> str:
-    """领域简报注入文本；needs_chart 且该 domain 有投影映射时非空，否则空串。"""
+    """领域简报注入文本（needs_chart 且有投影映射时非空）。"""
     if not intent.needs_chart:
         return ""
     return build_domain_brief(chart, intent.domain)
@@ -429,11 +430,11 @@ def build_sui_section(chart: BaziChart, intent: QuestionIntent) -> str:
     # 岁运关系流年上限：取实际需要的流年数，不超过 _MAX_LIUNIAN_LINES 防 prompt 爆炸
     sui_max = min(len(explicit) + len(derived), _MAX_LIUNIAN_LINES)
     target_years_sui = (explicit + derived)[:sui_max]
-    # 无指认时补入今年~今年+10年的流年关系（11年），否则开放性问题完全无流年关系
+    # 无指认时补入今年~今年+9年的流年关系（10年），否则开放性问题完全无流年关系
     if not target_years_sui and not intent.target_dayun:
         target_years_sui = sorted(
-            {item.year for item in chart.liunian if today.year <= item.year <= today.year + 10}
-        )[:11]
+            {item.year for item in chart.liunian if today.year <= item.year <= today.year + 9}
+        )[:10]
     # chart.liunian 可能不够覆盖目标年份，按需补建
     sui_chart = chart
     missing_sui = sorted(set(target_years_sui) - {item.year for item in chart.liunian})

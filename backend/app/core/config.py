@@ -70,6 +70,8 @@ class Settings(BaseSettings):
 
     # Agent
     agent_max_steps: int = Field(default=8, alias="AGENT_MAX_STEPS")
+    # 工作流 LLM 超时（秒）：生成/修复产出长文本（含思维链），60s 默认不够
+    workflow_llm_timeout: float = Field(default=180.0, alias="WORKFLOW_LLM_TIMEOUT")
 
     # 并发与连接池
     # 专用线程池（替换 asyncio 默认池，默认仅 min(32, cpu+4)）：

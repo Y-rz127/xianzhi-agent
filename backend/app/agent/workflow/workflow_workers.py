@@ -10,7 +10,7 @@ from typing import Any
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from app.agent.prompts import REVIEWER_SYSTEM
+from app.agent.prompts import CLASSIC_BOOK_WHITELIST, REVIEWER_SYSTEM
 from app.agent.workflow.workflow_models import DomainWorker, FactCheckResult
 from app.agent.workflow.workflow_support import _parse_json
 from app.core.logger import log
@@ -399,16 +399,7 @@ class ReviewerWorker:
                 book_match = re.match(r"《([^》]{1,12})》", citation)
                 if book_match:
                     book = book_match.group(1)
-                    classic_books = {
-                        "渊海子平",
-                        "子平真诠",
-                        "滴天髓",
-                        "穷通宝鉴",
-                        "三命通会",
-                        "神峰通考",
-                        "千里命稿",
-                    }
-                    if book not in cited_books and book not in classic_books:
+                    if book not in cited_books and book not in CLASSIC_BOOK_WHITELIST:
                         issues.append(f"引用《{book}》原文未在检索结果中出现，疑似杜撰古籍")
 
         # 3) 合规红线扫描
