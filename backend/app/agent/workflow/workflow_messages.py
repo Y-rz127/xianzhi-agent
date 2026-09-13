@@ -821,16 +821,19 @@ def check_facts(
             return True
         return False
 
-    def _answer_makes_binding_assertion(target_word: str) -> bool:
+    def _answer_makes_binding_assertion(target_word: str, text: str | None = None) -> bool:
         """判断回答是否在**肯定地断言**命盘事实层面带有 target_word（十神/神煞）。
 
         必须排除：
         - 否定句（没见/没有/不带/无/未/非 等，锚点与目标词之间出现）
         - 纯理论定义句（XX主XX/XX代表XX，且句中无锚点）
+
+        text: 校验用文本（默认 answer）；调用方可传子串消歧后的文本。
         """
-        if target_word not in answer:
+        scan_text = answer if text is None else text
+        if target_word not in scan_text:
             return False
-        for sent in _SENT_SPLIT.split(answer):
+        for sent in _SENT_SPLIT.split(scan_text):
             if target_word not in sent:
                 continue
             if _sentence_asserts_positive(sent, target_word):
@@ -868,33 +871,79 @@ def check_facts(
         if _answer_makes_binding_assertion(name) and name not in actual_shishen:
             issues.append(f"排盘事实中无「{name}」，回答却断言命盘带有，与十神事实不符")
 
+    def _scan_text_for(name: str) -> str:
+        """返回校验 name 用的文本：把「更长且包含 name」的神煞名（如 正学堂 中的 学堂、
+        正词馆 中的 词馆）就地替换为等长圆点，避免子串误配（"正学堂"被当作"学堂"判柱位）。
+        替换等长 → 位置/小句边界与 answer 完全一致，可直接复用。
+        """
+        text = answer
+        for longer in _SHENSHA_NAMES:
+            if len(longer) > len(name) and name in longer and longer in text:
+                text = text.replace(longer, "○" * len(longer))
+        return text
+
     # ===== 神煞：存在性断言校验 =====
     for name in _SHENSHA_NAMES:
-        if _answer_makes_binding_assertion(name) and name not in actual_shensha_all:
+        if _answer_makes_binding_assertion(name, _scan_text_for(name)) and name not in actual_shensha_all:
             issues.append(f"排盘事实中无「{name}」，回答却断言命盘带有，与神煞事实不符")
 
     # ===== 神煞：柱位归属断言校验 =====
+    # 配对口径（2026-09-11 修：旧版"同句共现即判错"会造成系统性误报）：
+    #   1) 以「小句」为单位配对，按 。；;！!？? 换行 与 ，,、 切分：
+    #      "再加上时柱华盖、日柱学堂" → 两个小句各含一个柱名 + 一个神煞，互不串味；
+    #      "冲到你月柱午中丁火正财，流年还带红艳煞" → 后半句无柱名，不构成归属断言。
+    #   2) 小句内出现多个柱名时取离目标神煞最近者；最近距离并列的柱名只要有一个是该神煞
+    #      的合法归属柱即放行（宁可不误杀）。
+    #   3) 纯岁运神煞（原局四柱没有、只在大运/流年行出现，如 2032 壬子的红艳煞）不按原局
+    #      柱位判错：只有回答在小句里把它绑到某原局柱、且该小句无岁运语境时才记问题。
     _pillar_names = [p.name for p in chart.pillars]
+    _static_shensha_all: set[str] = set()
+    for _names in actual_shensha_by_pillar.values():
+        _static_shensha_all |= _names
+    # 大运/流年（含合婚双盘）结构化神煞 - 原局静态神煞 = 纯岁运神煞
+    _dynamic_shensha: set[str] = set()
+    for _src in [chart] + ([other_chart] if other_chart else []):
+        for _item in list(_src.dayun) + list(_src.liunian):
+            for _s in getattr(_item, "shensha", None) or []:
+                if isinstance(_s, dict) and _s.get("name"):
+                    _dynamic_shensha.add(_s["name"])
+    _dynamic_shensha -= _static_shensha_all
+
+    _CLAUSE_SPLIT = re.compile(r"[。；;！!？?\n\r，,、]")
     for name in actual_shensha_all:
         if name not in answer:
             continue
-        for sent in _SENT_SPLIT.split(answer):
-            if name not in sent:
+        owners = [pn for pn in _pillar_names if name in actual_shensha_by_pillar.get(pn, set())]
+        is_dynamic = name in _dynamic_shensha
+        if not owners and not is_dynamic:
+            continue  # 归属不明（全局项或流年窗口外的神煞）→ 不做柱位校验
+        # 子串消歧后的文本（等长替换，"正学堂"不再被当作"学堂"）
+        for clause in _CLAUSE_SPLIT.split(_scan_text_for(name)):
+            if name not in clause:
                 continue
-            for pn in _pillar_names:
-                if name in actual_shensha_by_pillar.get(pn, set()):
-                    continue
-                if pn not in sent:
-                    continue
-                # 排除否定：如"日柱没有金舆"不算错误归属断言
-                a_pos, t_pos = sent.find(pn), sent.find(name)
-                if _sentence_has_negative_between(sent, a_pos, t_pos):
-                    continue
-                actual_pillar = (
-                    "、".join(p for p in _pillar_names if name in actual_shensha_by_pillar.get(p, set()))
-                    or "无"
+            anchors = [pn for pn in _pillar_names if pn in clause]
+            if not anchors:
+                continue
+            t_pos = clause.find(name)
+            dist = {pn: abs(clause.find(pn) - t_pos) for pn in anchors}
+            nearest_d = min(dist.values())
+            nearest = [pn for pn in anchors if dist[pn] == nearest_d]
+            if any(pn in owners for pn in nearest):
+                continue  # 最近柱名即合法归属柱 → 通过
+            if _DYNAMIC_CTX.search(clause):
+                continue  # 该小句在讲流年/大运 → 不是原盘柱位断言
+            a_pos = clause.find(nearest[0])
+            # 排除否定：如"日柱没有金舆"不算错误归属断言
+            if _sentence_has_negative_between(clause, a_pos, t_pos):
+                continue
+            if owners:
+                issues.append(
+                    f"「{name}」属于{'、'.join(owners)}，回答却关联到{nearest[0]}，与神煞事实不符"
                 )
-                issues.append(f"「{name}」属于{actual_pillar}，回答却关联到{pn}，与神煞事实不符")
-                break
+            else:
+                issues.append(
+                    f"「{name}」只出现在大运/流年（原局无此神煞），回答却关联到{nearest[0]}，与神煞事实不符"
+                )
+            break
 
     return FactCheckResult(ok=not issues, issues=issues)

@@ -412,3 +412,102 @@ def test_fact_block_uses_line_breaks_for_dayun_liunian():
     for ln in lines[::3]:
         assert "；" not in ln, f"流年首行不应有 ；: {ln!r}"
     assert "2021年:辛丑" in liunian_block
+
+
+# ============================================================
+# 神煞柱位归属：按小句配对（2026-09-11 修"同句共现即判错"的系统性误报）
+# 真实误报背景：性格轮"再加上时柱华盖、日柱学堂"被报成"华盖关联日柱/学堂关联时柱"；
+# 恋爱轮"冲到你月柱午中丁火正财，流年还带红艳煞"被报成"红艳煞属于无，却关联到月柱"。
+# ============================================================
+
+def _shensha_case_chart():
+    """固定盘（2004-06-22 08:00 男）：华盖→时柱、学堂→日柱；红艳煞只见于 2032 壬子流年。"""
+    from app.domain.chart_builder import build_bazi_chart
+
+    return build_bazi_chart("2004-06-22 08:00", MALE, liunian_start_year=2026, liunian_years=13)
+
+
+def _shensha_case_facts(chart, domain="personality", label="性格心性", target_years=()):
+    from app.agent.workflow.workflow_models import QuestionIntent
+
+    intent = QuestionIntent(
+        domain=domain, label=label, needs_chart=True, target_years=list(target_years)
+    )
+    return compact_facts(chart, intent)
+
+
+def test_shensha_pillar_check_allows_multi_pillar_enumeration():
+    """「时柱华盖、日柱学堂」是并列枚举：每个小句各含一个柱名，不得交叉配成错绑。"""
+    workflow = XianzhiWorkflow(chat_model=None)
+    chart = _shensha_case_chart()
+    facts = _shensha_case_facts(chart)
+
+    for answer in (
+        "再加上时柱华盖、日柱学堂，身上有股书卷气。",
+        "日柱带学堂、时柱带华盖，书卷气挺重。",
+    ):
+        result = workflow.check_facts(answer, chart, None, True, facts)
+        assert result.ok, f"{answer!r} 被误报: {result.issues}"
+
+
+def test_shensha_pillar_check_still_flags_real_misbinding():
+    """真错绑必须仍然报错：华盖属时柱、学堂属日柱。"""
+    workflow = XianzhiWorkflow(chat_model=None)
+    chart = _shensha_case_chart()
+    facts = _shensha_case_facts(chart)
+
+    result = workflow.check_facts("你日柱带华盖，爱琢磨艺术。", chart, None, True, facts)
+    assert not result.ok
+    assert any("华盖" in i and "属于时柱" in i and "日柱" in i for i in result.issues), result.issues
+
+    result2 = workflow.check_facts("你时柱带学堂，读书有底子。", chart, None, True, facts)
+    assert not result2.ok
+    assert any("学堂" in i and "属于日柱" in i for i in result2.issues), result2.issues
+
+
+def test_shensha_pillar_check_ignores_dynamic_shensha_in_liunian_clause():
+    """流年神煞（2032 壬子带红艳煞）与原局柱名同句但不同小句时，不算柱位错绑。"""
+    workflow = XianzhiWorkflow(chat_model=None)
+    chart = _shensha_case_chart()
+    facts = _shensha_case_facts(chart, "love", "恋爱感情", (2032, 2033, 2034))
+
+    answer = "冲到你月柱午中丁火正财，流年还带红艳煞。"
+    result = workflow.check_facts(answer, chart, None, True, facts)
+    assert result.ok, result.issues
+
+    # 但把岁运神煞绑到原局柱、且小句内无岁运语境 → 仍要报错
+    result2 = workflow.check_facts("你时柱带红艳煞，异性缘过旺。", chart, None, True, facts)
+    assert not result2.ok
+    assert any("红艳煞" in i and "只出现在大运/流年" in i for i in result2.issues), result2.issues
+
+
+def test_shensha_pillar_check_keeps_negation_and_correct_attribution_passing():
+    """否定式归属与正确归属继续放行。"""
+    workflow = XianzhiWorkflow(chat_model=None)
+    chart = _shensha_case_chart()
+    facts = _shensha_case_facts(chart)
+
+    for answer in (
+        "你日柱没有金舆，金舆在时柱。",
+        "你时柱华盖、日柱学堂，都在盘里。",
+        "时柱的金舆、福星贵人、华盖说明晚运有人帮。",
+    ):
+        result = workflow.check_facts(answer, chart, None, True, facts)
+        assert result.ok, f"{answer!r} 被误报: {result.issues}"
+
+
+def test_shensha_substring_names_not_cross_attributed():
+    """「正学堂」含子串「学堂」：不得把正学堂的柱位当成学堂的柱位来判（后者属日柱）。
+
+    本盘只有日柱学堂、没有正学堂，因此正确结果只有一条「排盘事实中无正学堂」，
+    不应再冒出「学堂属于日柱，回答却关联到时柱」。
+    """
+    workflow = XianzhiWorkflow(chat_model=None)
+    chart = _shensha_case_chart()
+    facts = _shensha_case_facts(chart)
+
+    result = workflow.check_facts("你时柱正学堂，学问正统。", chart, None, True, facts)
+
+    assert any("正学堂" in i for i in result.issues), result.issues
+    assert not any("「学堂」" in i for i in result.issues), result.issues
+    assert not any("「词馆」" in i for i in result.issues), result.issues
