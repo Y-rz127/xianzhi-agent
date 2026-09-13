@@ -11,7 +11,12 @@ from typing import TypedDict
 
 from langchain_core.messages import BaseMessage
 
-from app.agent.workflow.workflow_messages import build_sui_section, compact_facts
+from app.agent.workflow.workflow_messages import (
+    SHENSHA_NAMES,
+    SHISHEN_NAMES,
+    build_sui_section,
+    compact_facts,
+)
 from app.agent.workflow.xianzhi_workflow import (
     WORKERS,
     DomainWorker,
@@ -37,6 +42,22 @@ class XianzhiGraphState(TypedDict, total=False):
     raw_answer: str
     final_answer: str
     issues: list[str]
+
+
+def _dropped_real_facts(before: str, after: str, facts_text: str) -> list[str]:
+    """对比修复前后的十神/神煞提及，返回"原稿有、修复稿丢了、且排盘事实确实存在"的名字。
+
+    只作观测用（日志 + /metrics 的 repair_dropped_facts），不构成 issue、不触发新一轮修复：
+    修复器按 issues 重写整段时可能把正确信息一起删掉（实测恋爱轮修复稿删掉了正确的流年神煞
+    "红艳煞"），此前无人可见。
+    """
+    if not before or not after or not facts_text:
+        return []
+    names = set(SHISHEN_NAMES) | set(SHENSHA_NAMES)
+    return sorted(
+        name for name in names
+        if name != "日主" and name in before and name not in after and name in facts_text
+    )
 
 
 def create_xianzhi_graph(workflow):
@@ -173,7 +194,18 @@ def create_xianzhi_graph(workflow):
         log.info("[Reflextion] 修复稿 ({}字):\n{}", len(repaired), repaired)
         second_chart = getattr(intent, "second_chart", None)
         facts_text = compact_facts(state["chart_context"].chart, intent)
-        # 修复后先走 regex 快筛（零 LLM 调用），通过则信任修复，不再全量 LLM 重审
+        # 修复稿 vs 原稿：记录"原稿提到、修复稿丢掉、且排盘事实确实存在"的十神/神煞。
+        # 修复器按 issues 重写时可能把正确信息一并删掉（实测恋爱轮修复稿删掉了正确的流年神煞），
+        # 这里只落日志 + 指标，不触发新一轮修复。
+        dropped = _dropped_real_facts(state.get("raw_answer", ""), repaired, facts_text)
+        if dropped:
+            log.warning(
+                "[Reflextion] {} 修复稿丢弃了排盘事实中确实存在的十神/神煞：{}",
+                getattr(worker, "label", "?"),
+                "、".join(dropped),
+            )
+            record_error("repair_dropped_facts")
+        # 修复后先走 regex 快筛（零 LLM 调用）
         regex_issues = workflow._reviewer._regex_review(
             repaired,
             state["chart_context"].chart,
@@ -184,11 +216,34 @@ def create_xianzhi_graph(workflow):
             facts_text,
         )
         if not regex_issues:
-            log.info(
-                "[Reflextion] {} Worker 修复后 regex 快筛通过 ✓（跳过 LLM 重审）",
-                getattr(worker, "label", "?"),
+            # regex 通过 ≠ 修复稿没问题：再跑一次 LLM 深审复核。
+            # 旧版此处"regex 过即定稿"，修复稿从未被 LLM 看过，改写质量问题无人发现。
+            llm_ok = workflow._reviewer.review_llm_only(
+                repaired,
+                state["chart_context"].chart,
+                state.get("knowledge", ""),
+                user_prompt=state["user_prompt"],
+                ctx=state["chart_context"],
+                second_chart=second_chart.chart if second_chart else None,
+                sui_text=build_sui_section(state["chart_context"].chart, intent),
             )
-            return {"final_answer": repaired, "issues": []}
+            if llm_ok.ok:
+                log.info(
+                    "[Reflextion] {} Worker 修复后 regex + LLM 双通过 ✓ (source={})",
+                    getattr(worker, "label", "?"),
+                    llm_ok.source,
+                )
+                return {"final_answer": repaired, "issues": []}
+            # LLM 判不通过但图是单轮修复（无二次修复循环）：仍按 repaired 定稿，问题仅记日志 + 指标
+            log.warning(
+                "[Reflextion] {} 修复后 regex 通过但 LLM 深审发现问题（{} 条）→ 单轮修复不重试，按 repaired 定稿",
+                getattr(worker, "label", "?"),
+                len(llm_ok.issues),
+            )
+            for i, issue in enumerate(llm_ok.issues, 1):
+                log.warning("[Reflextion]   LLM 残留issue[{}]: {}", i, issue)
+            record_error("reviewer_repair_llm_rejected")
+            return {"final_answer": repaired, "issues": llm_ok.issues}
         # regex 仍发现问题 → 才跑 LLM 深审。
         # 注意：旧版这里调 `review()`，而 `review()` 会先跑一遍 regex 并在命中时立刻短路返回，
         # 所以 LLM 实际从未被调用（日志却写"触发 LLM 深审"，误导排查）。现改为 review_llm_only()。

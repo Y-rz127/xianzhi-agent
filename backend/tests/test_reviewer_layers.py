@@ -66,6 +66,16 @@ def test_fabricated_dayun_ganzhi_is_caught():
     assert any("丁卯" in i and "大运" in i for i in issues), issues
 
 
+def test_liunian_ganzhi_as_yun_needs_year_context():
+    """流年干支被当成"运"写：只有在年份/流年紧邻时才放行（旧版无条件放行 → 编造大运撞上
+    某个流年干支就拦不住）。本盘 2026-2035 窗口含己酉、壬子等流年干支，均非大运。"""
+    issues = _issues("你走到己酉运，感情有波动。")
+    assert any("己酉" in i and "大运" in i for i in issues), issues
+
+    assert _issues("2032壬子运要注意竞争。") == []
+    assert _issues("流年壬子运里，桃花多。") == []
+
+
 def test_real_dayun_and_liunian_ganzhi_pass():
     assert _issues("你走到癸酉运，本身是劫财运，又带桃花。") == []
     assert _issues("癸酉运里走己酉年，感情会有波动。") == []
@@ -244,11 +254,12 @@ def test_review_llm_only_is_safe_without_model():
 # ============================================================
 
 class _ScriptedModel:
-    """按 prompt 内容分派返回值：审核 → 判定 JSON；拆解 → 拆解 JSON；其余 → Worker 回答。"""
+    """按 prompt 内容分派返回值：审核 → 判定 JSON；修复 → 修复稿；拆解 → 拆解 JSON；其余 → 生成回答。"""
 
-    def __init__(self, worker_answer, verdict):
+    def __init__(self, worker_answer, repair_answer=None, verdicts=None):
         self.worker_answer = worker_answer
-        self.verdict = verdict
+        self.repair_answer = repair_answer
+        self.verdicts = list(verdicts or ['{"pass": true, "issues": []}'])
         self.review_calls = 0
 
     def bind(self, **kwargs):
@@ -257,8 +268,11 @@ class _ScriptedModel:
     def invoke(self, messages, **kwargs):
         text = "\n".join(str(getattr(m, "content", "")) for m in messages)
         if "【待审核回答】" in text:
+            idx = min(self.review_calls, len(self.verdicts) - 1)
             self.review_calls += 1
-            return AIMessage(content=self.verdict)
+            return AIMessage(content=self.verdicts[idx])
+        if "【原回答】" in text:
+            return AIMessage(content=self.repair_answer or self.worker_answer)
         if "domain" in text and "queries" in text:
             return AIMessage(
                 content='{"domain":"personality","queries":["性格 十神 格局 特征"],'
@@ -267,32 +281,83 @@ class _ScriptedModel:
         return AIMessage(content=self.worker_answer)
 
 
-def test_repair_second_check_reaches_llm_and_records_metric():
-    """修复稿仍被 regex 打回时：LLM 深审必须真的被调用（旧版 review() 被正则短路，LLM 从未调用），
-    LLM 判通过则按修复稿定稿并记 reviewer_regex_likely_false_positive。
-    """
+def _metrics_snapshot(key):
+    from app.core.observability import get_metrics
+
+    return dict(get_metrics()["internal_errors"]).get(key, 0)
+
+
+def _run_agent(model, question="我性格怎么样？"):
     from unittest.mock import MagicMock, patch
 
     from app.agent.xianzhi import Xianzhi
-    from app.core.observability import get_metrics
-
-    model = _ScriptedModel(
-        worker_answer="你日柱带华盖，爱琢磨，平时喜欢安静。",  # 华盖属时柱 → regex 命中
-        verdict='{"pass": true, "issues": []}',
-    )
-    before = dict(get_metrics()["internal_errors"]).get("reviewer_regex_likely_false_positive", 0)
 
     with patch("app.agent.xianzhi.create_chat_memory") as m1:
         m1.return_value = MagicMock()
         agent = Xianzhi(chat_model=model, local_tools=[])
         agent.set_conversation_id("test-repair-llm-second-check")
         agent.set_chart_context("2004-06-22 08:00", MALE)
-        answer = agent.run("我性格怎么样？")
+        return agent.run(question)
+
+
+def test_repair_second_check_reaches_llm_and_records_metric():
+    """修复稿仍被 regex 打回时：LLM 深审必须真的被调用（旧版 review() 被正则短路，LLM 从未调用），
+    LLM 判通过则按修复稿定稿并记 reviewer_regex_likely_false_positive。
+    """
+    model = _ScriptedModel(
+        worker_answer="你日柱带华盖，爱琢磨，平时喜欢安静。",  # 华盖属时柱 → regex 命中
+    )
+    before = _metrics_snapshot("reviewer_regex_likely_false_positive")
+
+    answer = _run_agent(model)
 
     assert model.review_calls == 1, "修复后的二次判定必须真的调用 LLM 深审"
     assert "华盖" in answer
-    after = dict(get_metrics()["internal_errors"]).get("reviewer_regex_likely_false_positive", 0)
-    assert after == before + 1, "regex 疑似误报必须计入 /metrics internal_errors"
+    assert _metrics_snapshot("reviewer_regex_likely_false_positive") == before + 1, (
+        "regex 疑似误报必须计入 /metrics internal_errors"
+    )
+
+
+def test_repair_output_is_llm_verified_even_when_regex_passes():
+    """修复稿 regex 通过也要过 LLM 深审（旧版"regex 过即定稿"，修复稿从未被 LLM 看过）。"""
+    model = _ScriptedModel(
+        worker_answer="你日柱带华盖，爱琢磨。",              # regex 命中 → 触发修复
+        repair_answer="你时柱华盖，爱琢磨，平时喜欢安静。",   # 修好了 → regex 通过
+        verdicts=['{"pass": false, "issues": ["修复稿丢失了流年信息"]}'],
+    )
+    before = _metrics_snapshot("reviewer_repair_llm_rejected")
+
+    answer = _run_agent(model)
+
+    assert model.review_calls == 1, "regex 通过后仍必须调用 LLM 复核修复稿"
+    assert "时柱华盖" in answer, "单轮修复不重试，仍按修复稿定稿"
+    assert _metrics_snapshot("reviewer_repair_llm_rejected") == before + 1
+
+
+def test_dropped_real_facts_helper_flags_only_real_ones():
+    """修复前后事实比对：只报"排盘事实中确实存在"且被丢掉的十神/神煞。"""
+    from app.agent.xianzhi_langgraph import _dropped_real_facts
+
+    facts = compact_facts(CHART, QuestionIntent(domain="love", label="恋爱感情", target_years=[2032]))
+    assert "红艳煞" in facts, "该盘 2032 壬子流年带红艳煞，用于本用例"
+    dropped = _dropped_real_facts("2032壬子年带红艳煞，感情竞争多。", "感情竞争感重一些。", facts)
+    assert dropped == ["红艳煞"], dropped
+    # 事实里没有的名字不算（避免把"编造内容被删掉"误报成信息损失）
+    assert _dropped_real_facts("命带紫微星", "感情竞争感重一些。", facts) == []
+
+
+def test_repair_dropping_real_fact_is_recorded():
+    """修复稿把原稿里"排盘事实确实存在"的十神删掉 → 记 repair_dropped_facts（仅观测，不重试）。"""
+    model = _ScriptedModel(
+        worker_answer="你日柱带华盖，庚金偏印贴身，想法多。",  # 华盖错绑 → regex 命中；偏印真实存在
+        repair_answer="你时柱华盖，想法多。",                  # 修好华盖，但把偏印整句删了
+    )
+    before = _metrics_snapshot("repair_dropped_facts")
+
+    answer = _run_agent(model)
+
+    assert "时柱华盖" in answer
+    assert _metrics_snapshot("repair_dropped_facts") == before + 1, "修复丢弃真实事实必须可观测"
 
 
 # ============================================================
@@ -302,22 +367,10 @@ def test_repair_second_check_reaches_llm_and_records_metric():
 def test_computed_shensha_names_are_all_known_to_checker():
     """排盘计算器产出的神煞名必须都在审核名单里（否则新神煞会被误判"排盘事实中无"）。"""
     import datetime as dt
-    import inspect
-    import ast
-    import textwrap
 
-    from app.agent.workflow.workflow_messages import check_facts
+    from app.agent.workflow.workflow_messages import SHENSHA_NAMES, SHISHEN_NAMES
 
-    def _literal(varname):
-        tree = ast.parse(textwrap.dedent(inspect.getsource(check_facts)))
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Assign) and any(
-                getattr(t, "id", "") == varname for t in node.targets
-            ):
-                return set(ast.literal_eval(node.value))
-        raise KeyError(varname)
-
-    known = _literal("_SHENSHA_NAMES") | _literal("_SHISHEN_NAMES")
+    known = set(SHENSHA_NAMES) | set(SHISHEN_NAMES)
     produced = set()
     for i in range(120):
         d = dt.date(1950, 1, 1) + dt.timedelta(days=i * 53)
