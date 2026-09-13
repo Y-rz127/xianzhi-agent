@@ -31,6 +31,7 @@ from app.agent.workflow.workflow_models import (
 from app.agent.workflow.workflow_support import (
     GANZHI_RE,
     YEAR_GANZHI_RE,
+    _DAYUN_GANZHI_RE,
     _dedupe_content,
 )
 from app.agent.workflow.workflow_workers import WORKERS
@@ -499,24 +500,36 @@ def check_facts(
     """
     issues: list[str] = []
     year_to_gz: dict[int, str] = {item.year: item.ganzhi for item in chart.liunian}
+    dayun_gz: set[str] = {d.ganzhi for d in chart.dayun}
     if other_chart is not None:
         for item in other_chart.liunian:
             year_to_gz.setdefault(item.year, item.ganzhi)
-    _DAYUN_KEYWORDS = ("大运", "交运", "起运", "运柱", "行运", "运", "步入", "走", "交")
+        dayun_gz |= {d.ganzhi for d in other_chart.dayun}
+    # 大运豁免（旧版把 (大运/运/走/交…) 丢进 ±30 字窗口判断，导致回答只要出现"运"字就整体
+    # 跳过流年校验——实测"2030年是己酉年，这一步运里注意变动"漏检）。现在改为同时满足：
+    #   ① 该干支确实是本盘某步大运的干支；② "年份→干支"之间(≤6字)或干支之后紧随大运词。
+    _DAYUN_MARKER_RE = re.compile(r"大运|交运|起运|运柱|行运|步入|迈入|走入|交入|走|交|运")
     for match in YEAR_GANZHI_RE.finditer(answer):
         year = int(match.group("year"))
         stated = match.group("ganzhi")
         expected = year_to_gz.get(year)
         if not expected or stated == expected:
             continue
-        # 大运语境排除：年份+干支附近若明确在描述大运（出现大运关键词），则该干支视为大运而非流年，跳过校验。
-        # 直接以「年份附近有大运关键词」语义判断，避免把大运干支误判为流年错误（不依赖 dayun 集合完整度）。
-        start = max(0, match.start() - 30)
-        end = min(len(answer), match.end() + 30)
-        context = answer[start:end]
-        if any(kw in context for kw in _DAYUN_KEYWORDS):
-            continue
+        if stated in dayun_gz:
+            gap = match.group("gap") or ""
+            tail = answer[match.end() : match.end() + 3]
+            if _DAYUN_MARKER_RE.search(gap) or re.match(r"(?:大)?运", tail):
+                continue  # 该干支在讲大运（"2028年走壬申大运"），不算流年干支错误
         issues.append(f"{year}年流年应为{expected}，回答写成了{stated}")
+
+    # 大运干支校验：回答提到的「XX运/XX大运」须是本盘（含合婚对方盘）真实存在的大运干支。
+    # 流年干支也算合法（"己酉年"写成"己酉运"属近义表达，宁可不误杀）；"财运/桃花运"无干支不匹配。
+    _dayun_valid = dayun_gz | set(year_to_gz.values())
+    for match in _DAYUN_GANZHI_RE.finditer(answer):
+        stated_dy = match.group(1)
+        if stated_dy in _dayun_valid:
+            continue
+        issues.append(f"排盘事实无「{stated_dy}」这步大运，回答却提到{stated_dy}运，与大运事实不符")
 
     # 每个柱名下，两张盘各自合法的干支都算正确
     valid: dict[str, set[str]] = {}
@@ -684,6 +697,9 @@ def check_facts(
                 actual_shensha_all.add(name)
 
     _SENT_SPLIT = re.compile(r"[。；;！!？?\n\r]")
+    # 否定词表：旧版把单字"不/无/未/非/否/没"当否定词，"不错""无论""非常"这类词就把肯定句
+    # 误判成否定而漏检（实测"你日柱不错，还带华盖"直接放行）。现改为：多字否定词直接命中；
+    # 单字否定须后接谓语（是/带/含/见/有…）或紧邻目标词才算否定。
     _NEG_TOKENS = (
         "没见",
         "没有",
@@ -693,13 +709,24 @@ def check_facts(
         "并无",
         "毫无",
         "不存在",
-        "没",
-        "不",
-        "无",
-        "未",
-        "非",
-        "否",
+        "不曾",
+        "并未",
+        "并非",
+        "而非",
+        "未有",
+        "未带",
+        "未含",
+        "无此",
+        "没带",
+        "无关",
+        "不算",
+        "谈不上",
+        "算不上",
+        "见不到",
+        "看不到",
     )
+    _NEG_CHARS = "不未无没非否莫"
+    _NEG_PREDICATES = "是带含见有存在落坐透现遇属会具犯逢临"
     # 动态岁运语境标识：出现即认为在讲外部流年/大运，而非原盘静态断言
     _DYNAMIC_CTX = re.compile(r"\d{4}|大运|流年|岁运|年运|运上|流月|流日")
     # "桃花年""红鸾运"等约定俗成 → 目标词后紧接年/运/月 视为动态流年讨论
@@ -724,13 +751,29 @@ def check_facts(
         "配",
     )
 
-    def _sentence_has_negative_between(sent: str, a_pos: int, b_pos: int) -> bool:
-        """判断 sent 中 a_pos 与 b_pos 之间（含边界附近±2）是否存在否定词。"""
+    def _sentence_has_negative_between(
+        sent: str, a_pos: int, b_pos: int, target_word: str = ""
+    ) -> bool:
+        """判断 sent 中 a_pos 与 b_pos 之间（含边界附近±2）是否存在否定词。
+
+        多字否定词直接命中；单字否定（不/未/无/没/非/否）只在后接谓语（是/带/含/见/有…）
+        或紧邻 target_word 时才算否定，避免"不错/无论/非常"把肯定断言当否定放行。
+        """
         lo, hi = sorted([a_pos, b_pos])
         lo = max(0, lo - 2)
         hi = min(len(sent), hi + 2)
         seg = sent[lo:hi]
-        return any(tok in seg for tok in _NEG_TOKENS)
+        if any(tok in seg for tok in _NEG_TOKENS):
+            return True
+        for i, ch in enumerate(seg):
+            if ch not in _NEG_CHARS:
+                continue
+            nxt = seg[i + 1 : i + 2]
+            if nxt and nxt in _NEG_PREDICATES:
+                return True
+            if target_word and seg[i + 1 : i + 1 + len(target_word)] == target_word:
+                return True
+        return False
 
     def _sentence_is_theory_definition(sent: str, target_word: str) -> bool:
         """判断该句是否是在做纯理论定义/区别解释，而非命盘断言。"""
@@ -800,7 +843,12 @@ def check_facts(
             a_pos = sent.find(anchor)
             if a_pos < 0:
                 continue
-            if not _sentence_has_negative_between(sent, a_pos, t_pos):
+            # 锚点与目标词之间若插入了年份/大运/流年（如"你日柱壬申，2045年拱禄入命"），
+            # 目标词是绑在岁运上的，不构成原局归属断言 → 换下一个锚点（避免误报"排盘事实中无X"）
+            _lo, _hi = sorted([a_pos, t_pos])
+            if _DYNAMIC_CTX.search(sent[_lo:_hi]):
+                continue
+            if not _sentence_has_negative_between(sent, a_pos, t_pos, target_word):
                 return True
         # B) needs_chart=True 无锚点路径：绑定命盘分析但句中没说盘/柱
         if needs_chart:
@@ -934,7 +982,7 @@ def check_facts(
                 continue  # 该小句在讲流年/大运 → 不是原盘柱位断言
             a_pos = clause.find(nearest[0])
             # 排除否定：如"日柱没有金舆"不算错误归属断言
-            if _sentence_has_negative_between(clause, a_pos, t_pos):
+            if _sentence_has_negative_between(clause, a_pos, t_pos, name):
                 continue
             if owners:
                 issues.append(

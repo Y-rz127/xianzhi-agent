@@ -12,8 +12,9 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.agent.prompts import CLASSIC_BOOK_WHITELIST, REVIEWER_SYSTEM
 from app.agent.workflow.workflow_models import DomainWorker, FactCheckResult
-from app.agent.workflow.workflow_support import _parse_json
+from app.agent.workflow.workflow_support import _parse_json, invoke_review
 from app.core.logger import log
+from app.core.observability import record_error
 from app.domain.bazi_engine import BaziChart, format_fact_context
 
 _REVIEWER_SYSTEM = REVIEWER_SYSTEM
@@ -289,6 +290,24 @@ WORKERS: dict[str, DomainWorker] = {
 }
 
 
+def _coerce_pass(value: Any) -> bool:
+    """把审核 JSON 的 pass 字段归一化为布尔。
+
+    旧实现 `bool(data.get("pass", True))` 会把字符串 "false"/"否" 当成 True（非空字符串为真），
+    模型明确判"不通过"时被静默当成通过。非预期类型一律保守判通过（宁可不误杀）。
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        v = value.strip().lower()
+        if v.startswith(("不", "否", "未", "非")) or "false" in v or "fail" in v or v in {"no", "n", "0"}:
+            return False
+        return True
+    return True
+
+
 class ReviewerWorker:
     """Reviewer 独立审核 Agent：正则快筛 + LLM 深审。
 
@@ -320,8 +339,27 @@ class ReviewerWorker:
         "稳赚不赔",
     )
 
-    # 古籍真实性校验：抽取回答中「《XXX》原文：...」标注
-    ANCIENT_CITATION_RE = re.compile(r"《[^》]{1,12}》[^。；;\n]{0,6}原文[：:]")
+    # 古籍引用标注：书名 + 引用标记（原文/原句/云/曰/有云/所言/上说…）。
+    # 旧版只认「原文：」，写成"《麻衣神相》云：…"就能绕过书名核验。
+    ANCIENT_CITATION_RE = re.compile(
+        r"《(?P<book>[^》]{1,12})》(?P<gap>[^。；;\n]{0,6}?)"
+        r"(?P<marker>原文|原句|有云|所云|所言|上说|中云|云|曰)"
+    )
+    # 引用标记后紧邻的引号原句（用于句级复核）：原文：“壬水通河，能泄金气。”
+    _QUOTED_AFTER_MARKER_RE = re.compile(r"[\s：:，,、]*[“\"'「](?P<quote>[^”\"'」]{4,80})[”\"'」]")
+    # 句级比对前去掉标点/空白，避免断句与标点差异造成误判
+    _QUOTE_STRIP_RE = re.compile(r"[\s，。、；：！？,.;:!?\"'“”‘’「」（）()《》—…·\-]")
+
+    @classmethod
+    def _normalize_quote(cls, text: str) -> str:
+        """引文归一化：只留实义文字，便于与检索片段做包含比对。"""
+        return cls._QUOTE_STRIP_RE.sub("", text or "")
+
+    @classmethod
+    def _following_quote(cls, text: str, pos: int) -> str:
+        """取引用标记之后紧邻的引号原句；没有引号原句返回空串。"""
+        m = cls._QUOTED_AFTER_MARKER_RE.match(text, pos)
+        return m.group("quote").strip() if m else ""
 
     def __init__(self, chat_model: BaseChatModel | None = None):
         self._chat_model = chat_model
@@ -349,7 +387,8 @@ class ReviewerWorker:
             fact_checker: 复用 XianzhiWorkflow.check_facts 方法
             second_chart: 合婚双盘时的对方命盘
             user_prompt: 原始用户问题（LLM 审核判断是否答非所问）
-            ctx: WorkflowChartContext（LLM 审核构建事实上下文用）
+            ctx: WorkflowChartContext（**当前未使用**：LLM 深审的事实上下文由 `format_fact_context(chart)`
+                构建，此处保留参数仅为调用方签名稳定）
             skip_llm: 跳过 LLM 深审，仅依赖正则
             needs_chart: 当前回答是否属于"绑定命盘分析"场景（命盘分析/合婚/流年大运推演等）。
                 True 时十神/神煞存在性严格校验；False（理论问答）时仅校验归属断言。
@@ -376,6 +415,18 @@ class ReviewerWorker:
 
         return self._llm_review(answer, chart, knowledge, user_prompt, ctx, second_chart, sui_text)
 
+    def review_llm_only(
+        self, answer, chart, knowledge, user_prompt="", ctx=None, second_chart=None, sui_text: str = ""
+    ) -> FactCheckResult:
+        """只跑第 2 层 LLM 深审。
+
+        供"正则已单独跑过"的调用方使用（如修复后的二次判定）：`review()` 会先跑正则并在
+        命中时立刻短路，导致调用方以为触发了 LLM 深审、实际 LLM 从未被调用。
+        """
+        if self._chat_model is None:
+            return FactCheckResult(ok=True, source="regex")
+        return self._llm_review(answer, chart, knowledge, user_prompt, ctx, second_chart, sui_text)
+
     def _regex_review(
         self, answer, chart, knowledge, fact_checker, second_chart, needs_chart: bool, facts_text: str = ""
     ) -> list[str]:
@@ -383,24 +434,37 @@ class ReviewerWorker:
         issues: list[str] = []
 
         # 1) 事实校验（四柱/大运/流年/十神/神煞）
+        # 合婚双盘：两盘各作主盘校验一次，同一条 issue 只保留一条（旧版会把重复项记两遍，
+        # 日志与修复提示都被灌两遍）
         fact_result = fact_checker(answer, chart, second_chart, needs_chart, facts_text)
         issues.extend(fact_result.issues)
         if second_chart is not None:
             fact_result2 = fact_checker(answer, second_chart, chart, needs_chart, facts_text)
-            issues.extend(fact_result2.issues)
+            _seen = set(issues)
+            for _issue in fact_result2.issues:
+                if _issue not in _seen:
+                    _seen.add(_issue)
+                    issues.append(_issue)
 
-        # 2) 古籍真实性校验
-        citations = self.ANCIENT_CITATION_RE.findall(answer)
-        if citations and knowledge and "未检索到相关知识" not in knowledge and "闲聊场景" not in knowledge:
-            cited_books = set()
-            for m in re.finditer(r"《([^》]{1,12})》", knowledge):
-                cited_books.add(m.group(1))
-            for citation in citations:
-                book_match = re.match(r"《([^》]{1,12})》", citation)
-                if book_match:
-                    book = book_match.group(1)
-                    if book not in cited_books and book not in CLASSIC_BOOK_WHITELIST:
-                        issues.append(f"引用《{book}》原文未在检索结果中出现，疑似杜撰古籍")
+        # 2) 古籍真实性校验：书名核验 + （该书确在检索片段中时）引文句级复核
+        if knowledge and "未检索到相关知识" not in knowledge and "闲聊场景" not in knowledge:
+            cited_books = {m.group(1) for m in re.finditer(r"《([^》]{1,12})》", knowledge)}
+            norm_knowledge = self._normalize_quote(knowledge)
+            for m in self.ANCIENT_CITATION_RE.finditer(answer):
+                book = m.group("book")
+                if book not in cited_books and book not in CLASSIC_BOOK_WHITELIST:
+                    issues.append(
+                        f"引用《{book}》{m.group('marker')}未在检索结果中出现，疑似杜撰古籍"
+                    )
+                    continue
+                quote = self._following_quote(answer, m.end())
+                # 只在"该书文本确实被检索到"时做句级复核：白名单书名但本次没检索到 → 沿用宽口径放行
+                if not quote or book not in cited_books or len(quote) < 6:
+                    continue
+                if self._normalize_quote(quote) not in norm_knowledge:
+                    issues.append(
+                        f"引用《{book}》的「{quote[:20]}」在该书检索片段中找不到，疑似杜撰原文"
+                    )
 
         # 3) 合规红线扫描
         risks_found = [kw for kw in self.COMPLIANCE_RISKS if kw in answer]
@@ -429,20 +493,26 @@ class ReviewerWorker:
             HumanMessage(content=human_content),
         ]
         try:
-            resp = self._chat_model.invoke(messages)
-            raw = (getattr(resp, "content", "") or "").strip()
+            raw = (invoke_review(self._chat_model, messages) or "").strip()
             raw = re.sub(r"^```(?:json)?\s*", "", raw)
             raw = re.sub(r"\s*```$", "", raw)
             data = _parse_json(raw)
             if not data or not isinstance(data, dict):
                 log.warning("[Reviewer] LLM 审核返回非 JSON，降级为通过: {}", raw[:200])
+                record_error("reviewer_llm_nonjson")
                 return FactCheckResult(ok=True, source="regex_fallback")
-            passed = bool(data.get("pass", True))
+            passed = _coerce_pass(data.get("pass", True))
             issues_raw = data.get("issues", [])
             issues = [str(i) for i in issues_raw if str(i).strip()] if isinstance(issues_raw, list) else []
+            if not passed and not issues:
+                # 判不通过却不给 issues：修复器无事可做，只会白烧一轮，按通过处理并计入指标
+                log.warning("[Reviewer] LLM 判不通过但未给出 issues，按通过处理（避免空修复轮）")
+                record_error("reviewer_pass_without_issues")
+                passed = True
             if not passed:
                 log.info("[Reviewer] LLM 深审发现问题: {} 条 issue", len(issues))
             return FactCheckResult(ok=passed, issues=issues, source="llm")
         except Exception as e:
             log.warning("[Reviewer] LLM 审核失败，降级为纯正则通过: {}", e)
+            record_error("reviewer_llm_error")
             return FactCheckResult(ok=True, source="regex_fallback")

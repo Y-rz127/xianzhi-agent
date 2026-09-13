@@ -14,26 +14,76 @@ from app.agent.workflow.workflow_models import (
     QuestionIntent,
     WorkflowChartContext,
 )
+from app.core.config import settings as _settings
 from app.domain.bazi_engine import build_bazi_chart, format_fact_context
 from app.rag.retrieval import DOMAIN_KEYWORDS
-from app.tools.text_clean import dedupe_content as _dedupe_content_impl
+from app.tools.text_clean import clean_think_tags, dedupe_content as _dedupe_content_impl
+
+
+def _iter_json_candidates(text: str):
+    """按大括号平衡扫描，逐个 yield 能解析成 JSON 的片段（含字符串转义/引号内大括号处理）。"""
+    for start, ch in enumerate(text):
+        if ch != "{":
+            continue
+        depth = 0
+        in_str = False
+        esc = False
+        for pos in range(start, len(text)):
+            c = text[pos]
+            if in_str:
+                if esc:
+                    esc = False
+                elif c == "\\":
+                    esc = True
+                elif c == '"':
+                    in_str = False
+                continue
+            if c == '"':
+                in_str = True
+            elif c == "{":
+                depth += 1
+            elif c == "}":
+                depth -= 1
+                if depth == 0:
+                    try:
+                        yield json.loads(text[start : pos + 1])
+                    except json.JSONDecodeError:
+                        pass
+                    break
 
 
 def _parse_json(text: str) -> Any:
-    """容错 JSON 解析：处理 LLM 输出的各种格式问题。"""
-    text = text.strip()
+    """容错 JSON 解析：处理 LLM 输出的各种格式问题。
+
+    旧实现失败后用贪婪正则 ``\\{[\\s\\S]*\\}`` 取"第一个 { 到最后一个 }"，只要思考文字里出现
+    任何大括号就会整体解析失败（审核路径因此被静默降级为"通过"）。现改为整体解析 →
+    逐个大括号起点做平衡扫描，逐个尝试；审核类 JSON 以 ``pass`` 字段为标志，优先取最后一个
+    含 ``pass`` 的对象（结论通常在思考之后），否则取最后一个可解析对象。
+    """
+    text = (text or "").strip()
+    if not text:
+        return None
     try:
         return json.loads(text)
     except json.JSONDecodeError:
         pass
-    # 尝试提取第一个 {...} 块
-    m = re.search(r"\{[\s\S]*\}", text)
-    if m:
-        try:
-            return json.loads(m.group(0))
-        except json.JSONDecodeError:
-            pass
-    return None
+    candidates = list(_iter_json_candidates(text))
+    if not candidates:
+        return None
+    verdicts = [c for c in candidates if isinstance(c, dict) and "pass" in c]
+    return verdicts[-1] if verdicts else candidates[-1]
+
+
+def invoke_review(chat_model: Any, messages: list[Any]) -> str:
+    """审核（Reviewer）专用 LLM 调用。
+
+    与 `workflow_messages.invoke` 一致地放宽超时并清理思考标签（旧版审核直接
+    `chat_model.invoke`，既没有超时 bind 也不清理 think 块，思考模型的输出会让 JSON 解析失败），
+    但不做"空产出兜底文案"——审核拿不到 JSON 时必须显式降级，而不是把兜底文案当审核结论解析。
+    """
+    response = chat_model.bind(timeout=_settings.workflow_llm_timeout).invoke(messages)
+    content = (getattr(response, "content", "") or "").strip()
+    return clean_think_tags(content)
 
 
 def _dedupe_content(content: str) -> str:
@@ -47,7 +97,7 @@ GANZHI_RE = re.compile(r"[甲乙丙丁戊己庚辛壬癸][子丑寅卯辰巳午�
 
 
 YEAR_GANZHI_RE = re.compile(
-    r"(?P<year>\d{4})年[^。；;，,、\n]{0,6}(?P<ganzhi>[甲乙丙丁戊己庚辛壬癸][子丑寅卯辰巳午未申酉戌亥])"
+    r"(?P<year>\d{4})年(?P<gap>[^。；;，,、\n]{0,6})(?P<ganzhi>[甲乙丙丁戊己庚辛壬癸][子丑寅卯辰巳午未申酉戌亥])"
 )
 
 

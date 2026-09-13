@@ -21,6 +21,7 @@ from app.agent.workflow.xianzhi_workflow import (
     classify_question,
 )
 from app.core.logger import log
+from app.core.observability import record_error
 
 
 class XianzhiGraphState(TypedDict, total=False):
@@ -188,27 +189,42 @@ def create_xianzhi_graph(workflow):
                 getattr(worker, "label", "?"),
             )
             return {"final_answer": repaired, "issues": []}
-        # regex 仍发现问题 → 才触发 LLM 深审
+        # regex 仍发现问题 → 才跑 LLM 深审。
+        # 注意：旧版这里调 `review()`，而 `review()` 会先跑一遍 regex 并在命中时立刻短路返回，
+        # 所以 LLM 实际从未被调用（日志却写"触发 LLM 深审"，误导排查）。现改为 review_llm_only()。
         log.info(
-            "[Reflextion] {} Worker 修复后 regex 发现 {} 条问题，触发 LLM 深审",
+            "[Reflextion] {} Worker 修复后 regex 发现 {} 条问题，跑 LLM 深审复核",
             getattr(worker, "label", "?"),
             len(regex_issues),
         )
-        repaired_review = workflow._reviewer.review(
+        repaired_review = workflow._reviewer.review_llm_only(
             repaired,
             state["chart_context"].chart,
             state.get("knowledge", ""),
-            workflow.check_facts,
-            second_chart.chart if second_chart else None,
             user_prompt=state["user_prompt"],
             ctx=state["chart_context"],
-            needs_chart=needs_chart,
+            second_chart=second_chart.chart if second_chart else None,
             sui_text=build_sui_section(state["chart_context"].chart, intent),
-            facts_text=facts_text,
         )
-        if repaired_review.ok:
-            log.info("[Reflextion] {} Worker 修复后通过校验 ✓", getattr(worker, "label", "?"))
+        if repaired_review.ok and repaired_review.source == "llm":
+            # LLM 深审认为修复稿没问题 → 残留 issue 大概率是正则误报：仍按 repaired 定稿，
+            # 但把"疑似误报"落日志 + 指标，避免正则误报长期静默（用户可见内容不受影响）
+            log.warning(
+                "[Reflextion] {} 修复稿 regex 仍报 {} 条问题，但 LLM 深审判通过 → regex 疑似误报，按 repaired 定稿",
+                getattr(worker, "label", "?"),
+                len(regex_issues),
+            )
+            for i, issue in enumerate(regex_issues, 1):
+                log.warning("[Reflextion]   regex 残留issue[{}]: {}", i, issue)
+            record_error("reviewer_regex_likely_false_positive")
             return {"final_answer": repaired, "issues": []}
+        if repaired_review.ok:
+            log.info(
+                "[Reflextion] {} Worker 修复后 LLM 深审未生效（source={}），残留 issue 仅记日志",
+                getattr(worker, "label", "?"),
+                repaired_review.source,
+            )
+            return {"final_answer": repaired, "issues": regex_issues}
         # 修复后仍未通过：issues 仅写日志，不再硬拼到用户可见回复中（之前的「口径校验：...」调试信息会泄露给用户，已移除）
         log.warning(
             "[Reflextion] {} Worker 修复后仍未通过 ✗，降级返回 repaired (残留 {} 条 issue 仅记日志)",

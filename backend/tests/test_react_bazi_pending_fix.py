@@ -139,7 +139,6 @@ def test_pure_chitchat_no_false_positive():
 
     test_cases = [
         "你好",
-        "哈哈，今天天气不错",
         "谢谢师傅",
         "在吗",
         "早上好",
@@ -158,6 +157,16 @@ def test_pure_chitchat_no_false_positive():
             result = agent._is_chitchat(text)
             assert result is True, f"'{text}' 应走闲聊短路，实际 _is_chitchat={result}"
             print(f"  ✓ '{text}' → 走闲聊短路（未误触发生辰信号）")
+
+        # 含天气词的寒暄按产品设计走 general（保留 ReAct 以便调用天气/搜索工具），
+        # 不算闲聊短路——见 test_classify_question_keeps_weather_queries_out_of_chitchat
+        weather_text = "哈哈，今天天气不错"
+        agent = Xianzhi(chat_model=MagicMock(), local_tools=[])
+        agent.reset()
+        agent.mount_chart_context(weather_text)
+        assert agent._birth_signal is False, f"'{weather_text}' 不应触发 _birth_signal"
+        assert agent._is_chitchat(weather_text) is False, "含天气词的寒暄应走 general 而非闲聊短路"
+        print(f"  ✓ '{weather_text}' → general（天气词保留工具调用能力，不误触发生辰信号）")
 
 
 if __name__ == "__main__":
