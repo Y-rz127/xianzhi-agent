@@ -211,7 +211,7 @@ export interface XiPanSiLing { stem: string; detail: string }
 export interface XiPanRelationGroup {
   /** 岁运栏为「壬申 · 丙午 · 丙申」，原局栏为四柱干支 */
   label: string
-  /** 天干栏：五合与相克（克者在前），如「丙庚相克」 */
+  /** 天干栏：只列五合与四冲（甲庚/乙辛/丙壬/丁癸），如「丁壬合木」「丙壬冲」 */
   gan: string[]
   /** 地支栏：三合/半合/拱局/会方/六合/六冲/六害/六破/三刑/自刑 */
   zhi: string[]

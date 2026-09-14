@@ -26,6 +26,7 @@ from app.domain.tables import (
     _YANG_GAN,
     _ZHI_SEQ,
     CONTROLS,
+    GAN_CHONG,
     GAN_HE,
     GAN_WUXING,
     GENERATES,
@@ -570,16 +571,18 @@ def _dedup(items: list[str]) -> list[str]:
 
 
 def _gan_rel(a: str, b: str) -> str:
-    """两天干关系：五合优先，其次相克（克者在前，与专业排盘软件同写法）。"""
+    """两天干关系：五合优先，其次四冲（甲庚/乙辛/丙壬/丁癸）。
+
+    天干只列「合」「冲」两类：四冲本身也是相克关系（如壬克丙），一律按「冲」报，
+    不得降格写成「相克」；其余非冲的天干相克（如丁克庚）属常规五行生克，不作关系列出。
+    """
     if not a or not b or a == b:
         return ""
     pair = frozenset((a, b))
     if pair in GAN_HE:
         return GAN_HE[pair]
-    if _ke(a, b):
-        return f"{a}{b}相克"
-    if _ke(b, a):
-        return f"{b}{a}相克"
+    if pair in GAN_CHONG:
+        return GAN_CHONG[pair]
     return ""
 
 

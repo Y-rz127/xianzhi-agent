@@ -58,7 +58,7 @@ class SuiRelations:
     wuxing: str = ""  # 干支五行，如 "火土"（丁未）；确定性事实，不做喜忌判定
     shishen_gan: str = ""  # 干对日主十神
     shishen_zhi: list[str] = field(default_factory=list)
-    gan_rel: list[str] = field(default_factory=list)  # 天干：合 / 相克
+    gan_rel: list[str] = field(default_factory=list)  # 天干：合 / 四冲（非冲的天干相克不列）
     zhi_rel: list[str] = field(default_factory=list)  # 地支：六合/六冲/六害/六破/三刑/三合
     zhu_rel: list[str] = field(default_factory=list)  # 伏吟 / 反吟（岁运 × 原局）
     touched_pillars: list[str] = field(default_factory=list)  # 被引动的原局柱 + 宫位

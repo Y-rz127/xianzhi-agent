@@ -407,12 +407,20 @@ def test_payload_carries_fields_frontend_selection_depends_on():
 
 
 def test_relations_match_professional_software():
-    """岁运/原局分析六栏，逐项对齐专业排盘软件截图（2026-09-07 丁酉流月，白露节气当日）。"""
+    """岁运/原局分析六栏（2026-09-07 丁酉流月，白露节气当日）。
+
+    天干栏口径已按产品要求收窄：四冲按「相冲」报（壬丙不得降格写「相克」），
+    非冲的天干相克（丙庚、丁庚）不列。
+    """
     r = _chart_xipan("男")["relations"]
     assert r["suiyun"]["label"] == "壬申 · 丙午 · 丁酉"
-    assert "丙庚相克" in r["suiyun"]["gan"]
-    assert "壬丙相克" in r["suiyun"]["gan"]
-    assert len(r["suiyun"]["gan"]) >= 2
-    assert r["yuanju"]["gan"] == ["庚甲相克"]
+    gan = r["suiyun"]["gan"]
+    assert "丙壬冲" in gan, gan  # 流年丙 冲 大运壬：必须报冲，不报克
+    assert "丁壬合木" in gan, gan  # 流月丁 合 大运壬
+    assert not [g for g in gan if g.endswith("相克")], gan  # 天干栏不再出现「相克」
+    assert "丙庚相克" not in gan, gan  # 丙火克庚金：非冲，不列
+    assert "丁庚相克" not in gan, gan  # 丁火克庚金：非冲，不列
+    assert gan == ["丙壬冲", "丁壬合木"], gan
+    assert r["yuanju"]["gan"] == ["甲庚冲"]
     assert r["yuanju"]["zhi"] == ["申辰拱合子"]
     assert r["yuanju"]["zhu"] == ["甲申截脚", "庚午截脚", "甲辰盖头"]
