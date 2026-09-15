@@ -11,7 +11,6 @@ from pathlib import Path
 from langchain_core.documents import Document
 from langchain_text_splitters import MarkdownHeaderTextSplitter, RecursiveCharacterTextSplitter
 
-from app.core.config import settings
 from app.core.logger import log
 
 KNOWLEDGE_DIR = Path(__file__).parent / "knowledge_docs"

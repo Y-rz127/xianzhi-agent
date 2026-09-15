@@ -11,21 +11,20 @@ import re
 from langchain_core.tools import tool
 from lunar_python import Lunar, Solar
 
-from app.domain.bazi_engine import (
-    GZ_WUXING,
+from app.domain.chart_builder import (
     build_bazi_chart,
-    build_domain_brief,
-    dayun_relations,
+    parse_birth,
+    parse_gender,
+)
+from app.domain.chart_format import (
     format_analysis_text,
     format_chart_text,
     format_dayun_text,
     format_fact_context,
     format_liunian_text,
-    format_sui_relations,
-    liunian_relations,
-    parse_birth,
-    parse_gender,
 )
+from app.domain.domain_brief import build_domain_brief
+from app.domain.tables import GZ_WUXING
 
 # 时间解析（农历/节日/时辰智能解析与出生时间标准化）已下沉到领域层 app/domain/time_parse.py，
 # 此处重导入以保持本模块对外引用不变（app.agent.xianzhi 仍从本模块导入 _normalize_birth_time）
@@ -36,6 +35,11 @@ from app.domain.time_parse import (
     _parse_birth_smart,
     _parse_cn_day,
     _parse_zhi_hour,
+)
+from app.domain.yun_relations import (
+    dayun_relations,
+    format_sui_relations,
+    liunian_relations,
 )
 from app.rag.retrieval import detect_domain
 from app.tools.cache import bazi_cache
@@ -522,7 +526,7 @@ def bazi_infer_dates(pillars: str, gender: str, top_n: int = 3) -> str:
         候选出生日期列表与选择指引
     """
     try:
-        from app.domain.bazi_engine import find_birth_dates_from_pillars
+        from app.domain.chart_format import find_birth_dates_from_pillars
         candidates = find_birth_dates_from_pillars(pillars, gender, top_n=top_n)
     except ValueError as e:
         return "八字解析失败: {}".format(e)

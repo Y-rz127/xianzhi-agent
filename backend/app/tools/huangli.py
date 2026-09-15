@@ -3,8 +3,8 @@ from __future__ import annotations
 
 from langchain_core.tools import tool
 
-from app.domain.huangli_calc import YI_JI_ITEMS
-from app.sub_app.huangli import huangli_app
+# 模块限定调用：与领域函数同名的本地定义（路由处理函数等）不会遮蔽
+from app.domain import huangli_calc
 
 
 @tool
@@ -21,7 +21,7 @@ def huangli_today(date: str = "") -> str:
         当日黄历文本摘要（宜忌/冲煞/彭祖/吉凶神/方位/值神/时辰要点）
     """
     try:
-        day = huangli_app.huangli_day(date)
+        day = huangli_calc.huangli_day(date)
     except ValueError as e:
         return "黄历查询失败: {}".format(e)
     except Exception as e:
@@ -78,9 +78,9 @@ def huangli_zeji(yi: str, start: str, end: str, avoid_chong: str = "") -> str:
         候选吉日列表（含日干支、冲煞、吉神、值神），按吉神多寡排序
     """
     try:
-        days = huangli_app.zeji(yi, start, end, avoid_chong)
+        days = huangli_calc.zeji(yi, start, end, avoid_chong)
     except ValueError as e:
-        return "择吉失败: {}（可选事项示例：{}）".format(e, "、".join(YI_JI_ITEMS[:12]))
+        return "择吉失败: {}（可选事项示例：{}）".format(e, "、".join(huangli_calc.YI_JI_ITEMS[:12]))
     except Exception as e:
         return "择吉失败: {}".format(e)
 

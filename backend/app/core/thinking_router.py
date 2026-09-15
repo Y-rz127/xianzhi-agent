@@ -27,6 +27,8 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import Any, Iterator, Optional
 
+from app.core.llm_delegate import DelegatingRunnable
+
 # None = 未显式设置，回落到 default_thinking
 thinking_override: ContextVar[Optional[bool]] = ContextVar("thinking_override", default=None)
 
@@ -47,8 +49,11 @@ def use_thinking(on: bool) -> Iterator[None]:
         thinking_override.reset(token)
 
 
-class ThinkingRouter:
+class ThinkingRouter(DelegatingRunnable):
     """按 contextvar 透明切换 ``enable_thinking`` 的模型中间件。
+
+    转发面（invoke/ainvoke/stream/astream/bind/bind_tools/with_config/属性委托）
+    由 ``DelegatingRunnable`` 提供，本类只实现「挑哪个副本」与「如何派生」两个钩子。
 
     Args:
         base: 底层 ``ChatOpenAI`` 实例（仅在直接构造时需要）。
@@ -79,35 +84,16 @@ class ThinkingRouter:
         on = self._default if v is None else v
         return self._on if on else self._off
 
-    # ---- Runnable 接口转发 ----
-    def invoke(self, input: Any, config: Any = None, **kwargs: Any) -> Any:
-        return self.pick().invoke(input, config=config, **kwargs)
+    # ---- DelegatingRunnable 钩子 ----
+    @property
+    def _target(self) -> Any:
+        """当前生效的副本：由 contextvar 开关决定走 ON 还是 OFF。"""
+        return self.pick()
 
-    async def ainvoke(self, input: Any, config: Any = None, **kwargs: Any) -> Any:
-        return await self.pick().ainvoke(input, config=config, **kwargs)
-
-    def stream(self, input: Any, config: Any = None, **kwargs: Any) -> Any:
-        return self.pick().stream(input, config=config, **kwargs)
-
-    async def astream(self, input: Any, config: Any = None, **kwargs: Any) -> Any:
-        async for chunk in self.pick().astream(input, config=config, **kwargs):
-            yield chunk
-
-    def bind_tools(self, tools: Any, **kwargs: Any) -> "ThinkingRouter":
+    def _derive(self, transform: Any) -> "ThinkingRouter":
+        """派生时对 ON/OFF 两份副本同步变换，保证工具绑定与配置对两条路径都生效。"""
         return ThinkingRouter(
-            on=self._on.bind_tools(tools, **kwargs),
-            off=self._off.bind_tools(tools, **kwargs),
+            on=transform(self._on),
+            off=transform(self._off),
             default_thinking=self._default,
         )
-
-    def bind(self, **kwargs: Any) -> "ThinkingRouter":
-        return ThinkingRouter(
-            on=self._on.bind(**kwargs),
-            off=self._off.bind(**kwargs),
-            default_thinking=self._default,
-        )
-
-    # ---- 其余属性/方法委托给 ON 副本（model_name / model / model_dump 等）----
-    def __getattr__(self, name: str) -> Any:
-        # 仅当实例上找不到属性时才走到这里（_on/_off/_default 均为实例属性，不会触发）
-        return getattr(self._on, name)

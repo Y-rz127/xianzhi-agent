@@ -6,7 +6,7 @@
 - 图 state 支持 summary 字段透传（修复双后端漂移）
 """
 
-from app.agent.workflow.xianzhi_workflow import XianzhiWorkflow
+from app.agent.workflow.orchestrator import XianzhiWorkflow
 from app.agent.xianzhi_langgraph import XianzhiGraphState, create_xianzhi_graph
 
 

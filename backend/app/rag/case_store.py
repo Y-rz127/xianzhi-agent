@@ -7,7 +7,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from app.core.logger import log
-from app.domain.bazi_engine import BaziChart
+from app.domain.chart_builder import BaziChart
 from app.rag.relevance import keyword_overlap
 
 

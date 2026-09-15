@@ -14,7 +14,6 @@ import threading
 from app.core.logger import log
 from app.rag.vector_store import get_knowledge_base
 
-
 DOMAIN_KEYWORDS = {
     "career": ("事业", "工作", "职业", "跳槽", "换工作", "升职", "创业", "老板", "岗位", "offer"),
     "wealth": ("财运", "赚钱", "收入", "投资", "生意", "偏财", "正财", "破财", "资产"),

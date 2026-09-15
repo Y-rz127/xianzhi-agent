@@ -4,7 +4,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from app.agent.workflow.xianzhi_workflow import XianzhiWorkflow, build_chart_context
+from app.agent.workflow.orchestrator import XianzhiWorkflow
+from app.agent.workflow.workflow_support import build_chart_context
 
 REPORT_MARKERS = ("【基本信息】", "【四柱】", "【五行】", "完整报告", "第一章", "第二章")
 
@@ -47,8 +48,3 @@ def evaluate_answer_case(case: dict[str, Any], answer: str) -> EvalResult:
     issues.extend(fact_check.issues)
 
     return EvalResult(case_id=case["id"], ok=not issues, issues=issues)
-
-
-def evaluate_answer_cases(cases: list[dict[str, Any]], answers: dict[str, str]) -> list[EvalResult]:
-    """批量评估（一对一映射 case→answer）。"""
-    return [evaluate_answer_case(case, answers.get(case["id"], "")) for case in cases]

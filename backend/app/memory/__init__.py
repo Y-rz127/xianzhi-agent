@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from app.core.config import settings
 from app.core.logger import log
-from app.memory.postgres_memory import PostgresChatMemory
 from app.memory.chat_memory import FileBasedChatMemory
+from app.memory.postgres_memory import PostgresChatMemory
 
 
 def create_chat_memory():

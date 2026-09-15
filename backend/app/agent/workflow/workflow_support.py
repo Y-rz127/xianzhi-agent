@@ -15,7 +15,8 @@ from app.agent.workflow.workflow_models import (
     WorkflowChartContext,
 )
 from app.core.config import settings as _settings
-from app.domain.bazi_engine import build_bazi_chart, format_fact_context
+from app.domain.chart_builder import build_bazi_chart
+from app.domain.chart_format import format_fact_context
 from app.rag.retrieval import DOMAIN_KEYWORDS
 from app.tools.text_clean import clean_think_tags, dedupe_content as _dedupe_content_impl
 

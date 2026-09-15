@@ -15,7 +15,8 @@ from app.agent.workflow.workflow_models import DomainWorker, FactCheckResult
 from app.agent.workflow.workflow_support import _parse_json, invoke_review
 from app.core.logger import log
 from app.core.observability import record_error
-from app.domain.bazi_engine import BaziChart, format_fact_context
+from app.domain.chart_builder import BaziChart
+from app.domain.chart_format import format_fact_context
 
 _REVIEWER_SYSTEM = REVIEWER_SYSTEM
 

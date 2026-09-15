@@ -6,7 +6,7 @@
 - workflow_workers：领域 Worker 注册表与 Reviewer 审核 Agent
 - workflow_retrieval：RAG 知识检索 / 查询构造 / 合婚对方盘解析（纯函数）
 - workflow_messages：消息拼装 / 事实校验（纯函数）
-- xianzhi_workflow：XianzhiWorkflow 编排核心（LangGraph 节点委托其方法）
+- orchestrator：XianzhiWorkflow 编排核心（LangGraph 节点委托其方法）
 
 包内模块互相引用统一使用绝对路径 app.agent.workflow.<module>。
 """

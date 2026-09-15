@@ -6,7 +6,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from app.domain.bazi_engine import BaziChart
+from app.domain.chart_builder import BaziChart
 
 DOMAIN_LABELS = {
     "career": "事业工作",

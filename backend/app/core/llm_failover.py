@@ -15,6 +15,7 @@ import time
 from typing import Any, Callable
 
 from app.core.config import settings
+from app.core.llm_delegate import DelegatingRunnable
 from app.core.llm_throttle import LLMBusyError
 from app.core.logger import log
 
@@ -87,7 +88,7 @@ def get_active_chain() -> list[str]:
         if now - _active_chain_at < _CHAIN_TTL_SECONDS:
             return list(_active_chain)
         try:
-            from app.db.app_config import get_config
+            from app.core.config.kv import get_config
 
             stored = get_config(_CHAIN_KEY)
             models = [str(m).strip() for m in (stored or {}).get("models", []) if str(m).strip()]
@@ -106,11 +107,12 @@ def invalidate_chain_cache() -> None:
         _active_chain_at = 0.0
 
 
-class FailoverModel:
+class FailoverModel(DelegatingRunnable):
     """按降级链执行的主模型包装器（最外层）。
 
     链首为主模型实例（primary，由 main.py 传入）；其余链位按模型名懒建实例。
-    bind/with_config 等派生返回携带绑定参数的新包装器，保持限流/计量不旁路。
+    派生方法返回携带绑定参数的新包装器，保持降级/限流/计量不旁路；
+    invoke/stream 覆写为「按链依次尝试」，其余转发面由 ``DelegatingRunnable`` 提供。
     """
 
     def __init__(
@@ -126,21 +128,24 @@ class FailoverModel:
         self._instances: dict[str, Any] = {settings.dashscope_model: primary}
         self._instances_lock = threading.Lock()
 
+    # ---- DelegatingRunnable 钩子 ----
+    @property
+    def _target(self) -> Any:
+        return self._primary
+
+    def _derive(self, transform: Any) -> "FailoverModel":
+        """变换主模型后重建包装器。
+
+        只对主模型应用变换，降级链上的备选模型不参与
+        （bind_tools 与降级链合并的复杂度不值得引入）。
+        """
+        return FailoverModel(transform(self._primary), self._factory, bound=dict(self._bound))
+
     # ---- 派生方法 ----
     def bind(self, **kwargs: Any) -> "FailoverModel":
+        # 与基类默认不同：绑定参数累积到 _bound，invoke 时与调用参数合并后投给
+        # 链上每个模型——只 bind 主模型的话，降级到备选模型时参数会丢。
         return FailoverModel(self._primary, self._factory, bound={**self._bound, **kwargs})
-
-    def bind_tools(self, tools: Any, **kwargs: Any) -> "FailoverModel":
-        # ReAct 路径绑定工具：只对主模型绑定（bind_tools 与降级链合并的复杂度不值得引入）
-        return FailoverModel(
-            self._primary.bind_tools(tools, **kwargs), self._factory, bound=dict(self._bound)
-        )
-
-    def with_config(self, config: Any = None, **kwargs: Any) -> "FailoverModel":
-        return FailoverModel(self._primary, self._factory, bound=dict(self._bound))
-
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self._primary, name)
 
     # ---- 链解析 ----
     def _resolve_model(self, name: str) -> Any:

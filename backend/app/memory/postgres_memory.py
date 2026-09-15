@@ -19,7 +19,7 @@ from langchain_core.messages import BaseMessage, messages_from_dict
 from app.core.config import settings
 from app.core.logger import log
 from app.core.observability import record_error as _record_error
-from app.db.pool import close_pool as _close_pg_pool, get_pool as _get_pool
+from app.db.pool import get_pool as _get_pool
 
 # 会话 schema 初始化状态（仅 memory 层会话表；业务表统一由 app.db.schema 负责）
 _schema_lock = threading.Lock()
@@ -90,13 +90,6 @@ def _ensure_schema():
         except Exception as e:
             # 数据库暂不可达：仅告警，保持 _schema_ready=False，下次调用/重启时重试
             log.warning("PG 记忆表初始化失败（数据库暂不可达，将在重启/首次使用时重试）: {}", e)
-
-
-def close_global_conn():
-    """关闭模块级连接池（应用退出时调用）。"""
-    global _schema_ready
-    _close_pg_pool()
-    _schema_ready = False
 
 
 class PostgresChatMemory:

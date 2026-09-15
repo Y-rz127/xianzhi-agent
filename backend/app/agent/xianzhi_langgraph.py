@@ -11,20 +11,19 @@ from typing import TypedDict
 
 from langchain_core.messages import BaseMessage
 
+from app.agent.workflow.fact_check import SHENSHA_NAMES, SHISHEN_NAMES
 from app.agent.workflow.workflow_messages import (
-    SHENSHA_NAMES,
-    SHISHEN_NAMES,
     build_sui_section,
     compact_facts,
 )
-from app.agent.workflow.xianzhi_workflow import (
-    WORKERS,
+from app.agent.workflow.workflow_models import (
     DomainWorker,
     FactCheckResult,
     QuestionIntent,
     WorkflowChartContext,
-    classify_question,
 )
+from app.agent.workflow.workflow_support import classify_question
+from app.agent.workflow.workflow_workers import WORKERS
 from app.core.logger import log
 from app.core.observability import record_error
 

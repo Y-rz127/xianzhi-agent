@@ -19,7 +19,8 @@ from app.agent.workflow.workflow_support import (
     _OTHER_BIRTH_RE2,
 )
 from app.core.logger import log
-from app.domain.bazi_engine import build_bazi_chart, effective_target_years
+from app.domain.chart_builder import build_bazi_chart
+from app.domain.yun_relations import effective_target_years
 from app.rag.retrieval import (
     DOMAIN_RULE_QUERIES,
     detect_theory_topic,

@@ -27,18 +27,18 @@ from app.agent.prompts import (
     REACT_FACT_GUARDRAILS as FACT_GUARDRAILS,
     REACT_NEXT_STEP_PROMPT as NEXT_STEP_PROMPT,
 )
-from app.agent.workflow.xianzhi_workflow import (
-    WorkflowChartContext,
-    XianzhiWorkflow,
+from app.agent.workflow.orchestrator import XianzhiWorkflow
+from app.agent.workflow.workflow_models import WorkflowChartContext
+from app.agent.workflow.workflow_support import (
     build_chart_context,
     classify_question,
     render_full_fact_context,
 )
 from app.core.config import settings
-from app.core.logger import log
 from app.core.llm_throttle import LLMBusyError, llm_tag
+from app.core.logger import log
 from app.core.thinking_router import use_thinking
-from app.domain.bazi_engine import find_birth_dates_from_pillars
+from app.domain.chart_format import find_birth_dates_from_pillars
 from app.memory import create_chat_memory
 from app.tools.bazi import BAZI_BIRTH_TOOLS, _normalize_birth_time
 from app.tools.mcp_client import mcp_manager

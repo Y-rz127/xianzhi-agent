@@ -3,19 +3,19 @@ from dataclasses import replace
 
 from langchain_core.language_models.fake_chat_models import FakeListChatModel
 
+from app.agent.workflow.orchestrator import XianzhiWorkflow
 from app.agent.workflow.workflow_messages import (
     build_sui_section,
     compact_facts,
     fact_block,
 )
 from app.agent.workflow.workflow_retrieval import build_theory_queries
-from app.agent.workflow.xianzhi_workflow import (
-    XianzhiWorkflow,
+from app.agent.workflow.workflow_support import (
     build_chart_context,
     classify_question,
-    detect_theory_topic,
 )
 from app.agent.xianzhi import Xianzhi
+from app.rag.retrieval import detect_theory_topic
 
 MALE = "\u7537"
 

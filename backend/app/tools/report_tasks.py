@@ -7,7 +7,10 @@ from __future__ import annotations
 from typing import Any
 
 from app.core.llm_throttle import llm_tag
-from app.domain.bazi_engine import build_bazi_chart, chart_to_api_dict
+from app.domain.chart_builder import (
+    build_bazi_chart,
+    chart_to_api_dict,
+)
 from app.tools.bazi import bazi_analysis, bazi_chart, bazi_dayun, bazi_liunian
 from app.tools.pdf_report import generate_bazi_report
 from app.tools.report_generator import DEFAULT_SECTIONS, generate_full_report
@@ -86,19 +89,24 @@ def _sections(params: dict) -> list[str]:
     return [s for s in raw.split(",") if s] if raw else list(DEFAULT_SECTIONS)
 
 
+def _collect_chart_texts(birth_time: str, gender: str) -> dict[str, str]:
+    """一次取齐四处排盘文本（大运 12 步 / 流年 10 年，与专业细盘同口径）。"""
+    return {
+        "chart_text": bazi_chart.invoke({"birth_time": birth_time, "gender": gender}),
+        "analysis_text": bazi_analysis.invoke(
+            {"birth_time": birth_time, "gender": gender, "question": "整体命盘"}
+        ),
+        "dayun_text": bazi_dayun.invoke({"birth_time": birth_time, "gender": gender, "count": 12}),
+        "liunian_text": bazi_liunian.invoke({"birth_time": birth_time, "gender": gender, "years": 10}),
+    }
+
+
 def build_basic_report_pdf(birth_time: str, gender: str) -> bytes:
     """基础 PDF：排盘工具 + 渲染，无 LLM 调用。"""
-    chart_text = bazi_chart.invoke({"birth_time": birth_time, "gender": gender})
-    analysis_text = bazi_analysis.invoke({"birth_time": birth_time, "gender": gender, "question": "整体命盘"})
-    dayun_text = bazi_dayun.invoke({"birth_time": birth_time, "gender": gender, "count": 12})
-    liunian_text = bazi_liunian.invoke({"birth_time": birth_time, "gender": gender, "years": 10})
     return generate_bazi_report(
         birth_time=birth_time,
         gender=gender,
-        chart_text=chart_text,
-        analysis_text=analysis_text,
-        dayun_text=dayun_text,
-        liunian_text=liunian_text,
+        **_collect_chart_texts(birth_time, gender),
         **_xipan_tables(birth_time, gender),
     )
 
@@ -111,22 +119,14 @@ def build_full_report_markdown(chat_model: Any, params: dict) -> bytes:
 
 def build_full_report_pdf(chat_model: Any, params: dict) -> bytes:
     """LLM 分节报告渲染为 PDF（多次 LLM 调用 + 排盘 + PDF 渲染）。"""
-    ai_commentary = generate_full_report(chat_model, params["birth_time"], params["gender"], _sections(params))
-    chart_text = bazi_chart.invoke({"birth_time": params["birth_time"], "gender": params["gender"]})
-    analysis_text = bazi_analysis.invoke(
-        {"birth_time": params["birth_time"], "gender": params["gender"], "question": "整体命盘"}
-    )
-    dayun_text = bazi_dayun.invoke({"birth_time": params["birth_time"], "gender": params["gender"], "count": 12})
-    liunian_text = bazi_liunian.invoke({"birth_time": params["birth_time"], "gender": params["gender"], "years": 10})
+    birth_time, gender = params["birth_time"], params["gender"]
+    ai_commentary = generate_full_report(chat_model, birth_time, gender, _sections(params))
     return generate_bazi_report(
-        birth_time=params["birth_time"],
-        gender=params["gender"],
-        chart_text=chart_text,
-        analysis_text=analysis_text,
-        dayun_text=dayun_text,
-        liunian_text=liunian_text,
+        birth_time=birth_time,
+        gender=gender,
         ai_commentary=ai_commentary,
-        **_xipan_tables(params["birth_time"], params["gender"]),
+        **_collect_chart_texts(birth_time, gender),
+        **_xipan_tables(birth_time, gender),
     )
 
 

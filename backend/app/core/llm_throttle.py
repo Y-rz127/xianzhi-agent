@@ -16,7 +16,7 @@ from contextvars import ContextVar
 from typing import Any, Iterator
 
 from app.core.config import settings
-from app.core.logger import log
+from app.core.llm_delegate import DelegatingRunnable
 
 
 class LLMBusyError(RuntimeError):
@@ -118,11 +118,11 @@ def _report_usage(wrapper: "ThrottledModel", result: Any, start: float, elapsed:
     record_llm_call(model, llm_usage_tag.get(), prompt, completion, elapsed * 1000)
 
 
-class ThrottledModel:
+class ThrottledModel(DelegatingRunnable):
     """包装 LangChain ChatModel：进入 invoke/stream 前获取全局信号量并过熔断。
 
-    bind/bind_tools/with_config 派生方法仍返回 ThrottledModel，保证限流不旁路；
-    其余属性委托给内层模型（model_name / get_input_schema 等）。
+    转发面（bind/bind_tools/with_config 派生 + 其余属性委托）由 ``DelegatingRunnable``
+    提供，保证限流不旁路；本类只覆写 invoke/ainvoke/stream/astream 加入背压与计量。
     熔断按模型名隔离（降级链中主模型故障不影响备选模型）。
     """
 
@@ -131,15 +131,14 @@ class ThrottledModel:
         self._model_name = str(getattr(inner, "model_name", None) or "unknown")
         self._circuit = _circuit_for(self._model_name)
 
-    # ---- 派生方法保持包装 ----
-    def bind(self, **kwargs: Any) -> "ThrottledModel":
-        return ThrottledModel(self._inner.bind(**kwargs))
+    # ---- DelegatingRunnable 钩子 ----
+    @property
+    def _target(self) -> Any:
+        return self._inner
 
-    def bind_tools(self, tools: Any, **kwargs: Any) -> "ThrottledModel":
-        return ThrottledModel(self._inner.bind_tools(tools, **kwargs))
-
-    def with_config(self, config: Any = None, **kwargs: Any) -> "ThrottledModel":
-        return ThrottledModel(self._inner.with_config(config, **kwargs))
+    def _derive(self, transform: Any) -> "ThrottledModel":
+        """派生后仍是 ThrottledModel，保证限流/熔断不被 bind 旁路。"""
+        return ThrottledModel(transform(self._inner))
 
     # ---- 背压入口 ----
     def _acquire(self) -> None:
@@ -200,7 +199,3 @@ class ThrottledModel:
             raise
         finally:
             self._release()
-
-    # ---- 其余属性/方法委托内层 ----
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self._inner, name)

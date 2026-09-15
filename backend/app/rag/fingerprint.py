@@ -4,67 +4,26 @@
 进而重复 embedding 全部知识片段（约 761 个）。PG 中向量索引本身已持久，
 只要指纹存活，重启即可直接复用现成索引、零 embedding。本地文件保留为兜底
 （首次迁移 / PG 不可用降级）。
+
+连接统一走 ``app.db.pool`` 的模块级池 —— 本模块曾自建第二个 ConnectionPool
+（同 DSN、同 check 逻辑），既多占 1~2 个空闲连接，又让应用关停要分别关两个池。
 """
 
 from __future__ import annotations
 
 import json
-import threading
 import time
 from pathlib import Path
 
 from app.core.config import settings
 from app.core.logger import log
+from app.db.pool import get_pool
 
 _FINGERPRINT_FILE = "knowledge_fingerprint.json"
 
 
 def _fingerprint_path() -> Path:
     return settings.vector_db_dir / _FINGERPRINT_FILE
-
-
-_fp_pool = None
-_fp_lock = threading.Lock()
-
-
-def _fp_pool_get():
-    """获取指纹连接池，懒加载。"""
-    global _fp_pool
-    if _fp_pool is None:
-        with _fp_lock:
-            if _fp_pool is None:
-                from psycopg_pool import ConnectionPool
-
-                def _check(c):
-                    try:
-                        c.execute("SELECT 1")
-                        return True
-                    except Exception:
-                        return False
-
-                _fp_pool = ConnectionPool(
-                    settings.pg_dsn(),
-                    min_size=1,
-                    max_size=2,
-                    kwargs={"autocommit": True},
-                    check=_check,
-                    max_lifetime=1800,
-                    open=True,
-                )
-    return _fp_pool
-
-
-def close_pool() -> None:
-    """应用关闭时显式关闭指纹连接池，避免连接泄漏。"""
-    global _fp_pool
-    with _fp_lock:
-        if _fp_pool is not None:
-            try:
-                _fp_pool.close()
-            except Exception as e:
-                log.warning("关闭 RAG 指纹连接池失败: {}", e)
-            finally:
-                _fp_pool = None
 
 
 def _ensure_table(conn) -> None:
@@ -78,7 +37,7 @@ def _ensure_table(conn) -> None:
 
 def _load_pg() -> dict | None:
     try:
-        pool = _fp_pool_get()
+        pool = get_pool()
         with pool.connection() as conn:
             _ensure_table(conn)
             row = conn.execute("SELECT data FROM rag_fingerprint WHERE id=1").fetchone()
@@ -91,7 +50,7 @@ def _load_pg() -> dict | None:
 
 def _save_pg(data: dict) -> None:
     try:
-        pool = _fp_pool_get()
+        pool = get_pool()
         with pool.connection() as conn:
             _ensure_table(conn)
             conn.execute(
