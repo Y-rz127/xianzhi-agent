@@ -10,11 +10,10 @@ from typing import Generator
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from app.agent.context import get_app_context
 from app.agent.prompts import HEHUN_SYSTEM_PROMPT
 from app.core.llm_throttle import llm_tag
 from app.core.logger import log
-from app.core.text_extract import normalize_chunk_text
+from app.sub_app._base import llm_interpret_stream
 from app.tools.text_clean import clean_think_tags
 
 
@@ -123,17 +122,11 @@ async def analyze_stream(
             )
         ),
     ]
-    try:
-        has_any_chunk = False
-        with llm_tag("hehun"):
-            async for chunk in get_app_context().chat_model.astream(messages):
-                text = normalize_chunk_text(getattr(chunk, "content", None))
-                if text:
-                    has_any_chunk = True
-                    yield clean_think_tags(text)
-        if not has_any_chunk:
-            log.warning("合婚 LLM 返回空片段")
-            yield base_result
-    except Exception:
-        log.exception("合婚 LLM 流式解读失败，返回规则结果")
-        yield base_result
+    async for chunk in llm_interpret_stream(
+        messages,
+        tag="hehun",
+        name="合婚",
+        empty_text=base_result,
+        error_text=base_result,
+    ):
+        yield clean_think_tags(chunk)

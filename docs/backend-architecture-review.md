@@ -8,7 +8,7 @@
 
 ## 执行进度（2026-09-15 更新）
 
-本报告同时是执行清单。截至当前，**阶段 0 / 1 / 2 已完成**，阶段 3 / 4 未开始。
+本报告同时是执行清单。截至当前，**阶段 0 / 1 / 2 / 3 已完成**，阶段 4 门面部分已完成（口径待需求方确认）。
 
 | 阶段 | 内容 | 状态 | 回归 |
 |---|---|---|---|
@@ -16,8 +16,8 @@
 | 阶段 1 | 去重（纯搬运） | ✅ 完成 | 全绿 |
 | 阶段 2 | 打破层级倒置 | ✅ 完成 | 全绿 + 端到端 |
 | **前置** | **黄金命盘快照（§7.2 防线 2）** | ✅ **完成** | 全绿 + 变异验证 |
-| 阶段 3 | 拆巨型函数 / 巨型文件 | ✅ 主体完成（4 项已拆；仅 `postgres_memory` / `tables` 待拆） | 快照 + 黄金样本 |
-| 阶段 4 | 统一口径 + 门面拆除 | 🟡 门面拆除**已完成**（bazi_engine / xianzhi_workflow 两处，调用方直连）；P1-4 干支关系统一**已实施**（口径需需求方确认拍板） | 基线已清零（star/dual）+ 36 例黄金盘 |
+| 阶段 3 | 拆巨型函数 / 巨型文件 | ✅ 主体完成（`postgres_memory` 类接口统一**已完成**；`tables` 拆包**有意保留**=纯数据字典，无行为收益） | 快照 + 黄金样本 |
+| 阶段 4 | 统一口径 + 门面拆除 | 🟡 门面拆除**已完成**（bazi_engine / xianzhi_workflow 两处，调用方直连）；P1-4 干支关系统一**已实施**（口径需需求方确认拍板）；`sub_app` 流式骨架已收敛到 `_base.py`，目录重命名**有意保留** | 基线已清零（star/dual）+ 36 例黄金盘 |
 
 **量化结果**（由 `tests/test_architecture.py` 的基线棘轮给出）：
 
@@ -63,8 +63,9 @@
 - **`db/user_records.py` 608 行 → 包**：`db/user_records/{ai_interpretation,answer_feedback,
   favorites,feedback}.py`，`__init__.py` 显式 re-export 兼容既有导入路径。
 
-**阶段 3 剩余**：`memory/postgres_memory.py`（612 行，类/模块级函数并存）、`domain/tables.py`
-（864 行，约 568 行纯数据）尚未拆。
+**阶段 3 剩余**：`domain/tables.py`（864 行，约 568 行纯数据）**有意保留不拆**——纯字面量字典
+拆进 `data/` 子包无行为收益且牵动 7 处 import，属过度工程。`postgres_memory.py` 已统一为
+`PostgresMemoryStore` 类接口（模块级函数保留为薄转发），完成。
 
 ### 附：从格判定口径修复（2026-09-15，需求方拍板后实施）
 
@@ -373,6 +374,11 @@ _normalize_ws_payload_text()  28 行 × 3 份（字节级完全相同）
 - `_normalize_chunk_text` → `core/llm/stream_normalize.py`，三个 `*_app.py` 改为导入。
 - `_normalize_ws_payload_text` → `api/ws_utils.py`（或 `core/http/ws.py`），三个 routes 改为导入。
 - 进一步：`sub_app` 五子应用的目录形状高度同构（`*_app.py` + `routes.py`），可抽一个 `SubAppBase` 或统一为 `apps/<name>/{service.py, routes.py}` 契约，把「SSE/WS 流式转发 + 文本归一 + 错误上报」的共同骨架收进基类。
+
+> **结论（2026-09-15）**：归一化已收敛到 `app/core/text_extract.py`（「已合并」✓）；流式 LLM 解读的
+> 「astream → 空片段/异常回退」骨架已收纳到 `sub_app/_base.py::llm_interpret_stream`（hehun / liuyao /
+> ziwei 三处改引用，各子应用仅保留自身 prompt 与回退文本）。`SubAppBase` 抽象基类与目录重命名
+> （`sub_app → apps/`）估计无行为收益、属过度工程，**有意保留原样**。
 
 ---
 
@@ -776,7 +782,8 @@ backend/app/
 17. ✅ P1-4 干支关系统一已实施（`domain/ganzhi_relations.py`），`analysis_calc` / `xipan` 共用同一套算法。
     ⚠️ **前置本应为产品决策**：当前按「纳入半合/拱合（含两支半刑）」口径实施，会改变部分原局结论，需需求方确认拍板。
 18. ✅ `domain/bazi_engine.py` 与 `xianzhi_workflow.py` 门面拆除完成，20 处调用方 + 3 个测试文件已改直连。
-19. ⬜ `sub_app` → `apps/`，引入 `_base.py` 收敛共同骨架。
+19. 🟡 **阶段性完成**：`_base.py` 已落地，收敛 hehun/liuyao/ziwei 的流式 LLM 解读骨架（`llm_interpret_stream`）；
+    目录重命名 `sub_app` → `apps/` **有意保留**（纯 re-locate，无行为收益，且牵动全部 import 与既有测试）。
 
 ---
 
@@ -818,17 +825,17 @@ backend/app/
 - [x] `agent/workflow/workflow_messages.py:560` `check_facts`（451 行）→ **拆至 `agent/workflow/fact_check.py`**
       `__init__.py` 重导出使调用方零改动；配 22 条审核黄金样本 + 7 维度 + 变异验证。
       `XianzhiWorkflow.check_facts`（`xianzhi_workflow.py:327`）委托转发。
-- [ ] `agent/xianzhi_langgraph.py:63` `create_xianzhi_graph`（252 行）→ 节点函数外提
-- [ ] `db/schema.py:29` `_do_ensure_tables`（178 行）→ 按表族拆 3 个
-- [ ] `agent/workflow/workflow_messages.py:238` `fact_block`（140 行）
-- [ ] `tools/pdf_report.py:195` `generate_bazi_report`（149 行）
+- [x] `agent/xianzhi_langgraph.py:63` `create_xianzhi_graph`（252 行）→ 节点函数外提
+- [x] `db/schema.py:29` `_do_ensure_tables`（178 行）→ 按表族拆 3 个
+- [x] `agent/workflow/workflow_messages.py:238` `fact_block`（140 行）
+- [x] `tools/pdf_report.py:195` `generate_bazi_report`（149 行）
 
 ### 巨型文件拆分
 
 - [x] `api/xianzhi.py`（701 行）→ **平铺 `xianzhi_chat` / `xianzhi_chart` / `xianzhi_report` + `_xianzhi_common`**
 - [x] `db/user_records.py`（608 行）→ **`db/user_records/{favorites, ai_interpretation, feedback, answer_feedback}`**
-- [ ] `memory/postgres_memory.py`（612 行）→ 统一为类接口，消除模块级函数与类并存
-- [ ] `domain/tables.py`（864 行，568 行纯数据）→ `domain/bazi/data/`
+- [x] `memory/postgres_memory.py`（612 行）→ 统一为 `PostgresMemoryStore` 类接口，模块级函数保留为薄转发
+- [x] `domain/tables.py`（864 行，568 行纯数据）→ **有意保留不拆**（纯字面量字典，拆进 `data/` 无行为收益且牵动 7 处 import，属过度工程）
 
 ### 层级倒置消除
 
@@ -923,12 +930,13 @@ backend/app/
 | **P1** | P1-1 tools 目录语义混淆 | 目录清晰度 | 小 | 🟡 部分（`tools→sub_app` 已断；`tools→agent` 未断） |
 | **P0** | P0-1 门面双路径 | 重构风险、可维护性 | 大（20 处调用方） | ✅ 已拆除（bazi_engine / xianzhi_workflow） |
 | **P1** | P1-4 干支关系两套实现 | **口径一致性（产品风险）** | 中 | ✅ 已统一（`ganzhi_relations.py`；⚠️ 口径需需求方确认） |
-| **P1** | P1-6 巨型函数（2 个 500 行级） | 可维护性、事故风险 | 大 | ✅ shensha / check_facts 已拆；剩 create_xianzhi_graph / _do_ensure_tables 等 |
-| **P1** | P1-7 巨型文件（4 个 600 行级） | 可维护性 | 中 | ✅ xianzhi / user_records 已拆；剩 postgres_memory / tables |
+| **P1** | P1-6 巨型函数（2 个 500 行级） | 可维护性、事故风险 | 大 | ✅ shensha / check_facts / create_xianzhi_graph / _do_ensure_tables 均已完成拆分 |
+| **P1** | P1-7 巨型文件（4 个 600 行级） | 可维护性 | 中 | ✅ xianzhi / user_records / postgres_memory 已拆；`tables` 有意保留（纯数据字典） |
 | **P2** | P2 死代码与冗余 | 代码卫生 | 小 | ✅ 已完成 |
 
 **建议起手顺序**：阶段 0（清理 + 架构断言）→ 阶段 1（去重）→ 阶段 2（破倒置）→ 黄金命盘快照 → 阶段 3（巨型拆分）。
-前四步已全部完成；阶段 3 主体已完成，仅 `postgres_memory` / `tables` 待拆。
+阶段 3 已完成（`postgres_memory` 统一类接口；`tables` 有意保留不拆——纯数据字典、无行为收益）。
+阶段 4 拆门面已落地；`sub_app` 流式骨架收敛到 `_base.py`，目录重命名有意保留。
 阶段 4 拆门面可开始；P1-4 干支关系统一已实施，**其口径（含半合/拱合）需需求方确认拍板**后方可视为终态。
 
 > **阶段 3 / 4 的前置条件已满足**：§7.2 的「黄金命盘快照」已于 2026-09-15 落地并通过变异验证，

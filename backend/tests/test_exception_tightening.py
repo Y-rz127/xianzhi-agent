@@ -114,9 +114,9 @@ class TestDeleteSessionSummaryCleanup:
 
         monkeypatch.setattr(postgres_memory, "_schema_ready", True)
         monkeypatch.setattr(
-            postgres_memory,
+            postgres_memory.PostgresMemoryStore,
             "_resolve_session_uuid",
-            lambda session_id: "11111111-1111-1111-1111-111111111111",
+            lambda self, session_id: "11111111-1111-1111-1111-111111111111",
         )
 
         calls = []

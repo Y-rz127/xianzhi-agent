@@ -6,11 +6,8 @@ import random
 from datetime import datetime
 from typing import Generator
 
-from app.agent.context import get_app_context
 from app.agent.prompts import LIUYAO_SYSTEM_PROMPT
-from app.core.llm_throttle import llm_tag
-from app.core.logger import log
-from app.core.text_extract import normalize_chunk_text
+from app.sub_app._base import llm_interpret_stream
 
 TRIGRAMS = {
     "111": ("乾", "天", "☰"),
@@ -133,17 +130,10 @@ async def interpret_stream(question: str, result: dict) -> Generator[str, None, 
     from langchain_core.messages import HumanMessage, SystemMessage
 
     msgs = [SystemMessage(content=LIUYAO_SYSTEM_PROMPT), HumanMessage(content=prompt)]
-    try:
-        has_any_chunk = False
-        with llm_tag("liuyao"):
-            async for chunk in get_app_context().chat_model.astream(msgs):
-                text = normalize_chunk_text(getattr(chunk, "content", None))
-                if text:
-                    has_any_chunk = True
-                    yield text
-        if not has_any_chunk:
-            log.warning("六爻 LLM 返回空片段")
-            yield "\n\n[AI 解读暂不可用]\n\n"
-    except Exception as e:
-        log.exception("六爻 LLM 解读失败")
-        yield f"\n\n[AI 解读暂不可用：{type(e).__name__}]\n\n"
+    async for chunk in llm_interpret_stream(
+        msgs,
+        tag="liuyao",
+        name="六爻",
+        empty_text="\n\n[AI 解读暂不可用]\n\n",
+    ):
+        yield chunk
