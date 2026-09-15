@@ -192,6 +192,130 @@ def _data_table(headers: list, rows: list, font_name: str, widths: list) -> Tabl
     return tbl
 
 
+# ---- 报告章节构造（单一职责；story 为可写列表，counter 为章节号计数器）----
+
+_CN_NUM = ["一", "二", "三", "四", "五", "六", "七", "八", "九", "十"]
+
+
+def _chapter_title(title: str, counter: list) -> str:
+    """章节自动编号：有细盘数据时章节更多，避免手写序号错位。"""
+    counter[0] += 1
+    return f"{_CN_NUM[counter[0] - 1]}、{title}"
+
+
+def _basic_info_section(story, styles, counter, birth_time, gender):
+    story.append(Paragraph(_chapter_title("基本信息", counter), styles["h2"]))
+    for line in [
+        "出生时间：{}".format(birth_time),
+        "性别：{}".format(gender),
+        "报告生成时间：{}".format(datetime.datetime.now().strftime("%Y-%m-%d %H:%M")),
+    ]:
+        story.append(Paragraph(line, styles["body"]))
+
+
+def _pillar_section(story, styles, font_name, counter, chart_text):
+    story.append(Paragraph(_chapter_title("四柱排盘", counter), styles["h2"]))
+    pillars = _extract_pillars(chart_text)
+    if pillars:
+        story.append(_pillar_table(pillars, font_name))
+        story.append(Spacer(1, 8))
+    story.append(Paragraph(_escape(chart_text), styles["body"]))
+
+
+def _analysis_section(story, styles, counter, analysis_text):
+    story.append(Paragraph(_chapter_title("五行与十神分析", counter), styles["h2"]))
+    story.append(Paragraph(_escape(analysis_text), styles["body"]))
+
+
+def _dayun_section(story, styles, font_name, counter, dayun_text, dayun_rows):
+    story.append(Paragraph(_chapter_title("大运推算", counter), styles["h2"]))
+    if dayun_rows:
+        story.append(_data_table(
+            ["大运", "十神", "年份", "年龄", "藏干", "副星(地支十神)", "星运", "神煞"],
+            [[r["ganzhi"], r["shishen"], r["years"], r["ages"], r["hidden"], r["fuxing"],
+              r["changsheng"], r["shensha"]] for r in dayun_rows],
+            font_name,
+            widths=[1.7*cm, 1.5*cm, 2.2*cm, 1.9*cm, 2.0*cm, 2.6*cm, 1.3*cm, 3.8*cm],
+        ))
+    else:
+        story.append(Paragraph(_escape(dayun_text), styles["body"]))
+
+
+def _liunian_section(story, styles, font_name, counter, liunian_text, liunian_rows):
+    story.append(Paragraph(_chapter_title("流年运势", counter), styles["h2"]))
+    if liunian_rows:
+        story.append(_data_table(
+            ["年份", "干支", "十神", "虚岁", "星运", "神煞"],
+            [[r["year"], r["ganzhi"], r["shishen"], r["age"], r["changsheng"], r["shensha"]]
+             for r in liunian_rows],
+            font_name,
+            widths=[1.6*cm, 1.8*cm, 1.8*cm, 1.4*cm, 1.6*cm, 8.8*cm],
+        ))
+    elif liunian_text:
+        story.append(Paragraph(_escape(liunian_text), styles["body"]))
+
+
+def _relations_section(story, styles, counter, relations):
+    if not relations:
+        return
+    story.append(Paragraph(_chapter_title("岁运与原局关系", counter), styles["h2"]))
+    for block_title, block in (
+        ("岁运分析（{}）", relations.get("suiyun") or {}),
+        ("原局分析（{}）", relations.get("yuanju") or {}),
+    ):
+        label = block.get("label") or ""
+        story.append(Paragraph(f"<b>{block_title.format(label)}</b>", styles["body"]))
+        for row_label, key in (("天干", "gan"), ("地支", "zhi"), ("整柱", "zhu")):
+            items = block.get(key) or []
+            story.append(Paragraph(
+                f"{row_label}：{'｜'.join(items) if items else '—'}",
+                styles["body"],
+            ))
+
+
+def _liuyue_section(story, styles, font_name, counter, liuyue_rows):
+    if not liuyue_rows:
+        return
+    story.append(Paragraph(_chapter_title("流月排盘（当年）", counter), styles["h2"]))
+    story.append(_data_table(
+        ["节气", "交节", "干支", "十神", "星运", "神煞"],
+        [[r["jieqi"], r["date"], r["ganzhi"], r["shishen"], r["changsheng"], r["shensha"]]
+         for r in liuyue_rows],
+        font_name,
+        widths=[2.0*cm, 1.8*cm, 1.8*cm, 1.8*cm, 1.6*cm, 8.0*cm],
+    ))
+
+
+def _shensha_section(story, styles, font_name, counter, shensha_by_pillar):
+    if not shensha_by_pillar:
+        return
+    story.append(Paragraph(_chapter_title("神煞按柱", counter), styles["h2"]))
+    story.append(_data_table(
+        ["柱位", "神煞"],
+        [[name, "、".join(names) or "—"] for name, names in shensha_by_pillar],
+        font_name,
+        widths=[2.2*cm, 14.8*cm],
+    ))
+
+
+def _ai_commentary_section(story, styles, counter, ai_commentary):
+    if ai_commentary:
+        story.append(Paragraph(_chapter_title("先知综合解读", counter), styles["h2"]))
+        story.append(Paragraph(_escape(ai_commentary), styles["body"]))
+
+
+def _footer_section(story, styles):
+    story.append(Spacer(1, 20))
+    story.append(Paragraph("【免责声明】", styles["h2"]))
+    story.append(Paragraph(
+        "本报告由 AI 智能体基于传统命理算法生成，仅供参考与文化交流，不构成任何决策依据。"
+        "命理之说，信则有不信则无，望理性看待，积极面对人生。",
+        styles["small"],
+    ))
+    story.append(Spacer(1, 30))
+    story.append(Paragraph("—— 先知智能体 · Powered by Xianzhi Agent ——", styles["footer"]))
+
+
 def generate_bazi_report(
     birth_time: str,
     gender: str,
@@ -236,109 +360,22 @@ def generate_bazi_report(
         title="先知八字命理报告",
     )
 
-    # 章节自动编号：有细盘数据时章节更多，避免手写序号错位
-    cn_num = ["一", "二", "三", "四", "五", "六", "七", "八", "九", "十"]
     counter = [0]
-
-    def _sec(title: str) -> str:
-        counter[0] += 1
-        return f"{cn_num[counter[0] - 1]}、{title}"
-
     story = []
     story.append(Paragraph("先知 · 八字命理分析报告", styles["title"]))
     story.append(Paragraph("命由天定 · 运由己造", styles["subtitle"]))
     story.append(Spacer(1, 6))
 
-    story.append(Paragraph(_sec("基本信息"), styles["h2"]))
-    for line in [
-        "出生时间：{}".format(birth_time),
-        "性别：{}".format(gender),
-        "报告生成时间：{}".format(datetime.datetime.now().strftime("%Y-%m-%d %H:%M")),
-    ]:
-        story.append(Paragraph(line, styles["body"]))
-
-    story.append(Paragraph(_sec("四柱排盘"), styles["h2"]))
-    pillars = _extract_pillars(chart_text)
-    if pillars:
-        story.append(_pillar_table(pillars, font_name))
-        story.append(Spacer(1, 8))
-    story.append(Paragraph(_escape(chart_text), styles["body"]))
-
-    story.append(Paragraph(_sec("五行与十神分析"), styles["h2"]))
-    story.append(Paragraph(_escape(analysis_text), styles["body"]))
-
-    story.append(Paragraph(_sec("大运推算"), styles["h2"]))
-    if dayun_rows:
-        story.append(_data_table(
-            ["大运", "十神", "年份", "年龄", "藏干", "副星(地支十神)", "星运", "神煞"],
-            [[r["ganzhi"], r["shishen"], r["years"], r["ages"], r["hidden"], r["fuxing"],
-              r["changsheng"], r["shensha"]] for r in dayun_rows],
-            font_name,
-            widths=[1.7*cm, 1.5*cm, 2.2*cm, 1.9*cm, 2.0*cm, 2.6*cm, 1.3*cm, 3.8*cm],
-        ))
-    else:
-        story.append(Paragraph(_escape(dayun_text), styles["body"]))
-
-    story.append(Paragraph(_sec("流年运势"), styles["h2"]))
-    if liunian_rows:
-        story.append(_data_table(
-            ["年份", "干支", "十神", "虚岁", "星运", "神煞"],
-            [[r["year"], r["ganzhi"], r["shishen"], r["age"], r["changsheng"], r["shensha"]]
-             for r in liunian_rows],
-            font_name,
-            widths=[1.6*cm, 1.8*cm, 1.8*cm, 1.4*cm, 1.6*cm, 8.8*cm],
-        ))
-    elif liunian_text:
-        story.append(Paragraph(_escape(liunian_text), styles["body"]))
-
-    if relations:
-        story.append(Paragraph(_sec("岁运与原局关系"), styles["h2"]))
-        for block_title, block in (
-            ("岁运分析（{}）", relations.get("suiyun") or {}),
-            ("原局分析（{}）", relations.get("yuanju") or {}),
-        ):
-            label = block.get("label") or ""
-            story.append(Paragraph(f"<b>{block_title.format(label)}</b>", styles["body"]))
-            for row_label, key in (("天干", "gan"), ("地支", "zhi"), ("整柱", "zhu")):
-                items = block.get(key) or []
-                story.append(Paragraph(
-                    f"{row_label}：{'｜'.join(items) if items else '—'}",
-                    styles["body"],
-                ))
-
-    if liuyue_rows:
-        story.append(Paragraph(_sec("流月排盘（当年）"), styles["h2"]))
-        story.append(_data_table(
-            ["节气", "交节", "干支", "十神", "星运", "神煞"],
-            [[r["jieqi"], r["date"], r["ganzhi"], r["shishen"], r["changsheng"], r["shensha"]]
-             for r in liuyue_rows],
-            font_name,
-            widths=[2.0*cm, 1.8*cm, 1.8*cm, 1.8*cm, 1.6*cm, 8.0*cm],
-        ))
-
-    if shensha_by_pillar:
-        story.append(Paragraph(_sec("神煞按柱"), styles["h2"]))
-        story.append(_data_table(
-            ["柱位", "神煞"],
-            [[name, "、".join(names) or "—"] for name, names in shensha_by_pillar],
-            font_name,
-            widths=[2.2*cm, 14.8*cm],
-        ))
-
-    if ai_commentary:
-        story.append(Paragraph(_sec("先知综合解读"), styles["h2"]))
-        story.append(Paragraph(_escape(ai_commentary), styles["body"]))
-
-    story.append(Spacer(1, 20))
-    story.append(Paragraph("【免责声明】", styles["h2"]))
-    story.append(Paragraph(
-        "本报告由 AI 智能体基于传统命理算法生成，仅供参考与文化交流，不构成任何决策依据。"
-        "命理之说，信则有不信则无，望理性看待，积极面对人生。",
-        styles["small"],
-    ))
-
-    story.append(Spacer(1, 30))
-    story.append(Paragraph("—— 先知智能体 · Powered by Xianzhi Agent ——", styles["footer"]))
+    _basic_info_section(story, styles, counter, birth_time, gender)
+    _pillar_section(story, styles, font_name, counter, chart_text)
+    _analysis_section(story, styles, counter, analysis_text)
+    _dayun_section(story, styles, font_name, counter, dayun_text, dayun_rows)
+    _liunian_section(story, styles, font_name, counter, liunian_text, liunian_rows)
+    _relations_section(story, styles, counter, relations)
+    _liuyue_section(story, styles, font_name, counter, liuyue_rows)
+    _shensha_section(story, styles, font_name, counter, shensha_by_pillar)
+    _ai_commentary_section(story, styles, counter, ai_commentary)
+    _footer_section(story, styles)
 
     doc.build(story)
     return buf.getvalue()
