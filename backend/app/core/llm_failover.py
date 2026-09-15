@@ -1,8 +1,10 @@
 """主模型降级链（FailoverModel）。
 
 - 链配置存 PG app_config（llm_failover_chain），管理后台 Web 端可热改，30s TTL 缓存
-- 主模型调用失败（限流/超时/5xx/熔断打开/模型不存在）时按链序自动切换下一模型
-- 客户端参数类错误（400 参数非法、鉴权失败）不降级，直接抛出
+- 主模型调用失败（限流/超时/5xx/熔断打开/模型不存在/额度耗尽）时按链序自动切换下一模型
+- 客户端参数类错误（400 参数非法、401 鉴权失败）不降级，直接抛出
+- 额度/配额类错误（403 AllocationQuota.FreeTierOnly、insufficient_quota、欠费）**要降级**：
+  额度是**按模型**计的（百炼免费额度即如此），本模型没额度时换链上其它模型通常立即可用
 - 每链位模型独立熔断（per-model circuit），失败主模型不会连累备选
 """
 
@@ -19,9 +21,32 @@ from app.core.logger import log
 _CHAIN_KEY = "llm_failover_chain"
 _CHAIN_TTL_SECONDS = 30.0
 
+# 额度/配额耗尽的上游文案片段（小写匹配；各家不统一，故用关键字而非错误码枚举）
+_QUOTA_HINTS = (
+    "allocationquota",  # 百炼/DashScope：AllocationQuota.FreeTierOnly
+    "freetieronly",
+    "free quota",
+    "quota",  # OpenAI：exceeded your current quota / insufficient_quota
+    "insufficient balance",
+    "insufficient_balance",
+    "credit balance",  # 余额不足
+    "arrearage",  # 阿里云欠费
+    "account balance",
+)
+
 
 class ModelUnavailableError(RuntimeError):
     """链上所有模型都失败时抛出，上层转友好文案。"""
+
+
+def _is_quota_exhausted(exc: Exception) -> bool:
+    """额度/配额耗尽类错误（多为 403，也可能 429）。
+
+    这类错误是「该模型当前不可调用」，不是请求本身有问题：额度按模型计时要换模型才能恢复。
+    上游各家文案不统一，故按关键字匹配（命中即视为可降级，误判代价只是多试一个模型）。
+    """
+    msg = str(exc).lower()
+    return any(hint in msg for hint in _QUOTA_HINTS)
 
 
 def _retryable(exc: Exception) -> bool:
@@ -29,6 +54,10 @@ def _retryable(exc: Exception) -> bool:
     name = f"{exc.__class__.__module__}.{exc.__class__.__name__}"
     if isinstance(exc, LLMBusyError):
         # 熔断打开/排队超时：本模型不健康，换下一个
+        return True
+    if _is_quota_exhausted(exc):
+        # 额度用尽（如 openai.PermissionDeniedError + AllocationQuota.FreeTierOnly）：
+        # 属模型级不可用，必须降级；此前落到末尾 return False，导致整条链一次都没试
         return True
     if "RateLimitError" in name or "APITimeoutError" in name or "APIConnectionError" in name:
         return True

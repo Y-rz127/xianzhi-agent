@@ -149,7 +149,7 @@
           <button class="btn btn-xs" @click="saveChain" :disabled="chainSaving">{{ chainSaving ? "保存中" : "保存" }}</button>
         </div>
       </div>
-      <div class="chain-hint">主模型失败（限流/超时/5xx/模型不存在）时按顺序自动降级；每行填一个模型名，第一行为主模型。留空=回退 .env 主模型。</div>
+      <div class="chain-hint">主模型失败（限流/超时/5xx/模型不存在/额度用尽）时按顺序自动降级；每行填一个模型名，第一行为主模型。留空=回退 .env 主模型。<br />候选：点模型名加入下方输入框；点 × 从候选删去（立即保存，不影响已在链上的模型）。</div>
       <textarea
         v-model="chainText"
         class="chain-input"
@@ -159,7 +159,31 @@
       ></textarea>
       <div class="chain-candidates">
         <span class="chain-candidate-label">候选：</span>
-        <span v-for="c in chainCandidates" :key="c" class="chain-chip" @click="addCandidate(c)" :title="`添加 ${c}`">{{ c }}</span>
+        <span v-for="c in chainCandidates" :key="c" class="chain-chip">
+          <span class="chain-chip-name" @click="addCandidate(c)" :title="`加入降级链：${c}`">{{ c }}</span>
+          <button
+            class="chain-chip-del"
+            :disabled="candidateSaving"
+            @click="removeCandidate(c)"
+            :title="`从候选删去 ${c}（不影响降级链）`"
+          >×</button>
+        </span>
+        <span v-if="!chainCandidates.length" class="chain-candidate-empty">（暂无候选，可手动添加或点「恢复默认」）</span>
+        <span class="chain-candidate-add">
+          <input
+            v-model="newCandidate"
+            class="chain-candidate-input"
+            placeholder="添加候选模型名"
+            spellcheck="false"
+            @keyup.enter="addNewCandidate"
+          />
+          <button class="btn btn-xs" :disabled="candidateSaving || !newCandidate.trim()" @click="addNewCandidate">添加</button>
+          <button
+            class="btn btn-xs"
+            :disabled="candidateSaving || !chainDefaults.length || sameCandidates(chainCandidates, chainDefaults)"
+            @click="restoreDefaultCandidates"
+          >恢复默认</button>
+        </span>
       </div>
       <div v-if="chainOrder.length" class="chain-summary">
         当前生效链：<span v-for="(m, i) in chainOrder" :key="m + i" class="chain-item">{{ i + 1 }}. {{ m }}</span>
@@ -210,7 +234,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from "vue"
-import { fetchMetrics, getLlmChain, updateLlmChain, getLlmPrice, updateLlmPrice, type MetricsData, type LlmPriceMap } from "../api"
+import { fetchMetrics, getLlmChain, updateLlmChain, updateLlmCandidates, getLlmPrice, updateLlmPrice, type MetricsData, type LlmPriceMap } from "../api"
 
 const metrics = ref<MetricsData | null>(null)
 const loading = ref(false)
@@ -334,6 +358,7 @@ async function loadChain() {
     const data = await getLlmChain()
     chainOrder.value = data.models
     chainCandidates.value = data.candidates
+    chainDefaults.value = data.default_candidates || []
     chainText.value = data.models.join("\n")
     chainMessage.value = ""
   } catch (e: any) {
@@ -368,6 +393,55 @@ function addCandidate(name: string) {
     current.push(name)
     chainText.value = current.join("\n")
   }
+}
+
+// ---- 候选模型增删（立即落库；只影响快捷提示，不动降级链）----
+const newCandidate = ref("")
+const candidateSaving = ref(false)
+const chainDefaults = ref<string[]>([])
+
+function sameCandidates(a: string[], b: string[]) {
+  return a.length === b.length && a.every((x, i) => x === b[i])
+}
+
+async function persistCandidates(next: string[], okText: string) {
+  candidateSaving.value = true
+  chainError.value = false
+  try {
+    const data = await updateLlmCandidates(next)
+    chainCandidates.value = data.candidates // 后端返回落库后的候选（已配置就以库为准，空就是空）
+    chainMessage.value = okText
+    setTimeout(() => (chainMessage.value = ""), 3000)
+  } catch (e: any) {
+    chainError.value = true
+    chainMessage.value = e.message || "候选保存失败"
+  } finally {
+    candidateSaving.value = false
+  }
+}
+
+function removeCandidate(name: string) {
+  if (candidateSaving.value) return
+  const next = chainCandidates.value.filter((c) => c !== name)
+  persistCandidates(next, next.length ? `已从候选删去 ${name}` : `已删去 ${name}，候选已清空`)
+}
+
+function addNewCandidate() {
+  const name = newCandidate.value.trim()
+  if (!name || candidateSaving.value) return
+  if (chainCandidates.value.includes(name)) {
+    chainError.value = true
+    chainMessage.value = `${name} 已在候选中`
+    setTimeout(() => (chainMessage.value = ""), 3000)
+    return
+  }
+  newCandidate.value = ""
+  persistCandidates([...chainCandidates.value, name], `已添加候选 ${name}`)
+}
+
+function restoreDefaultCandidates() {
+  if (candidateSaving.value || !chainDefaults.value.length) return
+  persistCandidates([...chainDefaults.value], "已恢复默认候选")
 }
 
 // ---- LLM 单价配置 ----
@@ -547,16 +621,44 @@ onUnmounted(() => {
   margin-top: var(--spacing-md);
 }
 .chain-candidate-label { font-size: 12px; color: var(--text-dim); }
-.chain-chip {
+.chain-candidate-empty { font-size: 12px; color: var(--text-dim); font-style: italic; }
+.chain-candidate-add { display: inline-flex; align-items: center; gap: 6px; }
+.chain-candidate-input {
+  width: 160px;
   font-size: 12px;
-  padding: 2px 10px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+}
+.chain-candidate-input:focus { outline: none; border-color: var(--accent, #d4af37); }
+.chain-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  padding: 2px 4px 2px 10px;
   border-radius: 999px;
   border: 1px solid var(--border);
   color: var(--text-dim);
-  cursor: pointer;
   transition: all 0.15s ease;
 }
 .chain-chip:hover { color: var(--text); border-color: var(--accent, #d4af37); }
+.chain-chip-name { cursor: pointer; }
+.chain-chip-del {
+  border: none;
+  background: transparent;
+  color: inherit;
+  font-size: 13px;
+  line-height: 1;
+  padding: 0 3px;
+  border-radius: 999px;
+  cursor: pointer;
+  opacity: 0.6;
+}
+.chain-chip-del:hover:not(:disabled) { color: #e06c75; opacity: 1; }
+.chain-chip-del:disabled { cursor: not-allowed; opacity: 0.3; }
 .chain-summary {
   display: flex;
   flex-wrap: wrap;

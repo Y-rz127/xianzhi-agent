@@ -1,4 +1,9 @@
-"""LLM 降级链管理接口（管理后台，经 API Key 鉴权中间件保护）。"""
+"""LLM 降级链管理接口（管理后台，经 API Key 鉴权中间件保护）。
+
+- 降级链：PG `llm_failover_chain`，空数组=回退 .env 主模型单元素链
+- 候选模型（快捷提示）：PG `llm_candidates`，可在管理端增删；未配置/存空=回退内置默认候选。
+  候选只是输入提示，删掉某个候选**不影响降级链**，也不会让已在链上的模型失效。
+"""
 from __future__ import annotations
 
 import asyncio
@@ -11,10 +16,13 @@ from app.core.logger import log
 router = APIRouter(prefix="/admin/llm", tags=["Admin-LLM"])
 
 _CHAIN_KEY = "llm_failover_chain"
+_CANDIDATES_KEY = "llm_candidates"
 _MAX_CHAIN_LEN = 5
+_MAX_CANDIDATE_LEN = 20
+_MAX_MODEL_NAME_LEN = 64
 
-# Web 端快捷候选（仅提示用，不限制用户填其他模型名）
-CANDIDATE_MODELS = [
+# 内置默认候选（首次使用/存空时生效；管理端可增删，落库 llm_candidates）
+DEFAULT_CANDIDATE_MODELS = [
     "qwen3.8-27b",
     "qwen3.8-flash",
     "qwen3.8-2.4t-a95b",
@@ -24,10 +32,49 @@ CANDIDATE_MODELS = [
 ]
 
 
+def _clean_models(raw: object) -> list[str]:
+    """规范化模型名列表：去空、去重、校验合法性（保持原顺序）。"""
+    if not isinstance(raw, list):
+        raise HTTPException(status_code=400, detail="models 必须是模型名数组")
+    out: list[str] = []
+    for item in raw:
+        name = str(item).strip()
+        if not name:
+            continue
+        if len(name) > _MAX_MODEL_NAME_LEN or any(ch.isspace() for ch in name):
+            raise HTTPException(status_code=400, detail=f"模型名不合法：{name[: _MAX_MODEL_NAME_LEN]}")
+        if name not in out:
+            out.append(name)
+    return out
+
+
+def get_candidates() -> list[str]:
+    """当前候选模型清单。
+
+    - 从未配置过（PG 无该 key，或读库失败）→ 内置默认候选；
+    - 配置过 → 以库里的清单为准，**含空清单**（管理端可以把候选删光，空就是空，
+      不会把已删掉的模型又"回退"出来）。恢复默认走 GET 返回的 default_candidates。
+    """
+    try:
+        from app.db.app_config import get_config
+
+        stored = get_config(_CANDIDATES_KEY)
+    except Exception as e:
+        log.warning("候选模型配置读取失败，回退默认候选: {}", e)
+        return list(DEFAULT_CANDIDATE_MODELS)
+    if stored is None:
+        return list(DEFAULT_CANDIDATE_MODELS)
+    return [str(m).strip() for m in (stored or {}).get("models", []) if str(m).strip()]
+
+
 @router.get("/chain")
 async def get_chain():
-    """当前降级链（第一个为主模型）与候选模型清单。"""
-    return {"models": get_active_chain(), "candidates": CANDIDATE_MODELS}
+    """当前降级链（第一个为主模型）、候选模型清单与内置默认候选。"""
+    return {
+        "models": get_active_chain(),
+        "candidates": get_candidates(),
+        "default_candidates": list(DEFAULT_CANDIDATE_MODELS),
+    }
 
 
 @router.put("/chain")
@@ -35,16 +82,30 @@ async def update_chain(payload: dict):
     """更新降级链：{"models": [...]}；空数组=回退 .env 主模型单元素链。"""
     from app.db.app_config import set_config
 
-    raw = payload.get("models")
-    if not isinstance(raw, list):
-        raise HTTPException(status_code=400, detail="models 必须是模型名数组")
-    models = [str(m).strip() for m in raw if str(m).strip()]
+    models = _clean_models(payload.get("models"))
     if len(models) > _MAX_CHAIN_LEN:
         raise HTTPException(status_code=400, detail=f"降级链最多 {_MAX_CHAIN_LEN} 个模型")
     await asyncio.to_thread(set_config, _CHAIN_KEY, {"models": models})
     invalidate_chain_cache()
     log.info("降级链已更新: {}", models or "（空，回退 env 主模型）")
     return {"models": get_active_chain()}
+
+
+@router.put("/candidates")
+async def update_candidates(payload: dict):
+    """更新候选模型清单（增/删都走这里）：{"models": [...]}；空数组=候选项清空（不回退默认）。
+
+    只影响管理端的快捷提示，与降级链互不干涉。传 default_candidates 即可恢复内置默认。
+    """
+    from app.db.app_config import set_config
+
+    models = _clean_models(payload.get("models"))
+    if len(models) > _MAX_CANDIDATE_LEN:
+        raise HTTPException(status_code=400, detail=f"候选最多 {_MAX_CANDIDATE_LEN} 个")
+    await asyncio.to_thread(set_config, _CANDIDATES_KEY, {"models": models})
+    log.info("候选模型已更新: {}", models or "（空）")
+    return {"candidates": get_candidates()}
+
 
 
 # ---------------- LLM 单价（成本折算） ----------------
@@ -57,7 +118,7 @@ async def get_price():
     """当前单价表与候选模型。单价单位：元/百万 token。"""
     from app.core.observability import current_price_map
 
-    return {"prices": current_price_map(), "candidates": CANDIDATE_MODELS}
+    return {"prices": current_price_map(), "candidates": get_candidates(), "default_candidates": list(DEFAULT_CANDIDATE_MODELS)}
 
 
 @router.put("/price")

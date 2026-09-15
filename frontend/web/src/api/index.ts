@@ -355,7 +355,7 @@ export async function getRagStatus(): Promise<RagStatus> {
   return await res.json()
 }
 
-export interface LlmChainStatus { models: string[]; candidates: string[] }
+export interface LlmChainStatus { models: string[]; candidates: string[]; default_candidates?: string[] }
 
 export async function getLlmChain(): Promise<LlmChainStatus> {
   const res = await apiFetch(`${API_BASE}/ai/admin/llm/chain`)
@@ -376,9 +376,25 @@ export async function updateLlmChain(models: string[]): Promise<LlmChainStatus> 
   return await res.json()
 }
 
+export interface LlmCandidatesStatus { candidates: string[] }
+
+/** 更新候选模型清单（增/删都是整表替换；空数组=回退内置默认候选） */
+export async function updateLlmCandidates(models: string[]): Promise<LlmCandidatesStatus> {
+  const res = await apiFetch(`${API_BASE}/ai/admin/llm/candidates`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ models }),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: `保存失败 ${res.status}` }))
+    throw new Error(err.detail || `保存失败 ${res.status}`)
+  }
+  return await res.json()
+}
+
 export type LlmPriceMap = Record<string, { input: number; output: number }>
 
-export interface LlmPriceStatus { prices: LlmPriceMap; candidates: string[] }
+export interface LlmPriceStatus { prices: LlmPriceMap; candidates: string[]; default_candidates?: string[] }
 
 export async function getLlmPrice(): Promise<LlmPriceStatus> {
   const res = await apiFetch(`${API_BASE}/ai/admin/llm/price`)
