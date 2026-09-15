@@ -39,8 +39,9 @@ from app.core.llm_throttle import LLMBusyError, llm_tag
 from app.core.logger import log
 from app.core.thinking_router import use_thinking
 from app.domain.chart_format import find_birth_dates_from_pillars
+from app.domain.tools_catalog import BAZI_BIRTH_TOOLS
 from app.memory import create_chat_memory
-from app.tools.bazi import BAZI_BIRTH_TOOLS, _normalize_birth_time
+from app.tools.bazi import _normalize_birth_time
 from app.tools.mcp_client import mcp_manager
 from app.tools.text_clean import clean_think_tags, dedupe_content, strip_user_input_boundary
 

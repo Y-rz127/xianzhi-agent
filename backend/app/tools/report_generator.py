@@ -11,8 +11,8 @@ import time
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from app.agent.prompts import REPORT_PROMPT_TEMPLATE, REPORT_SYSTEM_PROMPT
 from app.tools.bazi import bazi_analysis, bazi_chart, bazi_dayun
+from app.tools.report_prompts import REPORT_PROMPT_TEMPLATE, REPORT_SYSTEM_PROMPT
 
 SECTIONS = {
     "overview": "命盘总览",

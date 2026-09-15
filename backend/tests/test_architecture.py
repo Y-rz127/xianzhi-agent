@@ -48,21 +48,16 @@ FORBIDDEN_TARGETS: dict[str, set[str]] = {
 # ---------------- 基线（只减不增） ----------------
 # 每项都必须有注释说明来源与消除计划；(源包, 目标包) -> 现存违规条数
 BASELINE_VIOLATIONS: dict[tuple[str, str], int] = {
-    # memory→tools：postgres_memory 依赖 tools.bazi
-    # 消除计划：领域摘要下沉 domain，或经协议注入（报告 P1-7）
-    ("memory", "tools"): 1,
-    # tools→agent：report_generator 依赖 agent.prompts
-    # 消除计划：报告提示词下沉 capabilities/report（报告 P1-1）
-    ("tools", "agent"): 1,
+    # 全部清零：BAZI_BIRTH_TOOLS 下沉 app.domain.tools_catalog（消除 memory→tools），
+    # 报告提示词随使用者迁至 app.tools.report_prompts（消除 tools→agent）。
+    # tools 不再依赖 agent，agent→tools 为单向，agent⟷tools 循环一并断开。
 }
 
 # 包级循环（无序对，按字母序存）
-BASELINE_CYCLES: set[tuple[str, str]] = {
-    # 均由上方方向违规派生，消除对应违规后应一并消失
-    ("agent", "tools"),
-    # ("db", "rag") 已消除：detect_domain / DOMAIN_KEYWORDS 下沉 app.domain.domain_keywords，
-    # db.user_records.answer_feedback 直连 domain，db→rag 边消失，仅剩 rag→db 单向
-}
+BASELINE_CYCLES: set[tuple[str, str]] = set()
+# 已全部消除：
+# ("db", "rag")：detect_domain / DOMAIN_KEYWORDS 下沉 app.domain.domain_keywords，仅剩 rag→db 单向
+# ("agent", "tools")：报告提示词迁 tools.report_prompts 后 tools→agent 消失，agent→tools 成单向
 
 # 允许 import * 的模块（门面转发）。门面拆除后必须清空此集合。
 # 阶段 4 已拆除 domain.bazi_engine（其 `from app.domain.tables import *` 一并消除），

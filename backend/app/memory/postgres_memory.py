@@ -571,9 +571,9 @@ def get_birth_info_from_session(session_id: str) -> dict | None:
     用户可能用农历/节日/时辰等自然语言输入（如"2004年端午节 辰时 男"），
     前端正则无法提取；这里从 AIMessage 的 tool_calls 中取 LLM 已解析的标准 birth_time/gender。
     """
-    # 排盘工具名单复用 app.tools.bazi.BAZI_BIRTH_TOOLS（含 birth_time 参数的工具全集），
+    # 排盘工具名单复用 app.domain.tools_catalog.BAZI_BIRTH_TOOLS（含 birth_time 参数的工具全集），
     # 不再本地维护一份拷贝，避免与 agent 层名单漂移
-    from app.tools.bazi import BAZI_BIRTH_TOOLS
+    from app.domain.tools_catalog import BAZI_BIRTH_TOOLS
 
     try:
         session_uuid = _resolve_session_uuid(session_id)
