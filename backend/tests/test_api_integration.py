@@ -19,7 +19,7 @@ import time
 import pytest
 from fastapi.testclient import TestClient
 
-from app.api import state as app_state
+from app.agent.context import get_app_context
 from app.core.config import settings
 from main import app
 
@@ -150,7 +150,11 @@ def test_report_pdf(client: TestClient) -> None:
 
 @pytest.mark.integration
 def test_full_report(client: TestClient) -> None:
-    if app_state.get_chat_model() is None:
+    try:
+        chat_model = get_app_context().chat_model
+    except RuntimeError:
+        chat_model = None
+    if chat_model is None:
         pytest.skip("chat_model 未初始化，跳过集成测试")
     r = client.post(
         "/api/ai/xianzhi/report/tasks",

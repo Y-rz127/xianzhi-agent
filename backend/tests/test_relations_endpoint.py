@@ -101,16 +101,16 @@ def test_rejects_invalid_birth_time():
 # ---------------- ④ 四柱缓存 ----------------
 def test_pillars_are_cached_per_birth(monkeypatch):
     """同一次出生信息只排一次盘：点流年/流月是高频动作。"""
-    import app.domain.bazi_engine as engine
+    from app.domain import chart_builder as _chart_builder_mod
 
     calls = {"n": 0}
-    real = engine.build_bazi_chart
+    real = _chart_builder_mod.build_bazi_chart
 
     def counting(*args, **kwargs):
         calls["n"] += 1
         return real(*args, **kwargs)
 
-    monkeypatch.setattr(engine, "build_bazi_chart", counting)
+    monkeypatch.setattr(_chart_builder_mod, "build_bazi_chart", counting)
     api_mod._PILLAR_CACHE.clear()
 
     _relations(birth_time=BIRTH, gender=MALE, dayun="壬申", liunian="丙午", liuyue="丁酉")

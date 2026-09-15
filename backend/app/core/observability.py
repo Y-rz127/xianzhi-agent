@@ -44,7 +44,7 @@ def _load_price_map() -> dict[str, tuple[float, float]]:
             return _price_cache
         raw = None
         try:
-            from app.db.app_config import get_config
+            from app.core.config.kv import get_config
 
             stored = get_config("llm_price_map")
             if isinstance(stored, dict):

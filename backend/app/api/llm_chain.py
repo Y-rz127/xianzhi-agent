@@ -58,7 +58,7 @@ def get_candidates() -> list[str]:
       不会把已删掉的模型又"回退"出来）。恢复默认走 GET 返回的 default_candidates。
     """
     try:
-        from app.db.app_config import get_config
+        from app.core.config.kv import get_config
 
         stored = get_config(_CANDIDATES_KEY)
     except Exception as e:
@@ -82,7 +82,7 @@ async def get_chain():
 @router.put("/chain")
 async def update_chain(payload: dict):
     """更新降级链：{"models": [...]}；空数组=回退 .env 主模型单元素链。"""
-    from app.db.app_config import set_config
+    from app.core.config.kv import set_config
 
     models = _clean_models(payload.get("models"))
     if len(models) > _MAX_CHAIN_LEN:
@@ -99,7 +99,7 @@ async def update_candidates(payload: dict):
 
     只影响管理端的快捷提示，与降级链互不干涉。传 default_candidates 即可恢复内置默认。
     """
-    from app.db.app_config import set_config
+    from app.core.config.kv import set_config
 
     models = _clean_models(payload.get("models"))
     if len(models) > _MAX_CANDIDATE_LEN:
@@ -129,8 +129,8 @@ async def update_price(payload: dict):
 
     {"prices": {}} = 清空（不折算成本，回退 env LLM_PRICE_MAP）。
     """
+    from app.core.config.kv import set_config
     from app.core.observability import invalidate_price_cache
-    from app.db.app_config import set_config
 
     prices = payload.get("prices")
     if not isinstance(prices, dict):

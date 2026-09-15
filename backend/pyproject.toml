@@ -45,6 +45,10 @@ target-version = "py311"
 select = ["E", "F", "I", "W"]
 ignore = ["E501"]
 
+[tool.ruff.lint.isort]
+# 别名 import 合并进同一个括号块，避免 "X as A" 被逐个拆成独立 import 语句
+combine-as-imports = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [

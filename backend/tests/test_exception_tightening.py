@@ -90,13 +90,20 @@ class TestMemoryWriteReraise:
 
 
 class TestLegacyTarotRecordRouteRemoval:
-    """旧塔罗记录表专用路由必须从共享 API 栈中剥离，统一走通用 AI 解读记录表。"""
+    """旧塔罗记录表专用路由必须从共享 API 栈中剥离，统一走通用 AI 解读记录表。
+
+    注：本项目所用 FastAPI 版本把 include_router 的结果包在 _IncludedRouter 中
+    （该对象没有 .path 属性），直接遍历 router.routes 会全部取到空串、使断言恒真。
+    这里改用 app.openapi() 暴露的真实路径表做校验。
+    """
 
     def test_tarot_records_route_is_not_registered(self):
-        from app.api.routes import router
+        from main import app
 
-        paths = [getattr(r, "path", "") for r in router.routes]
-        assert not any(p == "/tarot_records" or p.startswith("/tarot_records/") for p in paths)
+        paths = app.openapi()["paths"]
+        assert paths, "openapi 路径表为空，该断言将失去意义"
+        leaked = [p for p in paths if "tarot_records" in p]
+        assert not leaked, f"旧的塔罗记录路由应已剥离，实际仍注册: {leaked}"
 
 
 class TestDeleteSessionSummaryCleanup:

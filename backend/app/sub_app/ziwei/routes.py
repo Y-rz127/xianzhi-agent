@@ -7,45 +7,16 @@ import json
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from app.agent.context import get_app_context
 from app.agent.prompts import ZIWEI_SYSTEM_PROMPT
-from app.api.common import client_error
-from app.api.context import get_app_context
+from app.core.http.errors import client_error
 from app.core.llm_throttle import llm_tag
 from app.core.logger import log
+from app.core.text_extract import normalize_ws_payload_text
 from app.sub_app.ziwei import ziwei_app
 
 router = APIRouter(prefix="/ziwei", tags=["ZiWei"])
 
-
-def _normalize_ws_payload_text(data) -> str:
-    """归一化 WebSocket 消息中的文本字段（兼容多种格式）。"""
-    if data is None:
-        return ""
-    if isinstance(data, str):
-        return data.strip()
-    if isinstance(data, dict):
-        for key in ("text", "content", "delta", "result"):
-            val = data.get(key)
-            if val and isinstance(val, str) and val.strip():
-                return val.strip()
-        if "choices" in data and isinstance(data["choices"], list):
-            choice = data["choices"][0] if data["choices"] else {}
-            delta = choice.get("delta", {})
-            if isinstance(delta, dict) and delta.get("content"):
-                return str(delta["content"]).strip()
-        for val in data.values():
-            if (
-                isinstance(val, str)
-                and len(val) > 20
-                and not val.startswith("<")
-                and "object at 0x" not in val
-            ):
-                return val.strip()
-        return ""
-    text = str(data)
-    if len(text) > 200 or "<__" in text or "object at 0x" in text:
-        return ""
-    return text.strip()
 
 
 @router.websocket("/ws")
@@ -83,7 +54,7 @@ async def ws_ziwei_interpret(websocket: WebSocket):
             leap=leap,
             focus=focus,
         ):
-            payload_text = _normalize_ws_payload_text(text)
+            payload_text = normalize_ws_payload_text(text)
             if payload_text:
                 await websocket.send_json({"type": "message", "data": payload_text})
 

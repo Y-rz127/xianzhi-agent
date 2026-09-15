@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from app.api.common import client_error
+from app.api import data_access as repo
 from app.api.deps import get_current_user
+from app.core.http.errors import client_error
 from app.core.logger import log
-from app.db import repository as repo
 
 router = APIRouter(prefix="/me", tags=["Me"])
 

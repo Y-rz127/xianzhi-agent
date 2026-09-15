@@ -8,8 +8,8 @@
 
 from __future__ import annotations
 
-from contextlib import contextmanager
 import asyncio
+from contextlib import contextmanager
 
 from app.core.thinking_router import (
     ThinkingRouter,

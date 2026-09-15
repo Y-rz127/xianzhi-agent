@@ -7,8 +7,13 @@
 同步函数统一包装为 `await asyncio.to_thread(...)` 的异步版本，API 层一律经此门面调用；
 SQL 与表结构保持不变，同步实现继续供线程内场景（agent 工具、后台任务）复用。
 
+**为什么在 api 层**：异步化诉求（别阻塞事件循环）本身就是 HTTP 并发的关切，
+不是存储层的关切；且全仓只有 api 层消费本门面。原位于 `app/db/repository.py`，
+因同时包裹 `app.memory.postgres_memory` 而构成 `db → memory` 反向依赖
+（与 `memory → db.pool` 形成 db⟷memory 循环）。归位到 api 后该边消失。
+
 用法：
-    from app.db import repository as repo
+    from app.api import data_access as repo
     user = await repo.get_by_token(token)
 """
 
@@ -17,8 +22,7 @@ from __future__ import annotations
 import asyncio
 from functools import wraps
 
-from app.db import chart_store, profiles, schema, user_records
-from app.db import users as user_store
+from app.db import chart_store, profiles, schema, user_records, users as user_store
 from app.memory import postgres_memory
 
 

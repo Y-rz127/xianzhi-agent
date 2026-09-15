@@ -20,10 +20,8 @@ import asyncio
 import threading
 from unittest.mock import MagicMock, patch
 
-import pytest
-
-from app.api.xianzhi import make_chart_notifier
 from app.agent.xianzhi import Xianzhi
+from app.api.xianzhi import make_chart_notifier
 
 MALE = "男"
 

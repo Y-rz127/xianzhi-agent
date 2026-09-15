@@ -5,8 +5,9 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from app.api.admin_accounts import router as admin_accounts_router
-from app.api.asr import router as asr_router
 from app.api.admin_users import router as admin_users_router
+from app.api.ai_interpretation_records import router as ai_interpretation_records_router
+from app.api.asr import router as asr_router
 from app.api.auth import router as auth_router
 from app.api.cases import router as cases_router
 from app.api.favorites import router as favorites_router
@@ -16,7 +17,6 @@ from app.api.me import router as me_router
 from app.api.observability import router as observability_router
 from app.api.profiles import router as profiles_router
 from app.api.rag import mgmt_router as rag_mgmt_router
-from app.api.ai_interpretation_records import router as ai_interpretation_records_router
 from app.api.xianzhi import router as xianzhi_router
 from app.sub_app.hehun.routes import router as hehun_router
 from app.sub_app.huangli.routes import router as huangli_router

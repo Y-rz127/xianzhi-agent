@@ -15,12 +15,15 @@
 from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langchain_core.messages import AIMessage
 
+from app.agent.workflow.orchestrator import XianzhiWorkflow
 from app.agent.workflow.workflow_messages import _compute_shensha, compact_facts
 from app.agent.workflow.workflow_models import QuestionIntent
 from app.agent.workflow.workflow_support import _parse_json
 from app.agent.workflow.workflow_workers import ReviewerWorker, _coerce_pass
-from app.agent.workflow.xianzhi_workflow import XianzhiWorkflow
-from app.domain.bazi_engine import build_bazi_chart, parse_gender
+from app.domain.chart_builder import (
+    build_bazi_chart,
+    parse_gender,
+)
 
 MALE = "男"
 # 固定盘：甲申 庚午 壬申 甲辰（华盖→时柱、学堂→日柱；大运 辛未/壬申/癸酉/甲戌/乙亥/丙子…）
@@ -368,7 +371,7 @@ def test_computed_shensha_names_are_all_known_to_checker():
     """排盘计算器产出的神煞名必须都在审核名单里（否则新神煞会被误判"排盘事实中无"）。"""
     import datetime as dt
 
-    from app.agent.workflow.workflow_messages import SHENSHA_NAMES, SHISHEN_NAMES
+    from app.agent.workflow.fact_check import SHENSHA_NAMES, SHISHEN_NAMES
 
     known = set(SHENSHA_NAMES) | set(SHISHEN_NAMES)
     produced = set()

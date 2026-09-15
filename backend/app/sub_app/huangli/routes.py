@@ -3,10 +3,9 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
 
-from app.api.common import client_error
+from app.core.http.errors import client_error
 from app.core.logger import log
-from app.domain.huangli_calc import YI_JI_ITEMS
-from app.sub_app.huangli import huangli_app
+from app.domain import huangli_calc
 
 router = APIRouter(prefix="/huangli", tags=["HuangLi"])
 
@@ -15,7 +14,7 @@ router = APIRouter(prefix="/huangli", tags=["HuangLi"])
 async def huangli_day(date: str = ""):
     """当日完整黄历，date 省略取今天，支持 1900-2100 年任意日期。"""
     try:
-        return huangli_app.huangli_day(date)
+        return huangli_calc.huangli_day(date)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -27,7 +26,7 @@ async def huangli_day(date: str = ""):
 async def huangli_range(start: str, end: str):
     """月视图轻量简报，区间上限 31 天。"""
     try:
-        return {"days": huangli_app.build_range_briefs(start, end)}
+        return {"days": huangli_calc.build_range_briefs(start, end)}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -39,7 +38,7 @@ async def huangli_range(start: str, end: str):
 async def huangli_zeji(yi: str, start: str, end: str, avoid_chong: str = ""):
     """择吉：筛选宜含目标事项的日子，吉神加星排序，可避冲生肖。"""
     try:
-        return {"yi": yi, "days": huangli_app.zeji(yi, start, end, avoid_chong)}
+        return {"yi": yi, "days": huangli_calc.zeji(yi, start, end, avoid_chong)}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -50,4 +49,4 @@ async def huangli_zeji(yi: str, start: str, end: str, avoid_chong: str = ""):
 @router.get("/items")
 async def huangli_items():
     """宜忌事项词表，供择吉下拉。"""
-    return {"items": list(YI_JI_ITEMS)}
+    return {"items": list(huangli_calc.YI_JI_ITEMS)}

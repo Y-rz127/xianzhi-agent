@@ -7,43 +7,14 @@ import json
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 
-from app.api.common import client_error
-from app.api.context import get_app_context
+from app.agent.context import get_app_context
+from app.core.http.errors import client_error
 from app.core.logger import log
+from app.core.text_extract import normalize_ws_payload_text
 from app.sub_app.hehun.hehun_app import analyze, analyze_stream as hehun_analyze_stream
 
 router = APIRouter(prefix="/xianzhi", tags=["Tools"])
 
-
-def _normalize_ws_payload_text(data) -> str:
-    """归一化 WebSocket 消息中的文本字段（兼容多种格式）。"""
-    if data is None:
-        return ""
-    if isinstance(data, str):
-        return data.strip()
-    if isinstance(data, dict):
-        for key in ("text", "content", "delta", "result"):
-            val = data.get(key)
-            if val and isinstance(val, str) and val.strip():
-                return val.strip()
-        if "choices" in data and isinstance(data["choices"], list):
-            choice = data["choices"][0] if data["choices"] else {}
-            delta = choice.get("delta", {})
-            if isinstance(delta, dict) and delta.get("content"):
-                return str(delta["content"]).strip()
-        for val in data.values():
-            if (
-                isinstance(val, str)
-                and len(val) > 20
-                and not val.startswith("<")
-                and "object at 0x" not in val
-            ):
-                return val.strip()
-        return ""
-    text = str(data)
-    if len(text) > 200 or "<__" in text or "object at 0x" in text:
-        return ""
-    return text.strip()
 
 
 @router.websocket("/hehun/ws")
@@ -78,7 +49,7 @@ async def ws_hehun_analyze(websocket: WebSocket):
             longitude_a=longitude_a,
             longitude_b=longitude_b,
         ):
-            payload_text = _normalize_ws_payload_text(text)
+            payload_text = normalize_ws_payload_text(text)
             if payload_text:
                 await websocket.send_json({"type": "message", "data": payload_text})
 

@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from app.api.common import client_error, is_message_too_long, message_too_long_text
-from app.api.context import get_app_context
+from app.agent.context import get_app_context
+from app.core.http.errors import client_error, is_message_too_long, message_too_long_text
 from app.core.logger import log
 from app.sub_app.tarot.tarot_app import SPREADS
 

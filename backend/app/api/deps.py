@@ -1,10 +1,22 @@
-"""API 层依赖：从请求中提取并校验用户 token。"""
+"""API 层依赖：从请求中提取并校验用户 token，以及注入 AppContext。"""
 from __future__ import annotations
 
-from fastapi import Header, HTTPException, Query
+from fastapi import Header, HTTPException, Query, Request
 
+from app.agent.context import AppContext
+from app.api import data_access as repo
 from app.core.config import settings
-from app.db import repository as repo
+
+
+async def app_context_dependency(request: Request) -> AppContext:
+    """FastAPI 依赖：HTTP handler 经此注入 AppContext。
+
+    未初始化返回 503（服务尚未就绪），而非 500。
+    """
+    ctx = getattr(request.app.state, "app_context", None)
+    if ctx is None:
+        raise HTTPException(status_code=503, detail="服务尚未就绪")
+    return ctx
 
 
 async def get_current_user(

@@ -1,8 +1,14 @@
-"""应用上下文（AppContext）：共享运行时依赖的单一持有者。
+"""运行时上下文（AppContext）与会话锁：共享依赖的单一持有者。
 
-R5 解耦全局 state：原 app/api/state.py 的模块级可变单例收敛为
-lifespan 内构造的 AppContext 实例，HTTP handler 经 FastAPI 依赖注入获取；
-WebSocket 等无法使用 Depends 的场景经模块级 get_app_context() 获取同一实例。
+原位于 ``app/api/context.py``：``sub_app`` 需要 ``get_app_context()`` 取 ``chat_model`` /
+``tarot_app``，只能反向 import api 层（报告 P0-4 的倒置边来源）。
+
+**为什么归 agent 层而不是 core**：``AppContext.get_xianzhi`` 会构造
+``app.agent.xianzhi`` 的 Xianzhi 实例，而 ``SessionLock`` 的语义正是"同一会话的
+agent 操作串行化" —— 两者都是 agent 层职责。放 core 会让 core 反向依赖 agent，
+把倒置边从一处搬到另一处。``api`` 与 ``sub_app`` 同为上层，均可合法 import agent。
+
+FastAPI 依赖（``app_context_dependency``）属 HTTP 装配细节，已移到 ``app/api/deps.py``。
 
 Xianzhi 智能体按会话池化（池为 AppContext 实例态）：
 - 每个 conversation_id 对应一个独立的 Xianzhi 实例 + 会话锁；
@@ -27,8 +33,6 @@ import threading
 from collections import OrderedDict
 from dataclasses import dataclass, field
 from typing import Any
-
-from fastapi import HTTPException, Request
 
 from app.core.logger import log
 
@@ -163,14 +167,3 @@ def get_app_context() -> AppContext:
     if _app_context is None:
         raise RuntimeError("AppContext not initialized")
     return _app_context
-
-
-async def app_context_dependency(request: Request) -> AppContext:
-    """FastAPI 依赖：HTTP handler 经此注入 AppContext。
-
-    未初始化返回 503（服务尚未就绪），而非 500。
-    """
-    ctx = getattr(request.app.state, "app_context", None)
-    if ctx is None:
-        raise HTTPException(status_code=503, detail="服务尚未就绪")
-    return ctx

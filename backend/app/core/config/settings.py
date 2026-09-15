@@ -6,10 +6,22 @@ from typing import Optional
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# 后端根目录（backend/）：本文件位于 backend/app/core/config.py，向上三级即达。
+
+# 后端根目录（backend/）：自本文件向上找首个含 pyproject.toml 的目录。
 # 用于把 .env、运行时数据目录与日志目录锚定到代码位置，而非进程的当前工作目录 ——
 # 否则从仓库根目录执行 pytest 时，相对路径会把记忆文件/向量库/日志写到根目录去。
-BACKEND_ROOT = Path(__file__).resolve().parents[2]
+#
+# 刻意不用固定的 parents[N]：本模块曾从 core/config.py 移到 core/config/settings.py，
+# 层数一变索引就静默指到 app/，.env 与全部运行时目录随之整体漂移（不报错、只写错地方）。
+def _find_backend_root() -> Path:
+    for parent in Path(__file__).resolve().parents:
+        if (parent / "pyproject.toml").is_file():
+            return parent
+    raise RuntimeError("未找到后端根目录：向上未发现 pyproject.toml")
+
+
+BACKEND_ROOT = _find_backend_root()
+
 
 
 class Settings(BaseSettings):

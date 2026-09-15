@@ -24,8 +24,8 @@ import asyncio
 import threading
 from unittest.mock import MagicMock, patch
 
-from app.api.xianzhi import WS_PING_SECONDS, make_progress_notifier, ws_keepalive_loop
 from app.agent.xianzhi import Xianzhi
+from app.api.xianzhi import WS_PING_SECONDS, make_progress_notifier, ws_keepalive_loop
 
 
 class _FakeWS:

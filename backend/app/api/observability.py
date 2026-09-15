@@ -3,7 +3,8 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends
 
-from app.api.context import AppContext, app_context_dependency
+from app.agent.context import AppContext
+from app.api.deps import app_context_dependency
 from app.core.observability import get_metrics, get_status
 from app.rag.vector_store import get_knowledge_base
 

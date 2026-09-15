@@ -15,7 +15,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from langchain_openai import ChatOpenAI
 
-from app.api.context import AppContext, set_app_context
+from app.agent.context import AppContext, set_app_context
 from app.api.routes import router
 from app.core.config import ensure_dirs, settings
 from app.core.llm_failover import FailoverModel
@@ -237,19 +237,13 @@ async def lifespan(app: FastAPI):
         for w in report_workers:
             w.cancel()
 
-    # 关闭 PG 连接池与 RAG 指纹持久化连接池（cases 已复用 postgres_memory 的连接池）
+    # 关闭 PostgreSQL 连接池（db / memory / RAG 指纹共用同一模块级池，关一次即可）
     try:
-        from app.memory.postgres_memory import close_global_conn
-
-        close_global_conn()
-    except Exception as e:
-        log.warning("关闭 PG 连接池失败: {}", e)
-    try:
-        from app.rag.fingerprint import close_pool
+        from app.db.pool import close_pool
 
         close_pool()
     except Exception as e:
-        log.warning("关闭 RAG 指纹连接池失败: {}", e)
+        log.warning("关闭 PG 连接池失败: {}", e)
 
     # 关闭 LLM 客户端 httpx 连接池（仅独立实例，复用主模型的无需关闭）
     for client in (decompose_http, reviewer_http, http):

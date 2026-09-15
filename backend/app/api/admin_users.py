@@ -8,9 +8,9 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Query
 
-from app.api.common import client_error
+from app.api import data_access as repo
+from app.core.http.errors import client_error
 from app.core.logger import log
-from app.db import repository as repo
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
 

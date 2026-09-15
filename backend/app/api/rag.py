@@ -10,7 +10,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
 
-from app.api.common import client_error
+from app.core.http.errors import client_error
 from app.core.logger import log
 from app.rag.knowledge import KNOWLEDGE_DIR
 from app.rag.vector_store import get_knowledge_base

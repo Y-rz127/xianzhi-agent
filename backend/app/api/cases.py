@@ -13,12 +13,12 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 
-from app.api.common import client_error
 from app.api.deps import require_admin
 from app.core.config import settings
+from app.core.http.errors import client_error
 from app.core.logger import log
 from app.db.pool import get_pool
-from app.domain.bazi_engine import extract_bazi_brief
+from app.domain.chart_format import extract_bazi_brief
 
 router = APIRouter(prefix="/cases", tags=["Cases"])
 
@@ -97,9 +97,11 @@ def _new_file_case(name: str, birth_time: str, gender: str, tags: list, chart_da
 
 def _build_chart_data(birth_time: str, gender: str) -> dict[str, Any]:
     """调用结构化排盘引擎生成命例数据。"""
-    from app.domain.bazi_engine import (
+    from app.domain.chart_builder import (
         build_bazi_chart,
         chart_to_api_dict,
+    )
+    from app.domain.chart_format import (
         format_analysis_text,
         format_chart_text,
         format_dayun_text,

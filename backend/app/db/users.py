@@ -1,6 +1,6 @@
 """用户账户存储（昵称 + 密码登录，多端同步）。
 
-主存储为 PostgreSQL，复用 app.memory.postgres_memory 的模块级连接池；
+主存储为 PostgreSQL，复用 app.db.pool 的模块级连接池（db / memory / RAG 指纹共用同一个池）；
 密码用 pbkdf2_hmac 加盐哈希，登录后签发随机 token 存库（支持多端）。
 """
 from __future__ import annotations

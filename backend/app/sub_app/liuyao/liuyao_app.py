@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
-from typing import Any, Generator
-
 import random
 from datetime import datetime
+from typing import Generator
 
+from app.agent.context import get_app_context
 from app.agent.prompts import LIUYAO_SYSTEM_PROMPT
-from app.api.context import get_app_context
 from app.core.llm_throttle import llm_tag
 from app.core.logger import log
+from app.core.text_extract import normalize_chunk_text
 
 TRIGRAMS = {
     "111": ("乾", "天", "☰"),
@@ -105,36 +105,6 @@ def _hexagram_text(hexagram: dict | None) -> str:
     return f"{name}（上卦{upper}，下卦{lower}）" if upper and lower else name
 
 
-def _normalize_chunk_text(raw_content: Any) -> str:
-    """归一化 LLM 流式返回的 chunk 文本（兼容多种格式）。"""
-    if raw_content is None:
-        return ""
-    if isinstance(raw_content, str):
-        text = raw_content.strip()
-        return text if text else ""
-    if isinstance(raw_content, list):
-        texts = []
-        for item in raw_content:
-            if isinstance(item, dict) and item.get("text"):
-                texts.append(item["text"])
-            elif isinstance(item, str):
-                texts.append(item)
-        text = " ".join(texts).strip()
-        return text if text else ""
-    if isinstance(raw_content, dict):
-        for key in ("text", "content", "delta", "result"):
-            val = raw_content.get(key)
-            if val and isinstance(val, str) and val.strip():
-                return val.strip()
-        for val in raw_content.values():
-            if isinstance(val, str) and len(val) > 20 and not val.startswith("<"):
-                return val.strip()
-        return ""
-    text = str(raw_content)
-    if len(text) > 200 or "<__" in text or "object at 0x" in text:
-        return ""
-    return text.strip()
-
 
 async def interpret_stream(question: str, result: dict) -> Generator[str, None, None]:
     """流式解读六爻结果。"""
@@ -167,7 +137,7 @@ async def interpret_stream(question: str, result: dict) -> Generator[str, None, 
         has_any_chunk = False
         with llm_tag("liuyao"):
             async for chunk in get_app_context().chat_model.astream(msgs):
-                text = _normalize_chunk_text(getattr(chunk, "content", None))
+                text = normalize_chunk_text(getattr(chunk, "content", None))
                 if text:
                     has_any_chunk = True
                     yield text

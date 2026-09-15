@@ -19,15 +19,31 @@ import pytest
 from fastapi import HTTPException
 
 from app.api import llm_chain
-from app.db import app_config
+from app.core.config import kv as kv_config
 
 
-def _patch_config(monkeypatch, store: dict) -> None:
-    """把 app_config 的读写换成内存字典（llm_chain 在函数内 import，故打模块属性即可）。"""
-    monkeypatch.setattr(app_config, "set_config", lambda key, value: store.__setitem__(key, value))
-    monkeypatch.setattr(
-        app_config, "get_config", lambda key, default=None: store.get(key, default)
-    )
+class _MemoryKVStore:
+    """内存 KV 存储：替代 PG 版，供接口单测使用。"""
+
+    def __init__(self, data: dict | None = None) -> None:
+        self.data: dict = data if data is not None else {}
+
+    def get(self, key, default=None):
+        return self.data.get(key, default)
+
+    def set(self, key, value) -> None:
+        self.data[key] = value
+
+
+def _patch_config(monkeypatch, store: dict) -> _MemoryKVStore:
+    """把 KV 读写换成内存字典。
+
+    走真实注册表（替换 ``kv_config._store``）而非打桩 ``get_config`` ——
+    这样 ``get_config`` 的异常兜底与 ``set_config`` 的未注册校验也在覆盖范围内。
+    """
+    mem = _MemoryKVStore(store)
+    monkeypatch.setattr(kv_config, "_store", mem)
+    return mem
 
 
 # ---------------- 1. _clean_models ----------------
@@ -73,7 +89,21 @@ def test_candidates_config_read_error_falls_back(monkeypatch):
     def boom(key, default=None):
         raise RuntimeError("pg down")
 
-    monkeypatch.setattr(app_config, "get_config", boom)
+    monkeypatch.setattr(kv_config, "get_config", boom)
+    assert llm_chain.get_candidates() == llm_chain.DEFAULT_CANDIDATE_MODELS
+
+
+def test_candidates_store_query_error_falls_back(monkeypatch):
+    """存储内部抛错（如连接池拿不到连接）同样回退默认候选 —— 真实 PG 不可达即走此路径。"""
+
+    class _BrokenStore:
+        def get(self, key, default=None):
+            raise RuntimeError("connection refused")
+
+        def set(self, key, value) -> None:  # pragma: no cover - 本用例不写
+            raise RuntimeError("connection refused")
+
+    monkeypatch.setattr(kv_config, "_store", _BrokenStore())
     assert llm_chain.get_candidates() == llm_chain.DEFAULT_CANDIDATE_MODELS
 
 
