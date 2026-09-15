@@ -87,6 +87,10 @@ class Xianzhi(ToolCallAgent):
         # 不再等整轮回答流完（旧做法在 socket 断开时会连通知一起丢，见 _fire_chart_notifier）
         self._chart_notifier: Optional[Callable[[dict], None]] = None
         self._chart_notified_key: Optional[tuple] = None  # 同一轮内同一张盘只通知一次
+        # 阶段进度回调（长静默期给前端反馈，见 set_progress_notifier）
+        self._progress_notifier: Optional[Callable[[str], None]] = None
+        # workflow 的阶段进度直接回调到本 Agent（可能在工作线程里被调用）
+        self._workflow.on_progress = self._fire_progress
         # 会话归属用户（挂盘时由 payload 带入并粘住；游客为空串）
         self._user_id: str = ""
         # 已落库的出生信息（避免每轮重复写库）
@@ -102,6 +106,24 @@ class Xianzhi(ToolCallAgent):
         实现方必须自己做线程安全转投，且不得抛异常（内部已 try 兜底）。
         """
         self._chart_notifier = fn
+
+    def set_progress_notifier(self, fn: Optional[Callable[[str], None]]) -> None:
+        """注册阶段进度回调（API 层每轮调用；传 None 注销）。
+
+        同 set_chart_notifier：可能在工作线程被调用，实现方负责线程安全转投。
+        用途：本轮生成实测 116 秒无任何输出，前端只能显示"推演中…"，
+        用户切页面就会关掉 socket，回答随之丢失。
+        """
+        self._progress_notifier = fn
+
+    def _fire_progress(self, text: str) -> None:
+        fn = self._progress_notifier
+        if fn is None or not text:
+            return
+        try:
+            fn(text)
+        except Exception as e:
+            log.warning("[xianzhi] 进度通知回调失败: {}", e)
 
     def _fire_chart_notifier(self) -> None:
         """挂盘成功后立刻回调（同一轮同盘去重）。"""

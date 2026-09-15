@@ -153,7 +153,7 @@
           </div>
           <div class="msg-body">
             <div class="msg-content loading-content">
-              <span class="loading-text">正在为您推演分析，请稍候</span>
+              <span class="loading-text">{{ progressText || '正在为您推演分析，请稍候' }}</span>
               <div class="loading-dots"><span></span><span></span><span></span></div>
             </div>
           </div>
@@ -267,6 +267,8 @@ const router = useRouter()
 const messages = ref<SessionMessage[]>([])
 const input = ref("")
 const loading = ref(false)
+/** 当前阶段文案（后端 progress 事件；空则显示默认"正在为您推演分析…"） */
+const progressText = ref("")
 const isRecording = ref(false)
 const isProcessingVoice = ref(false)
 let mediaRecorder: MediaRecorder | null = null
@@ -788,7 +790,9 @@ const send = async () => {
   chatWithXianzhi(userMsg, conversationId.value, {
     onMessage: (data) => { aiMsg.content += data; scrollToBottom() },
     onError: () => { aiMsg.content += "\n[连接中断]"; loading.value = false },
-    onDone: () => { loading.value = false; scrollToBottom(); syncSessionBirthInfo(); loadSessions(); loadChartCases() },
+    onDone: () => { loading.value = false; progressText.value = ""; scrollToBottom(); syncSessionBirthInfo(); loadSessions(); loadChartCases() },
+    // 阶段进度（检索/生成/审核）：长任务期间给出可见反馈，别让用户以为卡死
+    onProgress: (text: string) => { progressText.value = text },
     // 后端从 LLM 工具调用中提取到出生信息时回调（覆盖自然语言输入场景）
     onChartContext: async (birthTime, gender, birthPlaceStr) => {
       if (!birthTime || !gender) return

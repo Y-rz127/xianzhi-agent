@@ -99,7 +99,7 @@
           <view class="msg-text" :class="{ thinking: isThinking(msg.content) }" @longpress="copyMessage(msg)">
             <!-- AI 消息：用纯 text 渲染（uni-app mp-weixin 的 rich-text 渲染不可靠，曾导致内容为空），保留换行 -->
             <text v-if="msg.role === 'assistant' && msg.content" class="msg-content" :user-select="true">{{ formatContent(msg.content) }}</text>
-            <text v-else-if="!msg.content" class="typing">推演中…</text>
+            <text v-else-if="!msg.content" class="typing">{{ msg.progress || '推演中…' }}</text>
             <text v-else>{{ formatContent(msg.content) }}</text>
           </view>
           <!-- 回答反馈栏（点赞/点踩） -->
@@ -322,7 +322,7 @@ import { regionData, matchCityByName, type City } from '@/utils/region-data'
 
 const { themeClass } = useTheme()
 
-interface Message { role: 'user' | 'assistant'; content: string }
+interface Message { role: 'user' | 'assistant'; content: string; progress?: string }
 interface BirthInfo { time: string; gender: string }
 
 const recording = ref(false)
@@ -887,7 +887,10 @@ onShow(() => {
 })
 
 // 切走 tab / 页面隐藏时关闭 WS，避免 socket 累积超过小程序 5 个上限
-onHide(() => { closeAllWS() })
+// 切走 tab / 页面隐藏时关闭 WS，避免 socket 累积超过小程序 5 个上限。
+// 但**本轮还在生成时不能关**：这一关就把回答送回的通道掐了（实测 2 分钟级的生成
+// 期间用户很容易切页面看别处），宁可让它保持到最后一条消息。
+onHide(() => { if (!thinking.value) closeAllWS() })
 
 function onDateChange(e: any) { birthDate.value = e.detail.value }
 function onTimeChange(e: any) { birthTime.value = e.detail.value }
@@ -1097,6 +1100,53 @@ function downloadPdfReport() {
   if (time && g) downloadReport(time, g)
 }
 
+/**
+ * 断线兜底：WS 在 done 之前断开时，后端可能仍在生成（实测本轮 116 秒）。
+ * 回答一定会落库（agent cleanup → _persist_history），所以这里轮询会话消息，
+ * 用"本次提问"精确定位到它对应的回答，避免把上一轮的回答误当成本轮结果。
+ */
+async function recoverAnswerAfterDisconnect(idx: number, targetList: Message[], sentText: string) {
+  const conv = conversationId.value
+  const want = sentText.trim()
+  const cur0 = targetList[idx]
+  if (cur0 && !cur0.content) targetList[idx] = { ...cur0, progress: '连接中断，正在取回回答…' }
+  for (const wait of [2000, 3000, 5000, 8000, 12000, 15000]) {
+    await new Promise((r) => setTimeout(r, wait))
+    if (conversationId.value !== conv) return // 已切会话，放弃取回
+    try {
+      const msgs = await getSessionMessages('xianzhi', conv)
+      // 从后往前找本次提问（后端会剥离边界标记，故用前 24 字宽松匹配）
+      let qi = -1
+      for (let i = msgs.length - 1; i >= 0; i--) {
+        const m = msgs[i]
+        if (m.role !== 'user') continue
+        const c = (m.content || '').replace(/\s/g, '')
+        if (c && (c === want.replace(/\s/g, '') || c.includes(want.replace(/\s/g, '').slice(0, 24)))) {
+          qi = i
+          break
+        }
+      }
+      const ans = qi >= 0 ? msgs[qi + 1] : undefined
+      if (ans && ans.role === 'assistant' && (ans.content || '').trim()) {
+        targetList[idx] = { role: 'assistant', content: ans.content }
+        thinking.value = false
+        scrollToBottom()
+        uni.showToast({ title: '连接中断，已取回回答', icon: 'none', duration: 2500 })
+        return
+      }
+    } catch {
+      /* 取回失败继续重试 */
+    }
+  }
+  // 仍取不回：清掉"推演中…"状态，明确告诉用户去哪看，而不是一直转圈
+  const cur = targetList[idx]
+  if (cur && !cur.content) {
+    targetList[idx] = { role: 'assistant', content: '（连接中断，回答可能仍在生成，稍后可在会话记录里查看）' }
+  }
+  thinking.value = false
+  scrollToBottom()
+}
+
 function onSend() {
   const text = inputText.value.trim()
   if (!text || thinking.value) return
@@ -1183,6 +1233,14 @@ function onSend() {
     sect,
     token: getToken(),
     onMessage, onDone, onError, onChartContext,
+    // 阶段进度：把"推演中…"换成当前阶段，长任务期间用户不会以为卡死
+    onProgress: (t: string) => {
+      const cur = targetList[idx]
+      targetList[idx] = { ...cur, progress: t }
+      scrollToBottom()
+    },
+    // 连接在 done 之前断了：后端可能仍在生成，去会话记录里把回答取回来
+    onDisconnect: (reason: string) => recoverAnswerAfterDisconnect(idx, targetList, text),
   })
 }
 

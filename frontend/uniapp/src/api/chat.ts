@@ -35,6 +35,13 @@ export interface ChatWSCallbacks {
   onDone: () => void
   onError: (err: string) => void
   onChartContext?: (birthTime: string, gender: string, birthPlace?: string) => void
+  /** 阶段进度（"正在检索命理知识…"）：长静默期给用户反馈，别让人以为卡死 */
+  onProgress?: (text: string) => void
+  /**
+   * done/error 之前连接就断了（后端长静默期里切页面、被系统回收、网关掐断等）。
+   * 页面应清掉"推演中"状态并去会话记录里把已生成好的回答取回来。
+   */
+  onDisconnect?: (reason: string) => void
   onCards?: (cards: any[]) => void
 }
 
@@ -113,6 +120,8 @@ function connectChatWS(path: string, payload: Record<string, any>, cb: ChatWSCal
       if (data.type === 'message') cb.onMessage(data.data)
       else if (data.type === 'cards') cb.onCards?.(data.data)
       else if (data.type === 'chart_context') cb.onChartContext?.(data.data?.birth_time, data.data?.gender, data.data?.birth_place)
+      else if (data.type === 'progress') cb.onProgress?.(String(data.data || ''))
+      else if (data.type === 'ping') { /* 服务端保活，忽略 */ }
       else if (data.type === 'done') { doneOrError = true; cb.onDone(); currentChatActive = false }
       else if (data.type === 'error') { doneOrError = true; cb.onError(data.data || '服务错误'); currentChatActive = false }
     } catch (e: any) {
@@ -131,6 +140,12 @@ function connectChatWS(path: string, payload: Record<string, any>, cb: ChatWSCal
   wx.onSocketClose(() => {
     if (!isMine()) return
     currentChatActive = false
+    // 还没收到 done/error 就关了：后端可能仍在生成（本轮实测可长达 2 分钟），
+    // 通知页面去取回已落库的回答，而不是让"推演中…"永远转下去
+    if (!doneOrError) {
+      doneOrError = true
+      cb.onDisconnect?.('连接已断开')
+    }
   })
 
   // uni.connectSocket 发起连接（走 uni-app 域名绕过），wx 全局回调收消息（真机稳定）

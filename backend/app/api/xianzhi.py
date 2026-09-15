@@ -14,6 +14,9 @@ from app.api.deps import require_admin
 from app.core.logger import log
 from app.db import repository as repo
 
+# 保活 ping 间隔（秒）：小于常见网关默认的 60s 读超时，也小于小程序侧的静默回收窗口
+WS_PING_SECONDS = 15.0
+
 router = APIRouter(prefix="/xianzhi", tags=["Xianzhi"])
 
 
@@ -58,13 +61,49 @@ def make_chart_notifier(loop, push):
         payload = _payload_from_birth_info(info or {})
         if not payload.get("birth_time") or not payload.get("gender"):
             return
+        _thread_bridge(loop, push)(payload)
+
+    return _notify
+
+
+def make_progress_notifier(loop, push):
+    """构造阶段进度通知器（"正在检索…/正在推演生成…"），线程安全转投同 chart_context。"""
+
+    def _notify(text: str) -> None:
+        if text:
+            _thread_bridge(loop, push)(str(text))
+
+    return _notify
+
+
+def _thread_bridge(loop, push):
+    """把工作线程里的回调转投到事件循环：push(x) 会在循环线程上执行。"""
+
+    def _send(value) -> None:
         try:
-            loop.call_soon_threadsafe(push, payload)
+            loop.call_soon_threadsafe(push, value)
         except RuntimeError:
             # 事件循环已关闭（进程退出/测试收尾）：丢弃即可
             pass
 
-    return _notify
+    return _send
+
+
+async def ws_keepalive_loop(websocket, agent, *, interval: float = WS_PING_SECONDS) -> None:
+    """长静默期保活 + 断线探测。
+
+    为什么需要：本轮生成实测 116 秒，服务端一个字节都不发。这段静默期内
+    （1）前面的代理/网关（nginx 默认 proxy_read_timeout=60s）会掐连接；
+    （2）小程序侧长时间无数据也容易被系统回收。
+    更关键的是：服务端只有"发送时"才知道对端已经走了；不过这里**不中止生成**——
+    答案会落库、客户端断线后会去会话记录里取回（前端 onDisconnect → 取回函数）；
+    若 request_cancel，用户等了两分钟反而什么都拿不到，比浪费些 token 更糟。
+    """
+    while True:
+        await asyncio.sleep(interval)
+        if not await _safe_ws_send(websocket, {"type": "ping"}):
+            log.info("[ws] 保活 ping 失败，客户端已断开（本轮继续生成并落库，供前端取回）")
+            return
 
 
 @router.get("/chat")
@@ -110,6 +149,10 @@ async def chat_with_xianzhi(
                     lambda p: events.put_nowait(("chart_context", json.dumps(p, ensure_ascii=False))),
                 )
             )
+            # 阶段进度同样入队（长静默期给前端反馈，避免用户以为卡死）
+            agent.set_progress_notifier(
+                make_progress_notifier(loop, lambda t: events.put_nowait(("progress", t)))
+            )
             _mount_chart_context(agent, birth_time, gender, sect, yun_sect, uid, birth_place)
 
             async def _produce():
@@ -132,12 +175,14 @@ async def chat_with_xianzhi(
                 yield {"event": "message", "data": "[DONE]"}
             finally:
                 agent.set_chart_notifier(None)
-                # 客户端断开（EventSourceResponse 取消本生成器）时停掉在跑的链路，省 token
+                agent.set_progress_notifier(None)
+                # 客户端断开（EventSourceResponse 取消本生成器）：**不取消**在跑的生产任务，
+                # 让它照常跑完并落库——用户回头能在会话记录里看到答案；取消 = 白等一场。
                 if not task.done():
-                    agent.request_cancel()
-                    task.cancel()
+                    log.info("[sse] 客户端已断开，本轮继续在后台生成并落库")
 
-    return EventSourceResponse(event_stream())
+    # ping：长静默期（检索/生成/审核可长达 2 分钟）保持连接，兼防网关读超时
+    return EventSourceResponse(event_stream(), ping=int(WS_PING_SECONDS))
 
 
 async def _safe_ws_send(websocket: WebSocket, data: dict) -> bool:
@@ -212,8 +257,18 @@ async def ws_chat_with_xianzhi(websocket: WebSocket):
                 agent.set_chart_notifier(
                     make_chart_notifier(loop, lambda p: asyncio.ensure_future(_send_chart_context(p)))
                 )
+                agent.set_progress_notifier(
+                    make_progress_notifier(
+                        loop,
+                        lambda t: asyncio.ensure_future(
+                            _safe_ws_send(websocket, {"type": "progress", "data": t})
+                        ),
+                    )
+                )
                 _mount_chart_context(agent, birth_time, gender, sect, yun_sect, uid, birth_place)
                 client_alive = True
+                # 保活：每 WS_PING_SECONDS 秒一个 ping；发不出去就认定客户端已走并取消本轮
+                keepalive = asyncio.create_task(ws_keepalive_loop(websocket, agent))
                 try:
                     async for chunk in agent.arun_stream(message, verbose=verbose):
                         # 调试：确认发送给前端的 chunk 内容（排查"AI 回复为空"）
@@ -232,6 +287,8 @@ async def ws_chat_with_xianzhi(websocket: WebSocket):
                     client_alive = False
                 finally:
                     agent.set_chart_notifier(None)
+                    agent.set_progress_notifier(None)
+                    keepalive.cancel()
                 # 命盘通知已在挂盘那一刻发出（见上面的 set_chart_notifier），
                 # 这里不再补发：旧逻辑排在回答之后且以 client_alive 为条件，
                 # 回答发送失败时通知必然一起丢，正是"八字信息丢失"的根因。

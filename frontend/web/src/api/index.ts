@@ -61,6 +61,8 @@ export interface SSECallbacks {
   onError?: (err: Event) => void
   onDone?: () => void
   onChartContext?: (birthTime: string, gender: string, birthPlace?: string) => void
+  /** 阶段进度（"正在检索命理知识…"）：长任务期间给用户可见反馈 */
+  onProgress?: (text: string) => void
 }
 
 export function connectSSE(path: string, params: Record<string, string | undefined>, cb: SSECallbacks): EventSource {
@@ -86,6 +88,10 @@ export function connectSSE(path: string, params: Record<string, string | undefin
     const data = (e as MessageEvent).data || ""
     cb.onError?.(new ErrorEvent("error", { message: data }))
     es.close()
+  })
+  // 监听后端 progress 事件（检索/生成/审核阶段提示）
+  es.addEventListener("progress", (e) => {
+    cb.onProgress?.((e as MessageEvent).data || "")
   })
   es.onerror = (err) => { cb.onError?.(err); es.close() }
   return es

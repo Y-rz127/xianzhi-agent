@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import replace
+from typing import Callable
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
@@ -98,6 +99,8 @@ class XianzhiWorkflow:
         self.chat_model = chat_model
         self._decompose_model = decompose_model or chat_model
         self._reviewer = ReviewerWorker(reviewer_model or chat_model)
+        # 阶段进度回调（由 Agent 注入；长静默期给前端一点反馈，避免用户以为卡死而切页面）
+        self.on_progress: Callable[[str], None] | None = None
         # 编排后端唯一为 LangGraph：构建失败即快速失败（启动期暴露），
         # 不再保留内置流水线双后端，避免两套实现行为分叉
         try:
@@ -112,6 +115,22 @@ class XianzhiWorkflow:
     def backend(self) -> str:
         """编排后端（唯一实现：langgraph）。"""
         return "langgraph"
+
+    # ===== 阶段进度 =====
+    def _emit_progress(self, text: str) -> None:
+        """向调用方（前端）通报当前阶段。
+
+        意义：本轮生成实测 116 秒里服务端一个字节都不发，用户只能看到"推演中…"，
+        必然切页面 —— 一切页面客户端就把 socket 关了，回答就送不出去。
+        进度回调由 Agent 逐轮注入（见 Xianzhi._fire_progress），可能在工作线程被调用。
+        """
+        fn = self.on_progress
+        if fn is None or not text:
+            return
+        try:
+            fn(text)
+        except Exception as e:  # 通知失败绝不能影响生成
+            log.warning("[workflow] 进度通知失败: {}", e)
 
     # ===== LLM 意图拆解 =====
     _DECOMPOSE_SYSTEM = domain_sysprompt

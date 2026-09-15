@@ -92,6 +92,7 @@ def create_xianzhi_graph(workflow):
         if _is_chitchat(intent):
             log.info("[RAG] 闲聊意图，跳过知识检索")
             return {"knowledge": "（闲聊场景，无需命理知识检索）"}
+        workflow._emit_progress("正在检索命理知识…")
         knowledge = workflow._retrieve_rules(
             state["intent"], state["chart_context"], state.get("worker"), state["user_prompt"]
         )
@@ -101,6 +102,7 @@ def create_xianzhi_graph(workflow):
     def generate_node(state: XianzhiGraphState) -> XianzhiGraphState:
         """生成节点：组装 Worker 消息并调用 LLM 产出原始回答（含会话摘要透传）。"""
         worker = state.get("worker")
+        workflow._emit_progress("正在推演生成…")
         messages = workflow._build_messages(
             state["user_prompt"],
             state["intent"],
@@ -125,6 +127,7 @@ def create_xianzhi_graph(workflow):
         intent = state.get("intent")
         is_chitchat = _is_chitchat(intent)
         needs_chart = _intent_needs_chart(intent)
+        workflow._emit_progress("正在复核断语…")
         log.info("[Reviewer] 开始审核 {} Worker 产出 ({}字)...", getattr(worker, "label", "?"), len(raw))
         second_chart = getattr(intent, "second_chart", None)
         facts_text = compact_facts(state["chart_context"].chart, intent)
@@ -173,6 +176,7 @@ def create_xianzhi_graph(workflow):
             return {"final_answer": state.get("raw_answer", ""), "issues": []}
 
         worker = state.get("worker")
+        workflow._emit_progress("正在修订断语…")
         log.info("[Reflextion] {} Worker 开始修复...", getattr(worker, "label", "?"))
         checked = FactCheckResult(ok=False, issues=state.get("issues", []))
         messages = workflow._build_repair_messages(
