@@ -10,6 +10,8 @@ export const EP = {
   CHAT_SYNC: '/ai/xianzhi/chat/sync',
   CHAT_STREAM: '/ai/xianzhi/chat',
   CHART: '/ai/xianzhi/chart',
+  /** 按点选的大运/流年/流月现算「岁运分析 / 原局分析」六栏 */
+  RELATIONS: '/ai/xianzhi/relations',
   HEHUN: '/ai/xianzhi/hehun',
   FULL_REPORT: '/ai/xianzhi/full_report',
   REPORT_PDF: '/ai/xianzhi/report',

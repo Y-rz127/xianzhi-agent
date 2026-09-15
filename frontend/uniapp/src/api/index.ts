@@ -23,7 +23,7 @@ export {
 } from '@shared/api'
 import type {
   AnswerFeedbackPayload, BaziProfile, ChartCase, ChartData, ChatSession,
-  FavoriteCase, HehunParams, SessionMessage, TarotCard, XzUser,
+  FavoriteCase, HehunParams, SessionMessage, TarotCard, XzUser, XiPanRelations,
 } from '@shared/api'
 import type { SessionBirthInfo } from '@shared/api'
 import { EP, profileBody } from '@shared/api'
@@ -274,6 +274,27 @@ export const getChart = (birthTime: string, gender: string, sect = 2, yunSect = 
     sect,
     yun_sect: yunSect,
     ...(longitude ? { longitude } : {}),
+  })
+
+/**
+ * 按点选的大运/流年/流月现算「岁运分析 / 原局分析」六栏。
+ * 页面初次加载的 xipan.relations 只对应"今天"那一组，点别的年份不会变，所以点选后要回调这个接口。
+ * dayun/liunian/liuyue 传干支（如 "壬申"），缺省项自动跳过（童限无大运时可只传流年/流月）。
+ */
+export const getRelations = (
+  birthTime: string,
+  gender: string,
+  opts: { sect?: number; yunSect?: number; longitude?: number; dayun?: string; liunian?: string; liuyue?: string } = {}
+) =>
+  get<XiPanRelations>(EP.RELATIONS, {
+    birth_time: birthTime,
+    gender,
+    sect: opts.sect ?? 2,
+    yun_sect: opts.yunSect ?? 1,
+    ...(opts.longitude ? { longitude: opts.longitude } : {}),
+    ...(opts.dayun ? { dayun: opts.dayun } : {}),
+    ...(opts.liunian ? { liunian: opts.liunian } : {}),
+    ...(opts.liuyue ? { liuyue: opts.liuyue } : {}),
   })
 
 export interface BaziCandidate { birth_time: string; ganzhi: string; shi_chen: string }

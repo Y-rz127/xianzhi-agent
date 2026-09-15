@@ -11,7 +11,7 @@ export {
   EP, parseDayun, parsePillars, parseShensha, parseWuxing,
   isSameDayun, collapseBySelection,
 } from "@shared/api"
-import type { AnswerFeedbackPayload, BaziCandidate, BaziProfile, ChartCase, ChartData, ChatOptions, ChatSession, FavoriteCase, SessionBirthInfo, SessionMessage, TarotCard } from "@shared/api"
+import type { AnswerFeedbackPayload, BaziCandidate, BaziProfile, ChartCase, ChartData, ChatOptions, ChatSession, FavoriteCase, SessionBirthInfo, SessionMessage, TarotCard, XiPanRelations } from "@shared/api"
 import { EP } from "@shared/api"
 
 const API_BASE = import.meta.env.VITE_API_BASE
@@ -196,6 +196,27 @@ export async function getChart(birthTime: string, gender: string, sect = 2, yunS
   if (longitude !== undefined && longitude !== 0) params.set("longitude", String(longitude))
   const res = await apiFetch(`${API_BASE}${EP.CHART}?${params.toString()}`)
   if (!res.ok) throw new Error(`排盘失败 ${res.status}`)
+  return await res.json()
+}
+
+/** 按点选的大运/流年/流月现算「岁运分析 / 原局分析」（缺省项自动跳过：童限无大运） */
+export async function getRelations(
+  birthTime: string,
+  gender: string,
+  opts: { sect?: number; yunSect?: number; longitude?: number; dayun?: string; liunian?: string; liuyue?: string } = {}
+): Promise<XiPanRelations> {
+  const params = new URLSearchParams({
+    birth_time: birthTime,
+    gender,
+    sect: String(opts.sect ?? 2),
+    yun_sect: String(opts.yunSect ?? 1),
+  })
+  if (opts.longitude) params.set("longitude", String(opts.longitude))
+  if (opts.dayun) params.set("dayun", opts.dayun)
+  if (opts.liunian) params.set("liunian", opts.liunian)
+  if (opts.liuyue) params.set("liuyue", opts.liuyue)
+  const res = await apiFetch(`${API_BASE}${EP.RELATIONS}?${params.toString()}`)
+  if (!res.ok) throw new Error(`岁运关系计算失败 ${res.status}`)
   return await res.json()
 }
 

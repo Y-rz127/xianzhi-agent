@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import threading
+from collections import OrderedDict
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from sse_starlette.sse import EventSourceResponse
@@ -16,6 +18,10 @@ from app.db import repository as repo
 
 # 保活 ping 间隔（秒）：小于常见网关默认的 60s 读超时，也小于小程序侧的静默回收窗口
 WS_PING_SECONDS = 15.0
+
+# 干支字集：/relations 入参校验用（拒绝明显不合法的"干支"，避免静默算出空关系）
+_GAN_SET = set("甲乙丙丁戊己庚辛壬癸")
+_ZHI_SET = set("子丑寅卯辰巳午未申酉戌亥")
 
 router = APIRouter(prefix="/xianzhi", tags=["Xianzhi"])
 
@@ -425,6 +431,82 @@ async def cache_stats():
     from app.tools.cache import bazi_cache
 
     return bazi_cache.stats()
+
+
+# 四柱缓存：关系判定只用到干支，点一次大运/流年/流月就全量重排太浪费
+_PILLAR_CACHE: "OrderedDict[str, list]" = OrderedDict()
+_PILLAR_CACHE_MAX = 64
+_PILLAR_CACHE_LOCK = threading.Lock()
+
+
+def _pillars_cached(
+    birth_time: str, gender: str, sect: int, yun_sect: int, longitude: float | None
+) -> list:
+    """按出生信息缓存四柱（不含大运/流年等重活），供 /relations 反复调用。"""
+    from app.domain.bazi_engine import build_bazi_chart
+
+    key = "|".join([birth_time, gender, str(sect), str(yun_sect), str(longitude)])
+    with _PILLAR_CACHE_LOCK:
+        hit = _PILLAR_CACHE.get(key)
+        if hit is not None:
+            _PILLAR_CACHE.move_to_end(key)
+            return hit
+    chart = build_bazi_chart(
+        birth_time, gender, sect=sect, yun_sect=yun_sect, dayun_count=1, liunian_years=1, longitude=longitude
+    )
+    with _PILLAR_CACHE_LOCK:
+        _PILLAR_CACHE[key] = chart.pillars
+        while len(_PILLAR_CACHE) > _PILLAR_CACHE_MAX:
+            _PILLAR_CACHE.popitem(last=False)
+    return chart.pillars
+
+
+@router.get("/relations")
+async def get_relations(
+    birth_time: str,
+    gender: str,
+    sect: int = 2,
+    yun_sect: int = 1,
+    longitude: float | None = None,
+    dayun: str = "",
+    liunian: str = "",
+    liuyue: str = "",
+):
+    """按指定的 大运/流年/流月 计算「岁运分析 / 原局分析」。
+
+    细盘页点选大运/流年/流月时调用：页面初次加载的 relations 只对应"今天"那一组，
+    点别的年份不会变（旧行为）。这里按传入干支现算，缺省项自动跳过
+    （童限没有大运、只点到流年/流月也能算）。
+
+    入参：dayun/liunian/liuyue 为干支（如 "壬申"），按 大运→流年→流月 顺序叠加在原局上。
+    """
+    if not dayun and not liunian and not liuyue:
+        raise HTTPException(status_code=400, detail="至少需要 dayun / liunian / liuyue 之一")
+
+    from app.domain.bazi_engine import parse_birth, parse_gender
+    from app.domain.time_parse import _normalize_birth_time
+    from app.domain.xipan import _build_relations
+
+    try:
+        # _normalize_birth_time 内部也会解析（农历/时辰/节日），失败同样抛 ValueError
+        birth_time = _normalize_birth_time(birth_time)
+        parse_birth(birth_time)
+        parse_gender(gender)
+    except ValueError as e:  # 与 /chart 一致：输入非法返回 400，不能 500
+        raise HTTPException(status_code=400, detail=str(e))
+
+    sui: list[str] = []
+    for label, value in (("dayun", dayun), ("liunian", liunian), ("liuyue", liuyue)):
+        value = (value or "").strip()
+        if not value:
+            continue
+        if len(value) != 2 or value[0] not in _GAN_SET or value[1] not in _ZHI_SET:
+            raise HTTPException(status_code=400, detail=f"{label} 不是合法干支：{value}")
+        sui.append(value)
+
+    pillars = await asyncio.to_thread(_pillars_cached, birth_time, gender, sect, yun_sect, longitude)
+    rel = await asyncio.to_thread(_build_relations, pillars, sui)
+    return {"suiyun": rel["suiyun"], "yuanju": rel["yuanju"]}
 
 
 def _compute_chart_payload(

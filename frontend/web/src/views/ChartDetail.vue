@@ -407,7 +407,7 @@
             <div class="section-block" v-if="suiyunRows.length">
               <div class="section-title-row">
                 <span class="section-title">岁运分析</span>
-                <span class="gong-info">{{ xipan.relations?.suiyun.label }}</span>
+                <span class="gong-info">{{ relations?.suiyun.label }}</span>
               </div>
               <div v-for="row in suiyunRows" :key="'sy' + row.label" class="an-row">
                 <span class="an-label">{{ row.label }}</span>
@@ -422,7 +422,7 @@
             <div class="section-block" v-if="yuanjuRows.length">
               <div class="section-title-row">
                 <span class="section-title">原局分析</span>
-                <span class="gong-info">{{ xipan.relations?.yuanju.label }}</span>
+                <span class="gong-info">{{ relations?.yuanju.label }}</span>
               </div>
               <div v-for="row in yuanjuRows" :key="'yj' + row.label" class="an-row">
                 <span class="an-label">{{ row.label }}</span>
@@ -511,7 +511,7 @@
 import { ref, computed, onMounted, watch } from "vue"
 import { useRoute, useRouter } from "vue-router"
 import type { Pillar, WuxingItem, DayunItem, ShenshaItem, LiuNianItem, ChartAnalysis, ChartData, XiPanData, XiPanLiuYue, XiPanRelationGroup } from "../api/index.ts"
-import { getChart, downloadReport, generateFullReport, downloadFullReportPDF, isSameDayun, collapseBySelection } from "../api/index.ts"
+import { getChart, getRelations, downloadReport, generateFullReport, downloadFullReportPDF, isSameDayun, collapseBySelection, type XiPanRelations } from "../api/index.ts"
 import MarkdownRender from "../components/MarkdownRender.vue"
 
 type TabKey = 'pillars' | 'wuxing' | 'dayun' | 'liunian' | 'xipan' | 'report'
@@ -586,6 +586,9 @@ watch(xipan, (xp) => {
     selectedDayunIndex.value = xp.current.dayunIndex
     selectedYear.value = xp.current.year
     selectedLiuyueGz.value = xp.current.liuyue || ''
+    // 初次进入：直接用 /chart 已算好的那一组，避免白跑一次接口
+    relations.value = xp.relations || null
+    relationsKey.value = [snapDayunGz.value, snapLiunianGz.value, selectedLiuyueGz.value].join("|")
   }
 })
 
@@ -624,6 +627,41 @@ function isCurrentLiuyue(m: XiPanLiuYue): boolean {
 }
 
 // === 岁运 / 原局分析（后端 relations 引擎，六栏口径对齐专业排盘软件） ===
+// 数据跟随点选的大运/流年/流月（初次进入用 /chart 已算好的"今天"那一组）
+const relations = ref<XiPanRelations | null>(null)
+const relationsKey = ref("")
+let relationsTimer: ReturnType<typeof setTimeout> | null = null
+
+function currentRelationsKey(): string {
+  return [snapDayunGz.value, snapLiunianGz.value, selectedLiuyueGz.value].join("|")
+}
+
+function refreshRelations() {
+  if (!xipan.value || !birthTime.value || !gender.value) return
+  const key = currentRelationsKey()
+  if (!key.replace(/\|/g, "") || key === relationsKey.value) return
+  if (relationsTimer) clearTimeout(relationsTimer)
+  relationsTimer = setTimeout(async () => {
+    try {
+      const data = await getRelations(birthTime.value, gender.value, {
+        sect: Number(route.query.sect || 2) || 2,
+        yunSect: Number(route.query.yun_sect || 1) || 1,
+        longitude: Number(route.query.longitude || 0) || undefined,
+        dayun: snapDayunGz.value,
+        liunian: snapLiunianGz.value,
+        liuyue: selectedLiuyueGz.value,
+      })
+      if (currentRelationsKey() !== key) return // 期间又点了别的，丢弃这次结果
+      relations.value = data
+      relationsKey.value = key
+    } catch {
+      /* 拉取失败保留旧结果 */
+    }
+  }, 150)
+}
+
+watch([selectedDayunIndex, selectedYear, selectedLiuyueGz, xipan], () => refreshRelations())
+
 function relRows(g?: XiPanRelationGroup) {
   if (!g) return []
   return [
@@ -632,8 +670,8 @@ function relRows(g?: XiPanRelationGroup) {
     { label: '整柱', items: g.zhu || [] },
   ]
 }
-const suiyunRows = computed(() => relRows(xipan.value?.relations?.suiyun))
-const yuanjuRows = computed(() => relRows(xipan.value?.relations?.yuanju))
+const suiyunRows = computed(() => relRows(relations.value?.suiyun))
+const yuanjuRows = computed(() => relRows(relations.value?.yuanju))
 
 // 五行旺相休囚死的取色 class：用 ASCII 数字避免中文 class 被转义
 const XS_STATE_KEY: Record<string, number> = { 旺: 0, 相: 1, 休: 2, 囚: 3, 死: 4 }

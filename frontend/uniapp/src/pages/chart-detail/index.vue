@@ -358,7 +358,7 @@
             <view class="section inner" v-if="suiyunRows.length">
               <view class="section-title-row">
                 <text class="section-title flat">岁运分析</text>
-                <text class="gong-info">{{ xipan.relations?.suiyun.label }}</text>
+                <text class="gong-info">{{ relations?.suiyun.label }}{{ relationsLoading ? ' · 计算中…' : '' }}</text>
               </view>
               <view v-for="row in suiyunRows" :key="'sy' + row.label" class="an-row">
                 <text class="an-label">{{ row.label }}</text>
@@ -373,7 +373,7 @@
             <view class="section inner" v-if="yuanjuRows.length">
               <view class="section-title-row">
                 <text class="section-title flat">原局分析</text>
-                <text class="gong-info">{{ xipan.relations?.yuanju.label }}</text>
+                <text class="gong-info">{{ relations?.yuanju.label }}</text>
               </view>
               <view v-for="row in yuanjuRows" :key="'yj' + row.label" class="an-row">
                 <text class="an-label">{{ row.label }}</text>
@@ -532,7 +532,7 @@
 import { ref, computed, watch } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import { useTheme } from '@/composables/useTheme'
-import { getChart, generateFullReport, downloadReport, downloadFullReportPdf, isSameDayun, collapseBySelection, type ChartData, type Pillar, type WuxingItem, type DayunItem, type ShenshaItem, type LiuNianItem, type XiPanData, type XiPanLiuYue, type XiPanRelationGroup } from '@/api'
+import { getChart, getRelations, generateFullReport, downloadReport, downloadFullReportPdf, isSameDayun, collapseBySelection, type ChartData, type Pillar, type WuxingItem, type DayunItem, type ShenshaItem, type LiuNianItem, type XiPanData, type XiPanLiuYue, type XiPanRelationGroup, type XiPanRelations } from '@/api'
 import MarkdownRender from '@/components/MarkdownRender/MarkdownRender.vue'
 
 const { themeClass } = useTheme()
@@ -672,6 +672,54 @@ const selectedDayunIndex = ref(-1)
 const selectedYear = ref(0)
 const selectedLiuyueGz = ref('')
 
+// === 岁运/原局分析（跟随点选） ===
+// 初次进入用 /chart 里算好的那一组（对应"今天"），之后每次点大运/流年/流月回调 /relations 现算
+const relations = ref<XiPanRelations | null>(null)
+const relationsLoading = ref(false)
+// 已对齐的"大运|流年|流月"组合：同组合不重复请求（也用于跳过初始化那次）
+const relationsKey = ref('')
+// 盘面参数（onLoad 里从路由参数取，供 /relations 复用）
+const chartSect = ref(2)
+const chartYunSect = ref(1)
+const chartLongitude = ref<number | undefined>(undefined)
+let relationsTimer: ReturnType<typeof setTimeout> | null = null
+
+function currentRelationsKey(): string {
+  return [snapDayunGz.value, snapLiunianGz.value, selectedLiuyueGz.value].join('|')
+}
+
+/** 点选变化 → 拉取该组合的六栏关系（150ms 防抖；过期响应丢弃，避免快速点选时串位） */
+function refreshRelations() {
+  const xp = xipan.value
+  if (!xp || !birthTime.value || !gender.value) return
+  const key = currentRelationsKey()
+  if (!key.replace(/\|/g, '') || key === relationsKey.value) return
+  if (relationsTimer) clearTimeout(relationsTimer)
+  relationsTimer = setTimeout(async () => {
+    relationsLoading.value = true
+    try {
+      const data = await getRelations(birthTime.value, gender.value, {
+        sect: chartSect.value,
+        yunSect: chartYunSect.value,
+        longitude: chartLongitude.value,
+        dayun: snapDayunGz.value,
+        liunian: snapLiunianGz.value,
+        liuyue: selectedLiuyueGz.value,
+      })
+      if (currentRelationsKey() !== key) return // 期间又点了别的，丢弃这次结果
+      relations.value = data
+      relationsKey.value = key
+    } catch {
+      /* 拉取失败保留旧结果，不打断浏览 */
+    } finally {
+      relationsLoading.value = false
+    }
+  }, 150)
+}
+
+// 点选大运/流年/流月 → 岁运分析跟随刷新
+watch([selectedDayunIndex, selectedYear, selectedLiuyueGz, () => xipan.value], () => refreshRelations())
+
 const liuyueOfYear = computed(() => {
   const xp = xipan.value
   return xp ? xp.liuyue.filter((m) => m.year === selectedYear.value) : []
@@ -809,6 +857,7 @@ const startYunText = computed(() => {
 })
 
 // === 岁运分析 / 原局分析（后端 relations 引擎，六栏口径对齐专业排盘软件） ===
+// 数据不再固定为"今天"那一组：跟随用户点选的大运/流年/流月回调后端现算（见 refreshRelations）
 function relRows(g?: XiPanRelationGroup) {
   if (!g) return []
   return [
@@ -817,8 +866,8 @@ function relRows(g?: XiPanRelationGroup) {
     { label: '整柱', items: g.zhu || [] },
   ]
 }
-const suiyunRows = computed(() => relRows(xipan.value?.relations?.suiyun))
-const yuanjuRows = computed(() => relRows(xipan.value?.relations?.yuanju))
+const suiyunRows = computed(() => relRows(relations.value?.suiyun))
+const yuanjuRows = computed(() => relRows(relations.value?.yuanju))
 
 // === 神煞列表（截图式：四柱/大运/流年） ===
 const dayunShenshaRaw = computed(() => {
@@ -1140,10 +1189,17 @@ onLoad((options: any) => {
   const sect = Number(options.sect || 2) || 2
   const yunSect = Number(options.yun_sect || 1) || 1
   const longitude = Number(options.longitude || 0) || undefined
+  // 记下来供后续 /relations 调用复用（同一盘面同一流派）
+  chartSect.value = sect
+  chartYunSect.value = yunSect
+  chartLongitude.value = longitude
   getChart(birthTime.value, gender.value, sect, yunSect, longitude)
     .then((data) => {
       chart.value = data
       initXipanSelection()
+      // 初次进入：直接用 /chart 已算好的那一组（对应"今天"），避免白跑一次接口
+      relations.value = data.xipan?.relations || null
+      relationsKey.value = currentRelationsKey()
     })
     .catch(() => { chart.value = null })
     .finally(() => { loading.value = false })

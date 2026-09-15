@@ -35,6 +35,8 @@ logs/
 
 # 测试
 .pytest_cache/
+# pytest 在临时目录不可写时会回退到当前工作目录，落这些目录（每跑一次一个）
+pytest-cache-files-*/
 .coverage
 htmlcov/
 
