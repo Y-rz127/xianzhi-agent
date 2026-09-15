@@ -23,15 +23,15 @@
 
 | 指标 | 阶段 2 前 | 现在 |
 |---|---|---|
-| 分层倒置边 | 16 条 | **2 条**（`memory→tools`、`tools→agent`） |
-| 包级循环依赖 | 5 组 | **1 组**（`agent⟷tools`；`db⟷rag` 已随领域识别下沉 domain 消除） |
+| 分层倒置边 | 16 条 | **0 条**（`memory→tools` 随 `tools_catalog` 下沉 domain、`tools→agent` 随 `report_prompts` 归位 tools，均已消除） |
+| 包级循环依赖 | 5 组 | **0 组**（`db⟷rag`、`agent⟷tools` 均已随领域识别/提示词下沉 domain 消除） |
 | 双导入路径符号 | 28 个 | **0 个**（阶段 4 已拆两门面，符号统一直连） |
 | `import *` | 1 处 | **0 处**（`domain.bazi_engine` 的 `import *` 随门面拆除消除） |
 | 连接池实例 | 2 个 | **1 个** |
 
-已消除的倒置边：`core→db`(2)、`sub_app→api`(11)、`tools→sub_app`(1)、`db→memory`(1)。
+已消除的倒置边：`core→db`(2)、`sub_app→api`(11)、`tools→sub_app`(1)、`db→memory`(1)、`memory→tools`(1)、`tools→agent`(1)。
 
-**验证口径**：`ruff check app/ tests/ scripts/` 0 error；`pytest -m "not integration"` **668 passed / 0 failed**；
+**验证口径**：`ruff check app/ tests/ scripts/` 0 error；`pytest -m "not integration"` **688 passed / 0 failed**；
 并起真实服务打 8123 做了端到端核对（`/api/ai/huangli/*`、`/api/ai/admin/llm/chain` 读写 `app_config`、
 `/api/ai/xianzhi/chart` 排盘、`/api/ai/metrics`、`/api/health`）。
 
@@ -927,7 +927,7 @@ backend/app/
 | **P0** | P0-4 api 层被全员依赖 | 架构清晰度 | 中（11 处 import） | ✅ 已消除 |
 | **P1** | P1-2 sub_app 三胞胎复制 | 已实测的重复 56 行 | 小 | ✅ 已合并 |
 | **P1** | P1-3 LLM 代理样板重复 | 已实测的重复 ~90 行 | 小 | ✅ 已合并 |
-| **P1** | P1-1 tools 目录语义混淆 | 目录清晰度 | 小 | 🟡 部分（`tools→sub_app` 已断；`tools→agent` 未断） |
+| **P1** | P1-1 tools 目录语义混淆 | 目录清晰度 | 小 | ✅ 已消除（`tools→sub_app`、`tools→agent` 均已断；`tools` 仅依赖 `domain`/`core`） |
 | **P0** | P0-1 门面双路径 | 重构风险、可维护性 | 大（20 处调用方） | ✅ 已拆除（bazi_engine / xianzhi_workflow） |
 | **P1** | P1-4 干支关系两套实现 | **口径一致性（产品风险）** | 中 | ✅ 已统一（`ganzhi_relations.py`；⚠️ 口径需需求方确认） |
 | **P1** | P1-6 巨型函数（2 个 500 行级） | 可维护性、事故风险 | 大 | ✅ shensha / check_facts / create_xianzhi_graph / _do_ensure_tables 均已完成拆分 |
