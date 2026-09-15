@@ -310,196 +310,328 @@ def _extract_user_id(conversation_id: str) -> str:
     return ""
 
 
-def get_session_info(prefix: str = "", user_id: str = None) -> list:
-    """获取所有会话信息（前端会话列表），按 prefix/user_id 过滤。
+class PostgresMemoryStore:
+    """会话元数据 / 出生信息 / 历史消息的统一 DB 访问口（无实例状态，模块级单例）。
 
-    单条 SQL 完成聚合 + 每个会话最新一条消息提取（DISTINCT ON），消除逐组相关子查询的 N+1；
-    module/user_id 过滤下推 SQL，LIMIT 兜底防极端库拖垮接口。
+    记忆层的会话查询过程归一到本类，消除"记忆适配类 + 散落模块级业务函数"双范式；
+    外部旧 API（模块级同名函数）保留为薄转发，见文件底部。
     """
-    try:
+
+    def _resolve_session_uuid(self, session_id: str) -> str:
+        """解析 conversation_id 为真实 session_uuid：优先查 session_metadata，查不到再用确定性 UUID 计算。"""
+        try:
+            with _get_pool().connection() as conn:
+                row = conn.execute(
+                    "SELECT session_id FROM session_metadata WHERE conversation_id = %s", (session_id,)
+                ).fetchone()
+            if row:
+                return str(row[0])
+        except Exception as e:
+            # 降级为确定性 UUID 计算（可能指向空会话），但错误必须可见
+            log.warning("解析 session_uuid 失败，回退确定性 UUID: {}", e)
+            _record_error("memory.resolve_session_uuid")
+        return PostgresChatMemory._to_uuid(session_id)
+
+    def get_session_info(self, prefix: str = "", user_id: str = None) -> list:
+        """获取所有会话信息（前端会话列表），按 prefix/user_id 过滤。
+
+        单条 SQL 完成聚合 + 每个会话最新一条消息提取（DISTINCT ON），消除逐组相关子查询的 N+1；
+        module/user_id 过滤下推 SQL，LIMIT 兜底防极端库拖垮接口。
+        """
+        try:
+            _ensure_schema()
+            with _get_pool().connection() as conn:
+                sql = """
+                    SELECT agg.session_id,
+                           sm.conversation_id,
+                           sm.module,
+                           sm.user_id,
+                           last.message AS last_msg,
+                           agg.first_time,
+                           agg.last_time,
+                           agg.msg_count
+                    FROM (
+                        SELECT session_id,
+                               MIN(created_at) AS first_time,
+                               MAX(created_at) AS last_time,
+                               COUNT(*) AS msg_count
+                        FROM message_store
+                        GROUP BY session_id
+                    ) agg
+                    JOIN (
+                        SELECT DISTINCT ON (session_id) session_id, message
+                        FROM message_store
+                        ORDER BY session_id, created_at DESC
+                    ) last ON last.session_id = agg.session_id
+                    LEFT JOIN session_metadata sm ON sm.session_id = agg.session_id
+                """
+                conditions = []
+                params: list = []
+                if user_id:
+                    conditions.append("sm.user_id = %s")
+                    params.append(user_id)
+                elif prefix:
+                    # prefix 下推：优先匹配 sm.module；sm 缺失的旧行保留，由下方 Python 兜底
+                    conditions.append("(sm.module = %s OR sm.conversation_id IS NULL)")
+                    params.append(prefix)
+                if conditions:
+                    sql += " WHERE " + " AND ".join(conditions)
+                sql += " ORDER BY agg.last_time DESC LIMIT 500"
+                cur = conn.execute(sql, params)
+                rows = cur.fetchall()
+            sessions = []
+            for row in rows:
+                session_uuid = str(row[0])
+                conversation_id = row[1]
+                module = row[2]
+                # 旧数据/尚未同步时 session_metadata 无记录，用内存映射兜底
+                if not conversation_id:
+                    conversation_id = _session_uuid_map.get(session_uuid, session_uuid)
+                    module = _extract_module(str(conversation_id))
+                if prefix and str(module) != prefix:
+                    continue
+                last_msg_raw = row[4]
+                last_msg_text = ""
+                if last_msg_raw:
+                    try:
+                        if isinstance(last_msg_raw, str):
+                            msg_obj = json.loads(last_msg_raw)
+                        else:
+                            msg_obj = last_msg_raw
+                        if isinstance(msg_obj, dict):
+                            last_msg_text = msg_obj.get("content") or msg_obj.get("data", {}).get("content") or ""
+                    except Exception:
+                        last_msg_text = str(last_msg_raw)[:50]
+                sessions.append(
+                    {
+                        "id": conversation_id,
+                        "title": last_msg_text[:30] if last_msg_text else "新会话",
+                        "lastMessage": last_msg_text[:50] if last_msg_text else "",
+                        "firstTime": str(row[5]) if row[5] else "",
+                        "lastTime": str(row[6]) if row[6] else "",
+                        "messageCount": row[7],
+                    }
+                )
+            return sessions
+        except Exception:
+            log.exception("获取会话列表失败")
+            _record_error("memory.get_session_info")
+            return []
+
+    def get_session_owner(self, session_id: str) -> str:
+        """获取会话归属用户 ID（session_metadata.user_id），游客/旧格式会话返回空串。
+
+        供 API 层做会话越权校验：user_id 非空的会话仅限本人 token 访问。
+        查询失败时返回空串放行，避免 DB 抖动直接打断正常用户。
+        """
+        try:
+            with _get_pool().connection() as conn:
+                row = conn.execute(
+                    "SELECT user_id FROM session_metadata WHERE conversation_id = %s",
+                    (session_id,),
+                ).fetchone()
+            return (row[0] or "") if row else ""
+        except Exception as e:
+            log.warning("查询会话归属失败 {} : {}", session_id, e)
+            return ""
+
+    def delete_session(self, session_id: str):
+        """删除指定会话的所有消息，并清理其摘要记忆元数据。"""
+        try:
+            session_uuid = self._resolve_session_uuid(session_id)
+            with _get_pool().connection() as conn:
+                conn.execute("DELETE FROM message_store WHERE session_id = %s", (session_uuid,))
+                conn.execute(
+                    """
+                    UPDATE session_metadata
+                    SET summary = '', last_summary_msg_count = 0, updated_at = CURRENT_TIMESTAMP
+                    WHERE session_id = %s
+                    """,
+                    (session_uuid,),
+                )
+                conn.execute("DELETE FROM session_metadata WHERE session_id = %s", (session_uuid,))
+                # 出生信息随会话一起删（否则删了会话还能从 birth-info 接口读回敏感生辰）
+                conn.execute("DELETE FROM session_birth_info WHERE session_id = %s", (session_uuid,))
+        except Exception:
+            # 删除失败重抛，API 层返回 5xx，不向用户假装删除成功
+            log.exception("删除会话失败: {}", session_id)
+            _record_error("memory.delete_session")
+            raise
+
+    def get_messages(self, session_id: str) -> list:
+        """获取指定会话所有消息（前端 role 格式：user / assistant）。
+
+        过滤 tool/system 消息、tool_call_agent 注入的 next_step_prompt 占位消息及空消息；
+        user 消息剥离 base_agent 注入的指令防护边界标记。
+        """
+        try:
+            session_uuid = self._resolve_session_uuid(session_id)
+            with _get_pool().connection() as conn:
+                cur = conn.execute(
+                    """
+                    SELECT message, created_at FROM message_store
+                    WHERE session_id = %s ORDER BY created_at
+                """,
+                    (session_uuid,),
+                )
+                rows = cur.fetchall()
+            messages = []
+            for row in rows:
+                msg = row[0]
+                content = msg.get("data", {}).get("content", "") or ""
+                raw_role = msg.get("type", "").replace("_message", "")
+                if raw_role in ("tool", "system"):
+                    continue
+                # next_step_prompt 占位消息（tool_call_agent 注入的 HumanMessage）不作为用户消息展示，
+                # 关键词须与 app.agent.xianzhi.NEXT_STEP_PROMPT 实际文本一致
+                if raw_role == "human" and "根据用户需求选最合适的工具，复杂任务分解多步" in content:
+                    continue
+                if not content.strip():
+                    continue
+                role = "user" if raw_role == "human" else "assistant"
+                if role == "user":
+                    content = _strip_user_input_boundary(content)
+                messages.append(
+                    {
+                        "role": role,
+                        "content": content,
+                        "time": str(row[1]) if row[1] else "",
+                    }
+                )
+            return messages
+        except Exception:
+            log.exception("获取会话消息失败: {}", session_id)
+            _record_error("memory.get_messages")
+            return []
+
+    def upsert_session_birth_info(
+        self,
+        session_id: str,
+        birth_time: str,
+        gender: str,
+        place: str = "",
+        longitude: float = 0.0,
+        user_id: str = "",
+    ) -> None:
+        """写入/更新会话级出生信息（挂盘时调用；同一会话只保留最近一张盘）。
+
+        user_id 传空串（游客/未登录）时**不清空**已有归属：
+        同一会话里正则挂载那条路径拿不到 uid，不能让 payload 挂载写进去的 uid 被抹掉。
+        """
         _ensure_schema()
+        session_uuid = self._resolve_session_uuid(session_id)
         with _get_pool().connection() as conn:
-            sql = """
-                SELECT agg.session_id,
-                       sm.conversation_id,
-                       sm.module,
-                       sm.user_id,
-                       last.message AS last_msg,
-                       agg.first_time,
-                       agg.last_time,
-                       agg.msg_count
-                FROM (
-                    SELECT session_id,
-                           MIN(created_at) AS first_time,
-                           MAX(created_at) AS last_time,
-                           COUNT(*) AS msg_count
-                    FROM message_store
-                    GROUP BY session_id
-                ) agg
-                JOIN (
-                    SELECT DISTINCT ON (session_id) session_id, message
-                    FROM message_store
-                    ORDER BY session_id, created_at DESC
-                ) last ON last.session_id = agg.session_id
-                LEFT JOIN session_metadata sm ON sm.session_id = agg.session_id
-            """
-            conditions = []
-            params: list = []
-            if user_id:
-                conditions.append("sm.user_id = %s")
-                params.append(user_id)
-            elif prefix:
-                # prefix 下推：优先匹配 sm.module；sm 缺失的旧行保留，由下方 Python 兜底
-                conditions.append("(sm.module = %s OR sm.conversation_id IS NULL)")
-                params.append(prefix)
-            if conditions:
-                sql += " WHERE " + " AND ".join(conditions)
-            sql += " ORDER BY agg.last_time DESC LIMIT 500"
-            cur = conn.execute(sql, params)
-            rows = cur.fetchall()
-        sessions = []
-        for row in rows:
-            session_uuid = str(row[0])
-            conversation_id = row[1]
-            module = row[2]
-            # 旧数据/尚未同步时 session_metadata 无记录，用内存映射兜底
-            if not conversation_id:
-                conversation_id = _session_uuid_map.get(session_uuid, session_uuid)
-                module = _extract_module(str(conversation_id))
-            if prefix and str(module) != prefix:
-                continue
-            last_msg_raw = row[4]
-            last_msg_text = ""
-            if last_msg_raw:
-                try:
-                    if isinstance(last_msg_raw, str):
-                        msg_obj = json.loads(last_msg_raw)
-                    else:
-                        msg_obj = last_msg_raw
-                    if isinstance(msg_obj, dict):
-                        last_msg_text = msg_obj.get("content") or msg_obj.get("data", {}).get("content") or ""
-                except Exception:
-                    last_msg_text = str(last_msg_raw)[:50]
-            sessions.append(
-                {
-                    "id": conversation_id,
-                    "title": last_msg_text[:30] if last_msg_text else "新会话",
-                    "lastMessage": last_msg_text[:50] if last_msg_text else "",
-                    "firstTime": str(row[5]) if row[5] else "",
-                    "lastTime": str(row[6]) if row[6] else "",
-                    "messageCount": row[7],
-                }
+            conn.execute(
+                """
+                INSERT INTO session_birth_info
+                    (session_id, user_id, birth_time, gender, place, longitude, updated_at)
+                VALUES (%s, %s, %s, %s, %s, %s, now())
+                ON CONFLICT (session_id) DO UPDATE SET
+                    user_id = COALESCE(NULLIF(EXCLUDED.user_id, ''), session_birth_info.user_id),
+                    birth_time = EXCLUDED.birth_time,
+                    gender = EXCLUDED.gender,
+                    place = EXCLUDED.place,
+                    longitude = EXCLUDED.longitude,
+                    updated_at = now()
+                """,
+                (session_uuid, user_id or "", birth_time, gender, place or "", float(longitude or 0.0)),
             )
-        return sessions
-    except Exception:
-        log.exception("获取会话列表失败")
-        _record_error("memory.get_session_info")
-        return []
+
+    def get_session_birth_info(self, session_id: str) -> dict | None:
+        """读取会话级出生信息（查不到返回 None）。
+
+        这是命盘上下文恢复的**权威来源**：写入发生在挂盘那一刻，与 tool_calls 无关，
+        进程重启、agent 实例被换掉、换端接入都不影响。
+        """
+        try:
+            _ensure_schema()
+            session_uuid = self._resolve_session_uuid(session_id)
+            with _get_pool().connection() as conn:
+                row = conn.execute(
+                    "SELECT birth_time, gender, place, longitude, user_id"
+                    " FROM session_birth_info WHERE session_id = %s",
+                    (session_uuid,),
+                ).fetchone()
+            if not row:
+                return None
+            return {
+                "time": row[0],
+                "gender": row[1],
+                "place": row[2] or "",
+                "longitude": float(row[3] or 0.0),
+                "user_id": row[4] or "",
+            }
+        except Exception as e:
+            log.warning("读取会话出生信息失败: {}", e)
+            _record_error("memory.get_session_birth_info")
+            return None
+
+    def get_birth_info_from_session(self, session_id: str) -> dict | None:
+        """从会话历史中的排盘工具调用参数提取出生信息。
+
+        用户可能用农历/节日/时辰等自然语言输入（如"2004年端午节 辰时 男"），
+        前端正则无法提取；这里从 AIMessage 的 tool_calls 中取 LLM 已解析的标准 birth_time/gender。
+        """
+        # 排盘工具名单复用 app.domain.tools_catalog.BAZI_BIRTH_TOOLS（含 birth_time 参数的工具全集），
+        # 不再本地维护一份拷贝，避免与 agent 层名单漂移
+        from app.domain.tools_catalog import BAZI_BIRTH_TOOLS
+
+        try:
+            session_uuid = self._resolve_session_uuid(session_id)
+            with _get_pool().connection() as conn:
+                cur = conn.execute(
+                    """
+                    SELECT message FROM message_store
+                    WHERE session_id = %s ORDER BY created_at
+                """,
+                    (session_uuid,),
+                )
+                rows = cur.fetchall()
+            for row in reversed(rows):  # 逆序：取最近一次排盘
+                msg = row[0]
+                if msg.get("type") != "ai":
+                    continue
+                tool_calls = msg.get("data", {}).get("tool_calls", []) or []
+                for tc in tool_calls:
+                    name = tc.get("name", "")
+                    args = tc.get("args", {}) or {}
+                    if name in BAZI_BIRTH_TOOLS:
+                        bt = args.get("birth_time")
+                        gd = args.get("gender")
+                        if bt and gd:
+                            try:
+                                from app.domain.time_parse import _normalize_birth_time
+
+                                bt = _normalize_birth_time(bt)
+                            except Exception:
+                                pass
+                            return {"time": bt, "gender": gd}
+            return None
+        except Exception as e:
+            log.error("提取会话出生信息失败 {} : {}", session_id, e)
+            _record_error("memory.get_birth_info")
+            return None
 
 
-def _resolve_session_uuid(session_id: str) -> str:
-    """解析 conversation_id 为真实 session_uuid：优先查 session_metadata，查不到再用确定性 UUID 计算。"""
-    try:
-        with _get_pool().connection() as conn:
-            row = conn.execute(
-                "SELECT session_id FROM session_metadata WHERE conversation_id = %s", (session_id,)
-            ).fetchone()
-        if row:
-            return str(row[0])
-    except Exception as e:
-        # 降级为确定性 UUID 计算（可能指向空会话），但错误必须可见
-        log.warning("解析 session_uuid 失败，回退确定性 UUID: {}", e)
-        _record_error("memory.resolve_session_uuid")
-    return PostgresChatMemory._to_uuid(session_id)
+# 模块级单例：无状态，全进程共享
+_store = PostgresMemoryStore()
+
+
+# ---- 模块级薄转发：外部旧 API（app.api.data_access / app.agent.xianzhi）兼容 ----
+def get_session_info(prefix: str = "", user_id: str = None) -> list:
+    return _store.get_session_info(prefix, user_id)
 
 
 def get_session_owner(session_id: str) -> str:
-    """获取会话归属用户 ID（session_metadata.user_id），游客/旧格式会话返回空串。
-
-    供 API 层做会话越权校验：user_id 非空的会话仅限本人 token 访问。
-    查询失败时返回空串放行，避免 DB 抖动直接打断正常用户。
-    """
-    try:
-        with _get_pool().connection() as conn:
-            row = conn.execute(
-                "SELECT user_id FROM session_metadata WHERE conversation_id = %s",
-                (session_id,),
-            ).fetchone()
-        return (row[0] or "") if row else ""
-    except Exception as e:
-        log.warning("查询会话归属失败 {} : {}", session_id, e)
-        return ""
+    return _store.get_session_owner(session_id)
 
 
 def delete_session(session_id: str):
-    """删除指定会话的所有消息，并清理其摘要记忆元数据。"""
-    try:
-        session_uuid = _resolve_session_uuid(session_id)
-        with _get_pool().connection() as conn:
-            conn.execute("DELETE FROM message_store WHERE session_id = %s", (session_uuid,))
-            conn.execute(
-                """
-                UPDATE session_metadata
-                SET summary = '', last_summary_msg_count = 0, updated_at = CURRENT_TIMESTAMP
-                WHERE session_id = %s
-                """,
-                (session_uuid,),
-            )
-            conn.execute("DELETE FROM session_metadata WHERE session_id = %s", (session_uuid,))
-            # 出生信息随会话一起删（否则删了会话还能从 birth-info 接口读回敏感生辰）
-            conn.execute("DELETE FROM session_birth_info WHERE session_id = %s", (session_uuid,))
-    except Exception:
-        # 删除失败重抛，API 层返回 5xx，不向用户假装删除成功
-        log.exception("删除会话失败: {}", session_id)
-        _record_error("memory.delete_session")
-        raise
+    return _store.delete_session(session_id)
 
 
 def get_messages(session_id: str) -> list:
-    """获取指定会话所有消息（前端 role 格式：user / assistant）。
-
-    过滤 tool/system 消息、tool_call_agent 注入的 next_step_prompt 占位消息及空消息；
-    user 消息剥离 base_agent 注入的指令防护边界标记。
-    """
-    try:
-        session_uuid = _resolve_session_uuid(session_id)
-        with _get_pool().connection() as conn:
-            cur = conn.execute(
-                """
-                SELECT message, created_at FROM message_store
-                WHERE session_id = %s ORDER BY created_at
-            """,
-                (session_uuid,),
-            )
-            rows = cur.fetchall()
-        messages = []
-        for row in rows:
-            msg = row[0]
-            content = msg.get("data", {}).get("content", "") or ""
-            raw_role = msg.get("type", "").replace("_message", "")
-            if raw_role in ("tool", "system"):
-                continue
-            # next_step_prompt 占位消息（tool_call_agent 注入的 HumanMessage）不作为用户消息展示，
-            # 关键词须与 app.agent.xianzhi.NEXT_STEP_PROMPT 实际文本一致
-            if raw_role == "human" and "根据用户需求选最合适的工具，复杂任务分解多步" in content:
-                continue
-            if not content.strip():
-                continue
-            role = "user" if raw_role == "human" else "assistant"
-            if role == "user":
-                content = _strip_user_input_boundary(content)
-            messages.append(
-                {
-                    "role": role,
-                    "content": content,
-                    "time": str(row[1]) if row[1] else "",
-                }
-            )
-        return messages
-    except Exception:
-        log.exception("获取会话消息失败: {}", session_id)
-        _record_error("memory.get_messages")
-        return []
+    return _store.get_messages(session_id)
 
 
 def upsert_session_birth_info(
@@ -510,103 +642,12 @@ def upsert_session_birth_info(
     longitude: float = 0.0,
     user_id: str = "",
 ) -> None:
-    """写入/更新会话级出生信息（挂盘时调用；同一会话只保留最近一张盘）。
-
-    user_id 传空串（游客/未登录）时**不清空**已有归属：
-    同一会话里正则挂载那条路径拿不到 uid，不能让 payload 挂载写进去的 uid 被抹掉。
-    """
-    _ensure_schema()
-    session_uuid = _resolve_session_uuid(session_id)
-    with _get_pool().connection() as conn:
-        conn.execute(
-            """
-            INSERT INTO session_birth_info
-                (session_id, user_id, birth_time, gender, place, longitude, updated_at)
-            VALUES (%s, %s, %s, %s, %s, %s, now())
-            ON CONFLICT (session_id) DO UPDATE SET
-                user_id = COALESCE(NULLIF(EXCLUDED.user_id, ''), session_birth_info.user_id),
-                birth_time = EXCLUDED.birth_time,
-                gender = EXCLUDED.gender,
-                place = EXCLUDED.place,
-                longitude = EXCLUDED.longitude,
-                updated_at = now()
-            """,
-            (session_uuid, user_id or "", birth_time, gender, place or "", float(longitude or 0.0)),
-        )
+    return _store.upsert_session_birth_info(session_id, birth_time, gender, place, longitude, user_id)
 
 
 def get_session_birth_info(session_id: str) -> dict | None:
-    """读取会话级出生信息（查不到返回 None）。
-
-    这是命盘上下文恢复的**权威来源**：写入发生在挂盘那一刻，与 tool_calls 无关，
-    进程重启、agent 实例被换掉、换端接入都不影响。
-    """
-    try:
-        _ensure_schema()
-        session_uuid = _resolve_session_uuid(session_id)
-        with _get_pool().connection() as conn:
-            row = conn.execute(
-                "SELECT birth_time, gender, place, longitude, user_id"
-                " FROM session_birth_info WHERE session_id = %s",
-                (session_uuid,),
-            ).fetchone()
-        if not row:
-            return None
-        return {
-            "time": row[0],
-            "gender": row[1],
-            "place": row[2] or "",
-            "longitude": float(row[3] or 0.0),
-            "user_id": row[4] or "",
-        }
-    except Exception as e:
-        log.warning("读取会话出生信息失败: {}", e)
-        _record_error("memory.get_session_birth_info")
-        return None
+    return _store.get_session_birth_info(session_id)
 
 
 def get_birth_info_from_session(session_id: str) -> dict | None:
-    """从会话历史中的排盘工具调用参数提取出生信息。
-
-    用户可能用农历/节日/时辰等自然语言输入（如"2004年端午节 辰时 男"），
-    前端正则无法提取；这里从 AIMessage 的 tool_calls 中取 LLM 已解析的标准 birth_time/gender。
-    """
-    # 排盘工具名单复用 app.domain.tools_catalog.BAZI_BIRTH_TOOLS（含 birth_time 参数的工具全集），
-    # 不再本地维护一份拷贝，避免与 agent 层名单漂移
-    from app.domain.tools_catalog import BAZI_BIRTH_TOOLS
-
-    try:
-        session_uuid = _resolve_session_uuid(session_id)
-        with _get_pool().connection() as conn:
-            cur = conn.execute(
-                """
-                SELECT message FROM message_store
-                WHERE session_id = %s ORDER BY created_at
-            """,
-                (session_uuid,),
-            )
-            rows = cur.fetchall()
-        for row in reversed(rows):  # 逆序：取最近一次排盘
-            msg = row[0]
-            if msg.get("type") != "ai":
-                continue
-            tool_calls = msg.get("data", {}).get("tool_calls", []) or []
-            for tc in tool_calls:
-                name = tc.get("name", "")
-                args = tc.get("args", {}) or {}
-                if name in BAZI_BIRTH_TOOLS:
-                    bt = args.get("birth_time")
-                    gd = args.get("gender")
-                    if bt and gd:
-                        try:
-                            from app.domain.time_parse import _normalize_birth_time
-
-                            bt = _normalize_birth_time(bt)
-                        except Exception:
-                            pass
-                        return {"time": bt, "gender": gd}
-        return None
-    except Exception as e:
-        log.error("提取会话出生信息失败 {} : {}", session_id, e)
-        _record_error("memory.get_birth_info")
-        return None
+    return _store.get_birth_info_from_session(session_id)
