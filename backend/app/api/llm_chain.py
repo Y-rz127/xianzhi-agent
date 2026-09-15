@@ -21,11 +21,13 @@ _MAX_CHAIN_LEN = 5
 _MAX_CANDIDATE_LEN = 20
 _MAX_MODEL_NAME_LEN = 64
 
-# 内置默认候选（首次使用/存空时生效；管理端可增删，落库 llm_candidates）
+# 内置默认候选（首次使用/恢复默认时生效；管理端可增删，落库 llm_candidates）
+# 注意：这里只放「当前确认可用」的模型。qwen3.8-2.4t-a95b 曾因免费额度耗尽(403
+# AllocationQuota.FreeTierOnly)被移出默认清单；额度恢复后要重新加回，请用管理端
+# 「添加候选」或改这里。
 DEFAULT_CANDIDATE_MODELS = [
     "qwen3.8-27b",
     "qwen3.8-flash",
-    "qwen3.8-2.4t-a95b",
     "kimi-k3",
     "deepseek-v4-flash-0731",
     "deepseek-v4-pro-0813",

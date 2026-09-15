@@ -154,7 +154,7 @@
         v-model="chainText"
         class="chain-input"
         rows="4"
-        placeholder="qwen3.8-27b&#10;qwen3.8-flash&#10;qwen3.8-2.4t-a95b"
+        placeholder="qwen3.8-max-0902&#10;qwen3.8-27b&#10;qwen3.8-flash"
         spellcheck="false"
       ></textarea>
       <div class="chain-candidates">
