@@ -76,3 +76,32 @@ export function clearBirthPlaceLocal(sessionId: string) {
     if (sessionId) uni.removeStorageSync(BIRTH_PLACE_PREFIX + sessionId)
   } catch {}
 }
+
+/* ============ 会话级出生信息（本地持久化） ============
+ * 后端 chart_context 通知可能丢（长回答期间 socket 断开就没了），
+ * 落一份本地副本：重新进会话时先用本地兜住，再用 /birth-info 接口校正。
+ */
+const BIRTH_INFO_PREFIX = 'XZ_BIRTH_INFO_'
+
+export interface LocalBirthInfo { time: string; gender: '男' | '女' }
+
+export function getBirthInfoLocal(sessionId: string): LocalBirthInfo | null {
+  try {
+    const v = uni.getStorageSync(BIRTH_INFO_PREFIX + sessionId)
+    return v && v.time && v.gender ? (v as LocalBirthInfo) : null
+  } catch {
+    return null
+  }
+}
+
+export function setBirthInfoLocal(sessionId: string, time: string, gender: '男' | '女') {
+  try {
+    if (sessionId && time && gender) uni.setStorageSync(BIRTH_INFO_PREFIX + sessionId, { time, gender })
+  } catch {}
+}
+
+export function clearBirthInfoLocal(sessionId: string) {
+  try {
+    if (sessionId) uni.removeStorageSync(BIRTH_INFO_PREFIX + sessionId)
+  } catch {}
+}

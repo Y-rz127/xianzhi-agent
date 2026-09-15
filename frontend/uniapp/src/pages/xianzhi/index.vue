@@ -317,7 +317,7 @@ import {
   type ChartData, type ChatSession,
 } from '@/api'
 import { getLocalDateString } from '@/utils/datetimePicker'
-import { currentUserId, isLoggedIn, getToken, getUser, getBirthPlaceLocal, setBirthPlaceLocal, clearBirthPlaceLocal } from '@/utils/storage'
+import { currentUserId, isLoggedIn, getToken, getUser, getBirthPlaceLocal, setBirthPlaceLocal, clearBirthPlaceLocal, getBirthInfoLocal, setBirthInfoLocal } from '@/utils/storage'
 import { regionData, matchCityByName, type City } from '@/utils/region-data'
 
 const { themeClass } = useTheme()
@@ -683,16 +683,19 @@ async function switchToSession(session: ChatSession) {
     birthDate.value = ''
     birthTime.value = ''
     gender.value = '男' as '男' | '女'
-    if (bi.time && bi.gender) {
-      lastBirthInfo.value = { time: bi.time, gender: bi.gender }
-      const [d, t] = bi.time.split(' ')
+    // 后端查不到时用本地副本兜底（后端重启后老会话、通知丢失的场景）
+    const restored = bi.time && bi.gender ? bi : getBirthInfoLocal(session.id)
+    if (restored?.time && restored?.gender) {
+      lastBirthInfo.value = { time: restored.time, gender: restored.gender as '男' | '女' }
+      const [d, t] = restored.time.split(' ')
       birthDate.value = d || ''
       // 时辰（如"辰时"）映射为 HH:MM，确保 time picker 能正常显示
       birthTime.value = zhiHourToHHMM(t)
-      gender.value = bi.gender as '男' | '女'
+      gender.value = restored.gender as '男' | '女'
+      setBirthInfoLocal(session.id, restored.time, restored.gender as '男' | '女')
       _skipNextChartWatch = true
       // 命盘只服务内嵌卡片，不阻塞进入会话：后台补齐，失败保持 null
-      getChart(bi.time, bi.gender, 2, 1, birthLongitude.value || undefined)
+      getChart(restored.time, restored.gender, 2, 1, birthLongitude.value || undefined)
         .then((c) => { chartData.value = c })
         .catch(() => { chartData.value = null })
     }
@@ -801,8 +804,16 @@ const today = getLocalDateString()
 const birthTimeFull = computed(() =>
   birthDate.value && birthTime.value ? `${birthDate.value} ${birthTime.value}` : ''
 )
+/** 当前生效出生时间：优先表单（用户手选），其次 lastBirthInfo（AI 从对话里提取/后端通知） */
+const effectiveBirthTime = computed(() => birthTimeFull.value || lastBirthInfo.value?.time || '')
+/** 当前生效性别：同上（表单默认"男"，所以 lastBirthInfo 优先于默认值） */
+const effectiveGender = computed(() =>
+  birthTimeFull.value ? gender.value : lastBirthInfo.value?.gender || gender.value
+)
 const birthSummary = computed(() =>
-  birthTimeFull.value ? `${birthTimeFull.value} ${gender.value}${birthPlace.value ? ' · ' + birthPlace.value : ''}` : '点击设置出生信息'
+  effectiveBirthTime.value
+    ? `${effectiveBirthTime.value} ${effectiveGender.value}${birthPlace.value ? ' · ' + birthPlace.value : ''}`
+    : '点击设置出生信息'
 )
 
 const placeholderText = '请输入你的问题…'
@@ -829,6 +840,7 @@ watch([birthDate, birthTime, gender, birthLongitude], async ([d, t, g]) => {
   if (d && t && g) {
     const time = `${d} ${t}`
     lastBirthInfo.value = { time, gender: g }
+    if (conversationId.value) setBirthInfoLocal(conversationId.value, time, g)
     try { chartData.value = await getChart(time, g, 2, 1, birthLongitude.value || undefined) } catch { chartData.value = null }
   }
 })
@@ -843,6 +855,7 @@ async function applyBirth(bt: string, g: '男' | '女', name?: string) {
   birthTime.value = zhiHourToHHMM(t)
   gender.value = g
   lastBirthInfo.value = { time: bt, gender: g }
+  if (conversationId.value) setBirthInfoLocal(conversationId.value, bt, g)
   _skipNextChartWatch = true
   try { chartData.value = await getChart(bt, g, 2, 1) } catch { chartData.value = null }
   const autoMsg = name
@@ -1037,6 +1050,7 @@ function openChartDetail() {
 /** 把解析出的出生时间同步到表单、命盘上下文并主动拉取 chartData */
 async function applyExtractedBirth(time: string, g: '男' | '女') {
   lastBirthInfo.value = { time, gender: g }
+  if (conversationId.value) setBirthInfoLocal(conversationId.value, time, g)
   const [d, tm] = time.split(' ')
   birthDate.value = d || ''
   birthTime.value = zhiHourToHHMM(tm)
@@ -1128,6 +1142,8 @@ function onSend() {
     birthTime.value = zhiHourToHHMM(t)
     gender.value = g as '男' | '女'
     lastBirthInfo.value = { time: bt, gender: g as '男' | '女' }
+    // 本地留一份：后端通知可能丢（长回答期间 socket 断开），重进会话时先用它兜住
+    if (conversationId.value) setBirthInfoLocal(conversationId.value, bt, g as '男' | '女')
     // 出生地必须跟随"当前这张命盘"走，否则会跨命盘串值：
     //  - 本次后端提取到出生地 → 采用（覆盖上一张命盘遗留的值；库未收录也用原文替换，经度置 0 为安全默认）；
     //  - 本次未提到出生地且八字已变（新命盘 / 换人）→ 清空，不让上一个地点的真太阳时挂到这张命盘；
@@ -1161,8 +1177,8 @@ function onSend() {
 
   chatWithXianzhiWS(text, {
     conversationId: conversationId.value,
-    birthTime: birthTimeFull.value || undefined,
-    gender: gender.value,
+    birthTime: effectiveBirthTime.value || undefined,
+    gender: effectiveGender.value,
     birthPlace: birthPlace.value || undefined,
     sect,
     token: getToken(),

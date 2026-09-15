@@ -35,11 +35,36 @@ def _mount_chart_context(
 
 def _chart_context_payload(agent) -> dict:
     """从 Agent 提取出生信息 payload（SSE 需 JSON 序列化，WS 直接传 dict）。"""
-    bi = agent._last_birth_info or {}
-    payload = {"birth_time": bi.get("time"), "gender": bi.get("gender")}
-    if bi.get("place"):
-        payload["birth_place"] = bi["place"]
+    return _payload_from_birth_info(agent._last_birth_info or {})
+
+
+def _payload_from_birth_info(info: dict) -> dict:
+    """出生信息 → 前端 chart_context payload（字段名与前端约定一致）。"""
+    payload = {"birth_time": info.get("time"), "gender": info.get("gender")}
+    if info.get("place"):
+        payload["birth_place"] = info["place"]
     return payload
+
+
+def make_chart_notifier(loop, push):
+    """构造「命盘已挂载」通知器：把工作线程里的事件安全转投到事件循环。
+
+    挂盘发生在 asyncio.to_thread 中（arun_stream → mount_chart_context），
+    不能直接 await 发送，必须用 call_soon_threadsafe 回到循环上再发。
+    push(payload) 在事件循环上被调用（内部自行 ensure_future/put_nowait）。
+    """
+
+    def _notify(info: dict) -> None:
+        payload = _payload_from_birth_info(info or {})
+        if not payload.get("birth_time") or not payload.get("gender"):
+            return
+        try:
+            loop.call_soon_threadsafe(push, payload)
+        except RuntimeError:
+            # 事件循环已关闭（进程退出/测试收尾）：丢弃即可
+            pass
+
+    return _notify
 
 
 @router.get("/chat")
@@ -73,20 +98,44 @@ async def chat_with_xianzhi(
         async with lock:
             agent._sect = sect
             agent._yun_sect = yun_sect
+            loop = asyncio.get_running_loop()
+            events: asyncio.Queue = asyncio.Queue()
+            _END = object()  # 生产者结束哨兵
+
+            # 挂盘即通知（同 WS 路径）：通知与回答共用一条队列，但通知来自挂盘那一刻，
+            # 不再等整轮回答流完，客户端断开也照样先收到。
+            agent.set_chart_notifier(
+                make_chart_notifier(
+                    loop,
+                    lambda p: events.put_nowait(("chart_context", json.dumps(p, ensure_ascii=False))),
+                )
+            )
             _mount_chart_context(agent, birth_time, gender, sect, yun_sect, uid, birth_place)
+
+            async def _produce():
+                try:
+                    async for chunk in agent.arun_stream(message, verbose=verbose):
+                        await events.put(("message", chunk))
+                except Exception as e:
+                    log.exception("SSE stream error")
+                    await events.put(("error", client_error(e)))
+                finally:
+                    await events.put((_END, None))
+
+            task = asyncio.create_task(_produce())
             try:
-                async for chunk in agent.arun_stream(message, verbose=verbose):
-                    yield {"event": "message", "data": chunk}
-                # 流结束后，如果后端从工具调用中提取到出生信息，通知前端（覆盖自然语言输入场景）
-                if agent._last_birth_info:
-                    yield {
-                        "event": "chart_context",
-                        "data": json.dumps(_chart_context_payload(agent)),
-                    }
+                while True:
+                    kind, data = await events.get()
+                    if kind is _END:
+                        break
+                    yield {"event": kind, "data": data}
                 yield {"event": "message", "data": "[DONE]"}
-            except Exception as e:
-                log.exception("SSE stream error")
-                yield {"event": "error", "data": client_error(e)}
+            finally:
+                agent.set_chart_notifier(None)
+                # 客户端断开（EventSourceResponse 取消本生成器）时停掉在跑的链路，省 token
+                if not task.done():
+                    agent.request_cancel()
+                    task.cancel()
 
     return EventSourceResponse(event_stream())
 
@@ -143,6 +192,26 @@ async def ws_chat_with_xianzhi(websocket: WebSocket):
             async with lock:
                 agent._sect = sect
                 agent._yun_sect = yun_sect
+                # 挂盘即通知：把「命盘已挂载」提前到挂载那一刻发，不再等整轮回答流完。
+                # 旧做法排在回答之后且带 client_alive 门槛，回答一发送失败就静默丢通知
+                # （2026-09-15 实测：生成 29s 后 socket 已断 → chart_context 没发出去）。
+                loop = asyncio.get_running_loop()
+
+                async def _send_chart_context(payload: dict) -> None:
+                    # 这个任务由通知回调 ensure_future 派生，异常没人接 → 内部全兜住
+                    try:
+                        ok = await _safe_ws_send(
+                            websocket, {"type": "chart_context", "data": payload}
+                        )
+                    except Exception as e:
+                        log.warning("[ws] chart_context 发送异常: {}", e)
+                        return
+                    if not ok:
+                        log.warning("[ws] chart_context 发送失败（客户端已断开）: {}", payload)
+
+                agent.set_chart_notifier(
+                    make_chart_notifier(loop, lambda p: asyncio.ensure_future(_send_chart_context(p)))
+                )
                 _mount_chart_context(agent, birth_time, gender, sect, yun_sect, uid, birth_place)
                 client_alive = True
                 try:
@@ -161,19 +230,11 @@ async def ws_chat_with_xianzhi(websocket: WebSocket):
                     if client_alive:
                         await _safe_ws_send(websocket, {"type": "error", "data": client_error(e)})
                     client_alive = False
-                # 流结束后，如果后端从工具调用中提取到出生信息，通知前端（覆盖自然语言输入场景）
-                if client_alive and agent._last_birth_info:
-                    bi = agent._last_birth_info
-                    ws_payload = {"birth_time": bi.get("time"), "gender": bi.get("gender")}
-                    if bi.get("place"):
-                        ws_payload["birth_place"] = bi["place"]
-                    await _safe_ws_send(
-                        websocket,
-                        {
-                            "type": "chart_context",
-                            "data": ws_payload,
-                        },
-                    )
+                finally:
+                    agent.set_chart_notifier(None)
+                # 命盘通知已在挂盘那一刻发出（见上面的 set_chart_notifier），
+                # 这里不再补发：旧逻辑排在回答之后且以 client_alive 为条件，
+                # 回答发送失败时通知必然一起丢，正是"八字信息丢失"的根因。
                 if client_alive:
                     await _safe_ws_send(websocket, {"type": "done"})
     except WebSocketDisconnect:
@@ -277,7 +338,12 @@ async def get_xianzhi_session_birth_info(
     token: str = Query(None),
     app_ctx: AppContext = Depends(app_context_dependency),
 ):
-    """从会话历史中的排盘工具调用提取出生信息，供前端恢复命盘上下文。
+    """从会话恢复命盘上下文（出生信息）。
+
+    三级来源，取到即返回：
+    1. 会话实例内存（`_last_birth_info`）——最新，本轮刚挂的盘也拿得到；
+    2. PG `session_birth_info`——挂盘时即落库，进程重启/换端/换实例都能恢复（权威兜底）；
+    3. 会话历史里的排盘工具调用参数——兼容旧数据（本表上线前的老会话）。
 
     出生信息属敏感个人数据，有归属的会话需本人 token。
     """
@@ -289,6 +355,9 @@ async def get_xianzhi_session_birth_info(
             return {"time": current["time"], "gender": current["gender"]}
     except Exception:
         pass
+    stored = await repo.get_session_birth_info(session_id)
+    if stored and stored.get("time") and stored.get("gender"):
+        return {"time": stored["time"], "gender": stored["gender"]}
     info = await repo.get_birth_info_from_session(session_id)
     return info or {"time": None, "gender": None}
 

@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Optional
+from typing import Callable, Optional
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
@@ -83,9 +83,41 @@ class Xianzhi(ToolCallAgent):
         self._bazi_pending: Optional[dict] = None  # 八字待确认候选: {"pillars","gender","candidates"}
         self._birth_signal: bool = False  # 模糊生辰信号：精确正则没抓到但疑似在提供生辰
         self._history_len = 0  # 本轮载入的历史消息数，_persist_history 据此只落盘新增消息
+        # 命盘挂载回调（由 API 层按轮注册）：挂上盘就立刻通知前端，
+        # 不再等整轮回答流完（旧做法在 socket 断开时会连通知一起丢，见 _fire_chart_notifier）
+        self._chart_notifier: Optional[Callable[[dict], None]] = None
+        self._chart_notified_key: Optional[tuple] = None  # 同一轮内同一张盘只通知一次
+        # 会话归属用户（挂盘时由 payload 带入并粘住；游客为空串）
+        self._user_id: str = ""
+        # 已落库的出生信息（避免每轮重复写库）
+        self._birth_persisted_key: Optional[tuple] = None
         # MCP 工具签名缓存：None=尚未绑定；仅签名变化时才重新 bind_tools（见 think）
         self._mcp_tool_signature: Optional[tuple] = None
         self._lock = asyncio.Lock()
+
+    def set_chart_notifier(self, fn: Optional[Callable[[dict], None]]) -> None:
+        """注册「命盘已挂载」回调（API 层每轮调用；传 None 注销）。
+
+        回调可能在**工作线程**里被触发（挂盘发生在 asyncio.to_thread），
+        实现方必须自己做线程安全转投，且不得抛异常（内部已 try 兜底）。
+        """
+        self._chart_notifier = fn
+
+    def _fire_chart_notifier(self) -> None:
+        """挂盘成功后立刻回调（同一轮同盘去重）。"""
+        info = self._last_birth_info
+        fn = self._chart_notifier
+        if not info or fn is None:
+            return
+        key = (info.get("time"), info.get("gender"), info.get("place") or "")
+        if key == self._chart_notified_key:
+            return
+        self._chart_notified_key = key
+        try:
+            fn(dict(info))
+        except Exception as e:
+            # 通知失败绝不能影响挂盘本身
+            log.warning("[xianzhi] 命盘挂载通知回调失败: {}", e)
 
     @property
     def lock(self) -> asyncio.Lock:
@@ -124,6 +156,9 @@ class Xianzhi(ToolCallAgent):
         self._sect = 2
         self._yun_sect = 1
         self._history_len = 0
+        # 每轮重置「已通知」标记：同一张盘在新的一轮仍要再通知一次
+        # （客户端可能刚重建页面/换端接入，拿不到通知就靠 birth-info 接口兜底）
+        self._chart_notified_key = None
         # _bazi_pending 不再重置：交给 mount_chart_context / set_conversation_id 管理生命周期
 
     def set_chart_context(
@@ -143,6 +178,10 @@ class Xianzhi(ToolCallAgent):
         try:
             birth_time = _normalize_birth_time(birth_time)
             longitude = birth_place_to_longitude(birth_place)
+            # 归属用户粘住：payload 挂载带 uid，正则挂载（mount_chart_context）不带，
+            # 不能让后者把前者写进去的 uid 抹掉
+            if user_id:
+                self._user_id = user_id
             workflow_context = build_chart_context(
                 birth_time, gender, sect, yun_sect, user_id, longitude=longitude
             )
@@ -161,8 +200,11 @@ class Xianzhi(ToolCallAgent):
                 "yun_sect": yun_sect,
                 "place": birth_place or "",
                 "longitude": longitude,
+                "user_id": self._user_id,
             }
             log.info("已挂载命盘上下文: {} {} user={} longitude={}", birth_time, gender, user_id, longitude)
+            # 挂上盘就立刻通知前端（不等回答流完，避免 socket 断开时通知一起丢）
+            self._fire_chart_notifier()
         except Exception as e:
             log.warning("挂载命盘上下文失败: {}", e)
             self.chart_context = ""
@@ -399,6 +441,10 @@ class Xianzhi(ToolCallAgent):
         self.final_answer = answer
         self.message_list.append(AIMessage(content=answer))
         self.state = AgentState.FINISHED
+        # 兜底：workflow 内部直接用 build_bazi_chart 排盘（不走 LangChain 工具），
+        # 正常不会产生 tool_calls，所以这里通常是 no-op；保留扫描是为了覆盖
+        # verbose 混跑 / 未来 workflow 改用工具的场景，避免出生信息漏挂。
+        self._capture_birth_from_tool_calls()
         return answer
 
     def _workflow_stream(self, user_prompt: str):
@@ -578,6 +624,36 @@ class Xianzhi(ToolCallAgent):
             self.message_list = list(reversed(selected))
         self._history_len = len(self.message_list)
 
+    def _persist_birth_info(self):
+        """把当前命盘的出生信息落库到会话（供重启/换端恢复）。
+
+        背景：`_last_birth_info` 只活在 agent 实例内存里，重启或换会话后就查不到了；
+        而 PG 侧的旧恢复路径只能从 message_store 的 tool_calls 里翻——正则直接挂的盘
+        （如"2005年9月28日18:00 男命"）根本不产生 tool_calls，于是"消息在、八字没了"。
+        这里同一张盘只写一次，写库失败只告警（不影响本轮回答）。
+        """
+        info = self._last_birth_info
+        if not info or not info.get("time") or not info.get("gender"):
+            return
+        key = (info["time"], info["gender"], info.get("place") or "", info.get("user_id") or "")
+        if key == self._birth_persisted_key:
+            return
+        try:
+            # cleanup 本身已在线程池里执行，直接用同步版（repository 里的是异步包装器）
+            from app.memory.postgres_memory import upsert_session_birth_info
+
+            upsert_session_birth_info(
+                self._conversation_id,
+                info["time"],
+                info["gender"],
+                info.get("place") or "",
+                info.get("longitude") or 0.0,
+                info.get("user_id") or "",
+            )
+            self._birth_persisted_key = key
+        except Exception as e:
+            log.warning("[xianzhi] 出生信息落库失败（不影响回答）: {}", e)
+
     def _persist_history(self):
         """仅持久化本轮新增的消息，避免重复追加历史导致消息指数级重复。
         同时过滤掉 next_step_prompt 占位消息（tool_call_agent.think 注入的 HumanMessage），
@@ -620,6 +696,11 @@ class Xianzhi(ToolCallAgent):
         except Exception as e:
             # 持久化失败 = 本轮对话丢失，错误级可见（记忆层已同步埋点）
             log.error("[xianzhi] cleanup 持久化历史失败: {}", e)
+        # 出生信息落库（会话级）：重启/换端后仍能恢复命盘上下文
+        try:
+            self._persist_birth_info()
+        except Exception as e:
+            log.warning("[xianzhi] cleanup 持久化出生信息失败: {}", e)
         # 命盘上下文持久化到会话：不清空，下一轮同会话仍可用
         # 仅在切换会话（set_conversation_id）时才主动清空
         super().cleanup()

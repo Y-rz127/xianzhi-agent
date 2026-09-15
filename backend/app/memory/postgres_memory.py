@@ -57,6 +57,27 @@ def _ensure_schema():
                 conn.execute(
                     "ALTER TABLE session_metadata ADD COLUMN IF NOT EXISTS last_summary_msg_count INT DEFAULT 0"
                 )
+                # 会话级出生信息：挂盘时写入，供重启/换端恢复命盘上下文。
+                # 只从 message_store 的 tool_calls 里翻是不够的——正则直接解析并挂载的
+                # 生辰（如"2005年9月28日18:00 男命"）不产生 tool_calls，查不回来。
+                # user_id 冗余自 session_metadata（游客为空串），与 schema.py 里其它
+                # 用户维度表保持一致，便于按用户排查/清理。
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS session_birth_info (
+                        session_id UUID PRIMARY KEY,
+                        user_id TEXT,
+                        birth_time TEXT NOT NULL,
+                        gender TEXT NOT NULL,
+                        place TEXT DEFAULT '',
+                        longitude DOUBLE PRECISION DEFAULT 0,
+                        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                # 兼容已建表的部署：补 user_id 列与索引
+                conn.execute("ALTER TABLE session_birth_info ADD COLUMN IF NOT EXISTS user_id TEXT")
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_session_birth_info_user ON session_birth_info(user_id)"
+                )
                 # 会话列表/消息查询的高频过滤列，避免每次全表扫描
                 conn.execute(
                     """
@@ -432,6 +453,8 @@ def delete_session(session_id: str):
                 (session_uuid,),
             )
             conn.execute("DELETE FROM session_metadata WHERE session_id = %s", (session_uuid,))
+            # 出生信息随会话一起删（否则删了会话还能从 birth-info 接口读回敏感生辰）
+            conn.execute("DELETE FROM session_birth_info WHERE session_id = %s", (session_uuid,))
     except Exception:
         # 删除失败重抛，API 层返回 5xx，不向用户假装删除成功
         log.exception("删除会话失败: {}", session_id)
@@ -484,6 +507,69 @@ def get_messages(session_id: str) -> list:
         log.exception("获取会话消息失败: {}", session_id)
         _record_error("memory.get_messages")
         return []
+
+
+def upsert_session_birth_info(
+    session_id: str,
+    birth_time: str,
+    gender: str,
+    place: str = "",
+    longitude: float = 0.0,
+    user_id: str = "",
+) -> None:
+    """写入/更新会话级出生信息（挂盘时调用；同一会话只保留最近一张盘）。
+
+    user_id 传空串（游客/未登录）时**不清空**已有归属：
+    同一会话里正则挂载那条路径拿不到 uid，不能让 payload 挂载写进去的 uid 被抹掉。
+    """
+    _ensure_schema()
+    session_uuid = _resolve_session_uuid(session_id)
+    with _get_pool().connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO session_birth_info
+                (session_id, user_id, birth_time, gender, place, longitude, updated_at)
+            VALUES (%s, %s, %s, %s, %s, %s, now())
+            ON CONFLICT (session_id) DO UPDATE SET
+                user_id = COALESCE(NULLIF(EXCLUDED.user_id, ''), session_birth_info.user_id),
+                birth_time = EXCLUDED.birth_time,
+                gender = EXCLUDED.gender,
+                place = EXCLUDED.place,
+                longitude = EXCLUDED.longitude,
+                updated_at = now()
+            """,
+            (session_uuid, user_id or "", birth_time, gender, place or "", float(longitude or 0.0)),
+        )
+
+
+def get_session_birth_info(session_id: str) -> dict | None:
+    """读取会话级出生信息（查不到返回 None）。
+
+    这是命盘上下文恢复的**权威来源**：写入发生在挂盘那一刻，与 tool_calls 无关，
+    进程重启、agent 实例被换掉、换端接入都不影响。
+    """
+    try:
+        _ensure_schema()
+        session_uuid = _resolve_session_uuid(session_id)
+        with _get_pool().connection() as conn:
+            row = conn.execute(
+                "SELECT birth_time, gender, place, longitude, user_id"
+                " FROM session_birth_info WHERE session_id = %s",
+                (session_uuid,),
+            ).fetchone()
+        if not row:
+            return None
+        return {
+            "time": row[0],
+            "gender": row[1],
+            "place": row[2] or "",
+            "longitude": float(row[3] or 0.0),
+            "user_id": row[4] or "",
+        }
+    except Exception as e:
+        log.warning("读取会话出生信息失败: {}", e)
+        _record_error("memory.get_session_birth_info")
+        return None
 
 
 def get_birth_info_from_session(session_id: str) -> dict | None:

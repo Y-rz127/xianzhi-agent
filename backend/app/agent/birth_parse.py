@@ -13,14 +13,30 @@ from typing import Optional
 from app.domain.city_longitude import CITY_LONGITUDE
 
 # 从用户输入中尝试提取出生时间与性别（完整公历，如 "男 1992-05-03 14:30"）
+#
+# 实测踩坑（2026-09-15，用户"我是2005年9月28日18: 00出生的男命"没被挂盘）：
+# 中文输入法常在全角冒号后自动补一个空格 → "18： 00" 旧正则 `[:：]\d` 直接不匹配；
+# 另外 "18时00分"/"下午6点30分"/"2005.9.28" 等常见写法也必须认，否则只能靠 LLM 调工具兜底。
+_DATE_PART = r"(?P<year>\d{4})[-年/\.](?P<month>\d{1,2})[-月/\.](?P<day>\d{1,2})[日号]?"
+# 时间必须带分隔符（:／：／时／点）：允许"裸小时"会让正则回溯把"28日"的 2 拆成日、
+# 8 当小时（实测 "2005年9月28日出生 男" 被解析成 2005-09-02 08:00）。
+_TIME_PART = (
+    r"(?P<marker>凌晨|早上|上午|中午|下午|晚上|晚间|夜里)?\s*"
+    r"(?P<hour>\d{1,2})\s*"
+    r"(?:[:：]\s*(?P<minute>\d{1,2})?\s*分?"
+    r"|(?:时|点)\s*(?P<minute2>\d{1,2})?\s*分?)"
+)
 _BIRTH_INFO_RE = re.compile(
-    r"(?P<gender>男|女)[^\d]*(?P<year>\d{4})[-年/](?P<month>\d{1,2})[-月/](?P<day>\d{1,2})[日\s]*(?P<hour>\d{1,2})[:：](?P<minute>\d{1,2})",
+    r"(?P<gender>男|女)[^\d]*" + _DATE_PART + r"[日\s]*" + _TIME_PART,
     re.UNICODE,
 )
 _BIRTH_INFO_RE2 = re.compile(
-    r"(?P<year>\d{4})[-年/](?P<month>\d{1,2})[-月/](?P<day>\d{1,2})[日\s]*(?P<hour>\d{1,2})[:：](?P<minute>\d{1,2})[^\d]*(?P<gender>男|女)",
+    _DATE_PART + r"[日\s]*" + _TIME_PART + r"[^\d]*(?P<gender>男|女)",
     re.UNICODE,
 )
+
+# 12 小时制时段词 → 换算偏移（0 = 原值，12 = 下午/晚上加 12 小时）
+_MARKER_PM = ("中午", "下午", "晚上", "晚间", "夜里")
 
 # 从用户输入中识别八字四柱（如 "甲申庚午壬申甲辰"），用于反推候选出生日期
 _PILLARS_RE = re.compile(r"([甲乙丙丁戊己庚辛壬癸][子丑寅卯辰巳午未申酉戌亥]){4}")
@@ -51,6 +67,11 @@ def extract_birth_info(text: str):
 
     支持两种语序：性别在前（"男 1992-..."）或年份在前（"1992-... 男"）。
     未匹配返回 (None, None)。birth_time 标准化为 "YYYY-MM-DD HH:MM"。
+
+    容错范围（实测过的常见写法）：
+    - 日期分隔符 `-`/`年`/`/`/`.`（"2005.9.28"）；
+    - 时间 `18:00`、`18： 00`（全角冒号后带空格，输入法自动补）、`18时00分`、`18点`；
+    - 时段词 `下午6点30分` / `晚上8点` / `凌晨1点`（下午/晚上/中午 +12h，凌晨12点→00）。
     月/日/时/分做范围校验（正则 1-2 位数字会放过 13 月/32 日/25 时等非法值）。
     """
     for pattern in (_BIRTH_INFO_RE, _BIRTH_INFO_RE2):
@@ -58,7 +79,13 @@ def extract_birth_info(text: str):
         if m:
             d = m.groupdict()
             month, day = int(d["month"]), int(d["day"])
-            hour, minute = int(d["hour"]), int(d["minute"])
+            hour = int(d["hour"])
+            minute = int(d.get("minute") or d.get("minute2") or 0)
+            marker = d.get("marker") or ""
+            if marker in _MARKER_PM and hour < 12:
+                hour += 12  # 下午6点 → 18 点
+            elif marker == "凌晨" and hour == 12:
+                hour = 0  # 凌晨12点 → 00 点
             if not (1 <= month <= 12 and 1 <= day <= 31 and 0 <= hour <= 23 and 0 <= minute <= 59):
                 continue  # 数值越界（如 1992-13-45），视为非出生信息，尝试下一模式
             birth_time = "{}-{:02d}-{:02d} {:02d}:{:02d}".format(
