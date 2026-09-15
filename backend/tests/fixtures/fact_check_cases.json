@@ -1,0 +1,39 @@
+{
+  "_comment": [
+    "check_facts 审核黄金样本。输入 = (回答文本, 命盘, other_chart, needs_chart)，输出 = (ok, issues) —— 全确定性，无 LLM 无 IO。",
+    "chart_case 引用 tests/fixtures/bazi_golden/cases.json 的用例 id；other_chart 为合婚对方盘（显式出生信息）。",
+    "intent 仅作文档用途：ok=应放行 / violation=应报问题 / regression=历史事故回归样本。",
+    "改动 check_facts 后，禁止直接 UPDATE_FACT_CHECK；先跑 scripts/fact_check_golden.py --diff 逐条核对语义。"
+  ],
+  "cases": [
+    {"id": "ok_pillars", "desc": "四柱陈述正确", "chart_case": "stem_jia", "answer": "你的四柱是甲子、丙子、甲辰、甲子。", "intent": "ok"},
+    {"id": "bad_pillar", "desc": "日柱干支写错", "chart_case": "stem_jia", "answer": "你的日柱是甲午。", "intent": "violation"},
+
+    {"id": "ok_liunian", "desc": "流年干支正确", "chart_case": "stem_jia", "answer": "2026年是丙午年。", "intent": "ok"},
+    {"id": "bad_liunian", "desc": "流年干支写错", "chart_case": "stem_jia", "answer": "2030年是己酉年。", "intent": "violation"},
+    {"id": "reg_dayun_leak_liunian", "desc": "历史事故：回答含「这一步运」曾导致整体跳过流年校验（漏检）", "chart_case": "stem_jia", "answer": "2030年是己酉年，这一步运里注意变动。", "intent": "regression"},
+
+    {"id": "ok_dayun", "desc": "大运干支正确", "chart_case": "stem_jia", "answer": "你走庚辰大运。", "intent": "ok"},
+    {"id": "bad_dayun", "desc": "编造大运干支", "chart_case": "stem_jia", "answer": "你走壬戌大运。", "intent": "violation"},
+    {"id": "reg_dayun_gz_collides_liunian", "desc": "历史事故：编造的大运干支恰好撞上某流年干支（戊申=2028流年）曾被无条件放行", "chart_case": "stem_jia", "answer": "你走戊申大运。", "intent": "regression"},
+
+    {"id": "ok_shensha_exists", "desc": "神煞存在性断言正确", "chart_case": "stem_jia", "answer": "你命盘带太极贵人。", "intent": "ok"},
+    {"id": "bad_shensha_exists", "desc": "断言命盘有不存在的神煞", "chart_case": "stem_jia", "answer": "你命盘有天乙贵人。", "intent": "violation"},
+    {"id": "ok_shensha_pillar", "desc": "神煞柱位归属正确（太极贵人在时柱）", "chart_case": "stem_jia", "answer": "你时柱带太极贵人。", "intent": "ok"},
+    {"id": "bad_shensha_pillar", "desc": "神煞柱位归属错误（太极贵人在年/月/时柱，不在日柱）", "chart_case": "stem_jia", "answer": "你日柱带太极贵人。", "intent": "violation"},
+    {"id": "reg_single_char_negation", "desc": "历史事故：单字「不」被当否定词，使「日柱不错，还带X」整体漏检。（注：现有两条独立路径保护——锚点路径的否定判定 + 无锚点路径的目标词±6 窗口判定；改其中之一不会让本样本漏检，两条都改才会）", "chart_case": "stem_jia", "answer": "你日柱不错，还带天乙贵人。", "intent": "regression"},
+
+    {"id": "bad_shishen_single", "desc": "断言命盘有不存在的十神", "chart_case": "stem_jia", "answer": "你命带伤官。", "intent": "violation"},
+    {"id": "bad_shishen_combo", "desc": "十神组合断言中缺一个", "chart_case": "stem_jia", "answer": "你命盘有七杀配正印。", "intent": "violation"},
+
+    {"id": "ok_negation", "desc": "多字否定句不应被当成肯定断言", "chart_case": "stem_jia", "answer": "你命盘没有天乙贵人。", "intent": "ok"},
+    {"id": "ok_dynamic_dayun_shensha", "desc": "动态岁运语境（大运带桃花）不应按原局神煞判错", "chart_case": "stem_jia", "answer": "大运带桃花。", "intent": "ok"},
+
+    {"id": "ok_theory_needs_chart_false", "desc": "理论问答（needs_chart=False）纯术语解释放行", "chart_case": "stem_jia", "answer": "红鸾主喜庆婚恋。", "intent": "ok", "needs_chart": false},
+    {"id": "ok_theory_needs_chart_true", "desc": "needs_chart=True 但无归属断言锚点，纯术语仍放行", "chart_case": "stem_jia", "answer": "正财代表求财。", "intent": "ok"},
+
+    {"id": "ok_hehun_dayun", "desc": "合婚：对方盘的大运算合法", "chart_case": "stem_jia", "answer": "对方走癸未大运。", "intent": "ok", "other_chart": {"birth": "1990-08-20 10:00", "gender": "女"}},
+    {"id": "bad_hehun_dayun", "desc": "合婚：两盘都没有的大运仍应报错", "chart_case": "stem_jia", "answer": "对方走壬辰大运。", "intent": "violation", "other_chart": {"birth": "1990-08-20 10:00", "gender": "女"}},
+    {"id": "ok_hehun_pillar", "desc": "合婚：对方盘日柱算合法", "chart_case": "stem_jia", "answer": "对方日柱是丁巳。", "intent": "ok", "other_chart": {"birth": "1990-08-20 10:00", "gender": "女"}}
+  ]
+}

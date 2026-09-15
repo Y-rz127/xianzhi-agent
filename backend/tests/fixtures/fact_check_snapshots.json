@@ -1,0 +1,112 @@
+{
+  "bad_dayun": {
+    "issues": [
+      "排盘事实无「壬戌」这步大运，回答却提到壬戌运，与大运事实不符"
+    ],
+    "ok": false
+  },
+  "bad_hehun_dayun": {
+    "issues": [
+      "排盘事实无「壬辰」这步大运，回答却提到壬辰运，与大运事实不符"
+    ],
+    "ok": false
+  },
+  "bad_liunian": {
+    "issues": [
+      "2030年流年应为庚戌，回答写成了己酉"
+    ],
+    "ok": false
+  },
+  "bad_pillar": {
+    "issues": [
+      "日柱应为甲辰，回答写成了甲午"
+    ],
+    "ok": false
+  },
+  "bad_shensha_exists": {
+    "issues": [
+      "排盘事实中无「天乙贵人」，回答却断言命盘带有，与神煞事实不符"
+    ],
+    "ok": false
+  },
+  "bad_shensha_pillar": {
+    "issues": [
+      "「太极贵人」属于年柱、月柱、时柱，回答却关联到日柱，与神煞事实不符"
+    ],
+    "ok": false
+  },
+  "bad_shishen_combo": {
+    "issues": [
+      "排盘事实中无「七杀」，回答却断言命盘带有，与十神事实不符"
+    ],
+    "ok": false
+  },
+  "bad_shishen_single": {
+    "issues": [
+      "排盘事实中无「伤官」，回答却断言命盘带有，与十神事实不符"
+    ],
+    "ok": false
+  },
+  "ok_dayun": {
+    "issues": [],
+    "ok": true
+  },
+  "ok_dynamic_dayun_shensha": {
+    "issues": [],
+    "ok": true
+  },
+  "ok_hehun_dayun": {
+    "issues": [],
+    "ok": true
+  },
+  "ok_hehun_pillar": {
+    "issues": [],
+    "ok": true
+  },
+  "ok_liunian": {
+    "issues": [],
+    "ok": true
+  },
+  "ok_negation": {
+    "issues": [],
+    "ok": true
+  },
+  "ok_pillars": {
+    "issues": [],
+    "ok": true
+  },
+  "ok_shensha_exists": {
+    "issues": [],
+    "ok": true
+  },
+  "ok_shensha_pillar": {
+    "issues": [],
+    "ok": true
+  },
+  "ok_theory_needs_chart_false": {
+    "issues": [],
+    "ok": true
+  },
+  "ok_theory_needs_chart_true": {
+    "issues": [],
+    "ok": true
+  },
+  "reg_dayun_gz_collides_liunian": {
+    "issues": [
+      "排盘事实无「戊申」这步大运，回答却提到戊申运，与大运事实不符"
+    ],
+    "ok": false
+  },
+  "reg_dayun_leak_liunian": {
+    "issues": [
+      "2030年流年应为庚戌，回答写成了己酉"
+    ],
+    "ok": false
+  },
+  "reg_single_char_negation": {
+    "issues": [
+      "排盘事实中无「天乙贵人」，回答却断言命盘带有，与神煞事实不符"
+    ],
+    "ok": false
+  }
+}

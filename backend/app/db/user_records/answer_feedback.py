@@ -1,4 +1,7 @@
-"""命例收藏 / 通用 AI 解读记录 / 问题反馈 / 答案反馈与训练样本导出，按 user_id 隔离。"""
+"""回答反馈与训练样本导出：点赞/点踩、审核、转案例、SFT/DPO 样本。
+
+内部又细分为「回答反馈 CRUD」「特征提取与重排」「转案例 / 取消」「SFT/DPO 导出」。
+"""
 
 from __future__ import annotations
 
@@ -6,220 +9,18 @@ import json
 import uuid
 
 from app.core.logger import log
+from app.db import user_records
 from app.db.chart_store import add_chart_case, delete_chart_case
-from app.db.pool import get_pool
-from app.db.schema import _ensure_tables, _safe_json
-from app.domain.bazi_engine import extract_bazi_brief
+from app.db.schema import _safe_json
 
 
-def add_favorite(user_id: str, case_id: str) -> str:
-    """添加命例收藏（user_id+case_id 唯一，重复收藏不报错），返回收藏记录 id。"""
-    _ensure_tables()
-    fid = str(uuid.uuid4())
-    with get_pool().connection() as conn:
-        conn.execute(
-            """
-            INSERT INTO chart_favorites (id, user_id, case_id)
-            VALUES (%s, %s, %s)
-            ON CONFLICT (user_id, case_id) DO NOTHING
-            """,
-            (fid, user_id, case_id),
-        )
-    return fid
+# 经包级转发，使测试可对 user_records._ensure_tables / get_pool 打桩
+def _ensure_tables() -> None:
+    user_records._ensure_tables()
 
 
-def list_favorites(user_id: str) -> list:
-    """列出某用户收藏的命例。
-
-    主联 cases 表（八字命例），并兼容联 chart_cases 表（Web 端命例，字段做映射）。
-    """
-    _ensure_tables()
-    result = []
-    with get_pool().connection() as conn:
-        # 联 cases 表（八字命例）
-        rows_cases = conn.execute(
-            """
-            SELECT f.case_id, c.name, c.tags, c.birth_time, c.gender, c.chart_data, f.created_at
-            FROM chart_favorites f
-            LEFT JOIN cases c ON c.id::text = f.case_id
-            WHERE f.user_id = %s AND c.id IS NOT NULL
-            """,
-            (user_id,),
-        ).fetchall()
-        for r in rows_cases:
-            chart_data = r[5] if isinstance(r[5], dict) else _safe_json(r[5]) if r[5] else {}
-            result.append(
-                {
-                    "caseId": str(r[0]),
-                    "title": r[1] or "",
-                    "name": r[1] or "",
-                    "source": "cases",
-                    "birthTime": r[3] or "",
-                    "gender": r[4] or "",
-                    "tags": list(r[2] or []),
-                    "chartData": chart_data,
-                    "bazi": extract_bazi_brief(chart_data),
-                    "createdAt": str(r[6]) if r[6] else "",
-                }
-            )
-
-        # 兼容联 chart_cases 表（用户反馈转换的结构化案例库）
-        rows_chart = conn.execute(
-            """
-            SELECT f.case_id, c.title, c.source, c.question, c.analysis,
-                   c.domains, c.features, c.rating, c.verified, f.created_at
-            FROM chart_favorites f
-            LEFT JOIN chart_cases c ON c.id::text = f.case_id
-            WHERE f.user_id = %s AND c.id IS NOT NULL
-            """,
-            (user_id,),
-        ).fetchall()
-        for r in rows_chart:
-            result.append(
-                {
-                    "caseId": str(r[0]),
-                    "title": r[1] or "",
-                    "source": r[2] or "",
-                    "question": r[3] or "",
-                    "analysis": r[4] or "",
-                    "domains": list(r[5] or []),
-                    "features": r[6] if not isinstance(r[6], str) else _safe_json(r[6]),
-                    "rating": r[7] or 4,
-                    "verified": bool(r[8]) if r[8] is not None else True,
-                    "createdAt": str(r[9]) if r[9] else "",
-                }
-            )
-
-    result.sort(key=lambda x: x.get("createdAt", ""), reverse=True)
-    return result
-
-
-def remove_favorite(user_id: str, case_id: str) -> bool:
-    """取消收藏；返回是否成功删除。"""
-    _ensure_tables()
-    with get_pool().connection() as conn:
-        cur = conn.execute(
-            "DELETE FROM chart_favorites WHERE user_id = %s AND case_id = %s",
-            (user_id, case_id),
-        )
-        return cur.rowcount > 0
-
-
-def is_favorite(user_id: str, case_id: str) -> bool:
-    """判断某命例是否已被该用户收藏。"""
-    _ensure_tables()
-    with get_pool().connection() as conn:
-        row = conn.execute(
-            "SELECT 1 FROM chart_favorites WHERE user_id = %s AND case_id = %s",
-            (user_id, case_id),
-        ).fetchone()
-        return row is not None
-
-
-def add_ai_interpretation_record(
-    user_id: str, source: str, question: str, payload: dict | None, interpretation: str
-) -> str:
-    """保存一次通用 AI 解读记录，返回记录 id。"""
-    _ensure_tables()
-    rid = str(uuid.uuid4())
-    with get_pool().connection() as conn:
-        conn.execute(
-            """
-            INSERT INTO ai_interpretation_records (id, user_id, source, question, payload, interpretation)
-            VALUES (%s, %s, %s, %s, %s, %s)
-            """,
-            (
-                rid,
-                user_id,
-                source or "unknown",
-                question or "",
-                json.dumps(payload or {}, ensure_ascii=False),
-                interpretation or "",
-            ),
-        )
-    return rid
-
-
-def list_ai_interpretation_records(user_id: str, limit: int = 50) -> list:
-    """列出某用户的通用 AI 解读记录（默认最近 50 条，倒序）。"""
-    _ensure_tables()
-    with get_pool().connection() as conn:
-        rows = conn.execute(
-            """
-            SELECT id, source, question, payload, interpretation, created_at
-            FROM ai_interpretation_records WHERE user_id = %s ORDER BY created_at DESC LIMIT %s
-            """,
-            (user_id, limit),
-        ).fetchall()
-        return [
-            {
-                "id": str(r[0]),
-                "source": r[1],
-                "question": r[2] or "",
-                "payload": r[3] if not isinstance(r[3], str) else _safe_json(r[3]),
-                "interpretation": r[4] or "",
-                "createdAt": str(r[5]) if r[5] else "",
-            }
-            for r in rows
-        ]
-
-
-def delete_ai_interpretation_record(user_id: str, rid: str) -> bool:
-    """删除一条通用 AI 解读记录；返回是否成功删除。"""
-    _ensure_tables()
-    with get_pool().connection() as conn:
-        cur = conn.execute(
-            "DELETE FROM ai_interpretation_records WHERE user_id = %s AND id = %s",
-            (user_id, rid),
-        )
-        return cur.rowcount > 0
-
-
-def add_feedback(user_id: str | None, content: str, contact: str = "") -> str:
-    """保存用户问题反馈（user_id 可空，表示匿名），返回反馈 id。"""
-    _ensure_tables()
-    fid = str(uuid.uuid4())
-    with get_pool().connection() as conn:
-        conn.execute(
-            "INSERT INTO feedback (id, user_id, content, contact) VALUES (%s, %s, %s, %s)",
-            (fid, user_id, content, contact or ""),
-        )
-    return fid
-
-
-def list_feedback(limit: int = 200) -> list:
-    """列出反馈（联表获取昵称），默认最近 200 条倒序。"""
-    _ensure_tables()
-    with get_pool().connection() as conn:
-        rows = conn.execute(
-            """
-            SELECT f.id, f.user_id, f.content, f.contact, f.created_at,
-                   u.nickname AS user_nickname
-            FROM feedback f
-            LEFT JOIN users u ON u.id = f.user_id::uuid
-            ORDER BY f.created_at DESC LIMIT %s
-            """,
-            (limit,),
-        ).fetchall()
-        return [
-            {
-                "id": str(r[0]),
-                "user_id": r[1],
-                "content": r[2],
-                "contact": r[3] or "",
-                "created_at": str(r[4]) if r[4] else "",
-                "user_nickname": r[5] if r[5] else None,
-            }
-            for r in rows
-        ]
-
-
-def delete_feedback(fid: str) -> bool:
-    """删除一条反馈；返回是否成功删除。"""
-    _ensure_tables()
-    with get_pool().connection() as conn:
-        result = conn.execute("DELETE FROM feedback WHERE id = %s", (fid,))
-        return result.rowcount > 0
+def get_pool():
+    return user_records.get_pool()
 
 
 def add_answer_feedback(
@@ -459,7 +260,7 @@ def _refill_features_by_rechart(chart: dict, feats: dict) -> None:
         return
     try:
         # 延迟导入避免 user_records -> bazi_engine 的循环依赖
-        from app.domain.bazi_engine import build_bazi_chart
+        from app.domain.chart_builder import build_bazi_chart
 
         bazi = build_bazi_chart(birth_time, gender, sect=2, yun_sect=1, dayun_count=12, liunian_years=8)
         feats["day_master"] = bazi.wuxing.day_master or ""

@@ -3,12 +3,12 @@
 覆盖：事业简报要素、感情性别的配偶星取值、appearance 简报、零注入领域短路、
 以及映射表神煞名与 shensha_calc 实际产出集合的交叉校验（防止映射名漂移筛不出）。
 """
-import re
 
 import app.domain.domain_brief as db
 from app.domain.chart_builder import build_bazi_chart, parse_gender
 from app.domain.domain_brief import build_domain_brief
 from app.domain.shensha_calc import _compute_shensha
+from tests import bazi_golden as G
 
 MALE = "\u7537"
 FEMALE = "\u5973"
@@ -19,12 +19,8 @@ def _chart(birth_time: str = "1990-05-20 14:30", gender: str = MALE):
 
 
 def _shensha_names_producible() -> set[str]:
-    """从 shensha_calc 源码提取所有可产出的神煞名（锚点：实际产出，非 _SHENSHA_NAMES）。"""
-    import importlib.util
-
-    spec = importlib.util.find_spec("app.domain.shensha_calc")
-    src = open(spec.origin, encoding="utf-8").read() if spec else ""
-    return set(re.findall(r'add\("([^"]+)"', src))
+    """shensha_calc 实际可产出的神煞名（委托共享提取器，兼容包结构与拆族后的产出形式）。"""
+    return G.shensha_names_declared()
 
 
 def test_career_brief_has_gods_and_palace():
