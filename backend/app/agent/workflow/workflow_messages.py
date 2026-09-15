@@ -238,22 +238,8 @@ def compact_history(history: list[BaseMessage], summary: str = "") -> str:
     return "\n\n".join(parts) if parts else "（无）"
 
 
-def fact_block(chart: BaziChart, intent: QuestionIntent) -> str:
-    """单张命盘的紧凑事实块（不含对方盘逻辑，供 compact_facts 复用）。"""
-    today = _dt.date.today()
-    pillars = " ".join(f"{p.name}:{p.ganzhi}({p.nayin})" for p in chart.pillars)
-    # 四柱详述：藏干/副星/星运/自坐/空亡（表格新增字段，必须随排盘事实进 LLM 才能正确推理）
-    pillar_detail = "\n".join(
-        f"  {p.name}{'（日主）' if p.name == '日柱' else ''} {p.ganzhi}: "
-        f"主星[{p.shishen_gan or '—'}] "
-        f"藏干[{'、'.join(p.hidden_stems) or '—'}] "
-        f"副星[{'、'.join(p.shishen_zhi) or '—'}] "
-        f"星运[{p.changsheng or '—'}] "
-        f"自坐[{p.zizuo or '—'}] "
-        f"空亡[{p.xunkong or '—'}]"
-        for p in chart.pillars
-    )
-    # 天干关系：干合、干冲、干克、三奇
+def _gan_relations_line(chart: BaziChart) -> str:
+    """天干关系：干合、干冲、干克、三奇（仅统计四柱天干内的关系）。"""
     visible_gans = [p.gan for p in chart.pillars if p.gan]
     gan_he: list[str] = []
     gan_chong: list[str] = []
@@ -282,38 +268,46 @@ def fact_block(chart: BaziChart, intent: QuestionIntent) -> str:
         sanqi.append("乙丙丁（三奇贵人）")
     if {"壬", "癸", "辛"} <= gan_set:
         sanqi.append("壬癸辛（三奇贵人）")
-    gan_rel_parts = []
+    parts = []
     if gan_he:
-        gan_rel_parts.append(f"合={'、'.join(gan_he)}")
+        parts.append(f"合={'、'.join(gan_he)}")
     if gan_chong:
-        gan_rel_parts.append(f"冲={'、'.join(gan_chong)}")
+        parts.append(f"冲={'、'.join(gan_chong)}")
     if gan_ke:
-        gan_rel_parts.append(f"克={'、'.join(gan_ke)}")
+        parts.append(f"克={'、'.join(gan_ke)}")
     if sanqi:
-        gan_rel_parts.append(f"三奇={'、'.join(sanqi)}")
-    gan_relation_line = "；".join(gan_rel_parts) if gan_rel_parts else "—"
-    # 神煞：按柱分组注入，确保与前端表格展示一致（此前完全缺失，LLM 看不到神煞）
+        parts.append(f"三奇={'、'.join(sanqi)}")
+    return "；".join(parts) if parts else "—"
+
+
+def _shensha_by_pillar_line(chart: BaziChart) -> str:
+    """神煞按柱分组注入文本（与前端表格展示一致）。"""
     shensha_all = _compute_shensha(chart.pillars, parse_gender(chart.birth.gender))
     shensha_by_pillar: dict[str, list[str]] = {}
     for _s in shensha_all:
         shensha_by_pillar.setdefault(_s.get("pillar") or "全局", []).append(_s["name"])
-    shensha_line = "\n".join(
+    return "\n".join(
         f"  {p.name}:{'、'.join(shensha_by_pillar.get(p.name, [])) or '—'}" for p in chart.pillars
     )
-    # 大运排序：用户指认的目标大运优先放前，其余按年龄顺序跟在后面（便于 LLM 快速定位）
+
+
+def _dayun_lines(chart: BaziChart, intent: QuestionIntent) -> list[str]:
+    """大运每步一行；目标大运优先放前，其余按年龄顺序（便于 LLM 按行命中）。"""
     dayun = list(chart.dayun)
     hit_idxs = {d.index for d in resolve_target_dayuns(chart, intent.target_dayun)}
     if hit_idxs:
         dayun.sort(key=lambda d: (0 if d.index in hit_idxs else 1, d.index))
-    # 大运每步一行（避免用 ； 连成长串，便于 LLM 按行命中）
-    dayun_lines = [
+    return [
         f"  {item.ganzhi}({item.shishen_gan}) {item.start_year}-{item.end_year} {item.start_age}-{item.end_age}岁"
         f"{'  ← 目标' if item.index in hit_idxs else ''}"
         f"\n    藏干[{'、'.join(item.hidden_stems) or '—'}] 副星[{'、'.join(item.shishen_zhi) or '—'}]"
         f"\n    星运[{item.changsheng or '—'}] 神煞[{'、'.join(s['name'] for s in item.shensha) or '—'}]"
         for item in dayun
     ]
-    # 流年选择：显式年份 ∪ 大运指认换算年份（去重排序后全量注入，由 _MAX_LIUNIAN_LINES 防爆）
+
+
+def _liunian_lines(chart: BaziChart, intent: QuestionIntent, today: _dt.date) -> list[str]:
+    """流年每年一行：显式年份 ∪ 大运换算年份，缺失时按需补建（_MAX_LIUNIAN_LINES 防爆）。"""
     years = effective_target_years(chart, intent.target_years, intent.target_dayun)
     if years:
         years = years[:_MAX_LIUNIAN_LINES]
@@ -335,24 +329,44 @@ def fact_block(chart: BaziChart, intent: QuestionIntent) -> str:
         liunian_items = [item for item in chart.liunian if current_year <= item.year <= current_year + 9]
         if not liunian_items:
             liunian_items = chart.liunian[:4]
-    # 流年每年一行（含绑定大运 + 4 字段），避免 ； 串
-    liunian_lines = [
+    return [
         f"  {item.year}年:{item.ganzhi}({item.shishen_gan}) {item.age}虚岁 所在大运:{item.dayun_ganzhi or '-'}"
         f"\n    藏干[{'、'.join(item.hidden_stems) or '—'}] 副星[{'、'.join(item.shishen_zhi) or '—'}]"
         f"\n    星运[{item.changsheng or '—'}] 神煞[{'、'.join(s['name'] for s in item.shensha) or '—'}]"
         for item in liunian_items
     ]
-    # 计算用户当前周岁，避免 LLM 自行推算出错
+
+
+def _current_age_text(chart: BaziChart, today: _dt.date) -> str:
+    """当前周岁文本，避免 LLM 自行推算出错（解析失败返回空串）。"""
     birth_str = chart.birth.solar or ""
-    current_age = ""
     try:
         m = re.search(r"(\d{4})-(\d{1,2})-(\d{1,2})", birth_str)
         if m:
             by, bm, bd = int(m.group(1)), int(m.group(2)), int(m.group(3))
             age = today.year - by - ((today.month, today.day) < (bm, bd))
-            current_age = f"; 当前周岁: {age}岁"
+            return f"; 当前周岁: {age}岁"
     except Exception:
         pass
+    return ""
+
+
+def fact_block(chart: BaziChart, intent: QuestionIntent) -> str:
+    """单张命盘的紧凑事实块（不含对方盘逻辑，供 compact_facts 复用）。"""
+    today = _dt.date.today()
+    pillars = " ".join(f"{p.name}:{p.ganzhi}({p.nayin})" for p in chart.pillars)
+    # 四柱详述：藏干/副星/星运/自坐/空亡（表格新增字段，必须随排盘事实进 LLM 才能正确推理）
+    pillar_detail = "\n".join(
+        f"  {p.name}{'（日主）' if p.name == '日柱' else ''} {p.ganzhi}: "
+        f"主星[{p.shishen_gan or '—'}] "
+        f"藏干[{'、'.join(p.hidden_stems) or '—'}] "
+        f"副星[{'、'.join(p.shishen_zhi) or '—'}] "
+        f"星运[{p.changsheng or '—'}] "
+        f"自坐[{p.zizuo or '—'}] "
+        f"空亡[{p.xunkong or '—'}]"
+        for p in chart.pillars
+    )
+    current_age = _current_age_text(chart, today)
     return "\n".join(
         [
             f"当前日期: {today.year}年{today.month}月{today.day}日{current_age}",
@@ -360,21 +374,21 @@ def fact_block(chart: BaziChart, intent: QuestionIntent) -> str:
             f"四柱: {pillars}",
             f"四柱详述:\n{pillar_detail}",
             "神煞（按柱）:",
-            shensha_line,
+            _shensha_by_pillar_line(chart),
             f"日主: {chart.wuxing.day_master}({chart.wuxing.day_master_wuxing}); 强弱: {chart.wuxing.strength}; 分数: {chart.wuxing.strength_score}",
             f"特殊格局: {chart.wuxing.special_pattern or '无'}",
             f"五行权重: {chart.wuxing.counts}; 最旺: {chart.wuxing.strongest}; 最弱: {chart.wuxing.weakest}",
             f"用神提示: {chart.wuxing.useful_hint}",
             f"十神结构: {chart.analysis.ten_gods}; 透干: {chart.analysis.exposed_stems or '-'}; 通根: {chart.analysis.rooted_stems or '-'}",
-            f"天干关系: {gan_relation_line}",
+            f"天干关系: {_gan_relations_line(chart)}",
             f"地支关系: 合={chart.analysis.combinations or '-'}; 冲={chart.analysis.clashes or '-'}; 害={chart.analysis.harms or '-'}; 破={chart.analysis.breaks or '-'}; 刑={chart.analysis.punishments or '-'}; 三合/三会={chart.analysis.three_assemblies or '-'}",
             f"调候: 月令{chart.analysis.season}; {chart.analysis.adjustment}",
             f"判断置信度: {chart.analysis.confidence}",
             f"起运: {chart.start_yun['startDate']} 起; {chart.start_yun['direction']}; 起运年龄 {chart.start_yun['startYear']}年{chart.start_yun['startMonth']}月{chart.start_yun['startDay']}日",
             "大运:",
-            *dayun_lines,
+            *_dayun_lines(chart, intent),
             "相关流年:",
-            *(liunian_lines or ["  （未指定）"]),
+            *(_liunian_lines(chart, intent, today) or ["  （未指定）"]),
             "口径: " + "；".join(chart.warnings),
         ]
     )
