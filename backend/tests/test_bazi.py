@@ -3,15 +3,17 @@ from pathlib import Path
 
 import pytest
 
-from app.domain.bazi_engine import (
+from app.domain.analysis_calc import (
     Pillar,
-    _branch_combinations,
     _classify_strength,
-    _compute_shensha,
     _detect_special_pattern,
+)
+from app.domain.chart_builder import (
+    _compute_shensha,
     build_bazi_chart,
     chart_to_api_dict,
 )
+from app.domain.ganzhi_relations import branch_relations
 from app.tools.bazi import (
     bazi_analysis,
     bazi_chart,
@@ -489,40 +491,47 @@ def test_sanqi_guiren_requires_day_gan_to_belong_to_triple():
     )
 
 
-def test_branch_combinations_three_he_full_board():
-    """三合局识别：四组三合局都能被识别。"""
+def test_branch_relations_three_he_full_board():
+    """三合局识别：四组三合局都能被识别，且三支齐全时不叠加半合/拱合。"""
     cases = [
         # 用户盘：壬子·壬子·丙申·壬辰 → 申子辰合水局
-        (["子", "子", "申", "辰"], ["申子辰合水局"]),
+        (["子", "子", "申", "辰"], ["申子辰合水局"], []),
         # 亥卯未合木局
-        (["亥", "卯", "未", "子"], ["亥卯未合木局"]),
-        # 寅午戌合火局
-        (["寅", "午", "戌", "申"], ["寅午戌合火局"]),
-        # 巳酉丑合金局
-        (["巳", "酉", "丑", "辰"], ["巳酉丑合金局"]),
+        (["亥", "卯", "未", "子"], ["亥卯未合木局"], []),
+        # 寅午戌合火局（申寅另成半刑，属刑类，不在此断言）
+        (["寅", "午", "戌", "申"], ["寅午戌合火局"], []),
+        # 巳酉丑合金局（辰酉另成六合、辰丑破，各归其位）
+        (["巳", "酉", "丑", "辰"], ["巳酉丑合金局"], []),
     ]
-    for zhis, expected in cases:
-        got = _branch_combinations(zhis)
-        for label in expected:
-            assert label in got, f"zhis={zhis} 应含 {label}，实际: {got}"
+    for zhis, san_he, ban_he in cases:
+        rel = branch_relations(zhis)
+        for label in san_he:
+            assert label in rel.san_he, f"zhis={zhis} 应含 {label}，实际: {rel.san_he}"
+        assert rel.ban_he == tuple(ban_he), f"zhis={zhis} 半合应恰为 {ban_he}，实际: {rel.ban_he}"
+        assert rel.gong_he == (), f"zhis={zhis} 不应有拱合，实际: {rel.gong_he}"
 
 
-def test_branch_combinations_three_hui_full_board():
-    """三会方识别：四组三会都能被识别。"""
+def test_branch_relations_three_hui_full_board():
+    """三会方识别：四组三会都能被识别；同柱组若另成半合/六合/破，各归其位。"""
     cases = [
-        (["寅", "卯", "辰", "子"], ["寅卯辰会东方木"]),
-        (["巳", "午", "未", "子"], ["巳午未会南方火"]),
-        (["申", "酉", "戌", "子"], ["申酉戌会西方金"]),
-        (["亥", "子", "丑", "午"], ["亥子丑会北方水"]),
+        # 子辰 旺半合水 与 三会同见（新口径：半合纳入原局）
+        (["寅", "卯", "辰", "子"], ["寅卯辰会东方木"], ["子辰半合水"]),
+        # 午未 六合 与 三会同见
+        (["巳", "午", "未", "子"], ["巳午未会南方火"], []),
+        # 申子 半合水 + 子酉破 与 三会同见
+        (["申", "酉", "戌", "子"], ["申酉戌会西方金"], ["申子半合水"]),
+        # 子丑 六合 与 三会同见
+        (["亥", "子", "丑", "午"], ["亥子丑会北方水"], []),
     ]
-    for zhis, expected in cases:
-        got = _branch_combinations(zhis)
-        for label in expected:
-            assert label in got, f"zhis={zhis} 应含 {label}，实际: {got}"
+    for zhis, hui, ban_he in cases:
+        rel = branch_relations(zhis)
+        for label in hui:
+            assert label in rel.hui, f"zhis={zhis} 应含 {label}，实际: {rel.hui}"
+        assert rel.ban_he == tuple(ban_he), f"zhis={zhis} 半合应恰为 {ban_he}，实际: {rel.ban_he}"
 
 
-def test_branch_combinations_liu_po():
-    """六破识别：六对相破都能被命中。"""
+def test_branch_relations_liu_po():
+    """六破识别：六对相破都能被命中（归 `po`，不再混进合/会栏）。"""
     pairs = [
         (["子", "酉", "寅", "卯"], "子酉破"),
         (["卯", "午", "寅", "子"], "卯午破"),
@@ -532,24 +541,30 @@ def test_branch_combinations_liu_po():
         (["未", "戌", "寅", "子"], "未戌破"),
     ]
     for zhis, label in pairs:
-        got = _branch_combinations(zhis)
-        assert label in got, f"zhis={zhis} 应含 {label}，实际: {got}"
+        rel = branch_relations(zhis)
+        assert label in rel.po, f"zhis={zhis} 应含 {label}，实际: {rel.po}"
+        assert not any(label in x for x in rel.san_he + rel.hui), (
+            f"破不应混入合/会栏: {zhis} {rel.san_he + rel.hui}"
+        )
 
 
-def test_branch_combinations_empty_when_no_assembly():
-    """无关地支不应误报三合/三会/破。"""
-    # 子寅辰午：无三合局、无三会方、无相破（注意 子酉才是破，此组不含酉）
-    got = _branch_combinations(["子", "寅", "辰", "午"])
-    assert got == [], f"无三合/三会/破时应为空，实际: {got}"
+def test_branch_relations_empty_assembly_becomes_ban_he():
+    """口径变更：子寅辰午 无三合/三会/破，但 **子辰旺半合水、寅午生半合火** 应被识别。
+
+    旧口径（只认三支齐全）返回空；知识库 §一 明确半合是正式关系类，故现在报出。
+    """
+    rel = branch_relations(["子", "寅", "辰", "午"])
+    assert rel.san_he == () and rel.hui == () and rel.po == ()
+    assert rel.ban_he == ("子辰半合水", "寅午半合火"), f"实际: {rel.ban_he}"
 
 
-def test_branch_combinations_he_and_po_coexist_on_sishen():
-    """巳申既六合又相破：三合/三会/破识别层只负责破，
-    六合由 _branch_relations 负责；这里验证破层能识别巳申破。"""
-    got = _branch_combinations(["巳", "申", "子", "辰"])
-    assert "巳申破" in got, f"巳申应识别为相破，实际: {got}"
-    # 同时验证三合水局也在（申子辰）
-    assert "申子辰合水局" in got, f"申子辰应合水局，实际: {got}"
+def test_branch_relations_sishen_he_po_banxing_coexist():
+    """巳申三关系同见：六合、六破、半刑（无恩之刑），外加申子辰三合。"""
+    rel = branch_relations(["巳", "申", "子", "辰"])
+    assert "申子辰合水局" in rel.san_he
+    assert "巳申破" in rel.po
+    assert "巳申合水" in rel.liu_he
+    assert "巳申半刑（无恩之刑）" in rel.ban_xing
 
 
 def test_xueren_other_months_unaffected():
@@ -667,19 +682,65 @@ def test_detect_special_pattern_guihai_x4_zhuanwang_runcan():
 
 
 def test_detect_special_pattern_cong_subtypes():
-    """极弱候选应正确区分从杀/从财/从儿/从势（均真从：无根无印）。"""
-    cong = [("丙", "午"), ("丙", "午"), ("丙", "午"), ("丙", "午")]
+    """极弱候选应正确区分从杀/从财/从儿/从势。
+
+    真从须**同时**满足：日主无根无印（地支藏干既无日主五行也无印星）、
+    **月令为所从之神当令**、且**无破格之神有力**
+    （knowledge_docs/33_从格专旺化气体系.md §一.2 第 4 条 + §二/§三/§四 第 4 条）。
+    故各子格的四柱须同时避开：日主五行/印星的藏干、破格之神的本气。
+
+    score 直接给 -10.0 —— 本测试只验分派（哪一行独旺 → 哪个格名），
+    真实分数由 `_build_wuxing_analysis` 计算，其口径另由黄金快照把守。
+    """
     cases = [
-        ({"金": 0.0, "木": 0.5, "水": 0.2, "火": 0.5, "土": 10.0}, -8.43, "从杀格"),
-        ({"金": 0.0, "木": 0.5, "水": 0.2, "火": 10.0, "土": 0.5}, -7.48, "从财格"),
-        ({"金": 0.0, "木": 12.0, "水": 0.2, "火": 0.5, "土": 0.5}, -7.15, "从儿格"),
-        ({"金": 0.0, "木": 0.5, "水": 0.2, "火": 6.0, "土": 8.0}, -10.68, "从势格"),
+        # 从杀：月支酉=金(官杀)当令；避开火本气(食伤为破格之神)
+        ([("己", "戌"), ("己", "酉"), ("甲", "戌"), ("己", "酉")],
+         {"木": 0.1, "水": 0.1, "火": 0.3, "土": 0.2, "金": 10.0}, "从杀格"),
+        # 从财：月支戌=土(财)当令；避开金本气(官杀为破格之神)
+        ([("己", "巳"), ("己", "戌"), ("甲", "戌"), ("己", "午")],
+         {"木": 0.1, "水": 0.1, "火": 0.3, "土": 10.0, "金": 0.2}, "从财格"),
+        # 从儿：月支午=火(食伤)当令；避开印星(水)本气
+        ([("己", "巳"), ("己", "午"), ("甲", "戌"), ("己", "午")],
+         {"木": 0.1, "水": 0.1, "火": 13.0, "土": 0.1, "金": 0.1}, "从儿格"),
+        # 从势：财(土)与官杀(金)相当（次/最 ≥ _CONG_SECOND_RATIO）；从势无破格之神
+        ([("己", "巳"), ("己", "戌"), ("甲", "戌"), ("己", "午")],
+         {"木": 0.1, "水": 0.1, "火": 0.3, "土": 6.5, "金": 8.0}, "从势格"),
     ]
-    for weighted, score, expect in cases:
-        sp = _detect_special_pattern(cong, weighted, "水", "壬", score, "金", "木", "火", "土")
+    for pillars, weighted, expect in cases:
+        sp = _detect_special_pattern(
+            pillars, weighted, "木", "甲", -10.0, "水", "火", "土", "金"
+        )
         assert sp["is_special"] is True, (weighted, sp)
         assert sp["kind"] == "从格", (weighted, sp)
         assert sp["label"] == expect, (weighted, sp["label"], expect)
+
+
+def test_detect_special_pattern_fake_cong_when_month_not_in_season():
+    """无根且气势专一，但月令非所从之神当令 → 降为假从（§一.2 第 4 条）。"""
+    # 月支 酉=金(官杀)，而全局土(财)独旺
+    pillars = [("己", "巳"), ("己", "酉"), ("甲", "戌"), ("己", "午")]
+    sp = _detect_special_pattern(
+        pillars, {"木": 0.1, "水": 0.1, "火": 0.3, "土": 10.0, "金": 0.2},
+        "木", "甲", -10.0, "水", "火", "土", "金",
+    )
+    assert sp["is_special"] is True
+    assert sp["kind"] == "假从"
+    assert sp["label"] == "假从财格"
+    assert "行帮身运即破败" in sp["useful_hint"]
+
+
+def test_detect_special_pattern_fake_cong_when_breaker_potent():
+    """无根且月令当令，但破格之神有力 → 格局不纯 → 假从（§二.1 第 4 条）。"""
+    # 月支 戌=土(财)当令、无根，但 酉 为金(官杀)本气 → 官杀有力泄财
+    pillars = [("己", "酉"), ("己", "戌"), ("甲", "戌"), ("己", "午")]
+    sp = _detect_special_pattern(
+        pillars, {"木": 0.1, "水": 0.1, "火": 0.3, "土": 10.0, "金": 0.2},
+        "木", "甲", -10.0, "水", "火", "土", "金",
+    )
+    assert sp["is_special"] is True
+    assert sp["kind"] == "假从"
+    assert sp["label"] == "假从财格"
+    assert "格局不纯" in sp["useful_hint"]
 
 
 def test_detect_special_pattern_fake_cong_has_root():

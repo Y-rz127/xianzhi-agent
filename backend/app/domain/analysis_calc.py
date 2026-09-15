@@ -1,23 +1,16 @@
 """命局结构分析：五行强弱、专旺/从格判定、十神统计、干支合冲刑害。"""
 from __future__ import annotations
 
+from dataclasses import dataclass
+
+from app.domain.ganzhi_relations import branch_relations, stem_relations
 from app.domain.models import DomainAnalysis, Pillar, WuxingAnalysis
 from app.domain.tables import (
     CONTROLS,
-    GAN_CHONG,
-    GAN_HE,
     GAN_WUXING,
     GENERATES,
     HIDDEN_STEMS,
-    LIU_CHONG,
-    LIU_HAI,
-    LIU_HE,
-    LIU_PO,
-    SAN_HE,
-    SAN_HUI,
-    SAN_XING,
     SEASON_NOTES,
-    SELF_XING,
     WUXING_ORDER,
     ZHI_WUXING,
 )
@@ -25,10 +18,15 @@ from app.domain.tables import (
 # 特殊格局判定阈值
 _ZHUANWANG_DOM_RATIO = 0.60       # 主导五行占全局加权比例下限
 _ZHUANWANG_PRESSURE_MAX = 2.0     # 克泄耗三行合计加权上限（超过视为破局，不判专旺）
-_CONG_ROOT_MIN_HIDDEN = 0.30      # 藏干中日主五行达此权重视为有"根"
-_CONG_RESOURCE_MIN_HIDDEN = 0.30  # 藏干中印星五行达此权重视为有"印根"
-_CONG_SELF_WX_MAX = 0.50          # 日主自身五行加权超过此值，不从
-_CONG_SECOND_RATIO = 0.60         # 从势判定：次旺/最旺 ≥ 此比例视为两行相当 → 从势
+_CONG_ROOT_MIN_HIDDEN = 0.30      # 藏干中某五行达此权重视为"本气级"（判透干印比是否有地支支撑）
+_CONG_RESOURCE_MIN_HIDDEN = 0.30  # 同上，用于印星
+_CONG_SECOND_RATIO = 0.80         # 从势判定：次旺/最旺 ≥ 此比例视为两行相当 → 从势
+
+# 原 _CONG_SELF_WX_MAX = 0.50 已删除（2026-09-15）。
+# 它比较的是"日主五行**绝对**权重"，而日干自身必然贡献 1.0，
+# 该量最小值恒为 1.0（6 万样本实测 min=1.0）→ 守卫恒真、从格永不成立（死代码）。
+# 同文件专旺侧用的是**占比**（_ZHUANWANG_DOM_RATIO），从格侧却用绝对量，量纲本就不一致。
+# 日主无根/无印/无比劫的判定已由 _root_profile 完整承担，无需再设权重阈值。
 
 _LU = {"甲": "寅", "乙": "卯", "丙": "巳", "丁": "午", "戊": "巳", "己": "午",
        "庚": "申", "辛": "酉", "壬": "亥", "癸": "子"}  # 日主禄地
@@ -72,44 +70,83 @@ def _root_branches_for_master(day_master: str) -> set[str]:
 _ZHUANWANG_NAME = {"水": "润下格", "火": "炎上格", "木": "曲直格", "金": "从革格", "土": "稼穑格"}
 
 
-def _has_root(pillars, day_master: str, day_wx: str, resource: str) -> bool:
-    """真假从根气判定：日主有禄/刃/库根、藏干中气以上本气根，或印星/比劫透干 → 不从。
+# ---------------- 日主根气画像（真从 / 假从 / 正格 三档的分档依据） ----------------
+#
+# 口径来源：`knowledge_docs/33_从格专旺化气体系.md`
+#   §一.2「关键判定」：'地支藏干中只要有日主微根（如甲木见辰中乙木、亥中甲木），
+#                       即不为真从，为假从。天干虚浮一比一印，亦为假从。'
+#   §八.3「假从假化与正格的边界」：根极弱 → 假从；根有力 → 正格；印比有力 → 正格。
+#   §八.1「现实」：假从居多，真从极少。
+#
+# 注意"微根"的门槛是**有一丝**，不是本气级 —— 故不能用 _CONG_ROOT_MIN_HIDDEN 当根气门槛。
+# 该常量现在只用于判断"透干的印比在地支有没有本气级支撑"（虚浮 vs 有力）。
 
+_VERDICT_SOLID = "有力"
+_VERDICT_WEAK = "微根"
+_VERDICT_NONE = "无根"
+
+
+@dataclass(frozen=True)
+class _RootProfile:
+    """日主根气画像。`verdict` 是三档判定的唯一入口。"""
+
+    lu_ren_ku: bool                    # 地支见禄/刃/墓库根
+    hidden_day: float                  # 藏干中日主五行权重合计（含余气）
+    hidden_resource: float             # 藏干中印星五行权重合计
+    solid_support: tuple[str, ...]     # 印比透干且地支有本气级支撑
+    floating_support: tuple[str, ...]  # 印比透干但地支无支撑（虚浮）
+
+    @property
+    def verdict(self) -> str:
+        if self.lu_ren_ku or self.solid_support:
+            return _VERDICT_SOLID
+        if self.hidden_day > 0 or self.hidden_resource > 0 or self.floating_support:
+            return _VERDICT_WEAK
+        return _VERDICT_NONE
+
+
+def _root_profile(pillars, day_master: str, day_wx: str, resource: str) -> _RootProfile:
+    """采集日主根气画像。
+
+    `pillars` 为四柱干支字符串（如 "甲子"）：`p[0]` 天干、`p[1]` 地支。
     日干本身即日主，不计入"比劫透干"，否则任何八字都会被判有比劫。
     """
     roots = _root_branches_for_master(day_master)
+    lu_ren_ku = False
     hidden_day = 0.0
     hidden_resource = 0.0
-    same_stem = False
-    resource_stem = False
-    for i, p in enumerate(pillars):
-        zhi = p[1]
-        if zhi in roots:
-            return True
-        for h, ratio in HIDDEN_STEMS.get(zhi, ()):
+    for p in pillars:
+        if p[1] in roots:
+            lu_ren_ku = True
+        for h, ratio in HIDDEN_STEMS.get(p[1], ()):
             hw = GAN_WUXING.get(h)
             if hw == day_wx:
                 hidden_day += ratio
             elif hw == resource:
                 hidden_resource += ratio
-        if i == 2:  # 日柱天干即日主，跳过比劫/印透干判定
+
+    solid: list[str] = []
+    floating: list[str] = []
+    for i, p in enumerate(pillars):
+        if i == 2:  # 日柱天干即日主
             continue
         gw = GAN_WUXING.get(p[0])
-        if gw == day_wx:
-            same_stem = True
-        elif gw == resource:
-            resource_stem = True
-    if same_stem:
-        return True
-    if hidden_day >= _CONG_ROOT_MIN_HIDDEN:
-        return True
-    if resource_stem or hidden_resource >= _CONG_RESOURCE_MIN_HIDDEN:
-        return True
-    return False
+        if gw not in (day_wx, resource):
+            continue
+        # 透干五行在地支有无支撑：地支本气即该五行，或藏干累计达本气级
+        supported = any(ZHI_WUXING.get(q[1]) == gw for q in pillars) or (
+            sum(
+                r for q in pillars for h, r in HIDDEN_STEMS.get(q[1], ()) if GAN_WUXING.get(h) == gw
+            )
+            >= _CONG_ROOT_MIN_HIDDEN
+        )
+        (solid if supported else floating).append(p[0])
+
+    return _RootProfile(lu_ren_ku, hidden_day, hidden_resource, tuple(solid), tuple(floating))
 
 
 def _detect_zhuanwang(weighted, day_wx, resource, officer, wealth, output):
-    """极旺候选 → 专旺格判定；要求日主五行独旺且克泄耗无破局。返回 (label, hint) 或 None。"""
+    """极旺候选 → 专旺格判定；要求日主五行独旺且克泄耗无破局。返回 (kind, label, hint) 或 None。"""
     total = sum(weighted.values())
     if total <= 0:
         return None
@@ -129,15 +166,66 @@ def _detect_zhuanwang(weighted, day_wx, resource, officer, wealth, output):
         f"日主入{name}（一行独旺，候选专旺），宜顺其旺势，喜{resource or '印星'}、{day_wx}比劫相扶；"
         f"切忌{wealth or '财星'}、{officer or '官杀'}逆克激怒旺神。"
     )
-    return name, hint
+    return "专旺", name, hint
+
+
+# 从格：所从之神 → (格名, 用神提示)
+_CONG_LABELS = {
+    "官杀": ("从杀格", "日主无依从杀，喜{wealth}生{officer}、顺势御杀；切忌{resource}、{day_wx}比劫抗杀。"),
+    "财": ("从财格", "日主无依从财，喜{output}生{wealth}、{officer}护财；切忌{resource}、{day_wx}比劫分财。"),
+    "食伤": ("从儿格", "日主无依从儿（食伤），喜{wealth}流通秀气；切忌{resource}制儿、{officer}犯怒。"),
+}
+_CONG_SHISHI = ("从势格", "日主无依、官杀/财/食伤两三相混而势均力敌，入从势格；"
+                           "宜顺势相从、随旺气流转，忌{resource}{day_wx}比劫扶身。")
+
+# 假从的额外告诫（知识库 §八.1：「行顺从运可发，行帮身运即破败，根基不稳」）
+_FAKE_TAIL = "行顺从运可发，行帮身运即破败，根基不稳，须先按正格参考。"
+
+# 子格的破格之神（知识库 §二.1 / §三.1 / §四.1 第 4 条）：
+#   从财格 — 无官杀泄财气（官杀虽克身但泄财，见官杀则不纯）
+#   从杀格 — 无食伤制杀（食伤制杀则破从局）
+#   从儿格 — 无印星克食伤（印克食伤则破从局）；该条已被"无根无印"前置条件覆盖，故恒满足
+#   从势格 — 无（财官食伤皆旺，无一定之从）
+_BREAKER_OF = {"财": "官杀", "官杀": "食伤", "食伤": "印星"}
+
+
+def _breaker_element(follow: str, resource: str, officer: str, output: str) -> str:
+    """取该子格破格之神的五行；未知子格返回空串。"""
+    return {"财": officer, "官杀": output, "食伤": resource}.get(follow, "")
+
+
+def _breaker_is_potent(pillars, breaker_wx: str) -> bool:
+    """破格之神是否有力：**透干，或地支见其本气**。
+
+    仅藏干余气/中气不算 —— 如土月丑/戌中藏的一点辛金（金为官杀），
+    库中之气不足以泄财，不构成破格。判据与本文件 `_root_profile` 的
+    "有力/虚浮"同一套机制，避免到处新造阈值。
+    """
+    if not breaker_wx:
+        return False
+    for i, p in enumerate(pillars):
+        if i != 2 and GAN_WUXING.get(p[0]) == breaker_wx:
+            return True
+        if ZHI_WUXING.get(p[1]) == breaker_wx:
+            return True
+    return False
 
 
 def _detect_conging(weighted, pillars, day_wx, day_master, resource, officer, wealth, output):
-    """极弱候选 → 从格判定（真假从 + 从杀/从财/从儿/从势）。返回 (label, hint) 或 None。"""
-    if _has_root(pillars, day_master, day_wx, resource):
-        return None  # 有根/有印/有比劫 → 假从或不从
-    if weighted.get(day_wx, 0.0) > _CONG_SELF_WX_MAX:
-        return None  # 日主自身五行仍有可观权重（藏干本气），不从
+    """极弱候选 → 从格判定。返回 (kind, label, hint) 或 None。
+
+    kind ∈ {"从格"(真从), "假从"}。四条判据对齐 `knowledge_docs/33_从格专旺化气体系.md`：
+    1. 根气三档（`_RootProfile.verdict`）：有力 → 正格不论从；微根 → 假从；无根 → 真从候选。
+    2. 全局气势专一：克泄耗中须有一行明显独旺，否则无从。
+    3. 月令须为所从之神当令（§一.2 第 4 条）。
+    4. **无破格之神**（§二.1/§三.1/§四.1 第 4 条）：该子格的破格之神有力则格局不纯。
+    任一条不满足即降为假从，并在提示里写明降级之由（供 LLM 区分真假从的岁运断法）。
+    """
+    month_zhi = pillars[1][1]
+    profile = _root_profile(pillars, day_master, day_wx, resource)
+    if profile.verdict == _VERDICT_SOLID:
+        return None  # 禄/刃/库根，或印比透干且有地支支撑 → 正格，不论从
+
     contenders = {
         "官杀": weighted.get(officer, 0.0),
         "财": weighted.get(wealth, 0.0),
@@ -145,39 +233,58 @@ def _detect_conging(weighted, pillars, day_wx, day_master, resource, officer, we
     }
     best_name = max(contenders, key=contenders.get)
     if contenders[best_name] < 0.5:
-        return None  # 没有一行明显独旺，不从
-    # 从势：次旺行与最旺行相当（差距不大）
+        return None  # 没有一行明显独旺，无从
+
     vals = sorted(contenders.values(), reverse=True)
-    if vals[1] >= vals[0] * _CONG_SECOND_RATIO and vals[1] > 0:
-        hint = (
-            f"日主极弱无依，官杀/财/食伤两三相混、势均力敌，入从势格；"
-            f"宜顺势相从，随旺气流转，喜多而从者、忌{resource or '印星'}{day_wx}比劫扶身。"
-        )
-        return "从势格", hint
-    name_map = {
-        "官杀": ("从杀格", f"日主极弱从杀，喜{wealth or '财星'}生{officer or '官杀'}、顺势御杀；切忌{resource or '印星'}、{day_wx}比劫抗杀。"),
-        "财": ("从财格", f"日主极弱从财，喜{output or '食伤'}生{wealth or '财星'}、{officer or '官杀'}护财；切忌{resource or '印星'}、{day_wx}比劫分财。"),
-        "食伤": ("从儿格", f"日主极弱从儿（食伤），喜{wealth or '财星'}流通秀气；切忌{resource or '印星'}制儿、{officer or '官杀'}犯怒。"),
-    }
-    return name_map[best_name]
+    is_shishi = vals[1] >= vals[0] * _CONG_SECOND_RATIO and vals[1] > 0
+    follow_wx = {"官杀": officer, "财": wealth, "食伤": output}
+
+    if is_shishi:
+        # 从势无一定之从：月令落在克泄耗任一行即算当令；亦无破格之神
+        label, template = _CONG_SHISHI
+        month_ok = ZHI_WUXING.get(month_zhi, "") in (officer, wealth, output)
+        impure = False
+    else:
+        label, template = _CONG_LABELS[best_name]
+        month_ok = ZHI_WUXING.get(month_zhi, "") == follow_wx[best_name]
+        breaker_wx = _breaker_element(best_name, resource, officer, output)
+        impure = _breaker_is_potent(pillars, breaker_wx)
+
+    hint = template.format(
+        resource=resource or "印星", day_wx=day_wx,
+        officer=officer or "官杀", wealth=wealth or "财星", output=output or "食伤",
+    )
+    if profile.verdict == _VERDICT_NONE and month_ok and not impure:
+        return "从格", label, hint
+
+    reasons = []
+    if profile.verdict != _VERDICT_NONE:
+        reasons.append("日主尚存微根或虚浮印比")
+    if not month_ok:
+        reasons.append("月令非所从之神当令")
+    if impure:
+        reasons.append(f"{_BREAKER_OF[best_name]}有力，泄耗所从之气，格局不纯")
+    return "假从", f"假{label}", f"{hint}（假从之由：{'；'.join(reasons)}。{_FAKE_TAIL}）"
 
 
 def _detect_special_pattern(pillars, weighted, day_wx, day_master, score,
                             resource, output, wealth, officer):
     """在 ±7 极端候选区做特殊格局识别：score ≥ 7 判专旺，score ≤ -7 判从格。
 
+    返回 `kind` ∈ {"专旺", "从格"(真从), "假从", ""}。真假从的区分见 `_detect_conging`
+    与 `knowledge_docs/33_从格专旺化气体系.md` §八：假从仍按所从之神取用，但行帮身运即破局。
     不落入极端区或判定不自信时返回 is_special=False。
     """
     if score >= 7:
         zw = _detect_zhuanwang(weighted, day_wx, resource, officer, wealth, output)
         if zw:
-            label, hint = zw
-            return {"is_special": True, "kind": "专旺", "label": label, "useful_hint": hint}
+            kind, label, hint = zw
+            return {"is_special": True, "kind": kind, "label": label, "useful_hint": hint}
     elif score <= -7:
         cg = _detect_conging(weighted, pillars, day_wx, day_master, resource, officer, wealth, output)
         if cg:
-            label, hint = cg
-            return {"is_special": True, "kind": "从格", "label": label, "useful_hint": hint}
+            kind, label, hint = cg
+            return {"is_special": True, "kind": kind, "label": label, "useful_hint": hint}
     return {"is_special": False, "kind": "", "label": "", "useful_hint": ""}
 
 
@@ -308,67 +415,23 @@ def _count_ten_gods(pillars: list[Pillar]) -> dict[str, int]:
     return dict(sorted(counts.items(), key=lambda item: (-item[1], item[0])))
 
 
-def _branch_relations(zhis: list[str]) -> tuple[list[str], list[str], list[str], list[str]]:
-    """归纳一组地支间的合/冲/害/刑关系（两两查六合/六冲/六害，三刑/自刑按集合判定）。"""
-    combinations: list[str] = []
-    clashes: list[str] = []
-    harms: list[str] = []
-    punishments: list[str] = []
-    for i in range(len(zhis)):
-        for j in range(i + 1, len(zhis)):
-            pair = frozenset((zhis[i], zhis[j]))
-            if pair in LIU_HE:
-                combinations.append(LIU_HE[pair])
-            if pair in LIU_CHONG:
-                clashes.append(LIU_CHONG[pair])
-            if pair in LIU_HAI:
-                harms.append(LIU_HAI[pair])
-    zhi_set = set(zhis)
-    for group, label in SAN_XING.items():
-        if group.issubset(zhi_set):
-            punishments.append(label)
-    for zhi in zhi_set:
-        if zhis.count(zhi) >= 2 and zhi in SELF_XING:
-            punishments.append(SELF_XING[zhi])
-    return combinations, clashes, harms, punishments
-
-
-def _branch_combinations(zhis: list[str]) -> list[str]:
-    """识别地支三合局、三会方、六破；只报三支全会的完整局，缺支不识别。"""
-    result: list[str] = []
-    zhi_set = set(zhis)
-    for group, label in SAN_HE.items():
-        if group.issubset(zhi_set):
-            result.append(label)
-    for group, label in SAN_HUI.items():
-        if group.issubset(zhi_set):
-            result.append(label)
-    for i in range(len(zhis)):
-        for j in range(i + 1, len(zhis)):
-            pair = frozenset((zhis[i], zhis[j]))
-            if pair in LIU_PO:
-                result.append(LIU_PO[pair])
-    return result
-
-
-def _stem_relations(gans: list[str]) -> tuple[list[str], list[str]]:
-    """天干五合与相冲。返回 (合, 冲)。"""
-    combos: list[str] = []
-    clashes: list[str] = []
-    for i in range(len(gans)):
-        for j in range(i + 1, len(gans)):
-            pair = frozenset((gans[i], gans[j]))
-            if pair in GAN_HE:
-                combos.append(GAN_HE[pair])
-            if pair in GAN_CHONG:
-                clashes.append(GAN_CHONG[pair])
-    return combos, clashes
+# 干支关系的实现已收敛到 `app.domain.ganzhi_relations`（单一事实源）：
+# 原 `_branch_relations` / `_branch_combinations` / `_stem_relations` 三个私有函数
+# 与 `xipan` 里的另一套并存，导致 36 个黄金命盘里 34 个两套结论不一致，已删除。
+# 统一口径：半合/拱合纳入、三刑用「两支半刑」、六破独立成「破」、自刑统一命名。
 
 
 def _build_domain_analysis(pillars: list[Pillar], wuxing: WuxingAnalysis) -> DomainAnalysis:
     """汇总十神、透干/根气、地支关系与季节调候，组装领域层分析对象。
 
-    天干五合/相冲以「(干合)」「(干冲)」前缀并入合/冲列表以便区分；
+    关系口径见 `app.domain.ganzhi_relations`（单一事实源）；本函数只做**视图映射**：
+      合 = 干合(加前缀区分) + 六合 + 半合 + 拱合（合局力量：六合＞半合＞拱合）
+      冲 = 干冲(加前缀区分) + 六冲
+      害 = 六害
+      破 = 六破            ← 独立成栏（原先被错放进「三合/三会」栏）
+      刑 = 三刑 + 半刑 + 自刑
+      三合/三会 = 完整三合局 + 三会方
+    天干以「(干合)」「(干冲)」前缀并入，便于与地支关系区分；
     pattern_hint 保留空串维持 dataclass 契约（根气/合冲等已由结构化字段承载）。
     """
     day_master = wuxing.day_master
@@ -377,11 +440,17 @@ def _build_domain_analysis(pillars: list[Pillar], wuxing: WuxingAnalysis) -> Dom
     exposed = [gan for gan in visible_gans if gan != day_master]
     rooted = sorted({day_master for stem in hidden_stems if stem == day_master})
     zhis = [p.zhi for p in pillars if p.zhi]
-    combinations, clashes, harms, punishments = _branch_relations(zhis)
-    three_assemblies = _branch_combinations(zhis)
-    gan_he, gan_chong = _stem_relations(visible_gans)
-    combinations = [f"{g}(干合)" for g in gan_he] + combinations
-    clashes = [f"{c}(干冲)" for c in gan_chong] + clashes
+
+    rel = branch_relations(zhis)
+    gan_he, gan_chong = stem_relations(visible_gans)
+
+    combinations = [f"{g}(干合)" for g in gan_he] + [*rel.liu_he, *rel.ban_he, *rel.gong_he]
+    clashes = [f"{c}(干冲)" for c in gan_chong] + list(rel.chong)
+    harms = list(rel.hai)
+    breaks = list(rel.po)
+    punishments = [*rel.san_xing, *rel.ban_xing, *rel.zi_xing]
+    three_assemblies = [*rel.hui, *rel.san_he]
+
     month_zhi = pillars[1].zhi if len(pillars) > 1 else ""
     adjustment = SEASON_NOTES.get(month_zhi, "调候需结合月令、寒暖燥湿与全局五行再定。")
 
@@ -400,6 +469,7 @@ def _build_domain_analysis(pillars: list[Pillar], wuxing: WuxingAnalysis) -> Dom
         combinations=combinations,
         clashes=clashes,
         harms=harms,
+        breaks=breaks,
         punishments=punishments,
         three_assemblies=three_assemblies,
         season=month_zhi,

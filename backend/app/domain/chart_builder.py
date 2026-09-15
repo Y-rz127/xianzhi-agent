@@ -22,13 +22,9 @@ from app.domain.models import (
 )
 from app.domain.shensha_calc import _compute_shensha
 from app.domain.tables import (
-    _GAN_CHANGSHENG_ZHI,
     _YANG_GAN,
     _ZHI_SEQ,
-    CHANG_SHENG,
-    CONTROLS,
     GAN_WUXING,
-    GENERATES,
     HIDDEN_STEMS,
     WUXING_ORDER,
     ZHI_WUXING,
@@ -307,12 +303,15 @@ def build_bazi_chart(
     liunian_start_year: int | None = None,
     longitude: float | None = None,
     liunian_cover_dayun: bool = False,
+    today: datetime.date | None = None,
 ) -> BaziChart:
     """构建完整八字命盘（BaziChart）。
 
     sect: 日柱计算流派；yun_sect: 大运计算流派；
     longitude: 出生地经度，用于真太阳时校正（基准 120°E，每度差 4 分钟）；
-    liunian_cover_dayun: 流年范围自动扩展到覆盖当前大运起止（前端流年神煞需整运十年）。
+    liunian_cover_dayun: 流年范围自动扩展到覆盖当前大运起止（前端流年神煞需整运十年）；
+    today: 基准日（默认取系统当天），会透传给细盘用于定位"当前岁运"。
+           不传时行为与历史一致；黄金命盘快照必须传固定值，否则快照随日期漂移。
     """
     y, m, d, h, mi = parse_birth(birth_time)
     gender_int = parse_gender(gender)
@@ -402,7 +401,10 @@ def build_bazi_chart(
     liunian = _build_liunian(
         yun, dayun, start_year, liunian_end - start_year + 1, day_master_gan, pillars, gender_int
     )
-    xipan = build_xipan(yun, pillars, gender_int, day_master_gan, dayun_direction, dayun_count=dayun_count)
+    xipan = build_xipan(
+        yun, pillars, gender_int, day_master_gan, dayun_direction, today=today, dayun_count=dayun_count
+    )
+
 
     warnings = [
         "流年干支采用立春口径；具体到立春前后的事件判断，应结合准确日期时刻。",
@@ -497,6 +499,7 @@ def chart_to_api_dict(chart: BaziChart) -> dict[str, Any]:
             "combinations": chart.analysis.combinations,
             "clashes": chart.analysis.clashes,
             "harms": chart.analysis.harms,
+            "breaks": chart.analysis.breaks,
             "punishments": chart.analysis.punishments,
             "threeAssemblies": chart.analysis.three_assemblies,
             "season": chart.analysis.season,

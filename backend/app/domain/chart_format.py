@@ -90,6 +90,7 @@ def format_analysis_text(chart: BaziChart, question: str = "整体运势") -> st
         f"  合: {', '.join(chart.analysis.combinations) or '-'}",
         f"  冲: {', '.join(chart.analysis.clashes) or '-'}",
         f"  害: {', '.join(chart.analysis.harms) or '-'}",
+        f"  破: {', '.join(chart.analysis.breaks) or '-'}",
         f"  刑: {', '.join(chart.analysis.punishments) or '-'}",
         f"  调候: {chart.analysis.adjustment}",
         f"  判断置信度: {chart.analysis.confidence}",

@@ -16,9 +16,10 @@ from app.domain.huangli_calc import (
     build_huangli_day,
     build_range_briefs,
     filter_zeji,
+    huangli_day,
     parse_date,
+    zeji,
 )
-from app.sub_app.huangli.huangli_app import huangli_day, zeji
 
 # ===== 黄金快照 =====
 

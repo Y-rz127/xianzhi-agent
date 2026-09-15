@@ -19,6 +19,11 @@ from typing import Any
 from lunar_python import Solar
 from lunar_python.util import LunarUtil
 
+from app.domain.ganzhi_relations import (
+    branch_relations,
+    gan_pair_relation,
+    zhi_pair_relations,
+)
 from app.domain.models import Pillar
 from app.domain.shensha_calc import _compute_shensha
 from app.domain.tables import (
@@ -26,19 +31,11 @@ from app.domain.tables import (
     _YANG_GAN,
     _ZHI_SEQ,
     CONTROLS,
-    GAN_CHONG,
-    GAN_HE,
     GAN_WUXING,
     GENERATES,
     GZ_WUXING,
     HIDDEN_STEMS,
     LIU_CHONG,
-    LIU_HAI,
-    LIU_HE,
-    LIU_PO,
-    SAN_HUI,
-    SAN_XING,
-    SELF_XING,
     WUXING_ORDER,
     ZHI_WUXING,
 )
@@ -571,68 +568,25 @@ def _dedup(items: list[str]) -> list[str]:
 
 
 def _gan_rel(a: str, b: str) -> str:
-    """两天干关系：五合优先，其次四冲（甲庚/乙辛/丙壬/丁癸）。
-
-    天干只列「合」「冲」两类：四冲本身也是相克关系（如壬克丙），一律按「冲」报，
-    不得降格写成「相克」；其余非冲的天干相克（如丁克庚）属常规五行生克，不作关系列出。
-    """
-    if not a or not b or a == b:
-        return ""
-    pair = frozenset((a, b))
-    if pair in GAN_HE:
-        return GAN_HE[pair]
-    if pair in GAN_CHONG:
-        return GAN_CHONG[pair]
-    return ""
-
-
-# 三合局（生-旺-墓）与所属五行：缺中神时两支拱出中神
-_SAN_HE_GROUPS = (
-    ("申", "子", "辰", "水"),
-    ("亥", "卯", "未", "木"),
-    ("寅", "午", "戌", "火"),
-    ("巳", "酉", "丑", "金"),
-)
+    """两天干关系（委托单一事实源 `ganzhi_relations.gan_pair_relation`）。"""
+    return gan_pair_relation(a, b)
 
 
 def _zhi_group_rel(zhis: list[str]) -> list[str]:
-    """三合局、半合、拱局（申辰拱子）与会方。"""
-    out: list[str] = []
-    for a, b, c, wx in _SAN_HE_GROUPS:
-        has = (a in zhis, b in zhis, c in zhis)
-        if all(has):
-            out.append(f"{a}{b}{c}合{wx}局")
-        elif has[0] and has[1]:
-            out.append(f"{a}{b}半合{wx}")
-        elif has[1] and has[2]:
-            out.append(f"{b}{c}半合{wx}")
-        elif has[0] and has[2]:
-            out.append(f"{a}{c}拱合{b}")
-    for group, label in SAN_HUI.items():
-        if group.issubset(set(zhis)):
-            out.append(label)
-    return out
+    """三会 / 三合 / 半合 / 拱合（**按合局力量由强到弱**排列，便于展示层直读）。"""
+    rel = branch_relations(zhis)
+    return [*rel.hui, *rel.san_he, *rel.ban_he, *rel.gong_he]
 
 
 def _zhi_pair_rel(x: str, y: str) -> list[str]:
-    """两地支的六合/六冲/六害/六破（同支不论）。"""
-    if not x or not y or x == y:
-        return []
-    pair = frozenset((x, y))
-    return [table[pair] for table in (LIU_HE, LIU_CHONG, LIU_HAI, LIU_PO) if pair in table]
+    """两地支的六合/六冲/六害/六破（委托单一事实源）。"""
+    return zhi_pair_relations(x, y)
 
 
 def _zhi_xing(zhis: list[str]) -> list[str]:
-    """三刑（持势/无恩/无礼）与自刑。"""
-    out: list[str] = []
-    zset = set(zhis)
-    for group, label in SAN_XING.items():
-        if group.issubset(zset):
-            out.append(label)
-    for z in zhis:
-        if z in SELF_XING and zhis.count(z) >= 2:
-            out.append(f"{z}{z}相刑")
-    return out
+    """三刑 / 半刑 / 自刑（委托单一事实源）。"""
+    rel = branch_relations(zhis)
+    return [*rel.san_xing, *rel.ban_xing, *rel.zi_xing]
 
 
 def _pillar_rel(gz: str, ref: str) -> str:

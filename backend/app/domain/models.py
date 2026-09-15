@@ -91,7 +91,7 @@ class WuxingAnalysis:
     strength_score: float
     useful_hint: str
     notes: list[str]
-    special_pattern: str = ""  # 特殊格局类型："专旺" / "从格" / 空串
+    special_pattern: str = ""  # 特殊格局类型："专旺" / "从格"(真从) / "假从" / 空串
 
 
 @dataclass(frozen=True)
@@ -110,6 +110,7 @@ class DomainAnalysis:
     adjustment: str
     pattern_hint: str
     confidence: float
+    breaks: list[str] = field(default_factory=list)  # 六破（原先被错放进 three_assemblies）
 
 
 @dataclass(frozen=True)

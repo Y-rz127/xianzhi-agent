@@ -264,3 +264,22 @@ def filter_zeji(yi: str, start: str, end: str, avoid_chong: str = "") -> list[di
         })
     hits.sort(key=lambda h: (-h["stars"], h["date"]))
     return hits
+
+
+# ---------------- 面向调用方的便捷入口 ----------------
+# 原位于 app/sub_app/huangli/huangli_app.py：Agent 工具层要复用，只能反向
+# import sub_app（报告 P1-1 的 tools → sub_app 倒置边）。逻辑纯计算，归 domain。
+
+
+def huangli_day(date: str = "") -> dict:
+    """当日完整黄历；date 留空或为空白取今天。"""
+    return build_huangli_day((date or "").strip() or _dt.date.today().isoformat())
+
+
+def zeji(yi: str, start: str, end: str, avoid_chong: str = "") -> list[dict]:
+    """择吉筛选；事项须命中宜忌词表，否则抛 ValueError。"""
+    item = (yi or "").strip()
+    if item not in YI_JI_ITEMS:
+        raise ValueError("不支持的择吉事项「{}」，请从词表中选择".format(item))
+    return filter_zeji(item, start, end, avoid_chong=(avoid_chong or "").strip())
+
