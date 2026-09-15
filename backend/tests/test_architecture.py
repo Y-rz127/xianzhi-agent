@@ -60,7 +60,8 @@ BASELINE_VIOLATIONS: dict[tuple[str, str], int] = {
 BASELINE_CYCLES: set[tuple[str, str]] = {
     # 均由上方方向违规派生，消除对应违规后应一并消失
     ("agent", "tools"),
-    ("db", "rag"),      # db.user_records → rag.retrieval.detect_domain
+    # ("db", "rag") 已消除：detect_domain / DOMAIN_KEYWORDS 下沉 app.domain.domain_keywords，
+    # db.user_records.answer_feedback 直连 domain，db→rag 边消失，仅剩 rag→db 单向
 }
 
 # 允许 import * 的模块（门面转发）。门面拆除后必须清空此集合。

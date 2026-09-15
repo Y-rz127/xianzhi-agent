@@ -24,6 +24,7 @@ from app.domain.chart_format import (
     format_liunian_text,
 )
 from app.domain.domain_brief import build_domain_brief
+from app.domain.domain_keywords import detect_domain
 from app.domain.tables import GZ_WUXING
 
 # 时间解析（农历/节日/时辰智能解析与出生时间标准化）已下沉到领域层 app/domain/time_parse.py，
@@ -41,7 +42,6 @@ from app.domain.yun_relations import (
     format_sui_relations,
     liunian_relations,
 )
-from app.rag.retrieval import detect_domain
 from app.tools.cache import bazi_cache
 
 # 携带 birth_time/gender 参数的排盘工具名：agent 会话内出生信息提取与

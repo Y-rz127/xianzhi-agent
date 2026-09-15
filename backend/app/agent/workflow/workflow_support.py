@@ -17,7 +17,7 @@ from app.agent.workflow.workflow_models import (
 from app.core.config import settings as _settings
 from app.domain.chart_builder import build_bazi_chart
 from app.domain.chart_format import format_fact_context
-from app.rag.retrieval import DOMAIN_KEYWORDS
+from app.domain.domain_keywords import DOMAIN_KEYWORDS
 from app.tools.text_clean import clean_think_tags, dedupe_content as _dedupe_content_impl
 
 

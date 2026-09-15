@@ -24,7 +24,7 @@
 | 指标 | 阶段 2 前 | 现在 |
 |---|---|---|
 | 分层倒置边 | 16 条 | **2 条**（`memory→tools`、`tools→agent`） |
-| 包级循环依赖 | 5 组 | **2 组**（`agent⟷tools`、`db⟷rag`） |
+| 包级循环依赖 | 5 组 | **1 组**（`agent⟷tools`；`db⟷rag` 已随领域识别下沉 domain 消除） |
 | 双导入路径符号 | 28 个 | **0 个**（阶段 4 已拆两门面，符号统一直连） |
 | `import *` | 1 处 | **0 处**（`domain.bazi_engine` 的 `import *` 随门面拆除消除） |
 | 连接池实例 | 2 个 | **1 个** |
@@ -460,11 +460,11 @@ class DelegatingRunnable:
 
 | 文件 | 行数 | 内容构成 |
 |---|---:|---|
-| `domain/tables.py` | 840 | 约 568 行纯字面量（59+ 个 `GAN_WUXING` / `LIU_HE` / `TIAN_YI` / `HUA_GAI` … 字典与元组） |
+| `domain/tables.py` | 864 | 约 568 行纯字面量（59+ 个 `GAN_WUXING` / `LIU_HE` / `TIAN_YI` / `HUA_GAI` … 字典与元组） |
 | `domain/city_longitude.py` | 390 | 城市经度查找表（纯数据） |
 | `domain/ziwei/tables.py` | 150 | 紫微星曜表（纯数据） |
 
-**问题**：`tables.py` 840 行让 `domain/` 目录的可读性变差——读者无法一眼看出「哪些文件是算法，哪些是数据」。它同时被 7 处依赖，且 `bazi_engine.py:39` 用 `import *` 全量导出，符号来源完全不可追踪。
+**问题**：`tables.py` 864 行让 `domain/` 目录的可读性变差——读者无法一眼看出「哪些文件是算法，哪些是数据」。它同时被 7 处依赖，且 `bazi_engine.py:39` 用 `import *` 全量导出，符号来源完全不可追踪。
 
 **解耦方案**：
 
@@ -510,9 +510,9 @@ class DelegatingRunnable:
 
 拆为 `db/user_records/{ai_interpretation,answer_feedback,favorites,feedback}.py`，`__init__.py` 显式 re-export 兼容既有导入路径 `from app.db.user_records import ...`。
 
-#### `memory/postgres_memory.py`（619 行）
+#### `memory/postgres_memory.py`（612 行）
 
-`PostgresChatMemory` 类只占 L102–L261，其余 ~360 行是模块级函数（`get_session_info` / `get_messages` / `get_birth_info_from_session` / `upsert_session_birth_info` …）。**同一个存储实体同时以「类」和「模块级函数」两套接口并存**。
+`PostgresChatMemory` 类只占 L95–L272，其余约 340 行是模块级函数（`get_session_info` / `get_messages` / `get_birth_info_from_session` / `upsert_session_birth_info` …）。**同一个存储实体同时以「类」和「模块级函数」两套接口并存**。
 
 **建议**：统一为一个 repository 类，模块级函数作为薄适配层或直接删除（`db/repository.py` 已提供异步门面）。
 
@@ -827,8 +827,8 @@ backend/app/
 
 - [x] `api/xianzhi.py`（701 行）→ **平铺 `xianzhi_chat` / `xianzhi_chart` / `xianzhi_report` + `_xianzhi_common`**
 - [x] `db/user_records.py`（608 行）→ **`db/user_records/{favorites, ai_interpretation, feedback, answer_feedback}`**
-- [ ] `memory/postgres_memory.py`（619 行）→ 统一为类接口，消除模块级函数与类并存
-- [ ] `domain/tables.py`（840 行，568 行纯数据）→ `domain/bazi/data/`
+- [ ] `memory/postgres_memory.py`（612 行）→ 统一为类接口，消除模块级函数与类并存
+- [ ] `domain/tables.py`（864 行，568 行纯数据）→ `domain/bazi/data/`
 
 ### 层级倒置消除
 
@@ -838,7 +838,7 @@ backend/app/
       `client_error` / 长度限额归 **`app/core/http/errors.py`**、FastAPI 依赖归 `api/deps.py`
 - [x] `tools/huangli.py` → `sub_app.huangli` → 直连 `domain.huangli_calc`
 - [x] `db/repository.py` → `memory` 反向依赖 → 门面归位 **`app/api/data_access.py`**；全仓连接池统一到 `db/pool.py`
-- [ ] `db/user_records.py:497` → `rag.retrieval.detect_domain`（db 依赖 rag）→ 领域识别下沉 domain 或经协议注入
+- [x] `db/user_records.py:497` → `rag.retrieval.detect_domain`（db 依赖 rag）→ **已消除**：`detect_domain` / `DOMAIN_KEYWORDS` 下沉为新模块 `domain/domain_keywords.py`，`db.user_records.answer_feedback` 及 `tools/bazi` / `workflow_support` / `orchestrator` 均直连 domain；`rag.retrieval` 改为从 domain 导入（仅内部使用）。`db→rag` 边消失，`db⟷rag` 循环随之断开，仅剩 `rag→db` 单向
 
 > 两处与初版计划的偏差（实际比计划更贴层）：
 > ① `AppContext` **不能**放 `core/` —— 它的 `get_xianzhi()` 会构造 `app.agent.xianzhi`，放 core 会把倒置边

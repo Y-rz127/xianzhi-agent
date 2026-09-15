@@ -77,8 +77,8 @@ from app.core.thinking_router import use_thinking
 
 # 检索策略（领域关键词/领域检索词/理论术语检索词/术语识别）统一由 app.rag.retrieval 提供，
 # 与 ReAct 工具路径（app/tools/rag_search.py）共用一套体系
+from app.domain.domain_keywords import detect_domain
 from app.rag.retrieval import (
-    detect_domain,
     detect_theory_topic,  # noqa: F401  # 测试仍从本模块导入
 )
 

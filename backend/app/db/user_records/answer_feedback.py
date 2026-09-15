@@ -294,8 +294,8 @@ def promote_to_case(fid: str, reviewer: str = "") -> tuple[str, str] | None:
         log.info("反馈已转过案例，幂等返回: fid={} case_id={}", fid, existing_cid)
         return existing_cid, existing_cid
 
-    # 延迟导入避免 db -> rag 的循环依赖
-    from app.rag.retrieval import detect_domain as _detect_domain
+    # 领域识别已下沉 domain，db 直连 domain 消除 db -> rag 循环依赖
+    from app.domain.domain_keywords import detect_domain as _detect_domain
 
     chart = item.get("chart_snapshot") or {}
     features = _extract_case_features(chart)
