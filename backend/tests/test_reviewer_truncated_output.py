@@ -90,26 +90,31 @@ def test_pass_false_without_issues_still_converts_to_pass(monkeypatch):
 
 # ---------------- _llm_review 端到端（假模型）----------------
 class _FakeResp:
-    def __init__(self, content: str):
+    def __init__(self, content: str, finish_reason: str = "stop"):
         self.content = content
+        self.response_metadata = {"finish_reason": finish_reason}
 
 
 class _FakeModel:
-    def __init__(self, content: str):
+    def __init__(self, content: str, finish_reason: str = "stop"):
         self._content = content
+        self._finish = finish_reason
 
     def bind(self, **kwargs):
         return self
 
     def invoke(self, messages):
-        return _FakeResp(self._content)
+        return _FakeResp(self._content, self._finish)
 
 
-def _review(monkeypatch, llm_output: str):
-    monkeypatch.setattr(wk, "invoke_review", lambda model, messages: llm_output)
+def _review(monkeypatch, llm_output: str, *, finish_reason: str = "stop", answer: str = "测试回答"):
+    """跑一次 LLM 深审（打桩 invoke_review_with_meta，返回 (正文, finish_reason)）。"""
+    monkeypatch.setattr(
+        wk, "invoke_review_with_meta", lambda model, messages: (llm_output, finish_reason)
+    )
     worker = ReviewerWorker(_FakeModel(""))
     return worker._llm_review(
-        answer="测试回答", chart=CHART, knowledge="", user_prompt="测试问题", ctx=None, second_chart=None
+        answer=answer, chart=CHART, knowledge="", user_prompt="测试问题", ctx=None, second_chart=None
     )
 
 
@@ -152,3 +157,31 @@ def test_valid_json_path_unchanged(monkeypatch):
     assert result.ok is False
     assert result.source == "llm"
     assert result.issues == ["十神与排盘事实不符"]
+
+
+# ---------------- finish_reason=length 的权威信号 ----------------
+def _err_count(key: str) -> int:
+    from app.core.observability import get_metrics
+
+    return int(dict(get_metrics()["internal_errors"]).get(key, 0))
+
+
+def test_truncated_finish_reason_is_recorded(monkeypatch):
+    """被截断要落指标，便于统计"审核有多少次是撞上限"，而不是靠不闭合反推。"""
+    before = _err_count("reviewer_output_truncated")
+    _review(monkeypatch, TRUNCATED, finish_reason="length")
+    assert _err_count("reviewer_output_truncated") == before + 1
+
+
+def test_normal_finish_reason_not_recorded(monkeypatch):
+    before = _err_count("reviewer_output_truncated")
+    _review(monkeypatch, '{"pass": true, "issues": []}', finish_reason="stop")
+    assert _err_count("reviewer_output_truncated") == before
+
+
+def test_finish_reason_of_reads_metadata():
+    from app.agent.workflow.workflow_support import finish_reason_of
+
+    assert finish_reason_of(_FakeResp("x", "length")) == "length"
+    assert finish_reason_of(_FakeResp("x", "STOP")) == "stop"  # 大小写归一
+    assert finish_reason_of(object()) == ""  # 拿不到就返回空串，不影响主流程

@@ -11,7 +11,7 @@ import datetime as _dt
 import re
 from dataclasses import replace as _dc_replace
 
-from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 
 from app.agent.core.base_agent import _wrap_user_input
 from app.agent.prompts import (
@@ -30,10 +30,12 @@ from app.agent.workflow.workflow_models import (
 )
 from app.agent.workflow.workflow_support import (
     _dedupe_content,
+    finish_reason_of,
 )
 from app.agent.workflow.workflow_workers import WORKERS
 from app.core.config import settings as _settings
 from app.core.logger import log
+from app.core.observability import record_error
 from app.domain.analysis_calc import (
     CONTROLS,
     GAN_WUXING,
@@ -202,19 +204,75 @@ def build_repair_messages(
     ]
 
 
+# 生成被输出上限截断时的续写指令（要求"接着写"，避免模型从头重写）
+_TRUNCATED_CONTINUE_HINT = (
+    "你上一条回答因为长度上限被中途截断了。请**紧接着最后一句继续写完**，"
+    "不要重新开头、不要重复已经写过的内容、不要加任何前言或解释，直接从断点续写。"
+)
+
+
+def _merge_continuation(head: str, tail: str) -> str:
+    """把续写片段接到被截断的正文后面，先去掉最大重叠。
+
+    模型即使被要求"接着写"，也常把最后一句重写一遍；重叠最长 60 字内取最大匹配，
+    找不到重叠就直接拼接（宁可多一句，也不要丢内容）。
+    """
+    head, tail = (head or "").rstrip(), (tail or "").strip()
+    if not head:
+        return tail
+    if not tail:
+        return head
+    for n in range(min(len(head), len(tail), 60), 3, -1):
+        if head[-n:] == tail[:n]:
+            return head + tail[n:]
+    return head + tail
+
+
 def invoke(chat_model, messages: list[BaseMessage]) -> str:
     """调用 LLM 生成回答，过滤  thinking 推理过程并去重。
 
     工作流 generate/repair 产出为长文本（含思维链），60s 默认超时频繁触发
     ReadTimeout，故单独放宽（与 report_generator 的 300s 同思路）。
+
+    另外处理**输出被截断**：finish_reason=length 表示撞到单次输出上限，正文是半截的
+    （2026-09-15 审核侧踩过同样的坑；生成侧更严重——用户会收到半句话）。
+    这里自动续写一次并拼接；续写仍被截断就按已有内容返回，同时记指标便于观察。
     """
-    response = chat_model.bind(timeout=_WORKFLOW_LLM_TIMEOUT).invoke(messages)
+    bound = chat_model.bind(timeout=_WORKFLOW_LLM_TIMEOUT)
+    response = bound.invoke(messages)
     content = (getattr(response, "content", "") or "").strip()
     content = clean_think_tags(content)
     content = strip_user_input_boundary(content)
+
+    if finish_reason_of(response) == "length":
+        record_error("workflow_output_truncated")
+        log.warning("[workflow] 生成被输出上限截断（{}字），自动续写一次", len(content))
+        if content:
+            content = _merge_continuation(content, _continue_truncated(bound, messages, content))
+            content = strip_user_input_boundary(content)
+
     if not content:
         return "我先看盘面，当前信息足够排盘，但模型没有生成有效解读。你可以换一个更具体的问题继续问。"
     return _dedupe_content(content)
+
+
+def _continue_truncated(bound_model, messages: list[BaseMessage], partial: str) -> str:
+    """让模型从断点续写；返回续写正文（失败返回空串，由调用方按已有内容处理）。"""
+    try:
+        followup = list(messages) + [
+            AIMessage(content=partial),
+            HumanMessage(content=_TRUNCATED_CONTINUE_HINT),
+        ]
+        resp = bound_model.invoke(followup)
+        tail = clean_think_tags((getattr(resp, "content", "") or "").strip())
+        if finish_reason_of(resp) == "length":
+            record_error("workflow_output_truncated_twice")
+            log.warning("[workflow] 续写仍被输出上限截断（本次续写 {}字），按现有内容定稿", len(tail))
+        return tail
+    except Exception as e:
+        record_error("workflow_continue_failed")
+        log.warning("[workflow] 截断续写失败，按现有内容定稿: {}", e)
+        return ""
 
 
 def compact_history(history: list[BaseMessage], summary: str = "") -> str:

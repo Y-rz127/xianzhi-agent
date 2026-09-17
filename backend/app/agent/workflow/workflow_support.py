@@ -75,8 +75,25 @@ def _parse_json(text: str) -> Any:
     return verdicts[-1] if verdicts else candidates[-1]
 
 
-def invoke_review(chat_model: Any, messages: list[Any]) -> str:
-    """审核（Reviewer）专用 LLM 调用。
+def finish_reason_of(response: Any) -> str:
+    """取 OpenAI 兼容响应的 finish_reason（"stop"/"length"/"content_filter"…），取不到返回空串。
+
+    这是判断"输出被服务端截断"的**权威信号**：`length` = 撞到单次输出上限被硬停，
+    拿到的正文是半截的。旧代码只取 `response.content`，把这个信号丢掉了，
+    只能从"JSON 不闭合 / 回答戛然而止"反推（2026-09-15 审核截断事故）。
+    """
+    meta = getattr(response, "response_metadata", None)
+    if isinstance(meta, dict):
+        for key in ("finish_reason", "stop_reason"):
+            value = meta.get(key)
+            if value:
+                return str(value).strip().lower()
+    value = getattr(response, "finish_reason", "") or ""
+    return str(value).strip().lower()
+
+
+def invoke_review_with_meta(chat_model: Any, messages: list[Any]) -> tuple[str, str]:
+    """审核专用调用，返回 (正文, finish_reason)。
 
     与 `workflow_messages.invoke` 一致地放宽超时并清理思考标签（旧版审核直接
     `chat_model.invoke`，既没有超时 bind 也不清理 think 块，思考模型的输出会让 JSON 解析失败），
@@ -84,7 +101,13 @@ def invoke_review(chat_model: Any, messages: list[Any]) -> str:
     """
     response = chat_model.bind(timeout=_settings.workflow_llm_timeout).invoke(messages)
     content = (getattr(response, "content", "") or "").strip()
-    return clean_think_tags(content)
+    return clean_think_tags(content), finish_reason_of(response)
+
+
+def invoke_review(chat_model: Any, messages: list[Any]) -> str:
+    """只要正文的兼容包装（新代码请用 `invoke_review_with_meta` 以拿到 finish_reason）。"""
+    content, _ = invoke_review_with_meta(chat_model, messages)
+    return content
 
 
 def _dedupe_content(content: str) -> str:

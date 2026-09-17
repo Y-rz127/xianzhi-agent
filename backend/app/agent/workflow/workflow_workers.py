@@ -13,7 +13,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.agent.prompts import CLASSIC_BOOK_WHITELIST, REVIEWER_SYSTEM
 from app.agent.workflow.workflow_models import DomainWorker, FactCheckResult
-from app.agent.workflow.workflow_support import _parse_json, invoke_review
+from app.agent.workflow.workflow_support import _parse_json, invoke_review_with_meta
 from app.core.logger import log
 from app.core.observability import record_error
 from app.domain.chart_builder import BaziChart
@@ -535,7 +535,17 @@ class ReviewerWorker:
             HumanMessage(content=human_content),
         ]
         try:
-            raw = (invoke_review(self._chat_model, messages) or "").strip()
+            raw, finish = invoke_review_with_meta(self._chat_model, messages)
+            raw = (raw or "").strip()
+            truncated = finish == "length"
+            if truncated:
+                # 权威信号：撞到单次输出上限被硬停 → 正文是半截的，JSON 必然不闭合。
+                # 落指标便于统计"审核到底有多少次是被截断"，而不是靠"不闭合"反推。
+                record_error("reviewer_output_truncated")
+                log.warning(
+                    "[Reviewer] 审核输出被输出上限截断（finish_reason=length，{}字），将走抢救路径",
+                    len(raw),
+                )
             raw = re.sub(r"^```(?:json)?\s*", "", raw)
             raw = re.sub(r"\s*```$", "", raw)
             data = _parse_json(raw)
@@ -546,7 +556,8 @@ class ReviewerWorker:
                     passed, issues = salvaged
                     record_error("reviewer_llm_nonjson_salvaged")
                     log.warning(
-                        "[Reviewer] LLM 审核输出非 JSON，已抢救出结论 pass={}（issues {} 条）; raw(前800字):\n{}",
+                        "[Reviewer] LLM 审核输出非 JSON（截断={}），已抢救出结论 pass={}（issues {} 条）; raw(前800字):\n{}",
+                        truncated,
                         passed,
                         len(issues),
                         raw[:800],
@@ -557,7 +568,11 @@ class ReviewerWorker:
                             "审核判不通过但输出被截断、未给出可解析的 issues；请按标准命理口径复核该回答的事实与生克逻辑"
                         ]
                     return FactCheckResult(ok=passed, issues=issues, source="llm_salvaged")
-                log.warning("[Reviewer] LLM 审核返回非 JSON 且捞不到结论，降级为通过; raw(前800字):\n{}", raw[:800])
+                log.warning(
+                    "[Reviewer] LLM 审核返回非 JSON 且捞不到结论（截断={}），降级为通过; raw(前800字):\n{}",
+                    truncated,
+                    raw[:800],
+                )
                 record_error("reviewer_llm_nonjson")
                 return FactCheckResult(ok=True, source="regex_fallback")
             passed = _coerce_pass(data.get("pass", True))
