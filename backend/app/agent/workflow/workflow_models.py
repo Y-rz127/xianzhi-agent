@@ -75,7 +75,7 @@ class FactCheckResult:
     """事实校验结果：ok 表示通过全部校验，issues 为发现的问题列表。"""
     ok: bool
     issues: list[str] = field(default_factory=list)
-    source: str = ""  # "regex" | "llm" | "both" | "regex_fallback"
+    source: str = ""  # "regex" | "llm" | "both" | "llm_salvaged" | "regex_fallback"
 
 
 @dataclass(frozen=True)

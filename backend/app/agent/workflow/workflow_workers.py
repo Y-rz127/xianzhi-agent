@@ -4,6 +4,7 @@ R9 拆分自 xianzhi_workflow.py。"""
 
 from __future__ import annotations
 
+import json
 import re
 from typing import Any
 
@@ -309,6 +310,46 @@ def _coerce_pass(value: Any) -> bool:
     return True
 
 
+def _salvage_verdict(raw: str) -> tuple[bool, list[str]] | None:
+    """从**残缺**的审核输出里抢救结论与 issues（JSON 解析失败时的兜底）。
+
+    背景（2026-09-15 实测）：修复后的二次审核，模型已经明确给出
+    `{"pass": false, "issues": [...]}`，但输出被截断（issues 写了两大段 + 思考块顶到输出上限），
+    JSON 不闭合 → `_parse_json` 的平衡扫描也救不回来 → 旧实现一律"降级为通过"，
+    等于把模型的否决静默丢掉、带病回答直接上线。
+
+    这里做两步廉价抢救：先抠 `"pass": true/false`，再抠 issues 数组里的字符串
+    （兼容最后一个被截断、没有闭合引号的 issue）。
+    返回 None 表示连 pass 字段都抠不到（此时才沿用"按通过 + 记指标"）。
+    """
+    m = re.search(r'"pass"\s*:\s*(true|false)', raw or "", re.IGNORECASE)
+    if not m:
+        return None
+    passed = m.group(1).strip().lower() == "true"
+
+    issues: list[str] = []
+    arr = re.search(r'"issues"\s*:\s*\[(.*)', raw, re.DOTALL)
+    if arr:
+        tail = arr.group(1)
+        # 完整字符串（含转义处理）
+        for token in re.findall(r'"((?:[^"\\]|\\.){2,1000})"', tail, re.DOTALL):
+            if token in ("pass", "issues"):
+                continue
+            try:
+                issues.append(json.loads(f'"{token}"'))
+            except Exception:
+                issues.append(token)
+        # 截断在末尾、没有闭合引号的那一条：仅在数组没正常闭合时才启用，
+        # 且排除捞到 "]}"/"]" 这类结构字符（实测会被当成 issue 丢给修复器）
+        stripped = tail.rstrip()
+        if not stripped.endswith("]"):
+            cut = re.search(r'"([^"]{2,1000})$', stripped, re.DOTALL)
+            last = cut.group(1).strip() if cut else ""
+            if last and last[0] not in "]},:":
+                issues.append(last)
+    return passed, [i for i in issues if str(i).strip()]
+
+
 class ReviewerWorker:
     """Reviewer 独立审核 Agent：正则快筛 + LLM 深审。
 
@@ -499,7 +540,24 @@ class ReviewerWorker:
             raw = re.sub(r"\s*```$", "", raw)
             data = _parse_json(raw)
             if not data or not isinstance(data, dict):
-                log.warning("[Reviewer] LLM 审核返回非 JSON，降级为通过: {}", raw[:200])
+                # 先抢救：输出被截断时模型往往已经写了 "pass": false（见 _salvage_verdict）
+                salvaged = _salvage_verdict(raw)
+                if salvaged is not None:
+                    passed, issues = salvaged
+                    record_error("reviewer_llm_nonjson_salvaged")
+                    log.warning(
+                        "[Reviewer] LLM 审核输出非 JSON，已抢救出结论 pass={}（issues {} 条）; raw(前800字):\n{}",
+                        passed,
+                        len(issues),
+                        raw[:800],
+                    )
+                    if not passed and not issues:
+                        # 判不通过却连 issues 都被截断：给修复器一条可执行的通用问题，不静默放行
+                        issues = [
+                            "审核判不通过但输出被截断、未给出可解析的 issues；请按标准命理口径复核该回答的事实与生克逻辑"
+                        ]
+                    return FactCheckResult(ok=passed, issues=issues, source="llm_salvaged")
+                log.warning("[Reviewer] LLM 审核返回非 JSON 且捞不到结论，降级为通过; raw(前800字):\n{}", raw[:800])
                 record_error("reviewer_llm_nonjson")
                 return FactCheckResult(ok=True, source="regex_fallback")
             passed = _coerce_pass(data.get("pass", True))
