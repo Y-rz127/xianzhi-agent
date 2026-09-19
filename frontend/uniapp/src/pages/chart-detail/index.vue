@@ -167,7 +167,7 @@
                   <text
                     v-for="c in snapColumns"
                     :key="'h' + c.name"
-                    :class="['pd-cell pd-col-head', (c.name === '大运' || c.name === '流年') && 'pd-cur-head']"
+                    :class="['pd-cell pd-col-head', (c.name === '大运' || c.name === '小运' || c.name === '流年') && 'pd-cur-head']"
                   >{{ c.name }}</text>
                 </view>
                 <view class="pd-row">
@@ -233,7 +233,7 @@
 
             <!-- 岁运横条：点大运看该运流年，点流年看该年流月 -->
             <view class="strip-hint-row">
-              <text class="strip-ctx">{{ selectedDayunLabel || '童限' }} · {{ selectedYear }}年</text>
+              <text class="strip-ctx">{{ selectedDayunLabel || TONGXIAN_LABEL }} · {{ selectedYear }}年</text>
               <text class="strip-hint">点大运看流年 · 点流年看流月</text>
             </view>
 
@@ -357,7 +357,7 @@
             <view class="section inner" v-if="suiyunRows.length">
               <view class="section-title-row">
                 <text class="section-title flat">岁运分析</text>
-                <text class="gong-info">{{ relations?.suiyun.label }}{{ relationsLoading ? ' · 计算中…' : '' }}</text>
+                <text class="gong-info">{{ suiyunHeadLabel }}{{ relationsLoading ? ' · 计算中…' : '' }}</text>
               </view>
               <view v-for="row in suiyunRows" :key="'sy' + row.label" class="an-row">
                 <text class="an-label">{{ row.label }}</text>
@@ -595,25 +595,43 @@ const warnings = computed<string[]>(() => chart.value?.warnings || [])
 const xipan = computed<XiPanData | null>(() => chart.value?.xipan || null)
 const maxWuxing = computed(() => Math.max(...wuxing.value.map((w) => w.count), 1))
 
-// 专业细盘快照列顺序：四柱在前，大运/流年放到右侧
-const SNAP_ORDER = ['年柱', '月柱', '日柱', '时柱', '大运', '流年']
+// 童限段（起运前）在大运列表里的显示值：后端把它直接填成这个字面量（app/domain/xipan.py 的
+// _build_dayun_list：`"ganzhi": gz or "童限"`）——**它正好 2 个字符**，所以不能再用
+// 「长度 == 2」判断"是不是真干支"：那会把「童限」当大运干支发给 /relations，
+// 后端按非法干支打回 400（未起运的盘点大运必失败）。
+const TONGXIAN_LABEL = '童限'
+const snapDayunIsTongxian = computed(() => {
+  const dy = xipan.value?.dayun.find((d) => d.index === selectedDayunIndex.value)
+  return !!dy && (dy.index === 0 || dy.ganzhi === TONGXIAN_LABEL)
+})
 
-// 点选后命盘大表实际展示的大运/流年干支（童限段无干支，以该年小运代位）
+// 点选后命盘大表实际展示的大运/流年干支（童限段无干支，以该年小运代位显示）
 const snapDayunGz = computed(() => {
   const xp = xipan.value
   if (!xp) return ''
   const dy = xp.dayun.find((d) => d.index === selectedDayunIndex.value)
   if (!dy) return ''
-  return dy.ganzhi.length === 2 ? dy.ganzhi : xp.liunian.find((l) => l.year === selectedYear.value)?.xiaoyun || ''
+  if (snapDayunIsTongxian.value) {
+    return xp.liunian.find((l) => l.year === selectedYear.value)?.xiaoyun || ''
+  }
+  return dy.ganzhi.length === 2 ? dy.ganzhi : ''
 })
 const snapLiunianGz = computed(() =>
   xipan.value?.liunian.find((l) => l.year === selectedYear.value)?.ganzhi || '')
 
-// 命盘大表的大运/流年两列跟随用户点选：字段查 ganzhiMeta（60 干支纯函数表，与后端 snapshot 逐字段一致）
+// 命盘大表的四柱只按这个白名单取快照列：**不要用 `SNAP_ORDER.indexOf(name) < 4` 过滤** ——
+// 童限时后端快照的第 2 列名是「小运」（`dayunLabel`），indexOf 返回 -1，也被判成 < 4，
+// 于是表里多出一列小运（用户截图里"年柱左边的小运"）。童限的小运改由右边那列承载（见下）。
+const SNAP_PILLARS = ['年柱', '月柱', '日柱', '时柱']
+
+// 童限：右边那一列没有大运可显示，改显示该年小运，列名也跟着改（列名决定神煞取哪一份）
+const snapYunColName = computed(() => (snapDayunIsTongxian.value ? '小运' : '大运'))
+
+// 命盘大表的运柱/流年两列跟随用户点选：字段查 ganzhiMeta（60 干支纯函数表，与后端 snapshot 逐字段一致）
 const snapColumns = computed(() => {
   const xp = xipan.value
   if (!xp) return []
-  const cols = [...(xp.snapshot?.columns || []).filter((c) => SNAP_ORDER.indexOf(c.name) < 4)]
+  const cols = [...(xp.snapshot?.columns || []).filter((c) => SNAP_PILLARS.includes(c.name))]
   const meta = xp.ganzhiMeta || {}
   const col = (name: string, gz: string) => {
     const m = meta[gz]
@@ -631,7 +649,7 @@ const snapColumns = computed(() => {
       nayin: m?.nayin || '',
     }
   }
-  cols.push(col('大运', snapDayunGz.value))
+  cols.push(col(snapYunColName.value, snapDayunGz.value))
   cols.push(col('流年', snapLiunianGz.value))
   return cols
 })
@@ -694,8 +712,9 @@ const chartYunSect = ref(1)
 const chartLongitude = ref<number | undefined>(undefined)
 let relationsTimer: ReturnType<typeof setTimeout> | null = null
 
+/** 关系请求的指纹 = **实际会发给后端的参数**（童限不传 dayun，故指纹里也不含代位显示的小运） */
 function currentRelationsKey(): string {
-  return [snapDayunGz.value, snapLiunianGz.value, selectedLiuyueGz.value].join('|')
+  return [snapDayunIsTongxian.value ? '' : snapDayunGz.value, snapLiunianGz.value, selectedLiuyueGz.value].join('|')
 }
 
 /** 点选变化 → 拉取该组合的六栏关系（150ms 防抖；过期响应丢弃，避免快速点选时串位） */
@@ -712,7 +731,10 @@ function refreshRelations() {
         sect: chartSect.value,
         yunSect: chartYunSect.value,
         longitude: chartLongitude.value,
-        dayun: snapDayunGz.value,
+        // 童限没有大运：**改传 xiaoyun**（后端按"运柱"处理，与大运互斥）。
+        // 不能拿小运冒充 dayun：能过干支校验，但会被标成"大运"，语义是错的。
+        dayun: snapDayunIsTongxian.value ? '' : snapDayunGz.value,
+        xiaoyun: snapDayunIsTongxian.value ? snapDayunGz.value : '',
         liunian: snapLiunianGz.value,
         liuyue: selectedLiuyueGz.value,
       })
@@ -738,7 +760,7 @@ const selectedDayunLabel = computed(() => {
   const xp = xipan.value
   if (!xp) return ''
   const d = xp.dayun.find((x) => x.index === selectedDayunIndex.value)
-  return d ? `${d.index === 0 ? '童限' : d.ganzhi + ' 大运'} · ${d.startYear}-${d.endYear}` : ''
+  return d ? `${d.index === 0 ? TONGXIAN_LABEL : d.ganzhi + ' 大运'} · ${d.startYear}-${d.endYear}` : ''
 })
 
 function initXipanSelection() {
@@ -878,6 +900,10 @@ function relRows(g?: XiPanRelationGroup) {
 }
 const suiyunRows = computed(() => relRows(relations.value?.suiyun))
 const yuanjuRows = computed(() => relRows(relations.value?.yuanju))
+// 运柱栏标题：童限时那一列是小运（后端 label 只是干支串，前端补出角色，免得看成大运）
+const suiyunHeadLabel = computed(
+  () => `${snapDayunIsTongxian.value ? '小运 ' : ''}${relations.value?.suiyun?.label || ''}`
+)
 
 // === 神煞列表（截图式：四柱/大运/流年） ===
 const dayunShenshaRaw = computed(() => {
@@ -972,7 +998,7 @@ const shenshaByPillar = computed(() => {
   return groups
 })
 
-// 快照表神煞行：四柱 + 点选的大运 + 点选的流年，与上方列内容同源
+// 快照表神煞行：四柱 + 点选的运柱（大运；童限时是小运）+ 点选的流年，与上方列内容同源
 const snapShenshaMap = computed(() => {
   const xp = xipan.value
   const map: Record<string, (ShenshaItem & { _cat: string })[]> = {}
@@ -981,9 +1007,16 @@ const snapShenshaMap = computed(() => {
   }
   const tag = (s: ShenshaItem) => ({ ...s, _cat: classifyShensha(s) })
   if (!xp) return map
-  const ds = dayunShenshaRaw.value.find((d) => d.ganzhi === snapDayunGz.value)
-  map['大运'] = (ds?.list || []).map(tag)
   const dict = xp.shenshaDict || {}
+  if (snapDayunIsTongxian.value) {
+    // 童限：这一列是小运 ⇒ 神煞查 xiaoyunShensha（与流年同一份"运柱神煞"索引 + 说明表）
+    map['小运'] = (xp.xiaoyunShensha?.[snapDayunGz.value] || [])
+      .map((name) => ({ name, description: dict[name] || '' }))
+      .map(tag)
+  } else {
+    const ds = dayunShenshaRaw.value.find((d) => d.ganzhi === snapDayunGz.value)
+    map['大运'] = (ds?.list || []).map(tag)
+  }
   map['流年'] = (xp.liunianShensha?.[snapLiunianGz.value] || [])
     .map((name) => ({ name, description: dict[name] || '' }))
     .map(tag)

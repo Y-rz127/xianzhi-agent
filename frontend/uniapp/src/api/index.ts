@@ -293,14 +293,15 @@ export const getChart = (birthTime: string, gender: string, sect = 2, yunSect = 
   })
 
 /**
- * 按点选的大运/流年/流月现算「岁运分析 / 原局分析」六栏。
+ * 按点选的大运/小运/流年/流月现算「岁运分析 / 原局分析」六栏。
  * 页面初次加载的 xipan.relations 只对应"今天"那一组，点别的年份不会变，所以点选后要回调这个接口。
- * dayun/liunian/liuyue 传干支（如 "壬申"），缺省项自动跳过（童限无大运时可只传流年/流月）。
+ * dayun/xiaoyun/liunian/liuyue 传干支（如 "壬申"），缺省项自动跳过。
+ * **dayun 与 xiaoyun 互斥**：童限（未起运）没有大运，该段以当年小运论 ⇒ 传 xiaoyun（传两个后端 400）。
  */
 export const getRelations = (
   birthTime: string,
   gender: string,
-  opts: { sect?: number; yunSect?: number; longitude?: number; dayun?: string; liunian?: string; liuyue?: string } = {}
+  opts: { sect?: number; yunSect?: number; longitude?: number; dayun?: string; xiaoyun?: string; liunian?: string; liuyue?: string } = {}
 ) =>
   get<XiPanRelations>(EP.RELATIONS, {
     birth_time: birthTime,
@@ -309,6 +310,7 @@ export const getRelations = (
     yun_sect: opts.yunSect ?? 1,
     ...(opts.longitude ? { longitude: opts.longitude } : {}),
     ...(opts.dayun ? { dayun: opts.dayun } : {}),
+    ...(opts.xiaoyun ? { xiaoyun: opts.xiaoyun } : {}),
     ...(opts.liunian ? { liunian: opts.liunian } : {}),
     ...(opts.liuyue ? { liuyue: opts.liuyue } : {}),
   })

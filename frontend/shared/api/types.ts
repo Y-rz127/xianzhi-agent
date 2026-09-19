@@ -235,6 +235,11 @@ export interface XiPanData {
   liuyueShensha?: Record<string, string[]>
   /** 流年干支 → 神煞名列表（覆盖全部流年，切到任何一步大运的十年都取得到） */
   liunianShensha?: Record<string, string[]>
+  /**
+   * 小运干支 → 神煞名列表（与 liunianShensha 同一「运柱神煞」口径）。
+   * 童限期细盘表把「大运」列换成小运显示，那一列的神煞取这里。
+   */
+  xiaoyunShensha?: Record<string, string[]>
   /** 60 干支 → 命盘列字段，供前端按点选的大运/流年重拼命盘大表 */
   ganzhiMeta?: Record<string, XiPanGanzhiMeta>
   /** 神煞名 → 说明，配合 liuyueShensha 解析流月神煞 */
