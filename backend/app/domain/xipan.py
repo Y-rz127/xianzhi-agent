@@ -167,6 +167,29 @@ def _year_ganzhi(year: int) -> str:
     return _GAN_SEQ[(year - 4) % 10] + _ZHI_SEQ[(year - 4) % 12]
 
 
+def ganzhi_year_of(d: Any) -> int:
+    """公历日期 → 所属**命理年**（立春换岁），即 `_year_ganzhi` 的年份参数。
+
+    为什么需要它：命理年不是公历年。1 月 15 日出生/发生的事，落在上一年的流年里
+    （1990-01-15 属 己巳 而非 庚午）。事件标注若直接取公历年，1-2 月的事件会**整体错位一年**，
+    而错位的一年在 K 线上往往正好跨在吉凶两端 —— 回测结果会被系统性污染。
+
+    边界口径：只精确到**日**，立春当天算当年（事件标注拿不到时辰，
+    强行按时辰切会让"同一天的两个人同一件事"落在两个流年）。若将来要精确到时刻，
+    改这里的比较即可，调用方无需变动。
+
+    参数可以是 `datetime.date` / `datetime.datetime` / `"YYYY-MM-DD"` 字符串。
+    """
+    if isinstance(d, str):
+        d = datetime.date.fromisoformat(d.strip()[:10])
+    elif isinstance(d, datetime.datetime):
+        d = d.date()
+    elif not isinstance(d, datetime.date):
+        raise ValueError(f"ganzhi_year_of 需要日期或日期字符串，收到 {type(d).__name__}")
+    lichun = _solar_date(_year_jie_qi(d.year)["立春"])
+    return d.year if d >= lichun else d.year - 1
+
+
 # 六十甲子按旬（每 10 位一旬）的旬空地支
 _XUN_KONG = ("戌亥", "申酉", "午未", "辰巳", "寅卯", "子丑")
 
