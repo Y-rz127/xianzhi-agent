@@ -289,6 +289,8 @@ export interface KlineCandle {
   ganzhi: string
   /** 所在大运干支 */
   dayun: string
+  /** open/close/high/low 同域：后端 SCORE_MIN–SCORE_MAX，即 0–100 分。
+      前端画布坐标域必须覆盖这一整段，取窄了高分年份的影线会被裁平 */
   open: number
   close: number
   high: number

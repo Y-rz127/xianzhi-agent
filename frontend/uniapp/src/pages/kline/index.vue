@@ -503,10 +503,15 @@ import {
 
 const { themeClass, isDark } = useTheme()
 
-// 画布坐标域：固定 [15, 85]，不随维度或命盘自适应。
+// 画布坐标域：固定 [0, 100]，不随维度或命盘自适应。
+// 上下沿就取后端 `fortune_score.SCORE_MIN/SCORE_MAX`：`build_candle` 里 open/close 按它夹、
+// high 取 min(SCORE_MAX, …)、low 取 max(SCORE_MIN, …)，四个价格值全落在 [0,100] 内，
+// 故这个域下**任何一根蜡烛都不可能被裁切**，影线贴到 100 也仍在画布内。
+// 曾是 [15, 85]：高分年份的影线一到 85 就被切平（2092 年前后成片红柱顶成一条直线），
+// 看着像"分数到头了"，其实是画布到头了 —— 域比数据窄，图就在说谎。
 // 固定域才能让「切维度」只换形状、不换刻度，两条曲线可以直接比高低。
-const LO = 15
-const HI = 85
+const LO = 0
+const HI = 100
 // 每根蜡烛的横向占位（rpx）。18rpx 下实体约 14rpx，手机上可辨
 const SLOT = 18
 // 画布右沿留白：最后一根蜡烛显示完毕即止，不留多余空白。
@@ -563,7 +568,9 @@ const upColor = computed(() => (isDark.value ? UP_DARK : UP_LIGHT))
 const downColor = computed(() => (isDark.value ? DOWN_DARK : DOWN_LIGHT))
 const accentColor = computed(() => (isDark.value ? UP_DARK : UP_LIGHT))
 
-const yTicks = [20, 30, 40, 50, 60, 70, 80]
+// 刻度与坐标域同为整十分档，两端都标：后端分数被夹在 [0,100]，
+// 标出 100 才能一眼看出某根蜡烛是"满分"还是"被画布削平"，标出 0 才是真的到底。
+const yTicks = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
 const yPct = (v: number) => (1 - (v - LO) / (HI - LO)) * 100
 const sign = (v: number) => (v > 0 ? '+' : '')
 
@@ -1405,7 +1412,10 @@ $chart-axis-row: 34rpx;   /* 年份轴 */
 }
 .band-alt { background: $color-border-light; border-radius: 6rpx; }
 
-.plot { height: $chart-plot; position: relative; }
+/* 绘图区自己兜住越界内容：坐标域 [0,100] 已保证蜡烛不出界，这层是防后端分数万一越界时
+   影线画到卡片标题/大运带上去（.plot 不裁剪的话，越界影线会直接盖住上面的字，
+   看起来比"被削平"更像坏了）。 */
+.plot { height: $chart-plot; position: relative; overflow: hidden; }
 .grid-line {
   position: absolute;
   left: 0;
