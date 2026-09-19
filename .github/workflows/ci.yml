@@ -51,18 +51,20 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.lock
           # dev 工具（pytest/ruff/pytest-asyncio）在 pyproject optional，这里显式安装稳妥。
-          pip install "pytest>=8.0.0" "pytest-asyncio>=0.24.0" "ruff>=0.7.0" "pytest-cov"
+          # ruff 钉死版本：新版可能新增规则导致 CI 意外变红（>=0.7.0 浮动装曾踩过）。
+          pip install "pytest>=8.0.0" "pytest-asyncio>=0.24.0" "ruff==0.16.3" "pytest-cov"
 
       - name: Ruff 检查（硬指标：零错误）
         run: ruff check .
+        # 范围=整个 backend/；migrations 已在 pyproject [tool.ruff] extend-exclude 排除。
 
       - name: 运行测试 + 覆盖率门禁
-        env:
-          # 测试库连接串；如你们的测试约定不同，改这里。
-          TEST_DB_URL: postgresql://postgres:postgres@localhost:5432/xianzhi_test
         run: |
-          # 整体覆盖率硬门槛 60%（§3.6）。核心模块 ≥80% 建议后续用 .coveragerc 分模块强化。
-          pytest -q --cov=app --cov-report=term-missing --cov-fail-under=60
+          # 与本地门禁同口径：排除 integration 标记（test_api_integration 需完整应用栈，
+          # 未初始化时自跳过，显式排除更稳）。测试零真实 DB 连接（pool 全打桩），
+          # pgvector 服务留作未来接入真实 DB 测试。
+          # 整体覆盖率硬门槛 60%（§3.6）。
+          pytest -q -m "not integration" --cov=app --cov-report=term-missing --cov-fail-under=60
 
   frontend:
     name: 前端 (vue-tsc + build)

@@ -40,6 +40,9 @@ dev = ["pytest>=8.0.0", "pytest-asyncio>=0.24.0", "ruff>=0.7.0"]
 [tool.ruff]
 line-length = 110
 target-version = "py311"
+# alembic 自动生成的迁移文件不入 lint 范围：I001/W292 类格式噪音，改历史迁移无收益。
+# 这是 CI「ruff check .」与本地「ruff check app/ tests/ scripts/ main.py」唯一范围差。
+extend-exclude = ["migrations"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "W"]
