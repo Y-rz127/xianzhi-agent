@@ -19,6 +19,7 @@ from app.agent.context import AppContext, set_app_context
 from app.api.routes import router
 from app.core.config import ensure_dirs, settings
 from app.core.llm_failover import FailoverModel
+from app.core.llm_health import SubModelSpec, probe_sub_models
 from app.core.llm_throttle import ThrottledModel
 from app.core.logger import log
 from app.core.observability import init_observability, record_request
@@ -46,8 +47,22 @@ def _close_quietly(client) -> None:
         pass
 
 
-def _make_model(model_name: str, temperature: float, timeout: float, http_client) -> ChatOpenAI:
-    """构造 DashScope ChatOpenAI 实例（thinking 始终关闭，用于轻量子模型）。"""
+def _make_model(
+    model_name: str,
+    temperature: float,
+    timeout: float,
+    http_client,
+    *,
+    enable_thinking: bool,
+) -> ChatOpenAI:
+    """构造 DashScope ChatOpenAI 实例（轻量子模型：意图拆解 / Reviewer 审核）。
+
+    `enable_thinking` 由调用方按**模型真实能力**显式给出，不再写死：qwen3.8 / glm-5 系
+    只接受 True，传 False 会被 400 拒绝（`InvalidParameter ... restricted to True`）。
+    曾写死 False，导致 Reviewer 的 LLM 深审每轮 400 后被兜底吞成"正则通过"——
+    答案照常输出，审核层其实从未运行（2026-09-19 现场）。
+    配置写错时由启动探活 `app/core/llm_health.py::probe_sub_models` 自动纠正并提示。
+    """
     return ChatOpenAI(
         model=model_name or settings.dashscope_model,
         base_url=settings.dashscope_url,
@@ -55,7 +70,7 @@ def _make_model(model_name: str, temperature: float, timeout: float, http_client
         temperature=temperature,
         timeout=timeout,
         max_retries=settings.llm_max_retries,
-        extra_body={"enable_thinking": False},
+        extra_body={"enable_thinking": enable_thinking},
         http_client=http_client,
     )
 
@@ -125,17 +140,31 @@ async def lifespan(app: FastAPI):
     # 降级链配置存 PG（Web 管理端热改），未配置时等效单主模型
     chat_model = FailoverModel(chat_model, _make_failover_model)
 
-    # 意图拆解 / Reviewer 审核模型（独立实例，留空则复用主模型）
-    decompose_http = httpx.Client(trust_env=False) if settings.decompose_model else None
+    # 意图拆解 / Reviewer 审核模型（独立实例，留空则复用主模型）。
+    # 思考开关按角色显式给（DECOMPOSE_ENABLE_THINKING / REVIEWER_ENABLE_THINKING），
+    # 不再写死：只接受思考模式的模型会在**每一轮**请求上 400（现场见 _make_model 注释）。
+    # 子模型各自的 httpx 连接池：trust_env=False 直连 DashScope（不经系统代理）。
+    # 为什么集中记一份：探活纠正时 `rebuild` 会再造一个实例（旧实例可能已被会话 Agent 持有，
+    # 不能立刻 close），关停时统一收口，避免连接池泄漏。
+    sub_model_http: list[httpx.Client] = []
+
+    def _make_sub_model(
+        model_name: str, temperature: float, timeout: float, enable_thinking: bool
+    ) -> ThrottledModel:
+        client = httpx.Client(trust_env=False)
+        sub_model_http.append(client)
+        return ThrottledModel(
+            _make_model(model_name, temperature, timeout, client, enable_thinking=enable_thinking)
+        )
+
     decompose_model = (
-        ThrottledModel(_make_model(settings.decompose_model, 0.1, 30.0, decompose_http))
-        if decompose_http
+        _make_sub_model(settings.decompose_model, 0.1, 30.0, settings.decompose_enable_thinking)
+        if settings.decompose_model
         else chat_model
     )
-    reviewer_http = httpx.Client(trust_env=False) if settings.reviewer_model else None
     reviewer_model = (
-        ThrottledModel(_make_model(settings.reviewer_model, 0.1, 60.0, reviewer_http))
-        if reviewer_http
+        _make_sub_model(settings.reviewer_model, 0.1, 60.0, settings.reviewer_enable_thinking)
+        if settings.reviewer_model
         else chat_model
     )
 
@@ -156,6 +185,31 @@ async def lifespan(app: FastAPI):
     )
     app.state.app_context = app_ctx
     set_app_context(app_ctx)
+
+    # 子模型启动探活规格：模型名非空的角色各探一次。
+    # 目的不是"测通不通"，而是把**配置类错误**（如 enable_thinking 与模型能力不匹配）
+    # 从"每轮请求里被兜底吞掉"提前到启动时可见/可自愈（见 app/core/llm_health.py）。
+    sub_model_specs = [
+        SubModelSpec(
+            label="意图拆解",
+            attr="decompose_model",
+            env_key="DECOMPOSE_ENABLE_THINKING",
+            model_name=settings.decompose_model,
+            enable_thinking=settings.decompose_enable_thinking,
+            rebuild=lambda flag: _make_sub_model(settings.decompose_model, 0.1, 30.0, flag),
+            model=decompose_model,
+        ),
+        SubModelSpec(
+            label="Reviewer 审核",
+            attr="reviewer_model",
+            env_key="REVIEWER_ENABLE_THINKING",
+            model_name=settings.reviewer_model,
+            enable_thinking=settings.reviewer_enable_thinking,
+            rebuild=lambda flag: _make_sub_model(settings.reviewer_model, 0.1, 60.0, flag),
+            model=reviewer_model,
+        ),
+    ]
+    sub_model_specs = [s for s in sub_model_specs if s.model_name]
 
     # 报告任务后台 worker（Redis 队列消费；多副本各自消费，任务单飞）
     # 启动前先修复上次进程崩溃遗留的 running/超时 pending 悬挂任务
@@ -218,6 +272,19 @@ async def lifespan(app: FastAPI):
 
     _bg_init_tasks.append(asyncio.create_task(_bg_init()))
 
+    # 子模型探活同样放后台：一次真实请求可能几秒，不能挡端口监听。
+    # 探活会不会与首个请求抢跑？会，但纠正只影响**之后**创建的会话 Agent，
+    # 且写错的配置本来就已经在每轮失败——不存在"比原来更差"的时间窗。
+    async def _bg_probe_sub_models():
+        if not sub_model_specs:
+            return
+        try:
+            await asyncio.to_thread(probe_sub_models, sub_model_specs, app_ctx)
+        except Exception as e:
+            log.warning("[探活] 子模型探活整体失败（不影响服务）: {}", e)
+
+    _bg_init_tasks.append(asyncio.create_task(_bg_probe_sub_models()))
+
     log.info("先知智能体启动完成 | 端口 {} | 本地工具 {} 个", settings.app_port, len(local_tools))
 
     yield
@@ -245,8 +312,8 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         log.warning("关闭 PG 连接池失败: {}", e)
 
-    # 关闭 LLM 客户端 httpx 连接池（仅独立实例，复用主模型的无需关闭）
-    for client in (decompose_http, reviewer_http, http):
+    # 关闭 LLM 客户端 httpx 连接池（仅独立子模型实例有各自的池；复用主模型的没有）
+    for client in (*sub_model_http, http):
         _close_quietly(client)
 
     # 关闭专用线程池（取消排队任务，等待中的执行不再接收；已在执行的不强杀）

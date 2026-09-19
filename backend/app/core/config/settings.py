@@ -42,6 +42,12 @@ class Settings(BaseSettings):
     # 意图拆解/Reviewer 审核模型（轻量独立实例，留空则复用主模型）
     decompose_model: str = Field(default="", alias="DECOMPOSE_MODEL")
     reviewer_model: str = Field(default="", alias="REVIEWER_MODEL")
+    # 两个子模型的思考开关**必须按模型真实能力给**：qwen3.8 / glm-5 系只接受 True，
+    # 传 False 会被 400 拒绝（`InvalidParameter ... restricted to True`）。曾在这里写死 False，
+    # 结果 Reviewer 的 LLM 深审每一轮都 400 后被兜底吞成"正则通过"（2026-09-19 现场）。
+    # 启动时 `app/core/llm_health.py::probe_sub_models` 会各探一次，不匹配则自动纠正并提示。
+    decompose_enable_thinking: bool = Field(default=False, alias="DECOMPOSE_ENABLE_THINKING")
+    reviewer_enable_thinking: bool = Field(default=False, alias="REVIEWER_ENABLE_THINKING")
     # LLM 生成参数；temperature 默认不传（None）：
     # kimi-k3 等模型不接受 temperature 参数，显式设置会被 400 拒绝；
     # 使用 qwen 等支持采样温度的模型时可设 LLM_TEMPERATURE=0.7

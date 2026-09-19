@@ -14,6 +14,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from app.agent.prompts import CLASSIC_BOOK_WHITELIST, REVIEWER_SYSTEM
 from app.agent.workflow.workflow_models import DomainWorker, FactCheckResult
 from app.agent.workflow.workflow_support import _parse_json, invoke_review_with_meta
+from app.core.llm_health import is_thinking_restricted, report_once
 from app.core.logger import log
 from app.core.observability import record_error
 from app.domain.chart_builder import BaziChart
@@ -587,6 +588,20 @@ class ReviewerWorker:
                 log.info("[Reviewer] LLM 深审发现问题: {} 条 issue", len(issues))
             return FactCheckResult(ok=passed, issues=issues, source="llm")
         except Exception as e:
+            if is_thinking_restricted(e):
+                # **永久性配置错误**：该模型只接受 enable_thinking=True，而本侧传了 False
+                # （`main.py::_make_model` 构造子模型时给的开关，见 settings 里的两个 *_ENABLE_THINKING）。
+                # 每轮都会复现，逐轮打 WARNING 只会把日志刷满 ⇒ 只报一次 ERROR + 单独计数，
+                # 让它出现在 /metrics 的 internal_errors 里而不是混进偶发失败的计数。
+                record_error("reviewer_llm_config_error")
+                report_once(
+                    "reviewer_thinking_restricted",
+                    "error",
+                    "[Reviewer] LLM 深审被**配置错误**拒绝，已降级为纯正则（同类错误只报这一次）: {}\n"
+                    "  → 该模型只接受思考模式：把 REVIEWER_ENABLE_THINKING 设为 true，或换一个接受关思考的模型",
+                    e,
+                )
+                return FactCheckResult(ok=True, source="regex_fallback")
             log.warning("[Reviewer] LLM 审核失败，降级为纯正则通过: {}", e)
             record_error("reviewer_llm_error")
             return FactCheckResult(ok=True, source="regex_fallback")

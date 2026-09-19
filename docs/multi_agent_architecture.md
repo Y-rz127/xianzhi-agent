@@ -215,6 +215,12 @@ class WorkerResult:
 - 非 JSON / LLM 异常 / 判不通过无 issues / regex 疑似误报，均记入 `/metrics` 的
   `internal_errors`（`reviewer_llm_nonjson`、`reviewer_llm_error`、`reviewer_pass_without_issues`、
   `reviewer_regex_likely_false_positive`），降级不再静默。
+- **配置类错误单独计数**（2026-09-19 补）：上游说"该模型只接受 `enable_thinking=True`"
+  这类**永久性**失败记 `reviewer_llm_config_error` / `decompose_llm_config_error`，
+  并按 key 只报一次 ERROR（逐轮复现的错误刷屏等于没报），不再混进 `reviewer_llm_error`
+  这种"偶发失败"计数里——两者要看的频率完全不同。识别与探活见 `app/core/llm_health.py`：
+  启动时对两个子模型各发一次最小请求，若"只接受思考模式"则自动改 `enable_thinking=true`
+  重建生效并提示该改哪个环境变量（`DECOMPOSE_ENABLE_THINKING` / `REVIEWER_ENABLE_THINKING`）。
 
 **修复后的二次判定**（2026-09-13 收紧两次）：
 

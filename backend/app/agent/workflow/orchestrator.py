@@ -72,7 +72,9 @@ from app.agent.workflow.workflow_workers import (  # noqa: F401
     WORKERS,
     ReviewerWorker,
 )
+from app.core.llm_health import is_thinking_restricted, report_once
 from app.core.logger import log
+from app.core.observability import record_error
 from app.core.thinking_router import use_thinking
 
 # 检索策略（领域关键词/领域检索词/理论术语检索词/术语识别）统一由 app.rag.retrieval 提供，
@@ -196,6 +198,18 @@ class XianzhiWorkflow:
             )
             return intent
         except Exception as e:
+            if is_thinking_restricted(e):
+                # 与 Reviewer 同类的**永久性配置错误**（见 app/core/llm_health.py）：
+                # 每轮都会复现，只报一次 ERROR + 单独计数，避免混进偶发失败里被忽略。
+                record_error("decompose_llm_config_error")
+                report_once(
+                    "decompose_thinking_restricted",
+                    "error",
+                    "[LLM拆解] 被**配置错误**拒绝，本轮到关键词分类兜底（同类错误只报这一次）: {}\n"
+                    "  → 该模型只接受思考模式：把 DECOMPOSE_ENABLE_THINKING 设为 true，或换模型",
+                    e,
+                )
+                return None
             log.warning("[LLM拆解] 失败，fallback到关键词分类: {}", e)
             return None
 
