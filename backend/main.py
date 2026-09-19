@@ -247,7 +247,9 @@ async def lifespan(app: FastAPI):
 
     report_stop = asyncio.Event()
     report_workers = [
-        asyncio.create_task(worker_loop(app_ctx.chat_model, report_stop))
+        # 传 None：报告属"子应用解读"，由 worker 按任务解析 SUB_APP_MODEL（未配置则回落主模型）。
+        # 不在这里注入实例——模型可能被启动探活整体替换，抓死引用会让纠正失效。
+        asyncio.create_task(worker_loop(None, report_stop))
         for _ in range(max(1, settings.report_task_workers))
     ]
 

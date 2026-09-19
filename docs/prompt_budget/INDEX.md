@@ -75,7 +75,7 @@ LangGraph 图：classify → chart(扩盘) → retrieve(知识检索) → genera
 
 塔罗/六爻/紫微/合婚/报告为独立子应用（`app/sub_app/*`、`app/tools/report_generator.py`），各自独立调 LLM，与上面 ReAct/Workflow 主链路互不叠加。共用提示词已收进 `app/agent/prompts.py` 单一事实源：
 
-**解读模型**：`app/sub_app/` 的四个解读入口（塔罗/六爻/紫微/合婚）统一走 `get_sub_app_model()` —— 配了 `SUB_APP_MODEL` 用独立实例，留空则回落主问答模型（旧行为）。**不要再直接取 `get_app_context().chat_model`**（`tests/test_sub_app_model.py` 有守卫）、也不要在装配期注入（模型实例可能被启动探活整体替换，`TarotApp` 因此按请求解析）。报告生成与 K 线批注仍走主模型。
+**解读模型**：塔罗/六爻/紫微/合婚四个解读入口统一走 `get_sub_app_model()`，**命理报告生成（`app/tasks/worker.py::resolve_report_model`）与 K 线 AI 批注（`app/api/xianzhi_kline.py::sub_app_model_of(app_ctx)`）同样纳入** —— 配了 `SUB_APP_MODEL` 用独立实例，留空则回落主问答模型（旧行为）。**不要再直接取 `get_app_context().chat_model`**（`tests/test_sub_app_model.py` 有守卫）、也不要在装配期注入（模型实例可能被启动探活整体替换：`TarotApp` 按请求解析、报告 worker 由 `worker_loop(None, …)` 按任务解析）。
 
 | 常量 | 值（字） | 消费方 |
 |---|---|---|

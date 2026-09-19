@@ -173,14 +173,22 @@ def get_app_context() -> AppContext:
     return _app_context
 
 
-def get_sub_app_model() -> Any:
-    """子应用（塔罗/紫微/六爻/合婚）解读用模型。
+def sub_app_model_of(ctx: Any) -> Any:
+    """给定 AppContext（或测试替身）取「子应用解读模型」。
 
     优先取 `SUB_APP_MODEL` 配出来的独立实例，未配置时回落主问答模型（＝旧行为）。
+    用 getattr 取字段而不是直接属性访问：测试里存在只塞了 `chat_model` 的 AppContext 替身。
+
+    哪些算"子应用解读"：塔罗 / 紫微 / 六爻 / 合婚的解读，命理报告生成，K 线 AI 批注。
+    它们都是"一次性、给定材料出解读"的短输出，与问答主链（长上下文 + 推理）不是一回事。
+    """
+    return getattr(ctx, "sub_app_model", None) or getattr(ctx, "chat_model", None)
+
+
+def get_sub_app_model() -> Any:
+    """子应用解读用模型（按请求从模块级上下文取）。
+
     子应用一律**按请求调用本函数**而不是在装配期注入：模型实例可能被启动探活纠正后
     整体替换（见 `app/core/llm_health.py`），提前抓住引用会让纠正对子应用失效。
-
-    用 getattr 取字段而不是直接属性访问：测试里存在只塞了 `chat_model` 的 AppContext 替身。
     """
-    ctx = get_app_context()
-    return getattr(ctx, "sub_app_model", None) or ctx.chat_model
+    return sub_app_model_of(get_app_context())

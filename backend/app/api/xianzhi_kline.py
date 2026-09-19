@@ -22,6 +22,7 @@ import asyncio
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
+from app.agent.context import sub_app_model_of
 from app.api import data_access as repo
 from app.api.deps import app_context_dependency
 from app.domain import fortune_score, kline_backtest, kline_resonance
@@ -270,7 +271,8 @@ async def annotate_kline(
     if not 0 <= body.max_dayun <= MAX_DAYUN_LIMIT:
         raise HTTPException(status_code=400, detail=f"max_dayun 需在 0-{MAX_DAYUN_LIMIT} 之间（0=不启用）")
 
-    chat_model = getattr(app_ctx, "chat_model", None)
+    # K 线批注属"子应用解读"：用 SUB_APP_MODEL（未配置则回落主问答模型），与问答分开配
+    chat_model = sub_app_model_of(app_ctx)
     if chat_model is None:
         raise HTTPException(status_code=503, detail="LLM 未就绪，批注暂不可用")
 

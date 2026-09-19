@@ -20,7 +20,7 @@ from types import SimpleNamespace
 import pytest
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
 
-from app.agent.context import AppContext, get_sub_app_model, set_app_context
+from app.agent.context import AppContext, get_sub_app_model, set_app_context, sub_app_model_of
 from app.sub_app import _base as sub_app_base
 from app.sub_app.tarot.tarot_app import TarotApp
 
@@ -100,6 +100,14 @@ def test_get_sub_app_model_tolerates_context_without_field():
 
 def test_get_sub_app_model_prefers_dedicated(ctx_pair):
     assert get_sub_app_model() is ctx_pair.sub
+
+
+def test_sub_app_model_of_works_with_injected_or_stub_context():
+    """按 ctx 取（而不是模块级）是给"注入式"调用点用的：K 线批注端点拿到的是 app_ctx 参数。"""
+    main, sub = _FakeModel(), _FakeModel()
+    assert sub_app_model_of(SimpleNamespace(chat_model=main, sub_app_model=sub)) is sub
+    assert sub_app_model_of(SimpleNamespace(chat_model=main)) is main, "替身缺字段 ⇒ 回落主模型"
+    assert sub_app_model_of(SimpleNamespace()) is None, "两者都没有 ⇒ None（调用方自己判 503）"
 
 
 # ============================================================
@@ -194,14 +202,58 @@ def test_shared_stream_skeleton_keeps_fallback_on_error():
 
 
 # ============================================================
-# 3. 守卫：别再退回"直取主模型"
+# 3. 命理报告 / K 线批注：也算子应用解读（2026-09-19 纳入）
+# ============================================================
+
+def test_report_worker_resolves_sub_app_model_per_task(ctx_pair):
+    """报告任务（命理报告）按需取子应用解读模型，而不是把实例抓在 worker 循环外。
+
+    抓死引用会让启动探活对子模型的纠正失效（见 resolve_report_model docstring）。
+    """
+    from app.tasks.worker import resolve_report_model
+
+    assert resolve_report_model() is ctx_pair.sub, "不传实例 ⇒ 取子应用解读模型"
+    assert resolve_report_model(None) is ctx_pair.sub
+    assert resolve_report_model(ctx_pair.main) is ctx_pair.main, "显式传入优先（测试/特殊装配）"
+
+
+def test_report_generation_uses_the_model_it_is_given(ctx_pair):
+    """报告生成只吃传入的模型（装配层给谁就用谁）——它是 resolve_report_model 的下游契约。"""
+    from app.tools.report_tasks import run_task
+
+    out = run_task(ctx_pair.sub, "full_report", {"birth_time": "1990-05-20 14:30", "gender": "男"})
+    assert isinstance(out, bytes) and out
+    assert ctx_pair.sub.invocations >= 1, "报告必须真的调用了传入模型"
+    assert ctx_pair.main.invocations == 0, "不能顺手打主问答模型"
+
+
+def test_kline_annotation_uses_sub_app_model():
+    """K 线 AI 批注走注入的 app_ctx ⇒ 也取子应用解读模型（未配置才回落主模型）。"""
+    from app.api import xianzhi_kline
+    from app.tools.cache import bazi_cache
+
+    bazi_cache.clear()  # 批注结果有缓存，命中缓存就不会调模型（否则本用例会假绿/假红）
+    main, sub = _FakeModel("来自主模型"), _FakeModel("K 线批注正文")
+    body = xianzhi_kline.KlineAnnotationRequest(birth_time="1988-03-03 09:00", gender="男")
+    try:
+        asyncio.run(xianzhi_kline.annotate_kline(body, app_ctx=SimpleNamespace(chat_model=main, sub_app_model=sub)))
+    except Exception:
+        # 批注内容会被事实校验，可能返回 ok=False 或抛错 —— 本用例只关心"用了哪个模型"
+        pass
+
+    assert sub.invocations >= 1, "批注必须打子应用解读模型"
+    assert main.invocations == 0, "批注不该再打主问答模型"
+
+
+# ============================================================
+# 4. 守卫：别再退回"直取主模型"
 # ============================================================
 
 def test_no_sub_app_module_reads_main_chat_model():
     """`app/sub_app/**` 里不许再出现 `get_app_context().chat_model`。
 
     出现即绕开 SUB_APP_MODEL（子应用模型配置静默失效），这类"配置看着生效其实没生效"
-    正是本轮要消灭的故障类型。
+    正是本轮要消灭的故障类型。报告与 K 线批注不在 `app/sub_app/` 下，由下面两条守卫覆盖。
     """
     import app.sub_app as sub_app_pkg
 
@@ -213,3 +265,26 @@ def test_no_sub_app_module_reads_main_chat_model():
         if "get_app_context().chat_model" in line
     ]
     assert not offenders, f"子应用解读应走 get_sub_app_model()，直接取主模型的位置：{offenders}"
+
+
+def test_report_and_kline_chains_resolve_sub_app_model_not_main():
+    """守卫：报告 worker 与 K 线批注端点必须走子应用模型解析。
+
+    这两处曾是 `app_ctx.chat_model` / `worker_loop(app_ctx.chat_model)` 直取主模型；
+    名字写死在源码里，故用文本守卫钉死（行为侧由上面两条用例覆盖）。
+    """
+    import app.api.xianzhi_kline as kline_api
+    import app.tasks.worker as report_worker
+    import main as app_main
+
+    kline_src = pathlib.Path(kline_api.__file__).read_text(encoding="utf-8")
+    assert "sub_app_model_of(app_ctx)" in kline_src, "K 线批注端点必须按 app_ctx 取子应用解读模型"
+    assert "getattr(app_ctx, \"chat_model\"" not in kline_src, "别再退回直取主模型"
+
+    worker_src = pathlib.Path(report_worker.__file__).read_text(encoding="utf-8")
+    assert "get_sub_app_model()" in worker_src, "报告 worker 必须按任务取子应用解读模型"
+
+    main_src = pathlib.Path(app_main.__file__).read_text(encoding="utf-8")
+    assert "worker_loop(None, report_stop)" in main_src, (
+        "main 不应把模型实例注入报告 worker（探活替换后纠正会失效）"
+    )

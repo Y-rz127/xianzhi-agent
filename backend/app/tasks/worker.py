@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
+from app.agent.context import get_sub_app_model
 from app.core.logger import log
 from app.core.redis_client import get_redis
 from app.db import report_tasks
@@ -27,9 +28,14 @@ async def enqueue(task_id: str) -> None:
     await r.lpush(_QUEUE_KEY, task_id)
 
 
-async def worker_loop(chat_model: Any, stop_event: asyncio.Event) -> None:
+async def worker_loop(chat_model: Any | None, stop_event: asyncio.Event) -> None:
     """单 worker 循环：RPOP 非阻塞轮询（阻塞式 BRPOP 会与 Redis 连接读超时冲突），
-    收到 stop 信号后当轮退出。"""
+    收到 stop 信号后当轮退出。
+
+    `chat_model` 传 **None ＝ 按任务解析「子应用解读模型」**（生产路径）：命理报告属于
+    子应用解读，与问答主模型分开配（`SUB_APP_MODEL`，未配置则回落主模型）。
+    显式传入实例只用于测试/特殊装配。
+    """
     log.info("报告任务 worker 启动")
     while not stop_event.is_set():
         r = await get_redis()
@@ -58,7 +64,7 @@ async def worker_loop(chat_model: Any, stop_event: asyncio.Event) -> None:
     log.info("报告任务 worker 退出")
 
 
-async def _process(chat_model: Any, task_id: str) -> None:
+async def _process(chat_model: Any | None, task_id: str) -> None:
     row = await asyncio.to_thread(report_tasks.get_task, task_id)
     if row is None or row["status"] != "pending":
         return
@@ -68,9 +74,20 @@ async def _process(chat_model: Any, task_id: str) -> None:
         return
     log.info("[report-worker] 开始执行 task={} kind={}", task_id, row["kind"])
     try:
-        payload = await asyncio.to_thread(run_task, chat_model, row["kind"], row["params"])
+        payload = await asyncio.to_thread(
+            run_task, resolve_report_model(chat_model), row["kind"], row["params"]
+        )
         await asyncio.to_thread(report_tasks.complete, task_id, payload)
         log.info("[report-worker] 执行完成 task={} size={}B", task_id, len(payload))
     except Exception as e:
         log.exception("[report-worker] 执行失败 task={}", task_id)
         await asyncio.to_thread(report_tasks.fail, task_id, str(e))
+
+
+def resolve_report_model(chat_model: Any | None = None) -> Any:
+    """报告任务用哪个模型：显式传入优先（测试/特殊装配），否则按需取子应用解读模型。
+
+    为什么不把实例抓在循环外：模型实例可能被启动探活整体替换（`core/llm_health.py`），
+    抓死引用会让纠正失效 —— 与 `app/sub_app` 侧同一条规矩（按需解析，不装配期注入）。
+    """
+    return chat_model if chat_model is not None else get_sub_app_model()
