@@ -270,8 +270,483 @@ export interface ChartData {
 
 export interface BaziCandidate { birth_time: string; ganzhi: string; shi_chen: string }
 
-/* ============ 命例 / 会话 ============ */
+/* ============ 命理 K 线（确定性运势评分 → 年蜡烛） ============ */
 
+/** 取象维度；key 与后端 `fortune_score.DIMENSIONS`、既有领域 key 对齐 */
+export type KlineDimension = 'comprehensive' | 'career' | 'wealth' | 'love' | 'health'
+
+export interface KlineDimensionOption {
+  key: KlineDimension
+  label: string
+  note: string
+}
+
+/** 一根年蜡烛。open 承接上年 close，故相邻蜡烛首尾相接 */
+export interface KlineCandle {
+  year: number
+  /** 虚岁 */
+  age: number
+  ganzhi: string
+  /** 所在大运干支 */
+  dayun: string
+  open: number
+  close: number
+  high: number
+  low: number
+  volume: number
+  /** 该年 12 个节气月分数；默认不返回，include_months=1 才有 */
+  monthScores?: number[]
+  /** 命中的干支关系（合/冲/刑/害/破、伏吟、反吟等） */
+  relations: string[]
+  relationAdj: number
+  /** 关系带来的振幅放大；冲主变动、与喜忌无关 */
+  volatility: number
+  isDayunStart: boolean
+  /** close >= open，前端按国内习惯涨红跌绿着色 */
+  isUp: boolean
+}
+
+/** 十年一段的大运带，供前端画宏观背景与均线 */
+export interface KlineDayunBand {
+  index: number
+  ganzhi: string
+  startYear: number
+  endYear: number
+  startAge: number
+  endAge: number
+  shishenGan: string
+}
+
+export interface KlineFavor {
+  dayMaster: string
+  dayMasterWuxing: string
+  strength: string
+  specialPattern: string
+  favor: Record<string, number>
+  mostFavored: string
+  mostOpposed: string
+  /** 病神代号（如 resource_dominant）；无病为空串。喜忌为何这样定，看这里 */
+  ailment: string
+  /** 病神的一句话依据，前端直接显示、不自行解释命理口径 */
+  ailmentNote: string
+}
+
+export interface KlineMeta {
+  startYear: number | null
+  endYear: number | null
+  yearCount: number
+  maxAge: number
+  /** 请求时声明的覆盖步数（0=没启用，按 maxAge 截断）。用于核对图与批注是不是同一段 */
+  maxDayun: number
+  dimension: KlineDimension
+  dimensionLabel: string
+  /** 该维度的一句话取象说明，前端直接显示、不自行解释命理口径 */
+  dimensionNote: string
+  /** 该维度的十神侧重（五行 → 系数，均值归一为 1）；综合维度为空表 */
+  dimensionEmphasis: Record<string, number>
+  availableDimensions: KlineDimensionOption[]
+  kScore: number
+  weightDayun: number
+  weightLiunian: number
+  weightLiuyue: number
+  note: string
+}
+
+export interface KlineData {
+  favor: KlineFavor
+  candles: KlineCandle[]
+  dayunBands: KlineDayunBand[]
+  meta: KlineMeta
+}
+
+/** 批注粒度：overview=当前大运与全期极值（进页面即取）；year=指定流年（点了才取） */
+export type KlineAnnotationScope = 'overview' | 'year'
+
+export interface KlineAnnotation {
+  /** 生成成功且通过事实校验。false 时 text 必为空串 */
+  ok: boolean
+  /** 批注正文；校验不过时为 '' —— 前端应显示提示而不是空行 */
+  text: string
+  /** 是否通过 check_facts 事实校验 */
+  factsOk: boolean
+  /** 未通过时的具体问题 */
+  issues: string[]
+  scope: KlineAnnotationScope
+  year?: number | null
+  /** 「当下」锚定年：overview 讲的是这一年的当前大运 */
+  anchorYear?: number | null
+  /** 该批注涉及的年份（用于图上高亮） */
+  years?: number[]
+  dimension: KlineDimension
+  cached: boolean
+}
+
+/* ---- 合盘共振线 ---- */
+
+/** 双盘日主五行关系：相生互补 / 同类 / 相克 */
+export type KlineResonanceKind = '相生' | '同类' | '相克' | ''
+
+/** 共振强度档位（由后端 verdict_of 给出，前端只负责上色） */
+export type KlineResonanceVerdict = '强共振' | '偏顺' | '平稳' | '偏逆' | '背离'
+
+/** 流年干支对双方喜忌的一致度 */
+export type KlineResonanceAlign = '双利' | '双损' | '一利一损' | '无明显作用'
+
+export interface KlineResonanceBase {
+  relationKind: KlineResonanceKind
+  complement: {
+    aNeeds: string
+    bCovers: boolean
+    bNeeds: string
+    aCovers: boolean
+  }
+  dayZhi: { a: string; b: string; relation: string }
+  /** 各项原始点（折合分之前），便于解释基线为何是这个分 */
+  points: Record<string, number>
+  /** 基线分 0-100：不随年份变的那部分 */
+  score: number
+}
+
+export interface KlineResonanceYear {
+  year: number
+  ganzhi: string
+  dayun: string
+  /** 甲方该年收盘分 */
+  scoreA: number
+  scoreB: number
+  isUpA: boolean
+  isUpB: boolean
+  /** 双方同比走向是否同号 */
+  sameDirection: boolean
+  moveGap: number
+  align: { deltaA: number; deltaB: number; label: KlineResonanceAlign }
+  palace: { a: string; b: string }
+  /** 四项逐年修正的分值明细（trend/align/sync/palace），sum + 基线 = resonance */
+  terms: Record<string, number>
+  resonance: number
+  verdict: KlineResonanceVerdict
+}
+
+export interface KlineResonanceMeta {
+  startYear: number | null
+  endYear: number | null
+  yearCount: number
+  maxAge: number
+  dimension: KlineDimension
+  dimensionLabel?: string
+  meanScore: number | null
+  peakYear: number | null
+  troughYear: number | null
+  weights: Record<string, number>
+  /** 口径说明：权重是待校准先验，只应读作相对次序 */
+  note: string
+  availableDimensions?: KlineDimensionOption[]
+}
+
+export interface KlineResonance {
+  base: KlineResonanceBase
+  years: KlineResonanceYear[]
+  meta: KlineResonanceMeta
+  /** 两盘各自的喜忌摘要（后端顺带返回，省两次 /kline） */
+  favorA: KlineFavor
+  favorB: KlineFavor
+  cached: boolean
+}
+
+/* ---- 反馈闭环 ---- */
+
+export interface KlineFeedbackPayload {
+  birthTime: string
+  gender: string
+  dimension: KlineDimension
+  scope: KlineAnnotationScope
+  year?: number
+  /** 生成批注时的当前年（批注含「当前大运」类措辞，须留锚点） */
+  anchorYear?: number
+  /** 1-5 星认可度 */
+  rating: number
+  /** 与实际是否吻合；不确定留空 */
+  accurate?: boolean | null
+  comment?: string
+  snapshot?: Record<string, unknown>
+}
+
+export interface KlineFeedbackResult {
+  ok: boolean
+  id: string
+}
+
+export interface KlineFeedbackStats {
+  total: number
+  avgRating: number | null
+  accurateYes: number
+  accurateNo: number
+  /** 明确表过态的样本数；accurateRate 只对它计算 */
+  decided: number
+  accurateRate: number | null
+  byDimension: { dimension: string; count: number; avgRating: number | null }[]
+  byScope: { scope: string; count: number }[]
+}
+
+/* ---- 事件标注与回测（校准闭环的真相面） ---- */
+
+/** 事件极性：1=吉 / 0=平 / -1=凶 */
+export type KlinePolarity = 1 | 0 | -1
+
+/** 事件领域。与评分维度对齐（general 用综合维度打分） */
+export type KlineEventDomain = 'general' | 'career' | 'wealth' | 'love' | 'health'
+
+/** 回测的预测器：close=年末分（与页面同源，默认）；mean=12 月均值（更稳，作对照） */
+export type KlinePredictor = 'close' | 'mean'
+
+export interface KlineEventPayload {
+  birthTime: string
+  gender: string
+  sect?: number
+  yunSect?: number
+  longitude?: number
+  /** 命理年（立春换岁）。与 eventDate 至少给一个；都给则后端互相校验 */
+  ganzhiYear?: number
+  /** 原始公历日期 YYYY-MM-DD，用于推导命理年（1-2 月的事件必须走它） */
+  eventDate?: string
+  polarity: KlinePolarity
+  domain?: KlineEventDomain
+  /** 来源：传记 / 自述 / 案例库 / 人工 */
+  source?: string
+  note?: string
+  caseId?: string
+}
+
+export interface KlineEventResult {
+  ok: boolean
+  id: string
+  /** 后端确认的命理年（可能是由 eventDate 推出的，回填用它而不是本地推算） */
+  ganzhiYear: number
+}
+
+export interface KlineEventItem {
+  id: string
+  birth_time: string
+  gender: string
+  sect: number
+  yun_sect: number
+  longitude: number | null
+  ganzhiYear: number
+  /** 原始公历日期；只记到年的事件为空串 */
+  eventDate: string
+  polarity: KlinePolarity
+  domain: KlineEventDomain
+  source: string
+  note: string
+  caseId: string
+  createdAt: string | null
+}
+
+export interface KlineEventStats {
+  total: number
+  charts: number
+  yearCount: number
+  yearFrom: number | null
+  yearTo: number | null
+  byPolarity: { polarity: number; count: number }[]
+  byDomain: { domain: string; count: number }[]
+  byChart: {
+    birthTime: string
+    gender: string
+    count: number
+    yearFrom: number | null
+    yearTo: number | null
+  }[]
+}
+
+/**
+ * 回测指标块。**必须与 randomBaseline 一并读**：
+ * 三分类随机猜也有约 1/3；只有 ci95 下界高于基线才算有区分度。
+ */
+export interface KlineBacktestSummary {
+  samples: number
+  /** 实际有吉凶的样本数（排除实际为平） */
+  decided: number
+  hits: number
+  hitRate: number | null
+  /** 严格口径：只算实际有吉凶的样本，预测为平一律算错 */
+  hitRateStrict: number | null
+  randomBaseline: number | null
+  randomBaselineStrict: number | null
+  /** 恒猜最多一类的命中率，最朴素的那条杠 */
+  majorityBaseline: number | null
+  lift: number | null
+  liftStrict: number | null
+  ci95: [number, number] | null
+  /** 仅总计块有：样本是否够 */
+  ok?: boolean
+  /** 仅总计块有：95% 区间下界是否高于随机基线 */
+  significant?: boolean
+}
+
+export interface KlineBacktestMiss {
+  chart: string
+  year: number
+  ganzhi: string
+  pred: string
+  truth: string
+  score: number
+  domain: string
+  note: string
+}
+
+export interface KlineBacktest {
+  dimension: string
+  predictor: KlinePredictor
+  minSamples: number
+  charts: number
+  yearFrom: number | null
+  yearTo: number | null
+  /** 回测窗口按多少虚岁固定切（与 yearFrom/yearTo 不是一回事） */
+  ageSpan: number
+  /** 各盘/各对预测区间的并集开始年；空库时为 null */
+  spanFrom: number | null
+  spanTo: number | null
+  events: { total: number; used: number; unmatched: number; invalid: number; duplicate: number }
+  unmatchedYears: { chart: string; ganzhiYear: number; note: string }[]
+  summary: KlineBacktestSummary
+  byDomain: (KlineBacktestSummary & { domain: string })[]
+  byDimension: (KlineBacktestSummary & { dimension: string })[]
+  byChart: (KlineBacktestSummary & { chart: string })[]
+  /** 错判样例（惊讶度由高到低），供人工复盘 */
+  misses: KlineBacktestMiss[]
+  warnings: string[]
+  note: string
+}
+
+/* ---- 合盘关系事件与合盘回测（共振权重的唯一校准数据源） ----
+ *
+ * 为什么与单盘事件分开：单盘事件校准的是「这个人这年过得好不好」，
+ * 共振权重只能由「这两人这年顺不顺」校准。两者主键不同（单盘=盘×年×领域；
+ * 关系事件没有领域切片 —— 同一年两人可以一个升职一个生病，但"我们俩这一年"
+ * 只有一个答案），硬合成一张表会让"哪些列该为空"变成隐性契约。
+ */
+
+/** 关系类型：只是"这分数该怎么读"的解释框架与复盘切片维度，**不参与打分** */
+export type KlineRelation = '夫妻' | '恋人' | '亲子' | '同事' | '朋友' | '合作' | '其他'
+
+export interface KlinePairEventPayload {
+  birthTimeA: string
+  genderA: string
+  birthTimeB: string
+  genderB: string
+  sect?: number
+  yunSect?: number
+  longitudeA?: number
+  longitudeB?: number
+  /** 命理年（立春换岁）。与 eventDate 至少给一个；都给则后端互相校验 */
+  ganzhiYear?: number
+  /** 原始公历日期 YYYY-MM-DD，用于推导命理年（1-2 月的事件必须走它） */
+  eventDate?: string
+  /** **关系本身**的吉凶（1=顺 / 0=平 / -1=逆），不是某一方的个人运势 */
+  polarity: KlinePolarity
+  relation?: KlineRelation | ''
+  source?: string
+  note?: string
+}
+
+/** 与单盘事件同一形状：ok + id + 后端确认的命理年 */
+export type KlinePairEventResult = KlineEventResult
+
+export interface KlinePairEventItem {
+  id: string
+  birthTimeA: string
+  genderA: string
+  birthTimeB: string
+  genderB: string
+  sect: number
+  yunSect: number
+  longitudeA: number | null
+  longitudeB: number | null
+  ganzhiYear: number
+  /** 原始公历日期；只记到年的事件为空串 */
+  eventDate: string
+  polarity: KlinePolarity
+  /** 空串 = 未标注关系类型 */
+  relation: string
+  source: string
+  note: string
+  createdAt: string | null
+}
+
+export interface KlinePairEventStats {
+  total: number
+  /** 涉及多少对人 */
+  pairs: number
+  yearCount: number
+  yearFrom: number | null
+  yearTo: number | null
+  byPolarity: { polarity: number; count: number }[]
+  /** 空 relation 在服务端已折叠成「未标注」 */
+  byRelation: { relation: string; count: number }[]
+  byPair: {
+    birthTimeA: string
+    genderA: string
+    birthTimeB: string
+    genderB: string
+    count: number
+    yearFrom: number | null
+    yearTo: number | null
+  }[]
+}
+
+/**
+ * 逐项诊断：每个 term 在"实际吉"的年份是不是真的更高。
+ *
+ * 这是**反推权重的直接依据**，比总命中率有用得多：总命中率只能说"合起来不准"，
+ * 逐项均值差能指出是哪一项在帮倒忙。`delta <= 0` 就是该项（或其符号）与现实相反。
+ */
+export interface KlineTermDiagnostic {
+  term: string
+  meanUp: number | null
+  meanDown: number | null
+  /** meanUp - meanDown；样本不足时为 null */
+  delta: number | null
+  /** delta > 0 即方向正确；样本不足时为 null */
+  signOk: boolean | null
+  samplesUp: number
+  samplesDown: number
+}
+
+export interface KlinePairBacktest {
+  dimension: string
+  /** 合盘只有一个预测源（共振分），恒为 resonance */
+  predictor: string
+  minSamples: number
+  pairs: number
+  yearFrom: number | null
+  yearTo: number | null
+  /** 回测窗口按多少虚岁固定切（与 yearFrom/yearTo 不是一回事） */
+  ageSpan: number
+  /** 各对预测区间的并集开始年；空库时为 null */
+  spanFrom: number | null
+  spanTo: number | null
+  events: { total: number; used: number; unmatched: number; invalid: number; duplicate: number }
+  unmatchedYears: { pair: string; ganzhiYear: number; note: string }[]
+  summary: KlineBacktestSummary
+  byRelation: (KlineBacktestSummary & { relation: string })[]
+  byPair: (KlineBacktestSummary & { pair: string })[]
+  termDiagnostics: KlineTermDiagnostic[]
+  misses: {
+    pair: string
+    year: number
+    ganzhi: string
+    pred: string
+    truth: string
+    score: number
+    relation: string
+    note: string
+  }[]
+  warnings: string[]
+  note: string
+}
+
+/* ============ 命例 / 会话 ============ */
 export interface ChartCase {
   id: string
   name: string

@@ -10,7 +10,17 @@ import { interpretLiuYaoStreamWS, interpretZiWeiStreamWS, hehunStreamWS } from '
 // R11 共享 API 层：数据模型/文本解析器/端点常量与 Web 端共用，统一在 frontend/shared/api 维护
 export type {
   AnswerFeedbackPayload, BaziProfile, ChartAnalysis, ChartCase, ChartData,
-  ChatSession, DayunItem, FavoriteCase, HehunParams, LiuNianItem, Pillar,
+  ChatSession, DayunItem, FavoriteCase, HehunParams, KlineAnnotation,
+  KlineAnnotationScope, KlineBacktest, KlineBacktestMiss, KlineBacktestSummary,
+  KlineCandle, KlineData,
+  KlineDayunBand, KlineDimension, KlineDimensionOption, KlineEventDomain,
+  KlineEventItem, KlineEventPayload, KlineEventResult, KlineEventStats, KlineFavor,
+  KlineFeedbackPayload, KlineFeedbackResult, KlineFeedbackStats, KlineMeta,
+  KlinePairBacktest, KlinePairEventItem, KlinePairEventPayload, KlinePairEventResult,
+  KlinePairEventStats, KlinePolarity, KlinePredictor, KlineRelation, KlineTermDiagnostic,
+  KlineResonance, KlineResonanceAlign, KlineResonanceBase, KlineResonanceKind,
+  KlineResonanceMeta, KlineResonanceVerdict, KlineResonanceYear,
+  LiuNianItem, Pillar,
   SessionMessage, ShenshaItem, WuxingItem, XzUser,
   XiPanColumn, XiPanCurrent, XiPanDaYun, XiPanData, XiPanLiuNian,
   XiPanLiuYue, XiPanQiYun, XiPanRelationGroup, XiPanRelations, XiPanSiLing,
@@ -23,7 +33,13 @@ export {
 } from '@shared/api'
 import type {
   AnswerFeedbackPayload, BaziProfile, ChartCase, ChartData, ChatSession,
-  FavoriteCase, HehunParams, SessionMessage, TarotCard, XzUser, XiPanRelations,
+  FavoriteCase, HehunParams, KlineAnnotation, KlineAnnotationScope,
+  KlineBacktest, KlineData, KlineDimension, KlineEventDomain, KlineEventItem,
+  KlineEventPayload, KlineEventResult, KlineEventStats, KlineFeedbackPayload,
+  KlineFeedbackResult, KlineFeedbackStats, KlinePairBacktest, KlinePairEventItem,
+  KlinePairEventPayload, KlinePairEventResult, KlinePairEventStats, KlinePredictor,
+  KlineRelation, KlineResonance,
+  SessionMessage, TarotCard, XzUser, XiPanRelations,
 } from '@shared/api'
 import type { SessionBirthInfo } from '@shared/api'
 import { EP, profileBody } from '@shared/api'
@@ -295,6 +311,241 @@ export const getRelations = (
     ...(opts.dayun ? { dayun: opts.dayun } : {}),
     ...(opts.liunian ? { liunian: opts.liunian } : {}),
     ...(opts.liuyue ? { liuyue: opts.liuyue } : {}),
+  })
+
+/**
+ * 命理 K 线：确定性运势评分 → 年蜡烛 + 大运带。
+ * 一次只取一个维度（默认综合）；十神侧重由后端决定，前端只传 key。
+ * 命盘走后端 bazi_cache，切换维度只重算评分、无需重新排盘。
+ * `dimension` 为综合时不发该参数 —— 默认值由后端定义，前端不抄一份。
+ * `maxDayun` 按"第几步大运"收尾（整段，不截在半个大运上）；给了它就以它为准。
+ */
+export const getKline = (
+  birthTime: string,
+  gender: string,
+  opts: {
+    sect?: number; yunSect?: number; longitude?: number
+    maxAge?: number; maxDayun?: number; dimension?: KlineDimension
+  } = {}
+) =>
+  get<KlineData>(EP.KLINE, {
+    birth_time: birthTime,
+    gender,
+    sect: opts.sect ?? 2,
+    yun_sect: opts.yunSect ?? 1,
+    ...(opts.longitude ? { longitude: opts.longitude } : {}),
+    ...(opts.maxAge ? { max_age: opts.maxAge } : {}),
+    ...(opts.maxDayun ? { max_dayun: opts.maxDayun } : {}),
+    ...(opts.dimension && opts.dimension !== 'comprehensive' ? { dimension: opts.dimension } : {}),
+  })
+
+/**
+ * K 线批注：让大模型解读某一段运势（**不改任何分数**）。
+ * 后端先算好分数再交给模型解读，且批注要过事实校验；不过则不返回文本，
+ * 由 `factsOk=false` + `issues` 告知前端 —— 故调用方必须判 `ok` 再用 `text`。
+ * 按 (盘, 维度, 粒度, 年份, 锚定年) 缓存，同一段二次请求不会重复花钱。
+ */
+export const getKlineAnnotation = (
+  birthTime: string,
+  gender: string,
+  opts: {
+    sect?: number; yunSect?: number; longitude?: number
+    dimension?: KlineDimension; scope?: KlineAnnotationScope; year?: number
+    maxDayun?: number
+  } = {}
+) =>
+  post<KlineAnnotation>(EP.KLINE_ANNOTATION, {
+    birth_time: birthTime,
+    gender,
+    sect: opts.sect ?? 2,
+    yun_sect: opts.yunSect ?? 1,
+    ...(opts.longitude ? { longitude: opts.longitude } : {}),
+    ...(opts.dimension ? { dimension: opts.dimension } : {}),
+    scope: opts.scope ?? 'overview',
+    ...(opts.scope === 'year' && opts.year ? { year: opts.year } : {}),
+    // 与画图同一段区间：批注里的"全期最高/最低"必须落在图上能看到的年份里
+    ...(opts.maxDayun ? { max_dayun: opts.maxDayun } : {}),
+  })
+
+/**
+ * 合盘共振线：两条单盘 K 线之上的**只读**叠加层，只算「关系顺逆」。
+ * 年份取两盘 K 线年份的交集（起运年不同）；后端顺带返回双方喜忌摘要。
+ * 权重是待校准先验 —— 调用方应把它读作**相对次序**（哪几年更顺），不是绝对吉凶。
+ */
+export const getKlineResonance = (
+  a: { birthTime: string; gender: string },
+  b: { birthTime: string; gender: string },
+  opts: {
+    sect?: number; yunSect?: number
+    longitudeA?: number; longitudeB?: number
+    dimension?: KlineDimension; maxAge?: number; maxDayun?: number
+  } = {}
+) =>
+  post<KlineResonance>(EP.KLINE_RESONANCE, {
+    birth_time_a: a.birthTime,
+    gender_a: a.gender,
+    birth_time_b: b.birthTime,
+    gender_b: b.gender,
+    sect: opts.sect ?? 2,
+    yun_sect: opts.yunSect ?? 1,
+    ...(opts.longitudeA ? { longitude_a: opts.longitudeA } : {}),
+    ...(opts.longitudeB ? { longitude_b: opts.longitudeB } : {}),
+    ...(opts.dimension ? { dimension: opts.dimension } : {}),
+    ...(opts.maxAge ? { max_age: opts.maxAge } : {}),
+    // 与主图同一步数，两条曲线右端才对得齐
+    ...(opts.maxDayun ? { max_dayun: opts.maxDayun } : {}),
+  })
+
+/**
+ * 记一条 K 线反馈（**只写不读，不影响任何分数**）。
+ * 维度 + 年份 + 锚定年是必带的：反馈只有能定位到「哪张盘的哪一年」才有校准价值。
+ */
+export const submitKlineFeedback = (p: KlineFeedbackPayload) =>
+  post<KlineFeedbackResult>(EP.KLINE_FEEDBACK, {
+    birth_time: p.birthTime,
+    gender: p.gender,
+    dimension: p.dimension,
+    scope: p.scope,
+    ...(p.year ? { year: p.year } : {}),
+    ...(p.anchorYear ? { anchor_year: p.anchorYear } : {}),
+    rating: p.rating,
+    accurate: p.accurate ?? null,
+    comment: p.comment || '',
+    ...(p.snapshot ? { snapshot: p.snapshot } : {}),
+  })
+
+/** 反馈汇总（均分 / 吻合率 / 按维度分布），回测校准的输入端 */
+export const getKlineFeedbackStats = (dimension?: KlineDimension) =>
+  get<KlineFeedbackStats>(EP.KLINE_FEEDBACK_STATS, dimension ? { dimension } : undefined)
+
+/**
+ * 录一条**真实事件标注**（回测的真相面：那一年实际发生了什么，不是"解读准不准"）。
+ *
+ * 命理年与公历年在 1-2 月相差一年，故优先传 `eventDate` 让后端按立春换岁推；
+ * 只有年份时传 `ganzhiYear`。两者都给会被后端交叉校验，不符直接报 400。
+ */
+export const submitKlineEvent = (p: KlineEventPayload) =>
+  post<KlineEventResult>(EP.KLINE_EVENTS, {
+    birth_time: p.birthTime,
+    gender: p.gender,
+    sect: p.sect ?? 2,
+    yun_sect: p.yunSect ?? 1,
+    ...(p.longitude ? { longitude: p.longitude } : {}),
+    ...(p.ganzhiYear != null ? { ganzhi_year: p.ganzhiYear } : {}),
+    ...(p.eventDate ? { event_date: p.eventDate } : {}),
+    polarity: p.polarity,
+    domain: p.domain || 'general',
+    source: p.source || '',
+    note: p.note || '',
+    ...(p.caseId ? { case_id: p.caseId } : {}),
+  })
+
+/** 列事件标注（可按命盘/年份/领域过滤；全空即"列最近的"） */
+export const listKlineEvents = (params: {
+  birthTime?: string; gender?: string; ganzhiYear?: number; domain?: KlineEventDomain; limit?: number
+} = {}) =>
+  get<{ items: KlineEventItem[]; count: number }>(EP.KLINE_EVENTS, {
+    birth_time: params.birthTime,
+    gender: params.gender,
+    ganzhi_year: params.ganzhiYear,
+    domain: params.domain,
+    limit: params.limit,
+  })
+
+/** 删一条录错的标注（标注是人工录的，必须有回退通道） */
+export const deleteKlineEvent = (id: string) =>
+  del<{ ok: boolean }>(`${EP.KLINE_EVENTS}/${encodeURIComponent(id)}`)
+
+/** 事件库总览：总量 / 吉凶分布 / 领域分布 / 涉及命盘。回测前先看它 */
+export const getKlineEventStats = () => get<KlineEventStats>(EP.KLINE_EVENT_STATS)
+
+/**
+ * 跑一次回测：命中率 / 随机基线 / lift / 置信区间。
+ *
+ * 只报命中率没有意义（三分类随机也有约 1/3），务必连 `summary.randomBaseline`
+ * 与 `summary.ci95` 一起显示；`birthTime` 为空则把库里所有盘一起回测。
+ */
+export const runKlineBacktest = (params: {
+  birthTime?: string; gender?: string
+  dimension?: KlineDimension | 'auto'; predictor?: KlinePredictor
+  minSamples?: number
+} = {}) =>
+  get<KlineBacktest>(EP.KLINE_BACKTEST, {
+    birth_time: params.birthTime,
+    gender: params.gender,
+    dimension: params.dimension,
+    predictor: params.predictor,
+    min_samples: params.minSamples,
+  })
+
+/* ---- 合盘关系事件与合盘回测（共振权重的唯一校准数据源） ----
+ *
+ * 与单盘事件的分工：单盘事件只能校准单盘打分口径；
+ * 「这两人某年顺不顺」才是共振分该对得上的真相。
+ */
+
+/**
+ * 录一条**关系事件**：那一年这两个人到底顺不顺。
+ *
+ * `polarity` 是**关系**的吉凶，不是某一方的个人运势 —— 同一年两人可以一个升职
+ * 一个生病，但"我们俩这一年"只有一个答案。`relation` 只用于事后按关系类型分组复盘。
+ */
+export const submitKlinePairEvent = (p: KlinePairEventPayload) =>
+  post<KlinePairEventResult>(EP.KLINE_PAIR_EVENTS, {
+    birth_time_a: p.birthTimeA,
+    gender_a: p.genderA,
+    birth_time_b: p.birthTimeB,
+    gender_b: p.genderB,
+    sect: p.sect ?? 2,
+    yun_sect: p.yunSect ?? 1,
+    ...(p.longitudeA ? { longitude_a: p.longitudeA } : {}),
+    ...(p.longitudeB ? { longitude_b: p.longitudeB } : {}),
+    ...(p.ganzhiYear != null ? { ganzhi_year: p.ganzhiYear } : {}),
+    ...(p.eventDate ? { event_date: p.eventDate } : {}),
+    polarity: p.polarity,
+    relation: p.relation || '',
+    source: p.source || '',
+    note: p.note || '',
+  })
+
+/** 列关系事件。四侧生辰都给时按「这一对」过滤，否则列最近的 */
+export const listKlinePairEvents = (params: {
+  birthTimeA?: string; genderA?: string; birthTimeB?: string; genderB?: string
+  ganzhiYear?: number; limit?: number
+} = {}) =>
+  get<{ items: KlinePairEventItem[]; count: number }>(EP.KLINE_PAIR_EVENTS, {
+    birth_time_a: params.birthTimeA,
+    gender_a: params.genderA,
+    birth_time_b: params.birthTimeB,
+    gender_b: params.genderB,
+    ganzhi_year: params.ganzhiYear,
+    limit: params.limit,
+  })
+
+/** 删一条录错的关系事件 */
+export const deleteKlinePairEvent = (id: string) =>
+  del<{ ok: boolean }>(`${EP.KLINE_PAIR_EVENTS}/${encodeURIComponent(id)}`)
+
+/** 关系事件库总览：总量 / 顺逆分布 / 关系类型分布 / 对数 */
+export const getKlinePairEventStats = () => get<KlinePairEventStats>(EP.KLINE_PAIR_EVENT_STATS)
+
+/**
+ * 跑一次合盘回测：命中率 / 随机基线 / lift + 逐项 term 诊断。
+ *
+ * 没有 predictor 参数 —— 合盘只有一个预测源（共振分），给了也没别的可换。
+ * `termDiagnostics` 里 `delta <= 0` 的项就是权重该调的地方。
+ */
+export const runKlinePairBacktest = (params: {
+  birthTimeA?: string; genderA?: string; birthTimeB?: string; genderB?: string
+  dimension?: KlineDimension; minSamples?: number
+} = {}) =>
+  get<KlinePairBacktest>(EP.KLINE_PAIR_BACKTEST, {
+    birth_time_a: params.birthTimeA,
+    gender_a: params.genderA,
+    birth_time_b: params.birthTimeB,
+    gender_b: params.genderB,
+    dimension: params.dimension,
+    min_samples: params.minSamples,
   })
 
 export interface BaziCandidate { birth_time: string; ganzhi: string; shi_chen: string }

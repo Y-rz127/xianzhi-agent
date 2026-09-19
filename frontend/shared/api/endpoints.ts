@@ -12,6 +12,22 @@ export const EP = {
   CHART: '/ai/xianzhi/chart',
   /** 按点选的大运/流年/流月现算「岁运分析 / 原局分析」六栏 */
   RELATIONS: '/ai/xianzhi/relations',
+  /** 命理 K 线：确定性运势评分 → 年蜡烛 + 大运带（一次请求一个维度） */
+  KLINE: '/ai/xianzhi/kline',
+  KLINE_ANNOTATION: '/ai/xianzhi/kline/annotation',
+  KLINE_RESONANCE: '/ai/xianzhi/kline/resonance',
+  KLINE_FEEDBACK: '/ai/xianzhi/kline/feedback',
+  KLINE_FEEDBACK_STATS: '/ai/xianzhi/kline/feedback/stats',
+  /** 事件标注（回测的 ground truth）：/events 增删查，/events/stats 总览 */
+  KLINE_EVENTS: '/ai/xianzhi/kline/events',
+  KLINE_EVENT_STATS: '/ai/xianzhi/kline/events/stats',
+  /** 回测：命中率 / 随机基线 / lift / 置信区间 */
+  KLINE_BACKTEST: '/ai/xianzhi/kline/backtest',
+  /** 合盘关系事件（共振权重的 ground truth）：一对人·某年顺不顺 */
+  KLINE_PAIR_EVENTS: '/ai/xianzhi/kline/pair-events',
+  KLINE_PAIR_EVENT_STATS: '/ai/xianzhi/kline/pair-events/stats',
+  /** 合盘回测：命中率 + 逐项 term 诊断（反推权重的输入） */
+  KLINE_PAIR_BACKTEST: '/ai/xianzhi/kline/pair-backtest',
   HEHUN: '/ai/xianzhi/hehun',
   FULL_REPORT: '/ai/xianzhi/full_report',
   REPORT_PDF: '/ai/xianzhi/report',

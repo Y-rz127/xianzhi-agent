@@ -64,6 +64,13 @@
       }
     },
     {
+      "path": "pages/kline/index",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "命理K线"
+      }
+    },
+    {
       "path": "pages/mine/index",
       "style": {
         "navigationStyle": "custom",

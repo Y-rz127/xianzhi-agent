@@ -19,8 +19,8 @@
           <text
             v-for="tab in tabs"
             :key="tab.key"
-            :class="['tab-btn', activeTab === tab.key && 'tab-active']"
-            @tap="activeTab = tab.key"
+            :class="['tab-btn', activeTab === tab.key && 'tab-active', tab.to && 'tab-link']"
+            @tap="onTabTap(tab)"
           >{{ tab.label }}</text>
         </view>
       </scroll-view>
@@ -121,15 +121,29 @@
         </view>
 
         <!-- 起运信息 -->
-        <view class="section" v-if="activeTab === 'paipan' && startYunText">
+        <view class="section" v-if="activeTab === 'paipan' && (startYunText || xipan?.qiyun)">
           <view class="qiyun-row">
             <view class="qiyun-left">
               <text class="qiyun-tag">起运</text>
-              <text class="qiyun-after">{{ startYunText.after || xipan?.qiyun?.after || '出生后起运' }}</text>
+              <text class="qiyun-after">{{ xipan?.qiyun?.after || startYunText?.after || '出生后起运' }}</text>
             </view>
             <view class="qiyun-meta">
               <text v-if="xipan?.qiyun" class="qiyun-sub">交运 {{ xipan.qiyun.startDate }} · {{ xipan.qiyun.jieqi }}后{{ xipan.qiyun.daysAfterJieqi }}天</text>
-              <text v-else class="qiyun-sub">交运 {{ startYunText.date }} · {{ startYunText.dir }}</text>
+              <text v-else-if="startYunText" class="qiyun-sub">交运 {{ startYunText.date }} · {{ startYunText.dir }}</text>
+            </view>
+          </view>
+          <!-- 月令旺衰 + 人元司令 -->
+          <view v-if="xipan" class="xp-state-row">
+            <view class="xp-state-block">
+              <text class="xp-state-title">月令旺衰</text>
+              <view class="xp-state-items">
+                <text v-for="w in xipan.wuxingState" :key="w.name" class="xp-state-item" :class="'xs-' + xsStateKey(w.state)">{{ w.name }}{{ w.state }}</text>
+              </view>
+            </view>
+            <view v-if="xipan.siling && xipan.siling.stem" class="xp-state-block">
+              <text class="xp-state-title">人元司令</text>
+              <view class="xp-state-items"><text class="xp-siling">{{ xipan.siling.stem }} 司令</text></view>
+              <text class="xp-siling-detail">{{ xipan.siling.detail }}</text>
             </view>
           </view>
         </view>
@@ -339,21 +353,6 @@
               </view>
             </view>
 
-            <!-- 月令旺衰 + 人元司令 -->
-            <view class="xp-state-row">
-              <view class="xp-state-block">
-                <text class="xp-state-title">月令旺衰</text>
-                <view class="xp-state-items">
-                  <text v-for="w in xipan.wuxingState" :key="w.name" class="xp-state-item" :class="'xs-' + xsStateKey(w.state)">{{ w.name }}{{ w.state }}</text>
-                </view>
-              </view>
-              <view v-if="xipan.siling && xipan.siling.stem" class="xp-state-block">
-                <text class="xp-state-title">人元司令</text>
-                <view class="xp-state-items"><text class="xp-siling">{{ xipan.siling.stem }} 司令</text></view>
-                <text class="xp-siling-detail">{{ xipan.siling.detail }}</text>
-              </view>
-            </view>
-
             <!-- 岁运分析（大运 · 流年 · 流月 叠加原局） -->
             <view class="section inner" v-if="suiyunRows.length">
               <view class="section-title-row">
@@ -538,12 +537,23 @@ import MarkdownRender from '@/components/MarkdownRender/MarkdownRender.vue'
 const { themeClass } = useTheme()
 
 type TabKey = 'paipan' | 'xipan' | 'notes'
-const tabs: { key: TabKey; label: string }[] = [
+// 「命理 K 线」占一个 tab 位、点了跳独立页（to 标记为外链 tab，永不成为 activeTab）：
+// 它和命理报告同属「看结论」，排在报告左边；排盘/细盘属「看数据」，故在其右。
+const tabs: { key: string; label: string; to?: boolean }[] = [
   { key: 'paipan', label: '基本排盘' },
   { key: 'xipan', label: '专业细盘' },
+  { key: 'kline', label: '命理K线', to: true },
   { key: 'notes', label: '命理报告' },
 ]
 const activeTab = ref<TabKey>('paipan')
+
+function onTabTap(tab: { key: string; to?: boolean }) {
+  if (tab.to) {
+    goKline()
+    return
+  }
+  activeTab.value = tab.key as TabKey
+}
 
 // 切 tab 回到顶部：scroll-view 由 :key 重建确定性归零；
 // 再兜一层页面级滚动（全局 page 是 min-height:100vh，页面本身也可能被滚走）
@@ -1175,6 +1185,14 @@ function goBack() {
   else uni.switchTab({ url: '/pages/xianzhi/index' })
 }
 
+/** 带同一套盘面参数进 K 线页：流派与经度必须一起带，否则两条曲线口径不一致 */
+function goKline() {
+  const q = `birth_time=${encodeURIComponent(birthTime.value)}&gender=${encodeURIComponent(gender.value)}` +
+    `&sect=${chartSect.value}&yun_sect=${chartYunSect.value}`
+  const lon = chartLongitude.value ? `&longitude=${chartLongitude.value}` : ''
+  uni.navigateTo({ url: `/pages/kline/index?${q}${lon}` })
+}
+
 onLoad((options: any) => {
   const decode = (v?: string) => {
     if (!v) return ''
@@ -1295,6 +1313,10 @@ onLoad((options: any) => {
 .section.inner { margin-bottom: 36rpx; }
 /* 表格贴顶：无标题的首个 section 不留上间距 */
 .section-flush { margin-top: 0; }
+
+/* 外链 tab：点了跳走，故不给选中态，仅用主色区分「可点开」 */
+.tab-btn.tab-link { color: $color-primary; }
+
 .section-title-row {
   display: flex;
   align-items: baseline;
