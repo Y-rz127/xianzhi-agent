@@ -198,21 +198,18 @@
         </view>
         <text v-else class="rel-empty">该年无合冲刑害</text>
         <view class="detail-actions">
+          <text class="act-pill" @tap="toggleEventCard">{{ evCardOpen ? '收起' : '事件标注' }}</text>
           <text class="act-pill" @tap="loadYearAnnotation">解读这一年</text>
         </view>
       </view>
 
-      <!-- 事件标注：回测的"真相面"（那年实际发生了什么）。与上面的反馈是两码事：
-           反馈是"我觉得准不准"（主观），事件是"确实发生了什么"（客观）。
-           回测只吃事件表 —— 拿主观反馈当标准答案，等于用嘴校准。 -->
-      <view class="card">
+      <!-- 事件标注：可折叠卡片 -->
+      <view v-if="evCardOpen" class="card">
         <view class="ev-head">
           <text class="card-title">事件标注</text>
-          <text class="ev-count">{{ evItems.length ? '本盘 ' + evItems.length + ' 条' : '本盘暂无' }}</text>
+          <text class="ev-count">{{ currentYearEvItems.length ? '本盘 ' + currentYearEvItems.length + ' 条' : '本盘暂无' }}</text>
         </view>
-        <text class="ev-hint">记「这一年实际发生了什么」，不是「你觉得准不准」。回测拿它当标准答案，攒够 20 条才谈得上命中率。回测阈值固定按全期切（不随事件伸缩），落在窗口外的年份只会入库、不进命中率。</text>
-        <text v-if="evStats" class="ev-hint">库里现有 {{ evStats.total }} 条 · {{ evStats.charts }} 张盘 · {{ evStats.yearCount }} 个年份</text>
-
+        <text class="ev-hint">记录这一年的真实事件（如：升职、结婚、搬家），用于验证K线准确率。</text>
         <view class="detail-actions">
           <text class="act-pill" @tap="toggleEventForm">
             {{ evFormOpen ? '收起' : '标注 ' + sel.year + ' 年' }}
@@ -221,10 +218,9 @@
           <text class="act-pill" @tap="runBacktest">{{ evBtLoading ? '回测中…' : '回测' }}</text>
         </view>
 
-        <!-- 结果行紧贴按钮：事件攒到几十条时，放在列表底下等于"点了看不见"。
-             必须连随机基线一起读 —— 三分类随机猜也有约 1/3，只报命中率是报喜不报忧。 -->
+        <!-- 结果行紧贴按钮：事件攒到几十条时，放在列表底下等于"点了看不见"。 -->
         <text v-if="btLine" class="bt-line">{{ btLine }}</text>
-        <text v-else-if="!bt" class="bt-line bt-line-idle">点「回测」看命中率 —— 只报命中率没有意义，会连随机基线一起给。</text>
+        <text v-else-if="!bt" class="bt-line bt-line-idle">记录足够事件后，点击回测查看准确率。</text>
 
         <view v-if="evFormOpen" class="ev-form">
           <view class="ev-row">
@@ -237,7 +233,7 @@
               placeholder-class="reso-ph"
             />
           </view>
-          <text class="ev-tip">按立春换岁：1-2 月发生的事记在上一命理年。填了公历日期则以日期为准。</text>
+          <text class="ev-tip">💡 1-2月的事件通常记在上一年。</text>
           <view class="ev-row">
             <text class="ev-label">公历日期</text>
             <input
@@ -284,8 +280,8 @@
           <text v-if="evMsg" class="ev-msg">{{ evMsg }}</text>
         </view>
 
-        <view v-if="evItems.length" class="ev-list">
-          <view v-for="it in evItems" :key="it.id" class="ev-item">
+        <view v-if="currentYearEvItems.length" class="ev-list">
+          <view v-for="it in currentYearEvItems" :key="it.id" class="ev-item">
             <text class="ev-item-main">{{ it.ganzhiYear }} · {{ polarityLabel(it.polarity) }} · {{ domainLabel(it.domain) }}</text>
             <text class="ev-item-note">{{ it.note || it.eventDate || '—' }}</text>
             <text class="ev-del" @tap="removeEvent(it)">删</text>
@@ -304,7 +300,7 @@
         </view>
         <template v-else-if="anno && anno.ok">
           <text class="anno-text">{{ anno.text }}</text>
-          <text class="anno-foot">大模型解读 · 已通过事实校验 · 不影响分数</text>
+          <text class="anno-foot">AI 解读仅供参考</text>
           <!-- 反馈闭环：只写不读。沉淀下来的「哪张盘哪一年哪一维」才是校准的输入 -->
           <view class="fb-wrap">
             <text class="fb-label">这段解读准吗？</text>
@@ -333,7 +329,7 @@
         </view>
 
         <template v-if="!reso">
-          <text class="reso-hint">输入对方生辰，看两人逐年的运势同步度。只读叠加，不影响上面任何分数。</text>
+          <text class="reso-hint">输入对方出生时间，查看两人运势的同步情况。</text>
           <view class="reso-form">
             <input
               v-model="resoBirth"
@@ -403,9 +399,6 @@
               <view class="dt-cell"><text class="dt-label">夫妻宫</text><text class="dt-value">{{ resoRow.palace.a || '—' }} / {{ resoRow.palace.b || '—' }}</text></view>
               <view class="dt-cell"><text class="dt-label">同步</text><text class="dt-value">{{ sign(resoRow.terms.sync) }}{{ resoRow.terms.sync }}</text></view>
             </view>
-            <view class="reso-terms">
-              <text v-for="(v, k) in resoRow.terms" :key="k" class="reso-term">{{ k }} {{ sign(v) }}{{ v }}</text>
-            </view>
             <text class="reso-note">{{ reso.meta.note }}</text>
           </view>
 
@@ -417,7 +410,7 @@
               <text class="pair-ev-title">关系事件</text>
               <text class="pair-ev-count">{{ pairEvItems.length ? '本对 ' + pairEvItems.length + ' 条' : '本对暂无' }}</text>
             </view>
-            <text class="pair-ev-hint">记「这一年我们俩怎么样」，不是「某一方过得好不好」。同一年两人可以一个升职一个生病，但关系的顺逆只有一个答案 —— 这正是共振线唯一校准得了的东西。回测阈值固定按全期切（不随事件伸缩），落在窗口外的年份只会入库、不进命中率。</text>
+            <text class="pair-ev-hint">记录这一年两人关系中的重要事件（如：结婚、吵架、和好）。</text>
 
             <view class="ev-row">
               <text class="ev-label">关系</text>
@@ -451,7 +444,7 @@
                 placeholder-class="reso-ph"
               />
             </view>
-            <text class="ev-tip">按立春换岁：1-2 月发生的事记在上一命理年。点上面的柱子切换年份即带过来。</text>
+            <text class="ev-tip">💡 点击上方柱子可快速填入年份。</text>
             <view class="ev-row">
               <text class="ev-label">备注</text>
               <input
@@ -467,10 +460,9 @@
             </view>
             <text v-if="pairMsg" class="ev-msg">{{ pairMsg }}</text>
 
-            <!-- 结果行紧贴按钮：事件攒多了时放在列表底下等于"点了看不见"。
-                 必须连随机基线一起读 —— 三分类随机猜也有约 1/3，只报命中率是报喜不报忧。 -->
+            <!-- 结果行紧贴按钮：事件攒多了时放在列表底下等于"点了看不见"。 -->
             <text v-if="pairBtLine" class="bt-line">{{ pairBtLine }}</text>
-            <text v-else-if="!pairBt" class="bt-line bt-line-idle">点「回测」看命中率 —— 只报命中率没有意义，会连随机基线一起给。</text>
+            <text v-else-if="!pairBt" class="bt-line bt-line-idle">记录足够事件后，点击回测查看准确率。</text>
 
             <view v-if="pairEvItems.length" class="ev-list">
               <view v-for="it in pairEvItems" :key="it.id" class="ev-item">
@@ -489,7 +481,7 @@
 
       <view class="foot-note">
         <text class="fn-text">{{ meta.note }}</text>
-        <text class="fn-text">分数为确定性规则计算（K={{ meta.kScore }}，大运 {{ meta.weightDayun }} / 流年 {{ meta.weightLiunian }} / 流月 {{ meta.weightLiuyue }}），非大模型生成。</text>
+        <text class="fn-text">💡 使用提示：左右滑动查看不同年份，点击蜡烛查看详情，点击「解读这一年」获取AI分析。</text>
       </view>
     </scroll-view>
   </view>
@@ -819,10 +811,16 @@ const EV_DOMAINS: { key: KlineEventDomain; label: string }[] = [
 const EV_MAX_ITEMS = 200
 
 const evFormOpen = ref(false)
+const evCardOpen = ref(false)
 const evYear = ref('')
 const evDate = ref('')
 const evPolarity = ref<KlinePolarity>(1)
 const evDomain = ref<KlineEventDomain>('general')
+const currentYearEvItems = computed(() => {
+  const targetYear = Number(sel.value?.year)
+  if (!Number.isInteger(targetYear)) return evItems.value
+  return evItems.value.filter((it) => Number(it.ganzhiYear) === targetYear)
+})
 const evNote = ref('')
 const evMsg = ref('')
 const evSaving = ref(false)
@@ -905,6 +903,19 @@ async function runBacktest() {
   } finally {
     evBtLoading.value = false
   }
+}
+
+function toggleEventCard() {
+  evCardOpen.value = !evCardOpen.value
+  if (!evCardOpen.value) {
+    evFormOpen.value = false
+    return
+  }
+  evFormOpen.value = false
+  evYear.value = String(sel.value.year)
+  evDate.value = ''
+  evMsg.value = ''
+  loadEventStats()
 }
 
 function toggleEventForm() {
@@ -1338,23 +1349,23 @@ $chart-axis-row: 34rpx;   /* 年份轴 */
 .card-title { font-size: 28rpx; font-weight: 600; color: $color-ink; }
 
 .ov-grid { display: flex; flex-wrap: wrap; }
-.ov-cell { width: 50%; padding: 6rpx 0; display: flex; align-items: baseline; }
-.ov-label { font-size: 24rpx; color: $color-ink-lighter; margin-right: 12rpx; }
-.ov-value { font-size: 28rpx; color: $color-ink; font-weight: 500; }
-.ov-note { display: block; margin-top: 12rpx; font-size: 23rpx; color: $color-ink-lighter; }
+.ov-cell { width: 50%; padding: 8rpx 0; display: flex; align-items: baseline; }
+.ov-label { font-size: 28rpx; color: $color-ink-light; margin-right: 12rpx; font-weight: 500; }
+.ov-value { font-size: 32rpx; color: $color-ink; font-weight: 600; }
+.ov-note { display: block; margin-top: 14rpx; font-size: 27rpx; color: $color-ink-light; line-height: 1.6; }
 /* 病药说明是「最喜/最忌」的依据，比维度说明更需要被读到，故用正文色 */
-.ov-ailment { color: $color-ink-light; line-height: 1.6; }
-.ov-stats { margin-top: 12rpx; padding-top: 12rpx; border-top: 1rpx solid $color-border-light; }
-.ov-stat { display: block; font-size: 22rpx; color: $color-ink-lighter; line-height: 1.7; }
+.ov-ailment { color: $color-ink; line-height: 1.7; font-weight: 500; }
+.ov-stats { margin-top: 14rpx; padding-top: 14rpx; border-top: 1rpx solid $color-border-light; }
+.ov-stat { display: block; font-size: 26rpx; color: $color-ink-light; line-height: 1.8; }
 
-.chart-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 16rpx; }
-.switch-hint { font-size: 21rpx; color: $color-ink-lightest; }
+.chart-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 18rpx; }
+.switch-hint { font-size: 25rpx; color: $color-ink-light; }
 .legend { display: flex; }
-.lg-item { display: flex; align-items: center; margin-left: 16rpx; }
-.lg-swatch { width: 16rpx; height: 16rpx; border-radius: 3rpx; margin-right: 6rpx; }
+.lg-item { display: flex; align-items: center; margin-left: 18rpx; }
+.lg-swatch { width: 18rpx; height: 18rpx; border-radius: 3rpx; margin-right: 8rpx; }
 .lg-up { background: #B8483C; }
 .lg-down { background: #2E7D6E; }
-.lg-text { font-size: 21rpx; color: $color-ink-lighter; }
+.lg-text { font-size: 25rpx; color: $color-ink-light; font-weight: 500; }
 
 .chart-flex { display: flex; align-items: flex-start; }
 .y-axis {
@@ -1439,100 +1450,104 @@ $chart-axis-row: 34rpx;   /* 年份轴 */
 .axis-year {
   position: absolute;
   top: 4rpx;
-  font-size: 20rpx;
-  color: $color-ink-lightest;
+  font-size: 24rpx;
+  color: $color-ink-light;
   text-align: center;
+  font-weight: 500;
 }
 .axis-year-start { text-align: left; }
 
-.slider-row { margin-top: 18rpx; }
+.slider-row { margin-top: 20rpx; }
 .year-slider { margin: 0 8rpx; }
 .slider-readout {
   display: flex;
   align-items: baseline;
   justify-content: center;
-  padding-top: 4rpx;
+  padding-top: 6rpx;
 }
-.ro-year { font-size: 30rpx; font-weight: 600; color: $color-ink; margin-right: 12rpx; }
-.ro-age { font-size: 23rpx; color: $color-ink-lighter; margin-right: 12rpx; }
-.ro-gz { font-size: 23rpx; color: $color-vermilion; }
+.ro-year { font-size: 34rpx; font-weight: 700; color: $color-ink; margin-right: 14rpx; }
+.ro-age { font-size: 27rpx; color: $color-ink-light; margin-right: 14rpx; font-weight: 500; }
+.ro-gz { font-size: 27rpx; color: $color-vermilion; font-weight: 600; }
 
-.detail-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 16rpx; }
-.detail-delta { font-size: 26rpx; font-weight: 600; }
+.detail-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 18rpx; }
+.detail-delta { font-size: 30rpx; font-weight: 700; }
 .delta-up { color: #B8483C; }
 .delta-down { color: #2E7D6E; }
 .detail-grid { display: flex; flex-wrap: wrap; }
-.dt-cell { width: 33.33%; padding: 8rpx 0; display: flex; align-items: baseline; }
-.dt-label { font-size: 23rpx; color: $color-ink-lighter; margin-right: 10rpx; }
-.dt-value { font-size: 27rpx; color: $color-ink; }
+.dt-cell { width: 33.33%; padding: 10rpx 0; display: flex; align-items: baseline; }
+.dt-label { font-size: 27rpx; color: $color-ink-light; margin-right: 10rpx; font-weight: 500; }
+.dt-value { font-size: 31rpx; color: $color-ink; font-weight: 600; }
 
-.rel-wrap { margin-top: 14rpx; display: flex; flex-wrap: wrap; }
+.rel-wrap { margin-top: 16rpx; display: flex; flex-wrap: wrap; }
 .rel-chip {
-  font-size: 21rpx;
-  padding: 5rpx 14rpx;
+  font-size: 25rpx;
+  padding: 7rpx 18rpx;
   border-radius: 999rpx;
-  margin: 6rpx 10rpx 0 0;
+  margin: 8rpx 12rpx 0 0;
   background: $color-border-light;
   color: $color-ink-light;
+  font-weight: 500;
 }
-.rel-chong { color: #B8483C; border: 1rpx solid rgba(184, 72, 60, 0.35); background: transparent; }
-.rel-xing { color: #C2762A; border: 1rpx solid rgba(194, 118, 42, 0.3); background: transparent; }
-.rel-hai { color: #8A7A3A; border: 1rpx solid rgba(138, 122, 58, 0.3); background: transparent; }
-.rel-he { color: #2E7D6E; border: 1rpx solid rgba(46, 125, 110, 0.32); background: transparent; }
-.rel-fu { color: $color-ink-lighter; border: 1rpx solid $color-border; background: transparent; }
-.rel-empty { display: block; margin-top: 14rpx; font-size: 22rpx; color: $color-ink-lightest; }
+.rel-chong { color: #B8483C; border: 1rpx solid rgba(184, 72, 60, 0.4); background: transparent; font-weight: 600; }
+.rel-xing { color: #C2762A; border: 1rpx solid rgba(194, 118, 42, 0.35); background: transparent; font-weight: 600; }
+.rel-hai { color: #8A7A3A; border: 1rpx solid rgba(138, 122, 58, 0.35); background: transparent; font-weight: 600; }
+.rel-he { color: #2E7D6E; border: 1rpx solid rgba(46, 125, 110, 0.38); background: transparent; font-weight: 600; }
+.rel-fu { color: $color-ink-light; border: 1rpx solid $color-border; background: transparent; }
+.rel-empty { display: block; margin-top: 16rpx; font-size: 26rpx; color: $color-ink-light; }
 
-.detail-actions { display: flex; justify-content: flex-end; margin-top: 16rpx; }
+.detail-actions { display: flex; justify-content: flex-end; margin-top: 18rpx; }
 .act-pill {
-  font-size: 22rpx;
+  font-size: 26rpx;
   color: $color-primary;
   border: 1rpx solid $color-primary;
   border-radius: 999rpx;
-  padding: 6rpx 20rpx;
+  padding: 8rpx 24rpx;
+  font-weight: 500;
 }
 
 .anno-head {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  margin-bottom: 14rpx;
+  margin-bottom: 16rpx;
 }
-.anno-scope { font-size: 22rpx; color: $color-ink-lighter; }
-.anno-text { display: block; font-size: 26rpx; line-height: 1.75; color: $color-ink; }
-.anno-foot { display: block; margin-top: 14rpx; font-size: 20rpx; color: $color-ink-lightest; }
-.anno-state { padding: 6rpx 0; }
-.anno-hint { display: block; font-size: 24rpx; color: $color-ink-lighter; line-height: 1.6; }
-.anno-issue { display: block; margin-top: 8rpx; font-size: 21rpx; color: $color-ink-lightest; line-height: 1.5; }
+.anno-scope { font-size: 26rpx; color: $color-ink-light; font-weight: 500; }
+.anno-text { display: block; font-size: 30rpx; line-height: 1.85; color: $color-ink; font-weight: 400; letter-spacing: 0.5rpx; }
+.anno-foot { display: block; margin-top: 16rpx; font-size: 24rpx; color: $color-ink-light; line-height: 1.6; }
+.anno-state { padding: 8rpx 0; }
+.anno-hint { display: block; font-size: 28rpx; color: $color-ink-light; line-height: 1.7; font-weight: 500; }
+.anno-issue { display: block; margin-top: 10rpx; font-size: 25rpx; color: $color-ink-light; line-height: 1.6; }
 
 /* ---- 反馈闭环 ---- */
 .fb-wrap {
-  margin-top: 18rpx;
-  padding-top: 16rpx;
+  margin-top: 20rpx;
+  padding-top: 18rpx;
   border-top: 1rpx solid $color-border;
 }
-.fb-label { display: block; font-size: 22rpx; color: $color-ink-lighter; }
-.fb-row { display: flex; margin-top: 12rpx; }
+.fb-label { display: block; font-size: 26rpx; color: $color-ink-light; font-weight: 500; }
+.fb-row { display: flex; margin-top: 14rpx; }
 .fb-pill {
-  font-size: 22rpx;
-  color: $color-ink-lighter;
+  font-size: 26rpx;
+  color: $color-ink-light;
   border: 1rpx solid $color-border;
   border-radius: 999rpx;
-  padding: 6rpx 22rpx;
-  margin-right: 14rpx;
+  padding: 8rpx 26rpx;
+  margin-right: 16rpx;
+  font-weight: 500;
 }
-.fb-pill-on { color: $color-primary; border-color: $color-primary; }
-.fb-msg { display: block; margin-top: 10rpx; font-size: 20rpx; color: $color-ink-lightest; }
+.fb-pill-on { color: $color-primary; border-color: $color-primary; font-weight: 600; }
+.fb-msg { display: block; margin-top: 12rpx; font-size: 24rpx; color: $color-ink-light; line-height: 1.6; }
 
 /* ---- 合盘共振线 ---- */
 .reso-head {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  margin-bottom: 14rpx;
+  margin-bottom: 16rpx;
 }
-.reso-tag { font-size: 22rpx; color: $color-ink-lighter; }
-.reso-hint { display: block; font-size: 22rpx; line-height: 1.6; color: $color-ink-lighter; }
-.reso-form { margin-top: 16rpx; }
+.reso-tag { font-size: 26rpx; color: $color-ink-light; font-weight: 500; }
+.reso-hint { display: block; font-size: 26rpx; line-height: 1.7; color: $color-ink-light; }
+.reso-form { margin-top: 18rpx; }
 .reso-input {
   height: 68rpx;
   font-size: 25rpx;
@@ -1611,77 +1626,80 @@ $chart-axis-row: 34rpx;   /* 年份轴 */
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  margin-bottom: 14rpx;
+  margin-bottom: 16rpx;
 }
-.ev-count { font-size: 22rpx; color: $color-ink-lighter; }
-.ev-hint { display: block; font-size: 21rpx; line-height: 1.6; color: $color-ink-lighter; }
-.ev-form { margin-top: 4rpx; }
-.ev-row { display: flex; align-items: center; margin-top: 16rpx; }
-.ev-label { width: 120rpx; flex-shrink: 0; font-size: 23rpx; color: $color-ink-lighter; }
+.ev-count { font-size: 26rpx; color: $color-ink-light; font-weight: 500; }
+.ev-hint { display: block; font-size: 25rpx; line-height: 1.7; color: $color-ink-light; margin-top: 8rpx; }
+.ev-form { margin-top: 6rpx; }
+.ev-row { display: flex; align-items: center; margin-top: 18rpx; }
+.ev-label { width: 130rpx; flex-shrink: 0; font-size: 27rpx; color: $color-ink-light; font-weight: 500; }
 /* 档位/领域各自成组换行：直接摆在行里会被 flex 压扁，中文会被拆成竖排 */
 .ev-pills { flex: 1; display: flex; flex-wrap: wrap; }
 .ev-input {
   flex: 1;
-  height: 68rpx;
-  font-size: 25rpx;
+  height: 72rpx;
+  font-size: 28rpx;
   color: $color-ink;
   border: 1rpx solid $color-border;
   border-radius: 10rpx;
-  padding: 0 18rpx;
+  padding: 0 20rpx;
   background: transparent;
+  font-weight: 500;
 }
-.ev-num { flex: none; width: 220rpx; }
-.ev-tip { display: block; margin: 10rpx 0 0 120rpx; font-size: 19rpx; color: $color-ink-lightest; }
+.ev-num { flex: none; width: 240rpx; }
+.ev-tip { display: block; margin: 12rpx 0 0 130rpx; font-size: 23rpx; color: $color-ink-light; line-height: 1.6; }
 .ev-pill {
   flex-shrink: 0;
   white-space: nowrap;
-  font-size: 23rpx;
-  color: $color-ink-lighter;
+  font-size: 27rpx;
+  color: $color-ink-light;
   border: 1rpx solid $color-border;
   border-radius: 999rpx;
-  padding: 6rpx 18rpx;
-  margin: 0 12rpx 8rpx 0;
+  padding: 7rpx 22rpx;
+  margin: 0 14rpx 10rpx 0;
+  font-weight: 500;
 }
-.ev-pill-on { color: $color-primary; border-color: $color-primary; }
-.ev-msg { display: block; margin-top: 12rpx; font-size: 21rpx; color: $color-ink-lighter; }
-.ev-list { margin-top: 18rpx; }
+.ev-pill-on { color: $color-primary; border-color: $color-primary; font-weight: 600; }
+.ev-msg { display: block; margin-top: 14rpx; font-size: 25rpx; color: $color-ink-light; line-height: 1.6; }
+.ev-list { margin-top: 20rpx; }
 .ev-item {
   display: flex;
   align-items: baseline;
-  padding: 12rpx 0;
+  padding: 14rpx 0;
   border-top: 1rpx solid $color-border-light;
 }
-.ev-item-main { font-size: 23rpx; color: $color-ink; flex-shrink: 0; }
+.ev-item-main { font-size: 27rpx; color: $color-ink; flex-shrink: 0; font-weight: 500; }
 .ev-item-note {
   flex: 1;
-  margin: 0 16rpx;
-  font-size: 21rpx;
-  color: $color-ink-lighter;
+  margin: 0 18rpx;
+  font-size: 25rpx;
+  color: $color-ink-light;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
-.ev-del { font-size: 21rpx; color: $color-ink-lightest; padding: 0 8rpx; }
+.ev-del { font-size: 25rpx; color: $color-ink-light; padding: 0 10rpx; }
 
 /* 关系事件嵌在共振卡里，用分隔线跟上面的曲线拉开层次而不是再套一层卡片 */
 .pair-ev {
-  margin-top: 24rpx;
-  padding-top: 20rpx;
+  margin-top: 28rpx;
+  padding-top: 24rpx;
   border-top: 1rpx solid $color-border-light;
 }
 .pair-ev-head { display: flex; align-items: baseline; justify-content: space-between; }
-.pair-ev-title { font-size: 26rpx; font-weight: 600; color: $color-ink; }
-.pair-ev-count { font-size: 22rpx; color: $color-ink-lighter; }
-.pair-ev-hint { display: block; margin-top: 8rpx; font-size: 21rpx; line-height: 1.6; color: $color-ink-lighter; }
+.pair-ev-title { font-size: 28rpx; font-weight: 700; color: $color-ink; }
+.pair-ev-count { font-size: 26rpx; color: $color-ink-light; font-weight: 500; }
+.pair-ev-hint { display: block; margin-top: 10rpx; font-size: 25rpx; line-height: 1.7; color: $color-ink-light; }
 .bt-line {
   display: block;
-  margin-top: 14rpx;
-  font-size: 21rpx;
-  line-height: 1.6;
+  margin-top: 16rpx;
+  font-size: 25rpx;
+  line-height: 1.7;
   color: $color-ink;
+  font-weight: 400;
 }
-.bt-line-idle { color: $color-ink-lightest; }
+.bt-line-idle { color: $color-ink-light; }
 
-.foot-note { padding: 8rpx 8rpx 24rpx; }
-.fn-text { display: block; font-size: 21rpx; color: $color-ink-lightest; line-height: 1.8; }
+.foot-note { padding: 10rpx 10rpx 28rpx; }
+.fn-text { display: block; font-size: 25rpx; color: $color-ink-light; line-height: 1.9; }
 </style>

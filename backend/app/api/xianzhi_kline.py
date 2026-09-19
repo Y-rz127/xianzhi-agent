@@ -85,9 +85,7 @@ def _dayun_bands(chart) -> list[dict]:
     ]
 
 
-def _build_chart(
-    birth_time: str, gender: str, sect: int, yun_sect: int, longitude: float | None
-):
+def _build_chart(birth_time: str, gender: str, sect: int, yun_sect: int, longitude: float | None):
     """按 /kline 的口径构建命盘。**评分与批注必须走同一个入口**：
 
     批注要吃 `compact_facts`/`check_facts`，也有命盘对象需求；
@@ -161,8 +159,6 @@ def _compute_kline_payload(
             "weightDayun": fortune_score.W_DAYUN,
             "weightLiunian": fortune_score.W_LIUNIAN,
             "weightLiuyue": fortune_score.W_LIUYUE,
-            "note": "分数为确定性规则计算（非大模型生成）；流年以立春换岁，"
-            "起点为起运年（童限期无大运可论）。维度只改十神侧重，不改干支关系判定。",
         },
     }
 
@@ -198,18 +194,14 @@ async def get_kline(
     if not 0 < max_age <= MAX_AGE_LIMIT:
         raise HTTPException(status_code=400, detail=f"max_age 需在 1-{MAX_AGE_LIMIT} 之间")
     if not 0 <= max_dayun <= MAX_DAYUN_LIMIT:
-        raise HTTPException(
-            status_code=400, detail=f"max_dayun 需在 0-{MAX_DAYUN_LIMIT} 之间（0=不启用）"
-        )
+        raise HTTPException(status_code=400, detail=f"max_dayun 需在 0-{MAX_DAYUN_LIMIT} 之间（0=不启用）")
     if dimension not in fortune_score.DIMENSIONS:
         raise HTTPException(
             status_code=400,
             detail=f"dimension 需为 {'/'.join(fortune_score.DIMENSIONS)} 之一",
         )
 
-    cache_tool = (
-        f"kline_api:{longitude}:{max_age}:{max_dayun}:{int(include_months)}:{dimension}"
-    )
+    cache_tool = f"kline_api:{longitude}:{max_age}:{max_dayun}:{int(include_months)}:{dimension}"
     payload = bazi_cache.get(birth_time, gender, sect, yun_sect, cache_tool)
     if payload is not None:
         return payload
@@ -272,15 +264,11 @@ async def annotate_kline(
             detail=f"dimension 需为 {'/'.join(fortune_score.DIMENSIONS)} 之一",
         )
     if body.scope not in annotator.SCOPES:
-        raise HTTPException(
-            status_code=400, detail=f"scope 需为 {'/'.join(annotator.SCOPES)} 之一"
-        )
+        raise HTTPException(status_code=400, detail=f"scope 需为 {'/'.join(annotator.SCOPES)} 之一")
     if body.scope == annotator.SCOPE_YEAR and body.year is None:
         raise HTTPException(status_code=400, detail="scope=year 时必须给 year")
     if not 0 <= body.max_dayun <= MAX_DAYUN_LIMIT:
-        raise HTTPException(
-            status_code=400, detail=f"max_dayun 需在 0-{MAX_DAYUN_LIMIT} 之间（0=不启用）"
-        )
+        raise HTTPException(status_code=400, detail=f"max_dayun 需在 0-{MAX_DAYUN_LIMIT} 之间（0=不启用）")
 
     chat_model = getattr(app_ctx, "chat_model", None)
     if chat_model is None:
@@ -288,10 +276,7 @@ async def annotate_kline(
 
     anchor_year = annotator.today_year()
     # 覆盖步数要进缓存键：批注写的是"全期最高/最低"，区间一变文案就该变
-    tool = (
-        f"{annotator.cache_tool(body.scope, body.dimension, body.year, anchor_year)}"
-        f"|dayun{body.max_dayun}"
-    )
+    tool = f"{annotator.cache_tool(body.scope, body.dimension, body.year, anchor_year)}|dayun{body.max_dayun}"
     hit = bazi_cache.get(body.birth_time, body.gender, body.sect, body.yun_sect, tool)
     if hit is not None:
         return {**hit, "cached": True}
@@ -329,9 +314,7 @@ async def annotate_kline(
     result["dimension"] = body.dimension
     # 只缓存成功的批注：一次模型抽风不该被缓存成"这盘永远没批注"
     if result.get("ok"):
-        bazi_cache.set(
-            body.birth_time, body.gender, result, body.sect, body.yun_sect, tool
-        )
+        bazi_cache.set(body.birth_time, body.gender, result, body.sect, body.yun_sect, tool)
     return {**result, "cached": False}
 
 
@@ -368,9 +351,7 @@ def _compute_resonance_payload(
     chart_a = _build_chart(birth_a, gender_a, sect, yun_sect, longitude_a)
     chart_b = _build_chart(birth_b, gender_b, sect, yun_sect, longitude_b)
     max_age = _resolve_pair_max_age(chart_a, chart_b, max_age=max_age, max_dayun=max_dayun)
-    payload = kline_resonance.build_resonance(
-        chart_a, chart_b, max_age=max_age, dimension=dimension
-    )
+    payload = kline_resonance.build_resonance(chart_a, chart_b, max_age=max_age, dimension=dimension)
     # 两盘各自的喜忌摘要随共振线一起给：前端画共振线时通常要在同一屏显示双方用神，
     # 缺了它前端得再打两次 /kline，而这两张盘后端刚刚已经建好了。
     payload["favorA"] = fortune_score.chart_favor_summary(chart_a)
@@ -418,9 +399,7 @@ async def get_kline_resonance(body: KlineResonanceRequest):
     if not 0 < body.max_age <= MAX_AGE_LIMIT:
         raise HTTPException(status_code=400, detail=f"max_age 需在 1-{MAX_AGE_LIMIT} 之间")
     if not 0 <= body.max_dayun <= MAX_DAYUN_LIMIT:
-        raise HTTPException(
-            status_code=400, detail=f"max_dayun 需在 0-{MAX_DAYUN_LIMIT} 之间（0=不启用）"
-        )
+        raise HTTPException(status_code=400, detail=f"max_dayun 需在 0-{MAX_DAYUN_LIMIT} 之间（0=不启用）")
     if body.dimension not in fortune_score.DIMENSIONS:
         raise HTTPException(
             status_code=400,
@@ -455,9 +434,7 @@ async def get_kline_resonance(body: KlineResonanceRequest):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    bazi_cache.set(
-        body.birth_time_a, body.gender_a, payload, body.sect, body.yun_sect, tool
-    )
+    bazi_cache.set(body.birth_time_a, body.gender_a, payload, body.sect, body.yun_sect, tool)
     return {**payload, "cached": False}
 
 
@@ -497,9 +474,7 @@ async def submit_kline_feedback(body: KlineFeedbackRequest):
             detail=f"dimension 需为 {'/'.join(fortune_score.DIMENSIONS)} 之一",
         )
     if body.scope not in annotator.SCOPES:
-        raise HTTPException(
-            status_code=400, detail=f"scope 需为 {'/'.join(annotator.SCOPES)} 之一"
-        )
+        raise HTTPException(status_code=400, detail=f"scope 需为 {'/'.join(annotator.SCOPES)} 之一")
     if body.scope == annotator.SCOPE_YEAR and body.year is None:
         raise HTTPException(status_code=400, detail="scope=year 时必须给 year")
     if not KLINE_RATING_MIN <= body.rating <= KLINE_RATING_MAX:
@@ -629,12 +604,12 @@ async def submit_kline_event(body: KlineEventRequest):
     if body.polarity not in KLINE_POLARITIES:
         raise HTTPException(status_code=400, detail="polarity 只能取 1（吉）/ 0（平）/ -1（凶）")
     if body.domain not in KLINE_EVENT_DOMAINS:
-        raise HTTPException(
-            status_code=400, detail=f"domain 需为 {'/'.join(KLINE_EVENT_DOMAINS)} 之一"
-        )
+        raise HTTPException(status_code=400, detail=f"domain 需为 {'/'.join(KLINE_EVENT_DOMAINS)} 之一")
     ganzhi_year = _resolve_ganzhi_year(body.ganzhi_year, body.event_date)
     if not KLINE_EVENT_YEAR_MIN <= ganzhi_year <= KLINE_EVENT_YEAR_MAX:
-        raise HTTPException(status_code=400, detail=f"ganzhi_year 需在 {KLINE_EVENT_YEAR_MIN}-{KLINE_EVENT_YEAR_MAX} 之间")
+        raise HTTPException(
+            status_code=400, detail=f"ganzhi_year 需在 {KLINE_EVENT_YEAR_MIN}-{KLINE_EVENT_YEAR_MAX} 之间"
+        )
     if body.sect not in (1, 2):
         raise HTTPException(status_code=400, detail="sect 需为 1 或 2")
 
@@ -678,9 +653,7 @@ async def list_kline_events_endpoint(
     from app.db.chart_store import KLINE_EVENT_DOMAINS
 
     if domain and domain not in KLINE_EVENT_DOMAINS:
-        raise HTTPException(
-            status_code=400, detail=f"domain 需为 {'/'.join(KLINE_EVENT_DOMAINS)} 之一"
-        )
+        raise HTTPException(status_code=400, detail=f"domain 需为 {'/'.join(KLINE_EVENT_DOMAINS)} 之一")
     if not 0 < limit <= MAX_BACKTEST_EVENTS:
         raise HTTPException(status_code=400, detail=f"limit 需在 1-{MAX_BACKTEST_EVENTS} 之间")
     items = await repo.list_kline_events(birth_time, gender, ganzhi_year, domain, limit)
@@ -751,9 +724,7 @@ async def submit_kline_pair_event(body: KlinePairEventRequest):
     if body.polarity not in KLINE_POLARITIES:
         raise HTTPException(status_code=400, detail="polarity 只能取 1（顺）/ 0（平）/ -1（逆）")
     if body.relation and body.relation not in KLINE_RELATIONS:
-        raise HTTPException(
-            status_code=400, detail=f"relation 需为 {'/'.join(KLINE_RELATIONS)} 之一或留空"
-        )
+        raise HTTPException(status_code=400, detail=f"relation 需为 {'/'.join(KLINE_RELATIONS)} 之一或留空")
     ganzhi_year = _resolve_ganzhi_year(body.ganzhi_year, body.event_date)
     if not KLINE_EVENT_YEAR_MIN <= ganzhi_year <= KLINE_EVENT_YEAR_MAX:
         raise HTTPException(
@@ -831,6 +802,7 @@ async def delete_kline_pair_event_endpoint(event_id: str):
 
 
 # ---------------- 回测 ----------------
+
 
 def _backtest_pairs(events: list[dict], *, max_charts: int | None = None) -> tuple[list[tuple], int]:
     """按「同一张盘」把事件分组并建盘。返回 ([(chart, events)], 被忽略的盘数)。
@@ -913,9 +885,7 @@ async def run_kline_backtest_endpoint(
         raise HTTPException(status_code=400, detail=str(e))
 
 
-def _backtest_pair_groups(
-    events: list[dict], *, max_pairs: int | None = None
-) -> tuple[list[tuple], int]:
+def _backtest_pair_groups(events: list[dict], *, max_pairs: int | None = None) -> tuple[list[tuple], int]:
     """按「同一对人」把关系事件分组并建盘。返回 ([(甲盘, 乙盘, events)], 被忽略的对数)。
 
     分组键用 `kline_pair_key`（两侧 chart_hash 排序后拼接）而不是原始四侧生辰：
@@ -1012,9 +982,7 @@ async def run_kline_pair_backtest_endpoint(
 
     def _run() -> dict:
         pairs, truncated = _backtest_pair_groups(events, max_pairs=MAX_BACKTEST_PAIRS)
-        result = kline_backtest.run_pair_backtest(
-            pairs, dimension=dimension, min_samples=min_samples
-        )
+        result = kline_backtest.run_pair_backtest(pairs, dimension=dimension, min_samples=min_samples)
         if truncated:
             result["warnings"].append(
                 f"配对过多，已按事件条数取前 {MAX_BACKTEST_PAIRS} 对（忽略 {truncated} 对）。"

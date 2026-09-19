@@ -30,6 +30,7 @@ from typing import Any
 
 from app.domain.analysis_calc import _controller_of, _producer_of
 from app.domain.chart_builder import _find_dayun_for_year, parse_birth, parse_gender
+from app.domain.ganzhi_relations import branch_relations
 from app.domain.models import BaziChart
 from app.domain.tables import CONTROLS, GAN_WUXING, GENERATES, HIDDEN_STEMS, WUXING_ORDER, ZHI_WUXING
 from app.domain.xipan import _MONTH_ZHI, _month_ganzhi, _year_ganzhi
@@ -68,6 +69,14 @@ BALANCED_TILT_SPAN = 2.2
 
 # 印重判据：印权重 ≥ 比劫 × 该倍数，且印为五行之最重者。见 `_resource_dominant`。
 RESOURCE_DOMINANT_RATIO = 1.5
+
+# 杀重判据（两条成立其一，均要求官杀为五行之最重）：
+#   ① 官杀 ≥ 比劫 × OFFICER_DOMINANT_RATIO；
+#   ② 比劫之根被原局六冲伤及 —— 根气虚浮，纯计数高估了比劫一党的抗杀之力。
+OFFICER_DOMINANT_RATIO = 1.15
+# 制化通道门槛：印（化杀）或食伤（制杀）≥ 官杀 × 该倍数即视为「有制有化」——
+# 杀印相生、食神制杀都是成格而不为病，不得进病药路径。
+OFFICER_MEDICINE_RATIO = 0.5
 
 # ---------------- 维度（十神侧重） ----------------
 # 「维度」不是换一套算法，而是**换一组十神侧重**：喜忌方向仍由原局决定（偏弱喜比印、
@@ -193,6 +202,50 @@ def _resource_dominant(counts: dict[str, float], same: str, resource: str) -> bo
     return counts.get(resource, 0.0) >= counts.get(same, 0.0) * RESOURCE_DOMINANT_RATIO
 
 
+def _same_root_clashed(zhis: list[str], same: str) -> bool:
+    """比劫之根（主气属比劫的地支）是否被原局六冲伤及。
+
+    六冲判定委托 `ganzhi_relations.branch_relations`（原局内部关系的单一事实源，
+    与 `analysis_calc` 同一入口）。藏干余气之根不计 —— 那是「有根」而非「有强根」，
+    折算进判据会让门槛失真。
+    """
+    roots = {z for z in zhis if ZHI_WUXING.get(z) == same}
+    if not roots:
+        return False
+    return any(any(root in rel for root in roots) for rel in branch_relations(zhis).chong)
+
+
+def _officer_dominant(
+    counts: dict[str, float],
+    zhis: list[str],
+    same: str,
+    resource: str,
+    output: str,
+    officer: str,
+) -> bool:
+    """杀重：官杀为五行之最重、且原局无制无化，克身成病。
+
+    与印重互斥（两者都要求自己是「最重」）。三个先决条件各自负责一件事：
+    - 「官杀为最重」说明病神所在（五行偏枯在官杀，04 文档 §三.1「官杀太重」）；
+    - 「印、食伤皆 ≤ 官杀 × OFFICER_MEDICINE_RATIO」把「杀重无制」与
+      「杀印相生 / 食神制杀」分开 —— 后两者是成格，官杀是被用的对象，不是病，
+      套病药论反而会把「印夺食 / 伤用神」说成吉；
+    - 「官杀显著重于比劫，或比劫之根被冲」回应的是：比劫党众硬抗能把 score 顶进
+      中和正侧，数值上「补平」了官杀的压制，但硬抗不等于制化（见 `_officer_ailment_signs`）。
+    """
+    if not counts or officer not in WUXING_ORDER or counts.get(officer, 0.0) <= 0:
+        return False
+    if max(WUXING_ORDER, key=lambda k: counts.get(k, 0.0)) != officer:
+        return False
+    if counts.get(resource, 0.0) > counts.get(officer, 0.0) * OFFICER_MEDICINE_RATIO:
+        return False
+    if counts.get(output, 0.0) > counts.get(officer, 0.0) * OFFICER_MEDICINE_RATIO:
+        return False
+    if counts.get(officer, 0.0) >= counts.get(same, 0.0) * OFFICER_DOMINANT_RATIO:
+        return True
+    return _same_root_clashed(zhis, same)
+
+
 def _ailment_signs(same: str, resource: str, output: str, wealth: str, officer: str) -> dict[str, float]:
     """印多之病 → 药：以财制印、以比劫泄印（04 文档 §三.2）；官杀生印，是给病神添柴。
 
@@ -204,6 +257,22 @@ def _ailment_signs(same: str, resource: str, output: str, wealth: str, officer: 
     否则「最忌」会被基准系数截胡，落不到病神头上。
     """
     return {same: 0.8, resource: -1.2, output: 0.7, wealth: 1.0, officer: -0.9}
+
+
+def _officer_ailment_signs(
+    same: str, resource: str, output: str, wealth: str, officer: str
+) -> dict[str, float]:
+    """杀重之病 → 药：食伤制杀、印化杀（04 文档 §三.2）；财滋杀，是给病神添柴。
+
+    **术语**：杀为病时食伤克杀是「制杀」（用药）；杀为用（从杀格、杀印相生）时
+    食伤克杀才是「破格」。字面相近而吉凶相反，与印重路径的「制印/坏印」辨析同构。
+
+    食伤 sign 取 1.6：× OUTPUT_COEF(0.55) = 0.88，方能压过印 ×RESOURCE_COEF(0.85) = 0.85，
+    保住「有杀先论杀、制杀为先」的次序 —— 金木交战等贴局亦以食伤通关制杀为急务，
+    印化杀为辅，比劫硬抗再次（能分力但制不了病）。
+    官杀为病神本身，忌得最重（1.2），否则「最忌」会被基准系数截胡。
+    """
+    return {same: 0.8, resource: 1.0, output: 1.6, wealth: -0.9, officer: -1.2}
 
 
 def _balanced_signs(
@@ -243,6 +312,7 @@ def favor_vector(chart: BaziChart) -> dict[str, float]:
         wealth: WEALTH_COEF,
         officer: OFFICER_COEF,
     }
+    zhis = [p.zhi for p in chart.pillars]
 
     if w.special_pattern == "专旺":
         # 顺其旺势：比劫/印/食伤泄秀为喜；官杀逆克激怒旺神，忌得最重
@@ -262,6 +332,16 @@ def favor_vector(chart: BaziChart) -> dict[str, float]:
         # 三个排除条件：专旺/从格已在前分流；偏弱档印是日主靠山，不作病论；
         # 极旺近专旺，仍以顺其旺势为口径，不在此处改向。
         signs = _ailment_signs(same, resource, output, wealth, officer)
+    elif (
+        w.strength != "极旺"
+        and w.strength_score > 0
+        and _officer_dominant(w.counts, zhis, same, resource, output, officer)
+    ):
+        # 杀重之病。档位同样回答不了「克从何来」：比劫党众硬抗能把 score 顶进
+        # 中和/偏旺正侧，方向表随之给出「最喜官杀」——给病神添柴。典型事故盘：
+        # 乙酉×3 乙卯（三酉冲一卯），天干四乙把 +0.44 的贴零分补成正侧。
+        # 排除条件与印重同构，另加「有制有化不为病」（杀印相生/食神制杀是成格）。
+        signs = _officer_ailment_signs(same, resource, output, wealth, officer)
     elif w.strength in ("偏旺", "极旺"):
         signs = {same: -1.0, resource: -0.8, output: 1.0, wealth: 1.0, officer: 1.0}
     else:
@@ -636,8 +716,11 @@ def _candle_to_dict(c: Candle) -> dict[str, Any]:
 def detect_ailment(chart: BaziChart) -> str:
     """原局病神代号；无病（或不在本引擎判据内）返回空串。
 
-    目前只识别一种能由五行权重确定性判定的病：**印重**。
-    其余病种（官杀重 / 财多身弱 / 食伤泄身太过等）在 `strength` 五档里已被
+    目前识别两种能由五行权重 + 原局六冲确定性判定的病：
+    - **印重**（resource_dominant）：旺由印撑，官杀生印反助病；
+    - **杀重**（officer_dominant）：官杀最重且无制无化。比劫党众硬抗会把 score
+      顶进中和/偏旺正侧，方向表随之误判「最喜官杀」，故须按病药论改向。
+    其余病种（财多身弱 / 食伤泄身太过等）在 `strength` 五档里已被
     「偏弱喜印比、忌克泄耗」覆盖，不需另立分支。
     """
     w = chart.wuxing
@@ -648,12 +731,22 @@ def detect_ailment(chart: BaziChart) -> str:
         return ""
     if _resource_dominant(w.counts, day_wx, _producer_of(day_wx)):
         return "resource_dominant"
+    if _officer_dominant(
+        w.counts,
+        [p.zhi for p in chart.pillars],
+        day_wx,
+        _producer_of(day_wx),
+        GENERATES.get(day_wx, ""),
+        _controller_of(day_wx),
+    ):
+        return "officer_dominant"
     return ""
 
 
 # 病神 → 一句话依据。放在后端是为了单一事实源：前端只显示，不解释命理口径。
 AILMENT_NOTES = {
     "resource_dominant": "病在印重：印为五行之最重、日主之旺独由印撑。以财制印、比劫泄印为药，官杀生印反助病。",
+    "officer_dominant": "病在杀重：官杀为五行之最重、原局无制无化而攻身。以食伤制杀、印星化杀为药，财滋杀反助病。",
 }
 
 
