@@ -7,7 +7,7 @@ import json
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from app.agent.context import get_app_context
+from app.agent.context import get_sub_app_model
 from app.agent.prompts import LIUYAO_SYSTEM_PROMPT
 from app.core.llm_throttle import llm_tag
 from app.core.logger import log
@@ -110,7 +110,7 @@ async def interpret_liuyao(body: dict):
     )
     try:
         with llm_tag("liuyao"):
-            response = await get_app_context().chat_model.ainvoke(
+            response = await get_sub_app_model().ainvoke(
                 [SystemMessage(content=LIUYAO_SYSTEM_PROMPT), HumanMessage(content=prompt)]
             )
         return {"interpretation": str(response.content)}

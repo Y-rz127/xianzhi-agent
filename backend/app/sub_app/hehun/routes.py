@@ -7,7 +7,7 @@ import json
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 
-from app.agent.context import get_app_context
+from app.agent.context import get_sub_app_model
 from app.core.http.errors import client_error
 from app.core.logger import log
 from app.core.text_extract import normalize_ws_payload_text
@@ -83,7 +83,7 @@ async def hehun(
     try:
         # 排盘与 LLM 调用均为同步阻塞计算，放线程池避免卡住事件循环
         try:
-            llm = get_app_context().chat_model
+            llm = get_sub_app_model()
         except RuntimeError:
             llm = None
         result = await asyncio.to_thread(

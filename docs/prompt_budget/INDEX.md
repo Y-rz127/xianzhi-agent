@@ -38,7 +38,7 @@ LangGraph 图：classify → chart(扩盘) → retrieve(知识检索) → genera
 ```
 
 - 编排后端**只有 LangGraph 一种**：`XianzhiWorkflow.__init__` 直接构建图，构建失败即快速失败；`AppContext.workflow_backend()` 固定返回 `"langgraph"`，settings 中已无切换项。旧文档描述的"内置 workflow 可切回"分支已不存在。
-- 意图拆解（decompose_model）与 Reviewer 深审（reviewer_model）可配独立轻量模型（`main.py` 构造，缺省复用主模型）。
+- 意图拆解（decompose_model）、Reviewer 深审（reviewer_model）、子应用解读（sub_app_model）可各配独立模型（`main.py` 构造，缺省复用主模型）。三者的 thinking 开关按角色配（`*_ENABLE_THINKING`）：有的模型只接受 `enable_thinking=true`，写错会让那一层每轮 400 后被兜底吞掉，启动探活会纠正并提示（`app/core/llm_health.py`）。
 
 **两条路径共用的公共调用**：会话跑完后 `_persist_history` 末尾触发【会话摘要】（`shared_summary.md`），异步后台执行，两条路径都会发生。
 
@@ -74,6 +74,8 @@ LangGraph 图：classify → chart(扩盘) → retrieve(知识检索) → genera
 ## 五、子应用独立提示词（不走主问答链路）
 
 塔罗/六爻/紫微/合婚/报告为独立子应用（`app/sub_app/*`、`app/tools/report_generator.py`），各自独立调 LLM，与上面 ReAct/Workflow 主链路互不叠加。共用提示词已收进 `app/agent/prompts.py` 单一事实源：
+
+**解读模型**：`app/sub_app/` 的四个解读入口（塔罗/六爻/紫微/合婚）统一走 `get_sub_app_model()` —— 配了 `SUB_APP_MODEL` 用独立实例，留空则回落主问答模型（旧行为）。**不要再直接取 `get_app_context().chat_model`**（`tests/test_sub_app_model.py` 有守卫）、也不要在装配期注入（模型实例可能被启动探活整体替换，`TarotApp` 因此按请求解析）。报告生成与 K 线批注仍走主模型。
 
 | 常量 | 值（字） | 消费方 |
 |---|---|---|

@@ -13,7 +13,7 @@ from collections.abc import AsyncGenerator
 
 from langchain_core.messages import BaseMessage
 
-from app.agent.context import get_app_context
+from app.agent.context import get_sub_app_model
 from app.core.llm_throttle import llm_tag
 from app.core.logger import log
 from app.core.text_extract import normalize_chunk_text
@@ -35,7 +35,7 @@ async def llm_interpret_stream(
     had_chunk = False
     try:
         with llm_tag(tag):
-            async for chunk in get_app_context().chat_model.astream(msgs):
+            async for chunk in get_sub_app_model().astream(msgs):
                 text = normalize_chunk_text(getattr(chunk, "content", None))
                 if text:
                     had_chunk = True

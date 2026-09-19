@@ -99,6 +99,8 @@ class AppContext:
     tarot_app: Any = None
     decompose_model: Any = None
     reviewer_model: Any = None
+    # 子应用（塔罗/紫微/六爻/合婚）解读模型：空则回落主问答模型（见 get_sub_app_model）
+    sub_app_model: Any = None
     # conversation_id -> Xianzhi 实例（会话锁为 agent.lock 上的 SessionLock，获取时现构）
     _agents: "OrderedDict[str, Any]" = field(default_factory=OrderedDict, repr=False)
     _pool_lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
@@ -109,6 +111,8 @@ class AppContext:
             self.decompose_model = self.chat_model
         if self.reviewer_model is None:
             self.reviewer_model = self.chat_model
+        if self.sub_app_model is None:
+            self.sub_app_model = self.chat_model
 
     def get_xianzhi(self, conversation_id: str):
         """获取（或创建）指定会话的 Xianzhi 实例及其会话锁（调用方在锁内完成会话操作，避免并发污染）。
@@ -167,3 +171,16 @@ def get_app_context() -> AppContext:
     if _app_context is None:
         raise RuntimeError("AppContext not initialized")
     return _app_context
+
+
+def get_sub_app_model() -> Any:
+    """子应用（塔罗/紫微/六爻/合婚）解读用模型。
+
+    优先取 `SUB_APP_MODEL` 配出来的独立实例，未配置时回落主问答模型（＝旧行为）。
+    子应用一律**按请求调用本函数**而不是在装配期注入：模型实例可能被启动探活纠正后
+    整体替换（见 `app/core/llm_health.py`），提前抓住引用会让纠正对子应用失效。
+
+    用 getattr 取字段而不是直接属性访问：测试里存在只塞了 `chat_model` 的 AppContext 替身。
+    """
+    ctx = get_app_context()
+    return getattr(ctx, "sub_app_model", None) or ctx.chat_model

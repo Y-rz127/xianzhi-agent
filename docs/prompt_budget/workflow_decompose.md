@@ -4,7 +4,7 @@
 
 - **所属路径**：Workflow（`app/agent/workflow/xianzhi_workflow.py` 的 `XianzhiWorkflow`）
 - **触发条件**：`answer()` 中 `detect_domain` 不是 `chitchat` **且** `_looks_off_topic` 为 False 时才调用（xianzhi_workflow.py:191-202）；否则用 `classify_question` 关键词兜底，**不消耗这次 LLM**
-- **LLM 调用点**：`xianzhi_workflow.py:131` → `self._decompose_model.invoke(messages)`。拆解模型为**独立轻量模型**（`main.py:112-117` 按 `settings.decompose_model` 构造，thinking 强制关闭、temperature 0.1；未配置时复用主模型）
+- **LLM 调用点**：`xianzhi_workflow.py:131` → `self._decompose_model.invoke(messages)`。拆解模型为**独立轻量模型**（`main.py` 按 `settings.decompose_model` 构造，temperature 0.1，thinking 由 `DECOMPOSE_ENABLE_THINKING` 按模型能力配、启动探活会纠正；未配置时复用主模型）
 - **调用次数**：每次问答 **最多 1 次**，且可能被短路跳过
 - **产出**：结构化 `{domain, target_years, queries, needs_chart, other_birth_time, other_gender, confidence}`，供后续检索与 LangGraph 路由（queries ≤3 条）
 

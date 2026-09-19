@@ -7,7 +7,7 @@ import json
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from app.agent.context import get_app_context
+from app.agent.context import get_sub_app_model
 from app.agent.prompts import ZIWEI_SYSTEM_PROMPT
 from app.core.http.errors import client_error
 from app.core.llm_throttle import llm_tag
@@ -120,7 +120,7 @@ async def ziwei_interpret(body: dict):
     )
     try:
         with llm_tag("ziwei"):
-            response = await get_app_context().chat_model.ainvoke(
+            response = await get_sub_app_model().ainvoke(
                 [SystemMessage(content=ZIWEI_SYSTEM_PROMPT), HumanMessage(content=prompt)]
             )
         return {"text": str(response.content)}

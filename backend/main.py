@@ -167,12 +167,24 @@ async def lifespan(app: FastAPI):
         if settings.reviewer_model
         else chat_model
     )
+    # 子应用（塔罗/紫微/六爻/合婚）解读模型：与问答主模型分开配，留空则复用主模型。
+    # temperature/timeout 跟主模型一致（解读与问答同为"生成一段话"，不另立口径）。
+    sub_app_model = (
+        _make_sub_model(
+            settings.sub_app_model,
+            settings.llm_temperature,
+            settings.llm_timeout,
+            settings.sub_app_enable_thinking,
+        )
+        if settings.sub_app_model
+        else chat_model
+    )
 
     # 记忆（数据库不可达时降级，不阻断端口监听）
     memory = create_chat_memory()
 
     local_tools = bazi_tools + search_tools + terminate_tools + rag_tools + huangli_tools + ziwei_tools
-    tarot_app = TarotApp(chat_model=chat_model)
+    tarot_app = TarotApp()  # 不注入模型：divine_stream 按请求取子应用解读模型（见 TarotApp docstring）
 
     # Xianzhi 按会话池化，首次请求时按需创建实例；HTTP handler 经依赖注入获取，WS 经模块级 get_app_context()
     app_ctx = AppContext(
@@ -182,6 +194,7 @@ async def lifespan(app: FastAPI):
         tarot_app=tarot_app,
         decompose_model=decompose_model,
         reviewer_model=reviewer_model,
+        sub_app_model=sub_app_model,
     )
     app.state.app_context = app_ctx
     set_app_context(app_ctx)
@@ -207,6 +220,17 @@ async def lifespan(app: FastAPI):
             enable_thinking=settings.reviewer_enable_thinking,
             rebuild=lambda flag: _make_sub_model(settings.reviewer_model, 0.1, 60.0, flag),
             model=reviewer_model,
+        ),
+        SubModelSpec(
+            label="子应用解读",
+            attr="sub_app_model",
+            env_key="SUB_APP_ENABLE_THINKING",
+            model_name=settings.sub_app_model,
+            enable_thinking=settings.sub_app_enable_thinking,
+            rebuild=lambda flag: _make_sub_model(
+                settings.sub_app_model, settings.llm_temperature, settings.llm_timeout, flag
+            ),
+            model=sub_app_model,
         ),
     ]
     sub_model_specs = [s for s in sub_model_specs if s.model_name]

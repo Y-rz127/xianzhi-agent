@@ -48,6 +48,11 @@ class Settings(BaseSettings):
     # 启动时 `app/core/llm_health.py::probe_sub_models` 会各探一次，不匹配则自动纠正并提示。
     decompose_enable_thinking: bool = Field(default=False, alias="DECOMPOSE_ENABLE_THINKING")
     reviewer_enable_thinking: bool = Field(default=False, alias="REVIEWER_ENABLE_THINKING")
+    # 子应用（塔罗/紫微/六爻/合婚）的解读模型：与「先知问答」主模型分开配，留空则复用主模型。
+    # 为什么值得分开：问答链要长上下文 + 推理（贵、慢），子应用解读是一次性短输出，
+    # 混用时两边的成本/时延互相绑死 —— 想给解读换个便宜快模型就得连问答一起换。
+    sub_app_model: str = Field(default="", alias="SUB_APP_MODEL")
+    sub_app_enable_thinking: bool = Field(default=False, alias="SUB_APP_ENABLE_THINKING")
     # LLM 生成参数；temperature 默认不传（None）：
     # kimi-k3 等模型不接受 temperature 参数，显式设置会被 400 拒绝；
     # 使用 qwen 等支持采样温度的模型时可设 LLM_TEMPERATURE=0.7

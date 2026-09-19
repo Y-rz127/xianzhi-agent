@@ -8,6 +8,7 @@ from typing import AsyncIterator, Literal
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from app.agent.context import get_sub_app_model
 from app.agent.prompts import TAROT_SYSTEM_PROMPT
 from app.core.llm_throttle import llm_tag
 from app.core.logger import log
@@ -456,7 +457,13 @@ SPREADS: dict[str, dict] = {
 
 
 class TarotApp:
-    def __init__(self, chat_model: BaseChatModel):
+    def __init__(self, chat_model: BaseChatModel | None = None):
+        """chat_model 仅用于测试/特殊装配的显式注入。
+
+        生产装配**不注入**（`TarotApp()`）：解读时按请求取「子应用解读模型」
+        （`SUB_APP_MODEL`，未配置则回落主问答模型），这样改了模型配置——包括启动探活
+        对子模型实例的整体替换——不需要重建 TarotApp。
+        """
         self.chat_model = chat_model
 
     def draw_cards(self, spread: SpreadKey) -> list[dict]:
@@ -499,10 +506,12 @@ class TarotApp:
 解读要落到问卜者的具体问题上。"""
 
         msgs = [SystemMessage(content=TAROT_SYSTEM_PROMPT), HumanMessage(content=user_prompt)]
+        # 显式注入优先（测试）；否则按请求取子应用解读模型（SUB_APP_MODEL，未配置＝主问答模型）
+        model = self.chat_model or get_sub_app_model()
         try:
             has_any_chunk = False
             with llm_tag("tarot"):
-                async for chunk in self.chat_model.astream(msgs):
+                async for chunk in model.astream(msgs):
                     text = self._normalize_chunk_text(getattr(chunk, "content", None))
                     if text:
                         has_any_chunk = True
