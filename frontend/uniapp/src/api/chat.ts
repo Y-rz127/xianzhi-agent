@@ -67,6 +67,34 @@ function extractErrMsg(err: any, fallback: string): string {
   return fallback
 }
 
+/**
+ * 连接握手超时（ms）：正常 1s 内连上，给弱网首连留足余量。
+ *
+ * ⚠️ 不要退回"X 毫秒后先盲发一次"的兜底（2026-09-19 线上现场）：
+ * 未连通的 socket 上 `sendSocketMessage` 必定失败，而 fail 回调会把整轮请求判死
+ * （弹「发送失败」+ sent 已置位 ⇒ onSocketOpen 到达后也不再重试）—— 用户消息就这么丢了。
+ * 那段兜底来自文件头「坑2：真机 task.onOpen 不触发」，但改用 wx 全局 API 之后
+ * `wx.onSocketOpen` 是可靠的，盲发只剩副作用。
+ * 真机若再现 onOpen 不触发，现在的症状是「连接超时」（可见、可重试），不再伪装成发送失败。
+ */
+const WS_CONNECT_TIMEOUT_MS = 10000
+
+/**
+ * 装配握手超时兜底，返回取消函数（onOpen / onError / onClose 都必须调用）。
+ * 到点仍未 settle 就按"连不上"报错，而不是在未连通的 socket 上盲发。
+ */
+function armConnectTimeout(
+  isMine: () => boolean,
+  isSettled: () => boolean,
+  onTimeout: () => void
+): () => void {
+  const timer = setTimeout(() => {
+    if (!isMine() || isSettled()) return
+    onTimeout()
+  }, WS_CONNECT_TIMEOUT_MS)
+  return () => clearTimeout(timer)
+}
+
 let currentChatActive = false
 let currentTarotActive = false
 let wsConnId = 0
@@ -91,11 +119,17 @@ function connectChatWS(path: string, payload: Record<string, any>, cb: ChatWSCal
   let receivedMessage = false
   let doneOrError = false
   let sent = false
+  // 是否已连上（只有 onSocketOpen 置 true）：未连通的 socket 发不出消息，见 doSend 注释
+  let opened = false
+  // 握手超时兜底的取消函数（onOpen / onError / onClose 都要调）
+  let cancelConnectTimeout: () => void = () => {}
 
   function isMine() { return wsConnId === myId }
 
   function doSend() {
-    if (sent || doneOrError) return
+    // 只在真正连上后发送：未连通时 sendSocketMessage 必定失败，失败回调会把整轮判死
+    // （弹「发送失败」且 sent 已置位 ⇒ onSocketOpen 到达后也不再重试）—— 消息就丢了。
+    if (sent || doneOrError || !opened) return
     sent = true
     wx.sendSocketMessage({
       data: JSON.stringify(payload),
@@ -108,6 +142,8 @@ function connectChatWS(path: string, payload: Record<string, any>, cb: ChatWSCal
 
   wx.onSocketOpen(() => {
     if (!isMine()) return
+    cancelConnectTimeout()
+    opened = true
     currentChatActive = true
     doSend()
   })
@@ -133,12 +169,14 @@ function connectChatWS(path: string, payload: Record<string, any>, cb: ChatWSCal
   wx.onSocketError((err: any) => {
     console.error('[WS] onSocketError id=', myId, 'isMine=', isMine(), 'receivedMsg=', receivedMessage, 'err=', err)
     if (!isMine()) return
+    cancelConnectTimeout()
     if (!receivedMessage && !doneOrError) { doneOrError = true; cb.onError(extractErrMsg(err, '连接错误')) }
     currentChatActive = false
   })
 
   wx.onSocketClose(() => {
     if (!isMine()) return
+    cancelConnectTimeout()
     currentChatActive = false
     // 还没收到 done/error 就关了：后端可能仍在生成（本轮实测可长达 2 分钟），
     // 通知页面去取回已落库的回答，而不是让"推演中…"永远转下去
@@ -151,11 +189,11 @@ function connectChatWS(path: string, payload: Record<string, any>, cb: ChatWSCal
   // uni.connectSocket 发起连接（走 uni-app 域名绕过），wx 全局回调收消息（真机稳定）
   uni.connectSocket({ url, complete: () => { } })
 
-  setTimeout(() => {
-    if (!sent && !doneOrError && isMine()) {
-      doSend()
-    }
-  }, 500)
+  // 握手超时兜底：连不上要如实报超时（原"500ms 后盲发一次"已删，理由见 armConnectTimeout）
+  cancelConnectTimeout = armConnectTimeout(isMine, () => opened || doneOrError, () => {
+    doneOrError = true
+    cb.onError('连接超时，请检查网络后重试')
+  })
 
   return null as any
 }
@@ -188,11 +226,13 @@ export function drawTarotCards(spread: 'daily' | 'three_card' | 'relationship' |
   const myId = ++wsConnId
   const url = resolveWsBase() + wsPath('/api/ai/tarot/ws')
 
-  let receivedMessage = false, doneOrError = false, sent = false
+  let receivedMessage = false, doneOrError = false, sent = false, opened = false
+  let cancelConnectTimeout: () => void = () => {}
   function isMine() { return wsConnId === myId }
 
   function doSend() {
-    if (sent || doneOrError) return
+    // 未连通的 socket 发不出消息，且失败回调会把整轮判死（详见 armConnectTimeout 注释）
+    if (sent || doneOrError || !opened) return
     sent = true
     wx.sendSocketMessage({
       data: JSON.stringify({ action: 'draw', spread }),
@@ -200,7 +240,7 @@ export function drawTarotCards(spread: 'daily' | 'three_card' | 'relationship' |
     })
   }
 
-  wx.onSocketOpen(() => { if (!isMine()) return; currentTarotActive = true; doSend() })
+  wx.onSocketOpen(() => { if (!isMine()) return; cancelConnectTimeout(); opened = true; currentTarotActive = true; doSend() })
 
   wx.onSocketMessage((res: any) => {
     if (!isMine() || !currentTarotActive) return
@@ -214,13 +254,17 @@ export function drawTarotCards(spread: 'daily' | 'three_card' | 'relationship' |
 
   wx.onSocketError((err: any) => {
     if (!isMine()) return
+    cancelConnectTimeout()
     if (!receivedMessage && !doneOrError) { doneOrError = true; cb.onError(extractErrMsg(err, '连接错误')) }
     currentTarotActive = false
   })
-  wx.onSocketClose(() => { if (!isMine()) return; currentTarotActive = false })
+  wx.onSocketClose(() => { if (!isMine()) return; cancelConnectTimeout(); currentTarotActive = false })
 
   uni.connectSocket({ url, complete: () => { } })
-  setTimeout(() => { if (!sent && !doneOrError && isMine()) doSend() }, 500)
+  cancelConnectTimeout = armConnectTimeout(isMine, () => opened || doneOrError, () => {
+    doneOrError = true
+    cb.onError('连接超时，请检查网络后重试')
+  })
 
   return null as any
 }
@@ -232,11 +276,13 @@ export function interpretTarotWS(opts: { spread: 'daily' | 'three_card' | 'relat
   const myId = ++wsConnId
   const url = resolveWsBase() + wsPath('/api/ai/tarot/ws')
 
-  let receivedMessage = false, doneOrError = false, sent = false
+  let receivedMessage = false, doneOrError = false, sent = false, opened = false
+  let cancelConnectTimeout: () => void = () => {}
   function isMine() { return wsConnId === myId }
 
   function doSend() {
-    if (sent || doneOrError) return
+    // 未连通的 socket 发不出消息，且失败回调会把整轮判死（详见 armConnectTimeout 注释）
+    if (sent || doneOrError || !opened) return
     sent = true
     wx.sendSocketMessage({
       data: JSON.stringify({ action: 'interpret', spread: opts.spread, question: opts.question || '', cards: opts.cards }),
@@ -244,7 +290,7 @@ export function interpretTarotWS(opts: { spread: 'daily' | 'three_card' | 'relat
     })
   }
 
-  wx.onSocketOpen(() => { if (!isMine()) return; currentTarotActive = true; doSend() })
+  wx.onSocketOpen(() => { if (!isMine()) return; cancelConnectTimeout(); opened = true; currentTarotActive = true; doSend() })
 
   wx.onSocketMessage((res: any) => {
     if (!isMine() || !currentTarotActive) return
@@ -265,13 +311,17 @@ export function interpretTarotWS(opts: { spread: 'daily' | 'three_card' | 'relat
 
   wx.onSocketError((err: any) => {
     if (!isMine()) return
+    cancelConnectTimeout()
     if (!receivedMessage && !doneOrError) { doneOrError = true; cb.onError(extractErrMsg(err, '连接错误')) }
     currentTarotActive = false
   })
-  wx.onSocketClose(() => { if (!isMine()) return; currentTarotActive = false })
+  wx.onSocketClose(() => { if (!isMine()) return; cancelConnectTimeout(); currentTarotActive = false })
 
   uni.connectSocket({ url, complete: () => { } })
-  setTimeout(() => { if (!sent && !doneOrError && isMine()) doSend() }, 500)
+  cancelConnectTimeout = armConnectTimeout(isMine, () => opened || doneOrError, () => {
+    doneOrError = true
+    cb.onError('连接超时，请检查网络后重试')
+  })
 
   return null as any
 }
@@ -294,11 +344,13 @@ function startStreamWS(path: string, payload: Record<string, any>, cb: StreamCal
   const myId = ++wsConnId
   const url = resolveWsBase() + wsPath(path)
 
-  let receivedMessage = false, doneOrError = false, sent = false
+  let receivedMessage = false, doneOrError = false, sent = false, opened = false
+  let cancelConnectTimeout: () => void = () => {}
   function isMine() { return wsConnId === myId }
 
   function doSend() {
-    if (sent || doneOrError) return
+    // 未连通的 socket 发不出消息，且失败回调会把整轮判死（详见 armConnectTimeout 注释）
+    if (sent || doneOrError || !opened) return
     sent = true
     wx.sendSocketMessage({
       data: JSON.stringify(payload),
@@ -306,7 +358,7 @@ function startStreamWS(path: string, payload: Record<string, any>, cb: StreamCal
     })
   }
 
-  wx.onSocketOpen(() => { if (!isMine()) return; currentStreamActive = true; doSend() })
+  wx.onSocketOpen(() => { if (!isMine()) return; cancelConnectTimeout(); opened = true; currentStreamActive = true; doSend() })
 
   wx.onSocketMessage((res: any) => {
     if (!isMine() || !currentStreamActive) return
@@ -329,13 +381,17 @@ function startStreamWS(path: string, payload: Record<string, any>, cb: StreamCal
 
   wx.onSocketError((err: any) => {
     if (!isMine()) return
+    cancelConnectTimeout()
     if (!receivedMessage && !doneOrError) { doneOrError = true; cb.onError(extractErrMsg(err, '连接错误')) }
     currentStreamActive = false
   })
-  wx.onSocketClose(() => { if (!isMine()) return; currentStreamActive = false })
+  wx.onSocketClose(() => { if (!isMine()) return; cancelConnectTimeout(); currentStreamActive = false })
 
   uni.connectSocket({ url, complete: () => { } })
-  setTimeout(() => { if (!sent && !doneOrError && isMine()) doSend() }, 500)
+  cancelConnectTimeout = armConnectTimeout(isMine, () => opened || doneOrError, () => {
+    doneOrError = true
+    cb.onError('连接超时，请检查网络后重试')
+  })
 }
 
 /** 六爻流式解读 */
