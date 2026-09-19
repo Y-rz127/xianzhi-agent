@@ -807,6 +807,7 @@ const EV_DOMAINS: { key: KlineEventDomain; label: string }[] = [
   { key: 'wealth', label: '财运' },
   { key: 'love', label: '感情' },
   { key: 'health', label: '健康' },
+  { key: 'study', label: '学业' },
 ]
 const EV_MAX_ITEMS = 200
 

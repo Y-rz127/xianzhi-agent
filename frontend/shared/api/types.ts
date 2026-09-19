@@ -273,7 +273,7 @@ export interface BaziCandidate { birth_time: string; ganzhi: string; shi_chen: s
 /* ============ 命理 K 线（确定性运势评分 → 年蜡烛） ============ */
 
 /** 取象维度；key 与后端 `fortune_score.DIMENSIONS`、既有领域 key 对齐 */
-export type KlineDimension = 'comprehensive' | 'career' | 'wealth' | 'love' | 'health'
+export type KlineDimension = 'comprehensive' | 'career' | 'wealth' | 'love' | 'health' | 'study'
 
 export interface KlineDimensionOption {
   key: KlineDimension
@@ -494,7 +494,7 @@ export interface KlineFeedbackStats {
 export type KlinePolarity = 1 | 0 | -1
 
 /** 事件领域。与评分维度对齐（general 用综合维度打分） */
-export type KlineEventDomain = 'general' | 'career' | 'wealth' | 'love' | 'health'
+export type KlineEventDomain = 'general' | 'career' | 'wealth' | 'love' | 'health' | 'study'
 
 /** 回测的预测器：close=年末分（与页面同源，默认）；mean=12 月均值（更稳，作对照） */
 export type KlinePredictor = 'close' | 'mean'

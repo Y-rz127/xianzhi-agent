@@ -117,6 +117,7 @@ DOMAIN_DIMENSIONS = {
     "wealth": "wealth",
     "love": "love",
     "health": "health",
+    "study": "study",
 }
 
 

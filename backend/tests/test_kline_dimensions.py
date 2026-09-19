@@ -2,7 +2,7 @@
 
 分两层：
 
-- **指纹层**（`test_dimension_fingerprint_matches_snapshot`）：8 个代表命盘 × 5 个维度
+- **指纹层**（`test_dimension_fingerprint_matches_snapshot`）：8 个代表命盘 × 全部维度
   的收盘分序列逐值冻结。`_DIM_EMPHASIS` 里任何一个侧重系数被顺手改动，此层立刻失败
   ——单测断言（如"事业维度某年 > 60"）对整体平移无感。
 - **不变量层**：抓"维度能算出来、但已经不自洽"。其中最重要的是
@@ -204,6 +204,27 @@ def test_love_dimension_depends_on_gender() -> None:
         assert FS.dimension_emphasis(male, dim) == FS.dimension_emphasis(female, dim), (
             f"「{FS.DIMENSION_LABELS[dim]}」维度不该随性别变化"
         )
+
+
+def test_study_dimension_structure() -> None:
+    """学业维度的侧重结构：印最重（学业文书之本）、食伤次之（聪慧发挥）、财最轻（坏印夺志）。
+
+    钉住 _DIM_EMPHASIS["study"] 的取象次序 —— 只断言偏序关系、不断言具体数值，
+    具体数值由指纹层冻结。若有人把学业侧重改成财最重，这条立刻失败。
+    """
+    from app.domain.chart_builder import build_bazi_chart
+
+    chart = build_bazi_chart("1985-01-05 00:00", "男")
+    empha = FS.dimension_emphasis(chart, "study")
+    mapping = FS._shishen_of_wuxing(chart.wuxing.day_master_wuxing)
+    assert empha[mapping["印枭"]] > empha[mapping["食伤"]], "学业维度印枭应重于食伤"
+    assert empha[mapping["食伤"]] > empha[mapping["官杀"]], "学业维度食伤应重于官杀"
+    wealth_wx = mapping["财"]
+    others = [v for k, v in empha.items() if k != wealth_wx]
+    assert all(empha[wealth_wx] < v for v in others), "学业维度财星（坏印夺志）应为最轻"
+    # 学业与事业都重印，但事业的官杀（权柄）必须重于学业的官杀 —— 否则两维度区分度不足
+    career = FS.dimension_emphasis(chart, "career")
+    assert career[mapping["官杀"]] > empha[mapping["官杀"]], "事业维度官杀应重于学业维度官杀"
 
 
 def test_dimension_is_deterministic() -> None:

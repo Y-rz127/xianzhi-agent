@@ -595,7 +595,7 @@ def kline_feedback_stats(dimension: str = "") -> dict:
 # ---------------- K 线事件标注（回测的真相面） ----------------
 
 KLINE_POLARITIES = (1, 0, -1)  # 吉 / 平 / 凶
-KLINE_EVENT_DOMAINS = ("general", "career", "wealth", "love", "health")
+KLINE_EVENT_DOMAINS = ("general", "career", "wealth", "love", "health", "study")
 # 命理年的合理范围。不是历法限制（lunar-python 覆盖更宽），而是**单位错误护栏**：
 # 传成 20260918 这种"日期当成年份"的错，落库后再发现要先跑一遍数据清洗。
 KLINE_EVENT_YEAR_MIN = 1000

@@ -10,8 +10,8 @@
   会让那个本就偏重的接口再涨一块（历史上 12 步大运 × 1500 条流月曾占 /chart 95% 体积）。
 - **月分数默认不返回**：前端画蜡烛只需要 OHLCV；月分数是调试与"每个值有出处"
   的证据链，需要时用 `include_months=1` 取。
-- **一次请求一个维度**：`dimension` 决定十神侧重（综合/事业/财运/感情/健康），
-  不提供"一次返回全部维度"的批量形态 —— 那会让载荷翻五倍，而切换维度的
+- **一次请求一个维度**：`dimension` 决定十神侧重（综合/事业/财运/感情/健康/学业），
+  不提供"一次返回全部维度"的批量形态 —— 那会让载荷翻倍，而切换维度的
   代价只是一次请求（命盘走 `bazi_cache`，二次请求只重算评分）。
 """
 
@@ -187,7 +187,7 @@ async def get_kline(
         max_dayun: 覆盖到第几步大运（默认 0=不启用）。给值时以整段大运收尾并覆盖
             `max_age`：末段截在半个大运上会让最右边那个大运的干支标签被裁掉。
         include_months: 是否附带每年 12 个节气月的分数明细
-        dimension: 取象维度（comprehensive/career/wealth/love/health），默认综合
+        dimension: 取象维度（comprehensive/career/wealth/love/health/study），默认综合
     """
     from app.tools.cache import bazi_cache
 
@@ -556,7 +556,7 @@ class KlineEventRequest(BaseModel):
     ganzhi_year: int | None = Field(default=None, description="命理年（立春换岁）")
     event_date: str = Field(default="", description="原始公历日期 YYYY-MM-DD，用于推导命理年")
     polarity: int = Field(..., description="1=吉 / 0=平 / -1=凶")
-    domain: str = Field(default="general", description="general/career/wealth/love/health")
+    domain: str = Field(default="general", description="general/career/wealth/love/health/study")
     source: str = Field(default="", description="来源：传记 / 自述 / 案例库 / 人工")
     note: str = Field(default="", max_length=MAX_EVENT_NOTE)
     case_id: str = ""

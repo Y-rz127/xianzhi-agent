@@ -226,7 +226,9 @@ def test_ailment_flips_officer_and_resource_over_wire() -> None:
 def test_dimension_changes_the_curve() -> None:
     """切维度必须真的换曲线，否则前端 tab 是摆设。"""
     base = [c["close"] for c in _payload()["candles"]]
-    for dim in ("career", "wealth", "love", "health"):
+    for dim in fortune_score.DIMENSIONS:
+        if dim == fortune_score.DIM_COMPREHENSIVE:
+            continue
         closes = [c["close"] for c in _payload(dimension=dim)["candles"]]
         ratio = sum(1 for a, b in zip(base, closes) if a != b) / len(base)
         assert ratio > 0.8, f"{dim} 维度只有 {ratio:.0%} 年份与综合不同"
@@ -234,7 +236,9 @@ def test_dimension_changes_the_curve() -> None:
 
 def test_dimension_does_not_change_relations_over_wire() -> None:
     base = [c["relations"] for c in _payload()["candles"]]
-    for dim in ("career", "wealth", "love", "health"):
+    for dim in fortune_score.DIMENSIONS:
+        if dim == fortune_score.DIM_COMPREHENSIVE:
+            continue
         assert [c["relations"] for c in _payload(dimension=dim)["candles"]] == base
 
 

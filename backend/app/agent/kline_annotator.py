@@ -50,6 +50,7 @@ _DIMENSION_DOMAIN = {
     "wealth": "wealth",
     "love": "love",
     "health": "health",
+    "study": "study",
 }
 
 SYSTEM_PROMPT = """你是八字命理分析师，负责解读一张**已经算好的**运势 K 线图。

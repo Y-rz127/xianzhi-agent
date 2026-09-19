@@ -84,16 +84,17 @@ OFFICER_MEDICINE_RATIO = 0.5
 # 后者是命理上早就成立的取象（论事业看官杀、论财看财星、男以财为妻女以官杀为夫），
 # 所以维度增强的是**同一套确定性口径的取象能力**，不是引入新的不确定来源。
 #
-# key 与 `agent.workflow.workflow_models.DOMAIN_LABELS` 对齐（career/wealth/love/health），
+# key 与 `agent.workflow.workflow_models.DOMAIN_LABELS` 对齐（career/wealth/love/health/study），
 # 以便将来 K 线维度与对话领域共用一套命名；comprehensive 是额外加的总纲维度。
 DIM_COMPREHENSIVE = "comprehensive"
-DIMENSIONS = ("comprehensive", "career", "wealth", "love", "health")
+DIMENSIONS = ("comprehensive", "career", "wealth", "love", "health", "study")
 DIMENSION_LABELS = {
     "comprehensive": "综合",
     "career": "事业",
     "wealth": "财运",
     "love": "感情",
     "health": "健康",
+    "study": "学业",
 }
 # 给前端做维度副标题的一句话取象说明。放后端是为了单一事实源 ——
 # 前端只显示，不解释命理口径。
@@ -103,6 +104,7 @@ DIMENSION_NOTES = {
     "wealth": "侧重财星与食伤：论财源与生财之力",
     "love": "男重财星、女重官杀：论感情缘分之向背",
     "health": "侧重比劫与官杀：论元气与攻身之病",
+    "study": "侧重印枭与食伤：论学业文书、聪慧与考试发挥",
 }
 
 # 相对侧重（未归一，1.0 = 与综合维度同等敏感）。数值表达的是十神在对应人事上的份量，
@@ -115,6 +117,9 @@ _DIM_EMPHASIS = {
     "wealth": {"比劫": 0.9, "印枭": 0.7, "食伤": 1.4, "财": 1.8, "官杀": 0.7},
     # 比劫为自身元气、印为养护、官杀为攻身之病；财耗身
     "health": {"比劫": 1.5, "印枭": 1.3, "食伤": 1.1, "财": 0.8, "官杀": 1.4},
+    # 印为学业文书之本（学堂词馆皆印）、食伤为聪慧与临场发挥；
+    # 财坏印夺志（读书人最忌分心于财）、比劫为同窗之争；官杀主功名属事业维度，取基线
+    "study": {"比劫": 0.7, "印枭": 1.8, "食伤": 1.3, "财": 0.6, "官杀": 1.0},
 }
 # 感情维度男女取用相反：男以财为妻（比劫夺财则争），女以官杀为夫（食伤克官则阻）
 _DIM_EMPHASIS_LOVE_MALE = {"比劫": 0.7, "印枭": 1.1, "食伤": 0.9, "财": 1.7, "官杀": 0.8}
