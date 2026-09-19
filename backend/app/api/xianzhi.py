@@ -3,6 +3,7 @@
 历史：本文件曾含全部路由（~700 行）。2026-09-15 拆为——
 - app.api.xianzhi_chat   （SSE / WebSocket / 同步 对话）
 - app.api.xianzhi_chart  （缓存统计 / 岁运关系现算 / 直接排盘 / 八字反推）
+- app.api.xianzhi_kline  （命理 K 线：确定性运势评分 → 年 OHLCV + 大运带）
 - app.api.xianzhi_report （报告任务提交 / 查询 / 下载）
 - app.api._xianzhi_common（命盘挂载 / 线程安全通知桥 / 保活循环 等共享辅助）
 
@@ -16,11 +17,19 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.agent.context import AppContext
-from app.api import _xianzhi_common, data_access as repo, xianzhi_chart, xianzhi_chat, xianzhi_report
+from app.api import (
+    _xianzhi_common,
+    data_access as repo,
+    xianzhi_chart,
+    xianzhi_chat,
+    xianzhi_kline,
+    xianzhi_report,
+)
 from app.api.deps import app_context_dependency, require_admin
 
 chat_router = xianzhi_chat.router
 chart_router = xianzhi_chart.router
+kline_router = xianzhi_kline.router
 report_router = xianzhi_report.router
 
 # 单测直接依赖的符号：保持 ``app.api.xianzhi`` 这一导入路径的向后兼容
@@ -35,6 +44,7 @@ _PILLAR_CACHE = xianzhi_chart._PILLAR_CACHE
 router = APIRouter(prefix="/xianzhi", tags=["Xianzhi"])
 router.include_router(chat_router)
 router.include_router(chart_router)
+router.include_router(kline_router)
 router.include_router(report_router)
 
 
