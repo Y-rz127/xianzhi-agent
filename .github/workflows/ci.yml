@@ -88,3 +88,30 @@ jobs:
         run: npm run build
         # 注：当前 package.json 仅有 dev/build/preview，无独立 lint 脚本。
         # 如需 ESLint/Prettier，待补充配置后在此追加一步。
+
+  uniapp:
+    name: 小程序 (vue-tsc --noEmit)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend/uniapp
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 设置 Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/uniapp/package-lock.json
+
+      - name: 安装依赖
+        run: |
+          if [ -f package-lock.json ]; then npm ci; else npm install; fi
+
+      - name: 类型检查（硬指标：零错误）
+        run: npm run type-check
+        # 必须走 package.json 里的 `vue-tsc --noEmit`，不要照搬 web 的 `-b`：
+        # ① `-b` 检查不到 pages/*.vue —— 曾因此把「有 1 个 TS 错误」误报成 0 错误；
+        # ② `-b` 会把 .js / .js.map emit 回 src/ 与 shared/，污染源码目录
+        #    （已在 uniapp/tsconfig.json 补 noEmit 兜住，这里是第二道）。

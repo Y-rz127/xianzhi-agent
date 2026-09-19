@@ -15,7 +15,13 @@
     "noImplicitThis": true,
     "useDefineForClassFields": true,
     "verbatimModuleSyntax": true,
+    // 历史坑：本文件曾缺 noEmit 且开着 sourceMap —— 于是 `vue-tsc -b`
+    // （而不是 package.json 里配的 `vue-tsc --noEmit`）会把 .js / .js.map
+    // emit 回 src/ 与 shared/，一次跑出 86 个产物文件躺在源码目录里。
+    // 那些 .js 与同名 .ts 并存，import 解析可能命中陈旧产物 ⇒ 改了代码却不生效。
+    // 类型检查请统一走 `npm run type-check`；noEmit 是第二道锁。
     "sourceMap": true,
+    "noEmit": true,
     "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"],

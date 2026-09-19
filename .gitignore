@@ -58,5 +58,12 @@ frontend/web/*.config.js
 frontend/uniapp/*.config.d.ts
 frontend/uniapp/*.config.js
 
+# 类型检查误跑 `vue-tsc -b` 会把产物 emit 回源码目录（uniapp 的 tsconfig 已补 noEmit，
+# 这里再兜一层）。源文件是 *.ts / *.vue，src 与 shared 下不该有手写 .js。
+frontend/uniapp/src/**/*.js
+frontend/uniapp/src/**/*.js.map
+frontend/shared/**/*.js
+frontend/shared/**/*.js.map
+
 # 本地向量模型
 models/*
