@@ -336,6 +336,7 @@ def test_chart_api_payload_contains_xipan():
         "liuyue",
         "liuyueShensha",
         "liunianShensha",
+        "xiaoyunShensha",
         "shenshaDict",
         "monthMeta",
         "ganzhiMeta",
@@ -397,13 +398,34 @@ def test_payload_carries_fields_frontend_selection_depends_on():
     # 逐行出现的键，必须都能在去重附表里查到
     assert {m["ganzhi"] for m in xp["liuyue"]} <= set(xp["liuyueShensha"])
     assert {ln["ganzhi"] for ln in xp["liunian"]} <= set(xp["liunianShensha"])
+    assert {ln["xiaoyun"] for ln in xp["liunian"] if ln.get("xiaoyun")} <= set(xp["xiaoyunShensha"])
     assert {m["zhi"] for m in xp["liuyue"]} <= set(xp["monthMeta"])
     used_gz = {ln["ganzhi"] for ln in xp["liunian"]} | {d["ganzhi"] for d in xp["dayun"] if d["index"] > 0}
     assert used_gz <= set(xp["ganzhiMeta"])
-    # 神煞名都要能在 shenshaDict 里取到说明（流月/流年两处查表共用）
+    # 神煞名都要能在 shenshaDict 里取到说明（流月/流年/小运三处查表共用）
     names = {n for lst in xp["liuyueShensha"].values() for n in lst}
     names |= {n for lst in xp["liunianShensha"].values() for n in lst}
+    names |= {n for lst in xp["xiaoyunShensha"].values() for n in lst}
     assert names <= set(xp["shenshaDict"])
+
+
+def test_xiaoyun_shensha_index_covers_every_xiaoyun():
+    """小运神煞按干支索引下发（童限期细盘把「大运」列换成小运显示，那一列的神煞取这里）。
+
+    口径与流年完全一致：都是「把该干支当临时运柱并入四柱算神煞」（`_yunzhu_shensha`）。
+    少了这份索引，童限盘那一列的神煞行会整列空着（`snapShenshaMap` 查不到干支）。
+    """
+    xp = _chart_xipan("男")
+    index = xp["xiaoyunShensha"]
+    assert index, "小运神煞索引不能为空"
+
+    # 每一年都有小运，且都能查到（含"该干支确实没有神煞"的合法空列表情形）
+    xiaoyun_gz = {ln["xiaoyun"] for ln in xp["liunian"] if ln.get("xiaoyun")}
+    assert xiaoyun_gz <= set(index)
+
+    # 同一干支在流年索引与小运索引里必须一致（同一函数、只认干支）
+    for gz in xiaoyun_gz & set(xp["liunianShensha"]):
+        assert index[gz] == xp["liunianShensha"][gz], f"{gz} 在流年/小运两处口径应一致"
 
 
 def test_relations_match_professional_software():

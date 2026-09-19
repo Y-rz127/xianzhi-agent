@@ -64,19 +64,25 @@ async def get_relations(
     yun_sect: int = 1,
     longitude: float | None = None,
     dayun: str = "",
+    xiaoyun: str = "",
     liunian: str = "",
     liuyue: str = "",
 ):
-    """按指定的 大运/流年/流月 计算「岁运分析 / 原局分析」。
+    """按指定的 大运/小运/流年/流月 计算「岁运分析 / 原局分析」。
 
     细盘页点选大运/流年/流月时调用：页面初次加载的 relations 只对应"今天"那一组，
-    点别的年份不会变（旧行为）。这里按传入干支现算，缺省项自动跳过
-    （童限没有大运、只点到流年/流月也能算）。
+    点别的年份不会变（旧行为）。这里按传入干支现算，缺省项自动跳过。
 
-    入参：dayun/liunian/liuyue 为干支（如 "壬申"），按 大运→流年→流月 顺序叠加在原局上。
+    入参：dayun/xiaoyun/liunian/liuyue 为干支（如 "壬申"），按 运柱→流年→流月 顺序叠加在原局上。
+    **大运与小运互斥**：童限（未起运）没有大运，该段以当年小运论，前端传 xiaoyun 而不是 dayun；
+    两个都传无法判断谁是运柱，直接 400。
     """
-    if not dayun and not liunian and not liuyue:
-        raise HTTPException(status_code=400, detail="至少需要 dayun / liunian / liuyue 之一")
+    if not any((dayun, xiaoyun, liunian, liuyue)):
+        raise HTTPException(status_code=400, detail="至少需要 dayun / xiaoyun / liunian / liuyue 之一")
+    if dayun and xiaoyun:
+        raise HTTPException(
+            status_code=400, detail="dayun 与 xiaoyun 互斥：童限没有大运，该段以当年小运论"
+        )
 
     from app.domain.chart_builder import (
         parse_birth,
@@ -94,7 +100,8 @@ async def get_relations(
         raise HTTPException(status_code=400, detail=str(e))
 
     sui: list[str] = []
-    for label, value in (("dayun", dayun), ("liunian", liunian), ("liuyue", liuyue)):
+    # 顺序即语义（运柱 → 流年 → 流月）：_build_relations 按位置叠加，label 也按此拼接
+    for label, value in (("dayun", dayun), ("xiaoyun", xiaoyun), ("liunian", liunian), ("liuyue", liuyue)):
         value = (value or "").strip()
         if not value:
             continue

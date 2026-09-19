@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import datetime
+from collections.abc import Iterable
 from typing import Any
 
 from lunar_python import Solar
@@ -355,25 +356,34 @@ def _ganzhi_meta(day_master: str) -> dict[str, dict[str, Any]]:
     return out
 
 
-def _liunian_shensha_index(
-    liunian_list: list[dict[str, Any]], pillars: list[Pillar], day_master: str, gender_int: int
+def _yunzhu_shensha_index(
+    ganzhis: Iterable[str], pillars: list[Pillar], day_master: str, gender_int: int
 ) -> tuple[dict[str, list[str]], dict[str, str]]:
-    """流年干支 → 神煞名，外加 名 → 说明。
+    """一组**运柱干支** → 神煞名，外加 名 → 说明。
 
-    流年神煞只由流年干支决定，60 条即可覆盖全部 125 个流年；此前神煞挂在顶层 chart.liunian
-    上且只覆盖当前大运十年，切到别的大运就没有神煞可显示。
+    运柱（大运/流年/流月/小运）神煞只由该干支决定，与运柱身份无关，故同一个函数服务所有运柱：
+    传 60 个干支就覆盖全部流年、小运；此前神煞挂在顶层 chart.liunian 上、只覆盖当前大运十年，
+    切到别的大运就没有神煞可显示。
     """
     names: dict[str, list[str]] = {}
     desc: dict[str, str] = {}
-    for item in liunian_list:
-        gz = item["ganzhi"]
-        if gz in names:
+    for gz in ganzhis:
+        if not gz or gz in names:
             continue
         ss = _yunzhu_shensha(gz, pillars, day_master, gender_int)
         names[gz] = [entry["name"] for entry in ss]
         for entry in ss:
             desc.setdefault(entry["name"], entry["description"])
     return names, desc
+
+
+def _liunian_shensha_index(
+    liunian_list: list[dict[str, Any]], pillars: list[Pillar], day_master: str, gender_int: int
+) -> tuple[dict[str, list[str]], dict[str, str]]:
+    """流年干支 → 神煞名（`_yunzhu_shensha_index` 的流年集包装，保持既有调用点不变）。"""
+    return _yunzhu_shensha_index(
+        [item["ganzhi"] for item in liunian_list], pillars, day_master, gender_int
+    )
 
 
 def _build_liuyue_list(
@@ -595,9 +605,12 @@ def _gan_rel(a: str, b: str) -> str:
     return gan_pair_relation(a, b)
 
 
-def _zhi_group_rel(zhis: list[str]) -> list[str]:
-    """三会 / 三合 / 半合 / 拱合（**按合局力量由强到弱**排列，便于展示层直读）。"""
-    rel = branch_relations(zhis)
+def _zhi_group_rel(zhis: list[str], *, require_from: Iterable[str] | None = None) -> list[str]:
+    """三会 / 三合 / 半合 / 拱合（**按合局力量由强到弱**排列，便于展示层直读）。
+
+    `require_from` 透传给单一事实源：只保留参与支里至少有一个在该集合里的合局（见其 docstring）。
+    """
+    rel = branch_relations(zhis, require_from=require_from)
     return [*rel.hui, *rel.san_he, *rel.ban_he, *rel.gong_he]
 
 
@@ -606,9 +619,9 @@ def _zhi_pair_rel(x: str, y: str) -> list[str]:
     return zhi_pair_relations(x, y)
 
 
-def _zhi_xing(zhis: list[str]) -> list[str]:
-    """三刑 / 半刑 / 自刑（委托单一事实源）。"""
-    rel = branch_relations(zhis)
+def _zhi_xing(zhis: list[str], *, require_from: Iterable[str] | None = None) -> list[str]:
+    """三刑 / 半刑 / 自刑（委托单一事实源；`require_from` 语义同 `_zhi_group_rel`）。"""
+    rel = branch_relations(zhis, require_from=require_from)
     return [*rel.san_xing, *rel.ban_xing, *rel.zi_xing]
 
 
@@ -637,27 +650,34 @@ def _own_pillar_rel(gz: str) -> str:
 
 
 def _build_relations(pillars: list[Pillar], sui: list[str]) -> dict[str, Any]:
-    """岁运分析（大运·流年·流月 叠加原局）与原局分析，六栏文字与专业排盘软件对齐。"""
+    """岁运分析（大运/小运·流年·流月 叠加原局）与原局分析，六栏文字与专业排盘软件对齐。"""
     orig_gan = [p.gan for p in pillars]
     orig_zhi = [p.zhi for p in pillars]
     orig_gz = [p.ganzhi for p in pillars]
     sui_gan = [g[0] for g in sui if len(g) == 2]
     sui_zhi = [g[1] for g in sui if len(g) == 2]
 
-    # 岁运：只取「岁运 × 原局」与「岁运 × 岁运」，原局内部留给原局栏
+    # 岁运：只取「岁运 × 原局」与「岁运 × 岁运」，原局内部留给原局栏。
     sui_gan_items = [_gan_rel(a, b) for a in sui_gan for b in orig_gan]
     sui_gan_items += [
         _gan_rel(sui_gan[i], sui_gan[j]) for i in range(len(sui_gan)) for j in range(i + 1, len(sui_gan))
     ]
+    # 地支的**局/刑类**（三会/三合/半合/拱合/三刑/自刑）是按"支集合"判定的：直接拿
+    # `sui_zhi + orig_zhi` 的并集算，会把**原局自己就成局**的项也算进岁运栏
+    # （如原局 子辰 半合水、岁运 寅午 —— 与岁运毫无关系，却被逐年重复报出）。
+    # 故传 require_from=sui_zhi：**参与支里至少有一支来自岁运**才收；
+    # 注意口径是"岁运有没有参与"，不是"原局有没有"——**原局已有、岁运再来属于岁运引动，必须保留**
+    # （现场：丙午/丁酉/癸巳/丁巳 盘，日支巳+月支酉 的 巳酉半合金，流月丁酉 再来即岁运引动）。
+    # 成对关系（六合/六冲/六害/六破）不受影响：它们本来就按 岁运×原局 显式枚举。
     all_zhi = sui_zhi + orig_zhi
-    sui_zhi_items = _zhi_group_rel(all_zhi)
+    sui_zhi_items = _zhi_group_rel(all_zhi, require_from=sui_zhi)
     for x in sui_zhi:
         for y in orig_zhi:
             sui_zhi_items += _zhi_pair_rel(x, y)
     for i in range(len(sui_zhi)):
         for j in range(i + 1, len(sui_zhi)):
             sui_zhi_items += _zhi_pair_rel(sui_zhi[i], sui_zhi[j])
-    sui_zhi_items += _zhi_xing(all_zhi)
+    sui_zhi_items += _zhi_xing(all_zhi, require_from=sui_zhi)
     sui_zhu = [_pillar_rel(g, r) for g in sui for r in orig_gz]
 
     yuan_gan = [
@@ -711,6 +731,17 @@ def build_xipan(
     ln_shensha, ln_desc = _liunian_shensha_index(liunian_list, pillars, day_master, gender_int)
     liuyue_extras["liunianShensha"] = ln_shensha
     liuyue_extras["shenshaDict"].update(ln_desc)
+    # 小运神煞：与流年同一「运柱神煞」口径，只是干支取自各年的小运。
+    # 童限期没有大运，细盘表把「大运」列换成小运显示（前端按 current 的 isTongxian 判定），
+    # 那一列的神煞就取这里 —— 少了它童限盘的神煞行会整列空着。
+    xy_shensha, xy_desc = _yunzhu_shensha_index(
+        [item.get("xiaoyun", "") for item in liunian_list], pillars, day_master, gender_int
+    )
+    liuyue_extras["xiaoyunShensha"] = xy_shensha
+    # 说明表按名去重，**只补缺、不覆盖**：同一神煞的说明文案里带旬/干支（如"旬空午未…"），
+    # 用 小运 的文案去 update 会把流年/流月那一栏已经用的文案改掉（实测 15 个黄金盘被改写）。
+    for name, text in xy_desc.items():
+        liuyue_extras["shenshaDict"].setdefault(name, text)
     liuyue_extras["ganzhiMeta"] = _ganzhi_meta(day_master)
 
     cur = _current(today, yun, year_dayun, xiaoyun, dayun_list, day_master, birth_year)

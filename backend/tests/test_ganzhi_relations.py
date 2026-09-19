@@ -194,3 +194,54 @@ def test_repeated_branch_keeps_repeated_relation():
     # 三合重复：申子辰 中 子 出现两次，三合局仍只报一次（集合判定）
     rel2 = _br("申", "子", "子", "辰")
     assert _labels(rel2)["san_he"] == ("申子辰合水局",)
+
+
+# ---------------- require_from：只保留"参与支里有该集合成员"的局/刑类 ----------------
+
+
+def test_require_from_drops_groups_no_member_comes_from_the_set():
+    """岁运细盘口径：局/刑类必须"有岁运支参与"。
+
+    并集判定下 子辰 是半合水（原局自成一局），但岁运只有 寅午 ⇒ 参与支一个都不来自岁运，
+    这类条目不该出现在岁运栏（否则会变成一个与流年无关的固定项）。
+    """
+    zhis = ["子", "辰", "寅", "午"]
+    assert "子辰半合水" in _labels(_br(*zhis))["ban_he"], "并集判定：原局自成一局"
+
+    rel = branch_relations(zhis, require_from=["寅", "午"])
+    assert "子辰半合水" not in rel.ban_he, "参与支都不来自 require_from ⇒ 不收"
+    assert "寅午半合火" in rel.ban_he, "寅午 含 require_from 成员 ⇒ 收"
+
+
+def test_require_from_keeps_groups_the_set_takes_part_in():
+    """**原局已有、岁运再来属于岁运引动，必须保留**（口径是"岁运有没有参与"，不是"原局有没有"）。
+
+    巳酉 在原局已成立；流月再来一个酉 ⇒ 参与支含酉 ⇒ 仍要报。
+    """
+    rel = branch_relations(["酉", "巳", "酉"], require_from=["酉"])
+    assert "巳酉半合金" in rel.ban_he, "岁运支参与 ⇒ 保留（不去重）"
+    assert "酉酉自刑" in rel.zi_xing, "自刑同理：酉 在 require_from 里 ⇒ 保留"
+
+
+def test_require_from_never_touches_pair_relations():
+    """成对关系（六合/六冲/六害/六破）按"谁与谁"成对计算，不受 require_from 影响。"""
+    zhis = ["子", "午", "丑", "未", "寅", "巳"]
+    full, restricted = branch_relations(zhis), branch_relations(zhis, require_from=["寅"])
+    for field in ("liu_he", "chong", "hai", "po"):
+        assert getattr(full, field) == getattr(restricted, field), f"{field} 不该被 require_from 影响"
+
+
+def test_require_from_bounds_xing_and_hui_too():
+    """三会/三刑/半刑同样按参与支过滤（不只是三合体系）。"""
+    # 原局 寅巳 半刑成立；岁运 子 ⇒ 与 寅巳 无关
+    rel = branch_relations(["寅", "巳", "子"], require_from=["子"])
+    assert not rel.ban_xing, "寅巳半刑 与岁运子无关 ⇒ 不收"
+    assert rel.hui == () and rel.san_xing == ()
+
+    # 岁运 寅 参与 ⇒ 寅巳半刑 保留
+    rel2 = branch_relations(["寅", "巳", "子"], require_from=["寅"])
+    assert any("寅巳半刑" in x for x in rel2.ban_xing)
+
+    # 三会：原局 寅卯辰 会东方木，岁运 子 ⇒ 不报；岁运 卯 ⇒ 报
+    assert branch_relations(["寅", "卯", "辰", "子"], require_from=["子"]).hui == ()
+    assert branch_relations(["寅", "卯", "辰", "子"], require_from=["卯"]).hui == ("寅卯辰会东方木",)

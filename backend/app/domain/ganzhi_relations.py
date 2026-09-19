@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from dataclasses import dataclass
 
 from app.domain.tables import (
@@ -67,13 +68,28 @@ class BranchRelations:
         ]
 
 
-def branch_relations(zhis: list[str]) -> BranchRelations:
+def branch_relations(
+    zhis: list[str], *, require_from: Collection[str] | None = None
+) -> BranchRelations:
     """归纳一组地支间的全部关系。
 
     成对关系（六合/六冲/六害/六破）按 `i<j` 遍历原列表（含重复支，与原实现一致）；
     局类（三会/三合/半合/拱合）与刑类按集合判定。
+
+    `require_from`：只保留**参与支里至少有一个落在该集合中**的局类/刑类关系
+    （成对关系不受影响，它们本就按"谁与谁"显式成对计算）。
+    岁运细盘用 `require_from=岁运支`：原局内部自成一局的（如原局 子辰 半合水、岁运 寅午）
+    不该出现在「岁运」栏；而**原局已有、岁运再来**的（参与支含岁运支）**必须保留** ——
+    那是岁运引动，不是重复。口径与 `fortune_score._involves_sui`（打分侧按"串里是否含
+    岁运字符"过滤）一致，故两处不会出现两套结果。
     """
     zhi_set = set(zhis)
+    req: set[str] | None = set(require_from) if require_from is not None else None
+
+    def _kept(members: Collection[str]) -> bool:
+        """该关系是否真的与调用方关心的那组支有关（未指定 require_from 时恒 True）。"""
+        return req is None or bool(req & set(members))
+
     hui: list[str] = []
     san_he: list[str] = []
     ban_he: list[str] = []
@@ -96,7 +112,7 @@ def branch_relations(zhis: list[str]) -> BranchRelations:
                 po.append(LIU_PO[pair])
 
     for group, label in SAN_HUI.items():
-        if group.issubset(zhi_set):
+        if group.issubset(zhi_set) and _kept(group):
             hui.append(label)
 
     # 三合体系：三支齐全 → 三合局；含中神的两支 → 半合；首尾两支（中神虚一）→ 拱合。
@@ -104,13 +120,17 @@ def branch_relations(zhis: list[str]) -> BranchRelations:
     for a, b, c, wx in SAN_HE_TRIPLE:
         has_a, has_b, has_c = a in zhi_set, b in zhi_set, c in zhi_set
         if has_a and has_b and has_c:
-            san_he.append(f"{a}{b}{c}合{wx}局")
+            if _kept((a, b, c)):
+                san_he.append(f"{a}{b}{c}合{wx}局")
         elif has_a and has_b:
-            ban_he.append(f"{a}{b}半合{wx}")
+            if _kept((a, b)):
+                ban_he.append(f"{a}{b}半合{wx}")
         elif has_b and has_c:
-            ban_he.append(f"{b}{c}半合{wx}")
+            if _kept((b, c)):
+                ban_he.append(f"{b}{c}半合{wx}")
         elif has_a and has_c:
-            gong_he.append(f"{a}{c}拱合{b}")
+            if _kept((a, c)):
+                gong_he.append(f"{a}{c}拱合{b}")
 
     san_xing: list[str] = []
     ban_xing: list[str] = []
@@ -118,19 +138,20 @@ def branch_relations(zhis: list[str]) -> BranchRelations:
         has_a, has_b, has_c = a in zhi_set, b in zhi_set, c in zhi_set
         present = [z for z, ok in ((a, has_a), (b, has_b), (c, has_c)) if ok]
         if len(present) == 3:
-            san_xing.append(f"{disp}{name}三刑")
+            if _kept(present):
+                san_xing.append(f"{disp}{name}三刑")
         elif len(present) == 2:
             # 半刑：按三元组的组合顺序输出（寅巳 / 巳申 / 申寅）
             for x, y, has_x, has_y in ((a, b, has_a, has_b), (b, c, has_b, has_c), (c, a, has_c, has_a)):
-                if has_x and has_y:
+                if has_x and has_y and _kept((x, y)):
                     ban_xing.append(f"{x}{y}半刑（{name}）")
     for group, label in SAN_XING_PAIR.items():
-        if group.issubset(zhi_set):
+        if group.issubset(zhi_set) and _kept(group):
             san_xing.append(label)
 
     zi_xing: list[str] = []
     for zhi in sorted(zhi_set):
-        if zhi in SELF_XING and zhis.count(zhi) >= 2:
+        if zhi in SELF_XING and zhis.count(zhi) >= 2 and _kept((zhi,)):
             zi_xing.append(SELF_XING[zhi])
 
     return BranchRelations(
