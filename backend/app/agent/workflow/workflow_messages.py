@@ -70,6 +70,41 @@ _WORKFLOW_LLM_TIMEOUT = _settings.workflow_llm_timeout
 _MAX_LIUNIAN_LINES = 20
 
 
+def chart_anchor(ctx: WorkflowChartContext) -> str:
+    """命盘锚点：一行「命盘已挂载」事实，用于跳过全量事实注入的场景。
+
+    为什么必须有：挂载命盘（`Xianzhi.set_chart_context`）与"模型能不能看见"是两条链路。
+    闲聊/术语 Worker 的 `skip_facts=True` 会把【系统排盘事实】整段拿掉，而用户的出生信息
+    通常来自出生信息面板（WS 参数 birth_time/gender），聊天文本里根本没有——
+    于是模型侧零痕迹，只能反问"你生辰还没报给我"。
+    （实测：2026-09-19 23:15 / 2026-09-20 13:25，两条日志均为 已挂载命盘上下文 →
+    domain=chitchat needs_chart=False → [Worker] 闲聊问候 → 回答否认收到生辰。）
+
+    锚点只给「不能自相矛盾的最小事实」：生辰四柱与日主是真是排盘结果，
+    因此模型据此作答不会与 Reviewer 的事实校验冲突；同时明确禁止再索取生辰。
+    """
+    chart = ctx.chart
+    pillars = " ".join(p.ganzhi for p in chart.pillars if p.ganzhi)
+    day_master = ""
+    if chart.wuxing.day_master:
+        day_master = "{}（{}）".format(chart.wuxing.day_master, chart.wuxing.day_master_wuxing)
+    lines = [
+        "【命盘已挂载 · 用户已提供出生信息，不得再向用户索要生辰八字】",
+        "出生: {} {}（日柱流派 sect={}，大运流派 yun_sect={}）".format(
+            ctx.birth_time, ctx.gender, ctx.sect, ctx.yun_sect
+        ),
+    ]
+    if pillars:
+        lines.append("四柱: {}".format(pillars))
+    if day_master:
+        lines.append("日主: {}".format(day_master))
+    lines.append(
+        "本轮未列出十神、神煞、大运流年等细节：不要凭空断言这些内容；"
+        "用户追问具体领域时自会有对应盘面事实可用。"
+    )
+    return "\n".join(lines)
+
+
 def build_messages(
     user_prompt: str,
     intent: QuestionIntent,
@@ -111,6 +146,10 @@ def build_messages(
     )
     if facts:
         human += f"【系统排盘事实】\n{facts}\n\n"
+    else:
+        # 跳过全量事实也必须留下「已挂载命盘」的痕迹，否则模型会反问用户索要生辰
+        # （闲聊/术语 Worker 的 skip_facts 场景，见 chart_anchor 注释）
+        human += chart_anchor(ctx) + "\n\n"
     match_basis = getattr(intent, "match_basis", "")
     if match_basis:
         human += f"【合婚基础数据（系统规则）】\n{match_basis}\n\n"
@@ -191,7 +230,11 @@ def build_repair_messages(
                 f"【发现的问题】\n"
                 + "\n".join(f"- {issue}" for issue in checked.issues)
                 + "\n\n"
-                + (f"【正确排盘事实】\n{facts}\n\n" if facts else "")
+                + (
+                    f"【正确排盘事实】\n{facts}\n\n"
+                    if facts
+                    else f"{chart_anchor(ctx)}\n\n"
+                )
                 + (
                     f"【合婚基础数据（系统规则）】\n{getattr(intent, 'match_basis', '')}\n\n"
                     if getattr(intent, "match_basis", "")

@@ -9,6 +9,7 @@ from app.agent.workflow.workflow_messages import (
     compact_facts,
     fact_block,
 )
+from app.agent.workflow.workflow_models import FactCheckResult
 from app.agent.workflow.workflow_retrieval import build_theory_queries
 from app.agent.workflow.workflow_support import (
     build_chart_context,
@@ -164,6 +165,55 @@ def test_build_messages_skips_similar_cases_for_theory():
     human_content = [m for m in messages if hasattr(m, "content") and "用户问题" in m.content][-1].content
 
     assert "相似命例参考" not in human_content
+
+
+def test_skip_facts_workers_still_see_mounted_chart_anchor():
+    """回归（2026-09-19 23:15 / 2026-09-20 13:25 实测）：
+
+    闲聊/术语 Worker 的 skip_facts=True 会拿掉【系统排盘事实】，而用户生辰来自出生信息面板
+    （WS 参数），聊天文本里没有 —— 模型侧零痕迹就会反问"你生辰还没报给我"。
+    因此跳过事实注入时，必须补上「命盘已挂载」锚点。
+    """
+    workflow = XianzhiWorkflow(chat_model=None)
+    ctx = build_chart_context("2026-09-16 10:00", MALE)
+    intent = classify_question("看了吗？")
+
+    assert intent.domain == "chitchat"  # 与线上日志一致：短追问被判为闲聊
+    messages = workflow._build_messages("看了吗？", intent, ctx, "知识", [], None)
+    human_content = [m for m in messages if hasattr(m, "content") and "用户问题" in m.content][-1].content
+
+    assert "系统排盘事实" not in human_content  # 闲聊仍不注入全量事实（省 token）
+    assert "命盘已挂载" in human_content
+    assert "2026-09-16 10:00" in human_content
+    assert MALE in human_content
+    assert "四柱" in human_content
+
+
+def test_theory_worker_also_gets_chart_anchor_when_facts_skipped():
+    """术语 Worker（skip_facts=True）同样要看见已挂载命盘。"""
+    workflow = XianzhiWorkflow(chat_model=None)
+    ctx = build_chart_context("1990-05-20 14:30", MALE)
+    intent = classify_question("用神是什么意思", today=dt.date(2026, 7, 5))
+
+    messages = workflow._build_messages("用神是什么意思", intent, ctx, "知识", [], None)
+    human_content = [m for m in messages if hasattr(m, "content") and "用户问题" in m.content][-1].content
+
+    assert "命盘已挂载" in human_content
+    assert "1990-05-20 14:30" in human_content
+
+
+def test_repair_messages_keep_chart_anchor_when_facts_skipped():
+    """修复路径同口径：跳过事实时也带锚点，避免修复稿里出现"没收到生辰"。"""
+    workflow = XianzhiWorkflow(chat_model=None)
+    ctx = build_chart_context("1990-05-20 14:30", MALE)
+    intent = classify_question("用神是什么意思", today=dt.date(2026, 7, 5))
+    checked = FactCheckResult(ok=False, issues=["测试用 issue"])
+
+    messages = workflow._build_repair_messages("原回答", checked, "用神是什么意思", intent, ctx, "知识", None)
+    human_content = [m for m in messages if hasattr(m, "content") and "原回答" in m.content][-1].content
+
+    assert "命盘已挂载" in human_content
+    assert "1990-05-20 14:30" in human_content
 
 
 def test_fact_checker_catches_wrong_liunian_and_pillar():
