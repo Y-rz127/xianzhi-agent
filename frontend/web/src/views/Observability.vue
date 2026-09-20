@@ -131,7 +131,7 @@
         </div>
         <div v-for="row in llmEntries" :key="row.model + row.tag" class="llm-row">
           <span class="llm-model">{{ row.model }}</span>
-          <span class="llm-tag">{{ row.tag }}</span>
+          <span :class="['llm-tag', row.tag === 'unknown' && 'llm-tag-missing']" :title="row.tag">{{ tagLabel(row.tag) }}</span>
           <span>{{ row.calls }}</span>
           <span>{{ formatTokens(row.prompt_tokens) }}</span>
           <span>{{ formatTokens(row.completion_tokens) }}</span>
@@ -258,6 +258,27 @@ const chartData = computed(() => {
 const topEndpoints = computed(() => metrics.value?.top_endpoints ?? [])
 const llmEntries = computed(() => metrics.value?.llm ?? [])
 const llmTotals = computed(() => metrics.value?.llm_totals ?? { calls: 0, prompt_tokens: 0, completion_tokens: 0, est_cost: 0, price_configured: false })
+
+/** LLM 用途标签 → 中文说明（后端 llm_tag 的取值集合，见 app/core/llm_throttle.py）。 */
+const LLM_TAG_LABELS: Record<string, string> = {
+  workflow: "命理问答编排",
+  react: "ReAct 工具循环",
+  chitchat: "闲聊直答",
+  summary: "会话摘要",
+  report: "命理报告",
+  probe: "启动探活",
+  kline: "K线批注",
+  tarot: "塔罗",
+  liuyao: "六爻",
+  ziwei: "紫微斗数",
+  hehun: "合婚",
+  unknown: "未标注（代码里漏包 llm_tag）",
+}
+
+/** 用途显示：中文说明优先；未登记的标签原样显示，避免掩盖新标签。 */
+function tagLabel(tag: string): string {
+  return LLM_TAG_LABELS[tag] ?? tag
+}
 const recentErrors = computed(() => {
   const list = metrics.value?.recent_errors ?? []
   return [...list].reverse()
@@ -744,6 +765,11 @@ onUnmounted(() => {
   border-radius: 999px;
   background: var(--bg-bright, rgba(255, 255, 255, 0.06));
   color: var(--text-dim);
+}
+/* 未标注用途：说明代码里有 LLM 调用漏包 llm_tag —— 标红以便一眼发现，而不是默默计成 unknown */
+.llm-tag-missing {
+  background: rgba(255, 86, 86, 0.14);
+  color: #ff8a8a;
 }
 .llm-cost { color: var(--accent-light, #ffd700); font-weight: 600; white-space: nowrap; }
 .section-header {

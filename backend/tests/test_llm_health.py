@@ -191,14 +191,18 @@ def test_transient_reviewer_failure_still_warns_every_time():
 # ============================================================
 
 class _PingModel:
-    """探活用的最小假模型：可配置成功 / 抛指定异常。"""
+    """探活用的最小假模型：可配置成功 / 抛指定异常，并记录调用时的成本归因标签。"""
 
     def __init__(self, error: Exception | None = None) -> None:
         self.error = error
         self.calls = 0
+        self.tags: list[str] = []
 
     def invoke(self, messages, **kwargs):
+        from app.core.llm_throttle import llm_usage_tag
+
         self.calls += 1
+        self.tags.append(llm_usage_tag.get())
         if self.error:
             raise self.error
         return AIMessage(content="pong")
@@ -225,6 +229,15 @@ def test_probe_passes_when_model_accepts_config():
     assert results[0].ok and not results[0].fixed
     assert results[0].enable_thinking is False
     assert model.calls == 1
+
+
+def test_probe_call_is_cost_attributed_as_probe():
+    """探活是真实计费调用：必须带 llm_tag("probe")，否则成本页会出现"用途 unknown"行
+    （2026-09-20 实测：三条 unknown 全是启动探活，无法解释也无从排查）。"""
+    model = _PingModel()
+    probe_sub_models([_spec(model)], SimpleNamespace(reviewer_model=model))
+
+    assert model.tags == ["probe"]
 
 
 def test_probe_auto_corrects_thinking_restricted_model():

@@ -37,17 +37,21 @@ CLEAN = "壬水日主生于午月，原局金重为病；行金运时分低，�
 
 
 class FakeModel:
-    """假模型：按序吐出预设回复，并留下收到的 prompt 供断言接地。"""
+    """假模型：按序吐出预设回复，并留下收到的 prompt 与成本归因标签供断言。"""
 
     def __init__(self, *replies: str):
         self.replies = list(replies)
         self.prompts: list[list] = []
+        self.tags: list[str] = []
 
     def bind(self, **_kwargs):
         return self
 
     def invoke(self, messages):
+        from app.core.llm_throttle import llm_usage_tag
+
         self.prompts.append(messages)
+        self.tags.append(llm_usage_tag.get())
         text = self.replies.pop(0) if self.replies else ""
         return SimpleNamespace(content=text)
 
@@ -215,6 +219,16 @@ def test_annotation_repairs_when_first_round_fails() -> None:
     assert result["ok"] is True and result["source"] == "repair"
     assert result["text"] == CLEAN
     assert len(model.prompts) == 2, "应恰好调用两次（首轮 + 修复轮）"
+
+
+def test_annotation_calls_are_cost_attributed_as_kline() -> None:
+    """批注是真实计费调用：两次调用（首轮 + 修复轮）都必须带 llm_tag("kline")，
+    否则成本页会把 K 线批注记成"用途 unknown"（2026-09-20 实测）。"""
+    bad = f"你命带{_absent_shensha()}，故少年得志。"
+    model = FakeModel(bad, CLEAN)
+    A.annotate(model, chart(), payload(), anchor_year=ANCHOR)
+
+    assert model.tags == ["kline", "kline"]
 
 
 def test_annotation_hides_text_when_both_rounds_fail() -> None:

@@ -17,6 +17,7 @@ from typing import Any, Iterator
 
 from app.core.config import settings
 from app.core.llm_delegate import DelegatingRunnable
+from app.core.logger import log
 
 
 class LLMBusyError(RuntimeError):
@@ -26,10 +27,44 @@ class LLMBusyError(RuntimeError):
 # 用途标签（成本归因）：由调用方用 llm_tag() 包裹设置，ThrottledModel 上报时读取
 llm_usage_tag: ContextVar[str] = ContextVar("llm_usage_tag", default="unknown")
 
+# 合法标签清单（单一事实源）：新增调用路径必须在这里登记，否则成本页的"用途"列
+# 会出现无法解释的行。前端 `Observability.vue` 的中文映射与此一一对应。
+#   workflow 命理问答编排（拆解/生成/审核/修复整条链） | react ReAct 工具循环
+#   chitchat 闲聊直答 | summary 会话摘要 | report 命理报告 | kline K线批注
+#   probe 启动探活 | tarot/liuyao/ziwei/hehun 子应用解读
+CANONICAL_TAGS: tuple[str, ...] = (
+    "workflow",
+    "react",
+    "chitchat",
+    "summary",
+    "report",
+    "kline",
+    "probe",
+    "tarot",
+    "liuyao",
+    "ziwei",
+    "hehun",
+)
+
+# 未打标签的调用只警告一次（按模型）：成本页出现"用途 unknown"就是这里漏包 llm_tag
+_untagged_warned: set[str] = set()
+_untagged_lock = threading.Lock()
+
+
+def _warn_untagged_once(model: str) -> None:
+    with _untagged_lock:
+        if model in _untagged_warned:
+            return
+        _untagged_warned.add(model)
+    log.warning(
+        "[llm] {} 的调用未打用途标签（成本页会记成 unknown）：调用方需用 llm_tag(...) 包裹",
+        model,
+    )
+
 
 @contextmanager
 def llm_tag(tag: str) -> Iterator[None]:
-    """标记当前执行上下文的 LLM 用途（如 workflow/chitchat/report/tarot）。"""
+    """标记当前执行上下文的 LLM 用途（取值见 `CANONICAL_TAGS`）。"""
     token = llm_usage_tag.set(tag)
     try:
         yield
@@ -115,7 +150,12 @@ def _report_usage(wrapper: "ThrottledModel", result: Any, start: float, elapsed:
     if elapsed is None:
         elapsed = time.perf_counter() - start
     model = getattr(wrapper, "model_name", None) or "unknown"
-    record_llm_call(model, llm_usage_tag.get(), prompt, completion, elapsed * 1000)
+    tag = llm_usage_tag.get()
+    if tag == "unknown":
+        # 漏包 llm_tag 是**成本归因的缺陷**，不是正常状态：留一条可 grep 的日志，
+        # 免得只能在成本页看到一行无从排查的 unknown（2026-09-20 的探活/K线批注就是这种）。
+        _warn_untagged_once(model)
+    record_llm_call(model, tag, prompt, completion, elapsed * 1000)
 
 
 class ThrottledModel(DelegatingRunnable):

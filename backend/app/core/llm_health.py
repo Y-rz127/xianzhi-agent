@@ -32,6 +32,7 @@ from typing import Any, Callable, Sequence
 
 from langchain_core.messages import HumanMessage
 
+from app.core.llm_throttle import llm_tag
 from app.core.logger import log
 
 # 探活请求的提示词：内容不重要，只看上游是否**接受**这次请求
@@ -122,8 +123,14 @@ class ProbeResult:
 
 
 def _ping(model: Any) -> None:
-    """一次最小请求：只为确认上游接受这组参数，不关心内容。"""
-    model.invoke([HumanMessage(content=_PING)])
+    """一次最小请求：只为确认上游接受这组参数，不关心内容。
+
+    带 `llm_tag("probe")`：探活是**真实计费调用**（每次启动 3 个模型各一次），
+    不打标签就会以"用途 unknown"混进成本页（2026-09-20 实测：三条 unknown 全是启动探活），
+    让成本归因留下无法解释的行。标成 probe 后既能对上账，也便于一眼看出"这是探活不是业务调用"。
+    """
+    with llm_tag("probe"):
+        model.invoke([HumanMessage(content=_PING)])
 
 
 def probe_sub_models(specs: Sequence[SubModelSpec], app_ctx: Any = None) -> list[ProbeResult]:

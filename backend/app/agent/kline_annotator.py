@@ -32,6 +32,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.agent.workflow.workflow_messages import compact_facts
 from app.agent.workflow.workflow_models import QuestionIntent
+from app.core.llm_throttle import llm_tag
 from app.core.logger import log
 
 SCOPE_OVERVIEW = "overview"
@@ -287,9 +288,15 @@ def annotate(
 
 
 def _invoke(chat_model: BaseChatModel, messages: list[Any]) -> str:
-    """单次模型调用。批注失败不该把整个接口拖成 500，故这里吞掉异常返回空串。"""
+    """单次模型调用。批注失败不该把整个接口拖成 500，故这里吞掉异常返回空串。
+
+    带 `llm_tag("kline")`：K 线批注用「子应用解读模型」，一次批注最多两次调用
+    （首轮 + 事实校验不通过时的修复轮），不打标签就会以"用途 unknown"计到成本页里。
+    标签打在 `_invoke` 而不是 `annotate`：两条调用路径（首轮/修复）共用它，且调用方不必记得包。
+    """
     try:
-        response = chat_model.bind(timeout=ANNOTATION_TIMEOUT).invoke(messages)
+        with llm_tag("kline"):
+            response = chat_model.bind(timeout=ANNOTATION_TIMEOUT).invoke(messages)
     except Exception as e:  # noqa: BLE001 - 上游超时/限流/网络都可能，统一降级
         log.warning("[K线批注] 模型调用失败：{}", e)
         return ""
