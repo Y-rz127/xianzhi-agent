@@ -774,14 +774,26 @@ function initXipanSelection() {
 
 function selectDayun(index: number) {
   selectedDayunIndex.value = index
-  const first = xipan.value?.liunian.find((l) => l.dayunIndex === index)
+  const xp = xipan.value
+  // 点正在走的大运（含童限段）→ 落回"现在"：当前年，流月随 selectYear 落当前月；
+  // 点其余大运 → 该运第一年
+  if (xp && index === xp.current.dayunIndex) {
+    selectYear(xp.current.year)
+    return
+  }
+  const first = xp?.liunian.find((l) => l.dayunIndex === index)
   if (first) selectYear(first.year)
 }
 function selectYear(year: number) {
   selectedYear.value = year
-  // 换流年默认落在该年第一个流月（立春），与「点大运落到该运首年」同规则；
-  // 之后只有用户点别的流月才切换
-  const first = xipan.value?.liuyue.find((m) => m.year === year)
+  const xp = xipan.value
+  // 点的是当前年 → 落当前月（与进入细盘时的初始锚点一致）；
+  // 其余年份 → 该年第一个节气月（立春）。之后只有用户点别的流月才切换
+  if (xp && year === xp.current.year && xp.current.liuyue) {
+    selectedLiuyueGz.value = xp.current.liuyue
+    return
+  }
+  const first = xp?.liuyue.find((m) => m.year === year)
   selectedLiuyueGz.value = first?.ganzhi || ''
 }
 function selectLiuyue(m: XiPanLiuYue) {
