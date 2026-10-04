@@ -20,6 +20,12 @@
 - 立春前 × 立春后（起运方向相反的盘，年份交集会缩短）
 - 极弱 × 专旺（强弱两端）
 
+**同类那一对不能用「同一张盘配自己」**（曾经是 `stem_ren` × `stem_ren`）：
+自配对下 `sync` 恒为 +2×`SYNC_UNIT`（两侧 delta 逐字相同 ⇒ 走向必然同号），
+stdev = 0、全年只有 1 个取值，把 `sync` 的方差下限钉死在快照里 ——
+读诊断时会误以为 `sync` 本身没有区分度。现用 `stem_ren` × `zhuanwang_runxia`
+（同为壬日主 ⇒ `dayMasterRelation` 同类分支照样覆盖，但两端一正格一专旺）。
+
 重生成快照：
     UPDATE_GOLDEN=1 ../.venv/Scripts/python.exe -m pytest tests/test_kline_resonance.py -q
 重生成后**必须人工核对 diff**（尤其权重变动会导致全量平移）。
@@ -46,7 +52,7 @@ diff_paths = BG.diff_paths
 
 # (甲, 乙, 说明) —— 说明只用于快照可读性，不参与计算。
 PAIRS: tuple[tuple[str, str, str], ...] = (
-    ("stem_ren", "stem_ren", "日主同类 · 同干自配对（基线最高的一类）"),
+    ("stem_ren", "zhuanwang_runxia", "日主同类 · 壬水 × 润下专旺（同类基线但两端格局不同）"),
     ("stem_ren", "stem_jia", "日主相生 · 壬水 × 甲木"),
     ("stem_ren", "stem_bing", "日主相克 · 壬水 × 丙火"),
     ("stem_jia", "boundary_female", "同日主不同性别 · 感情维度取用相反"),
