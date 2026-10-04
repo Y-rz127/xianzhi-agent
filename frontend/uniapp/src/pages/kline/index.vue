@@ -853,8 +853,9 @@ const domainLabel = (d: string) => EV_DOMAINS.find((x) => x.key === d)?.label ||
  * - 必须连随机基线一起给：三分类随机猜也有约 1/3，事件吉凶本来就偏的话
  *   "全猜多数类"还能更高；lift 为负就是**还不如瞎猜**。
  * - 样本不足时只报事实、不给百分比 —— 3 条里的 66.7% 会被人当结论用。
- * - 窗口外的年份永远回测不了（阈值固定按全期分位切，不随事件伸缩）：
- *   刚录完就显示"没有可用事件"会让人以为没存上，故要把原因和区间说出来。
+ * - 回测区间（spanFrom–spanTo）**常显**：它决定了"哪一年的事件能进命中率"。
+ *   只在有窗口外事件时才拼它，等于平时看不见 —— 页面画到 2091 而区间到 2089 时，
+ *   刚录完的事件显示"没有可用事件"，用户以为没存上（这个坑踩过）。
  */
 function formatBtLine(
   b: KlineBacktest | KlinePairBacktest,
@@ -865,13 +866,18 @@ function formatBtLine(
   const win = b.spanFrom != null && b.spanTo != null ? `${b.spanFrom}–${b.spanTo}` : ''
   const un = b.events?.unmatched || 0
   const outside = un ? `窗口外 ${un} 条${win ? `（回测区间 ${win}）` : ''}` : ''
+  // 已有窗口外提示时区间就在那句话里，不重复报一遍。
+  const span = !outside && win ? `回测区间 ${win}` : ''
   if (!s?.samples) {
     if (outside) return `${outside}，区间内暂无可回测事件。回测固定按 1–${b.ageSpan} 虚岁取全期阈值。`
-    return `本${noun}还没有可用于回测的事件。`
+    return [`本${noun}还没有可用于回测的事件。`, span].filter(Boolean).join(' ')
   }
   if (!s.ok) {
-    return [`已攒 ${s.samples}/${b.minSamples} 条（${scope}）—— 还没到能谈命中率的量`, outside]
-      .filter(Boolean).join(' · ')
+    return [
+      `已攒 ${s.samples}/${b.minSamples} 条（${scope}）—— 还没到能谈命中率的量`,
+      outside,
+      span,
+    ].filter(Boolean).join(' · ')
   }
   const pct = (v: number | null | undefined) => (v == null ? '—' : (v * 100).toFixed(1) + '%')
   const lift = s.liftStrict == null ? '—' : (s.liftStrict > 0 ? '+' : '') + (s.liftStrict * 100).toFixed(1) + 'pp'
@@ -883,6 +889,7 @@ function formatBtLine(
     `lift ${lift}`,
     s.significant ? '显著' : '不显著',
     outside,
+    span,
     bad.length ? `方向反了：${bad.join('/')}` : '',
   ].filter(Boolean).join(' · ')
 }
