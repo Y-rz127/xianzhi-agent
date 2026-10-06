@@ -84,10 +84,17 @@
           </view>
         </view>
         <text class="summary">{{ result.summary }}</text>
-        <button class="interpret" :loading="interpreting" @tap="doInterpret">{{ interpretation ? '重新 AI 解读' : 'AI 解读此卦' }}</button>
-        <view v-if="interpretation" class="answer">
+        <button class="interpret" :loading="interpreting" :disabled="interpreting" @tap="doInterpret">
+          {{ interpreting ? '解读中…' : (interpretation ? '重新 AI 解读' : 'AI 解读此卦') }}
+        </button>
+        <!-- 等待占位：LLM 首个 chunk 到达前可能十几秒（思考型模型更久），
+             没有这行用户会以为按钮没生效。三态文案与紫微页一致。 -->
+        <view v-if="interpreting || interpretation" class="answer">
           <text>卦象解读</text>
-          <text>{{ interpretation }}</text>
+          <text v-if="interpreting && !interpretation" class="wait">
+            {{ gotStatus ? '已收到请求，正在起稿…' : '正在连接解读服务…' }}
+          </text>
+          <text v-else>{{ interpretation }}</text>
         </view>
       </view>
     </scroll-view>
@@ -116,6 +123,8 @@ function numText(v: number | '' | null | undefined): string {
 }
 const loading = ref(false)
 const interpreting = ref(false)
+/** 已收到服务端 status：区别于"刚点了按钮"与"已有正文"三态 */
+const gotStatus = ref(false)
 const result = ref<LiuYaoResult | null>(null)
 const interpretation = ref('')
 const phase = ref<'idle' | 'casting' | 'revealing' | 'done'>('idle')
@@ -147,6 +156,7 @@ async function doCast() {
   loading.value = true
   result.value = null
   interpretation.value = ''
+  gotStatus.value = false
   phase.value = 'casting'
   try {
     // 摇卦动画固定展示约 1.6s，避免接口过快导致仪式感缺失
@@ -180,12 +190,18 @@ async function doInterpret() {
   }
   interpreting.value = true
   interpretation.value = ''
+  gotStatus.value = false
   try {
     await interpretLiuYaoStream({
       question: question.value,
       result: result.value,
       onMessage: (chunk: string) => {
         interpretation.value += chunk
+      },
+      // 后端在调模型前先发 status；首字可能要十几秒（思考型模型更久），用它给等待反馈。
+      // 不写进 interpretation —— 那是正文容器，状态文案混进去会被存成解读内容。
+      onStatus: () => {
+        gotStatus.value = true
       },
       onComplete: async () => {
         try {
@@ -326,4 +342,5 @@ onBeforeUnmount(() => {
 .answer { margin-top: 32rpx; padding: 32rpx; background: rgba(255, 255, 255, .04); border: 1rpx solid $nx-border; border-radius: 16rpx; }
 .answer text { display: block; line-height: 2; font-size: 29rpx; color: $nx-text; }
 .answer text:first-child { color: $nx-gold-light; margin-bottom: 16rpx; font-size: 32rpx; font-weight: 600; letter-spacing: 2rpx; }
+.answer .wait { color: $nx-text-dim; }
 </style>

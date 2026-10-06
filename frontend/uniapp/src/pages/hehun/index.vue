@@ -138,14 +138,19 @@
       </view>
 
       <!-- 结果卡片 -->
-      <view v-if="result" class="result-card">
+      <!-- 结果卡片。等待占位与紫微/六爻同口径：LLM 首个 chunk 到达前可能十几秒，
+             没有占位用户会以为按钮没生效。 -->
+      <view v-if="(loading && !result) || result" class="result-card">
         <view class="card-gradient-top gradient-result"></view>
         <view class="card-body">
           <view class="card-head">
             <view class="badge badge-result">☰</view>
             <text class="card-title display-font">合婚报告</text>
           </view>
-          <text class="result-text">{{ result }}</text>
+          <text v-if="loading && !result" class="result-text wait">
+            {{ gotStatus ? '已收到请求，正在起稿…' : '正在连接解读服务…' }}
+          </text>
+          <text v-else class="result-text">{{ result }}</text>
         </view>
       </view>
 
@@ -218,6 +223,8 @@ const today = new Date().toISOString().slice(0, 10)
 const a = reactive({ date: '', time: '', gender: '男' as '男' | '女', place: '', longitude: 0 })
 const b = reactive({ date: '', time: '', gender: '女' as '男' | '女', place: '', longitude: 0 })
 const loading = ref(false)
+/** 已收到服务端 status：区别于"刚点了按钮"与"已有正文"三态 */
+const gotStatus = ref(false)
 const result = ref('')
 
 // 排盘引擎默认晚子时（子正换日，sect=2），不再提供用户手动切换
@@ -368,6 +375,7 @@ async function onAnalyze() {
   if (!canSubmit.value || loading.value) return
   loading.value = true
   result.value = ''
+  gotStatus.value = false
   try {
     await hehunStream({
       birthTimeA: `${a.date} ${a.time}`,
@@ -379,6 +387,11 @@ async function onAnalyze() {
       longitudeB: b.longitude || undefined,
       onMessage: (chunk: string) => {
         result.value += chunk
+      },
+      // 后端在调模型前先发 status；首字可能要十几秒（思考型模型更久），用它给等待反馈。
+      // 不写进 result —— 那是正文容器，状态文案混进去会被存成解读内容。
+      onStatus: () => {
+        gotStatus.value = true
       },
       onComplete: async () => {
         try {
@@ -669,6 +682,8 @@ async function onAnalyze() {
   white-space: pre-wrap;
   letter-spacing: 0.02em;
 }
+/* 等待态：与紫微/六爻同口径，比正文淡一档表示"还没出正文" */
+.result-text.wait { color: $color-ink-light; }
 
 /* 出生地 */
 .place-picker { cursor: pointer; }
