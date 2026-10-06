@@ -60,6 +60,15 @@ class Settings(BaseSettings):
     llm_enable_thinking: bool = Field(default=False, alias="LLM_ENABLE_THINKING")
     llm_timeout: float = Field(default=60.0, alias="LLM_TIMEOUT")
     llm_max_retries: int = Field(default=2, alias="LLM_MAX_RETRIES")
+    # **两个 chunk 之间的最长静默**（langchain_openai 的 stream_chunk_timeout，默认 120s）。
+    # 与 llm_timeout 是两件事：那个管整个请求，这个管"多久没收到下一个内容块就判死"。
+    # SSE 的 `: keepalive` 注释会被 openai SDK 的解析器吃掉、不产生 chunk，**不重置此计时**，
+    # 所以思考型模型（glm-5.3 开思考实测思考 183s）会在思考期被判"内容静默"而抛
+    # httpx.ReadError（日志关键字 `langchain_openai.stream_chunk_timeout fired`）。
+    # 官方说明：设 None 或 0 关闭；负值会回落到默认 120s 并告警（不会静默关掉）。
+    llm_stream_chunk_timeout: Optional[float] = Field(
+        default=300.0, alias="LLM_STREAM_CHUNK_TIMEOUT"
+    )
 
     # LLM 背压与熔断（DashScope 配额保护）
     # 全模型共享的并发上限：队列满时按 llm_queue_timeout 等待，超时抛 LLMBusyError

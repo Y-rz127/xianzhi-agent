@@ -70,6 +70,9 @@ def _make_model(
         temperature=temperature,
         timeout=timeout,
         max_retries=settings.llm_max_retries,
+        # 思考型模型思考期无 chunk 流出，默认 120s 会误判"内容静默"（2026-10-06 实测
+        # glm-5.3 思考 183s ⇒ 每轮 AI 简批都 ReadError）。与上面的 timeout 是两件事。
+        stream_chunk_timeout=settings.llm_stream_chunk_timeout,
         extra_body={"enable_thinking": enable_thinking},
         http_client=http_client,
     )
@@ -116,6 +119,8 @@ async def lifespan(app: FastAPI):
         temperature=settings.llm_temperature,
         timeout=settings.llm_timeout,
         max_retries=settings.llm_max_retries,
+        # 思考期无 chunk 流出的长静默预算，同 _make_model 内的说明
+        stream_chunk_timeout=settings.llm_stream_chunk_timeout,
         extra_body={"enable_thinking": settings.llm_enable_thinking},
         http_client=http,
     )

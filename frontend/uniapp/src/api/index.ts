@@ -124,9 +124,12 @@ export const interpretLiuYaoStream = (params: {
   onMessage: (chunk: string) => void
   onComplete?: () => void
   onError?: (err: any) => void
+  /** 服务端 status（"开始解读…"）：首字到达前的等待反馈 */
+  onStatus?: (message: string) => void
 }) => new Promise<void>((resolve) => {
   interpretLiuYaoStreamWS(params.question, params.result, {
     onMessage: params.onMessage,
+    onStatus: params.onStatus,
     onDone: () => { params.onComplete?.(); resolve() },
     onError: (err: string) => params.onError?.(new Error(err)),
   })
@@ -264,6 +267,8 @@ export const hehunStream = (params: HehunParams & {
   onMessage: (chunk: string) => void
   onComplete?: () => void
   onError?: (err: any) => void
+  /** 服务端 status（"开始合婚分析…"）：首字到达前的等待反馈 */
+  onStatus?: (message: string) => void
 }) => new Promise<void>((resolve) => {
   hehunStreamWS({
     birthTimeA: params.birthTimeA,
@@ -275,6 +280,7 @@ export const hehunStream = (params: HehunParams & {
     longitudeB: params.longitudeB,
   }, {
     onMessage: params.onMessage,
+    onStatus: params.onStatus,
     onDone: () => { params.onComplete?.(); resolve() },
     onError: (err: string) => params.onError?.(new Error(err)),
   })
