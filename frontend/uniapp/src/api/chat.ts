@@ -334,6 +334,12 @@ export interface StreamCallbacks {
   onMessage: (chunk: string) => void
   onDone: () => void
   onError: (err: string) => void
+  /**
+   * 服务端 `{"type":"status"}` 到达时回调（可选，不实现则忽略）。
+   * 用途：LLM 首个 chunk 到达前给出「已收到请求」反馈 —— 首字可能要十几秒，
+   * 没有它用户会以为按钮没生效。后端在开始调模型前先发这条。
+   */
+  onStatus?: (message: string) => void
 }
 
 let currentStreamActive = false
@@ -365,7 +371,13 @@ function startStreamWS(path: string, payload: Record<string, any>, cb: StreamCal
     receivedMessage = true
     try {
       const d = JSON.parse(res.data as string)
-      if (d.type === 'message') {
+      if (d.type === 'status') {
+        // 「已收到请求」类状态：首字可能十几秒才来，没有它用户会以为按钮没生效。
+        // 收到即置位 receivedMessage —— 否则随后连接抖动会被 onSocketError
+        // 判成"一个字都没收到"而误报连接错误。
+        receivedMessage = true
+        cb.onStatus?.(d.message || '')
+      } else if (d.type === 'message') {
         let msgData = d.data
         if (typeof msgData !== 'string') {
           msgData = typeof msgData === 'object' ? JSON.stringify(msgData) : String(msgData || '')

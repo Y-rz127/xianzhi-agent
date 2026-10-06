@@ -114,7 +114,11 @@
             {{ interpreting ? '解读中…' : 'AI 简批' }}
           </button>
         </div>
-        <p v-if="interpretation" class="ai-result">{{ interpretation }}</p>
+        <!-- 等待占位：POST /interpret 要等 LLM 整段返回，首字前毫无反馈。
+             与小程序端的 status 占位同一目的（本端走 HTTP，无 status 消息）。 -->
+        <p v-if="interpreting || interpretation" class="ai-result">
+          {{ interpreting && !interpretation ? '正在请求 AI 简批，请稍候…' : interpretation }}
+        </p>
       </div>
     </section>
 

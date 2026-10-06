@@ -103,11 +103,18 @@
 
         <view class="actions">
           <button class="btn-ghost" @tap="resetForm">重新输入</button>
-          <button class="btn-cast" :loading="interpreting" :disabled="interpreting" @tap="doInterpret">AI 简批</button>
+          <button class="btn-cast" :loading="interpreting" :disabled="interpreting" @tap="doInterpret">
+            {{ interpreting ? '解读中…' : 'AI 简批' }}
+          </button>
         </view>
-        <view v-if="interpretation" class="answer">
+        <!-- 先出等待提示、再出正文：LLM 首个 chunk 到达前可能十几秒，
+             没有这行用户会以为按钮没生效。三态文案区分"刚点/已收到/写正文"。 -->
+        <view v-if="interpreting || interpretation" class="answer">
           <text class="a-title">命盘简批</text>
-          <text class="a-body">{{ interpretation }}</text>
+          <text v-if="interpreting && !interpretation" class="a-wait">
+            {{ gotStatus ? '已收到请求，正在起稿…' : '正在连接解读服务…' }}
+          </text>
+          <text v-else class="a-body">{{ interpretation }}</text>
         </view>
         <view class="foot-space"></view>
       </view>
@@ -190,6 +197,8 @@ const gender = ref<'男' | '女'>('男')
 
 const loading = ref(false)
 const interpreting = ref(false)
+/** 已收到服务端的 status（"开始解读…"）：区别于"刚点了按钮"与"已有正文"三态 */
+const gotStatus = ref(false)
 const chart = ref<ZiWeiChart | null>(null)
 const interpretation = ref('')
 const detail = ref<ZiWeiPalace | null>(null)
@@ -233,7 +242,9 @@ const sanFangSiZheng = computed(() => {
 })
 
 function back() { uni.navigateBack() }
-function resetForm() { phase.value = 'form'; chart.value = null; interpretation.value = '' }
+function resetForm() {
+  phase.value = 'form'; chart.value = null; interpretation.value = ''; gotStatus.value = false
+}
 function openDetail(p: ZiWeiPalace) { detail.value = p }
 function onSolarDatePick(e: any) { solarDate.value = e.detail.value }
 function onLunarYearPick(e: any) { lunarYearIdx.value = +e.detail.value }
@@ -266,11 +277,17 @@ async function doCast() {
 async function doInterpret() {
   interpreting.value = true
   interpretation.value = ''
+  gotStatus.value = false
   try {
     await interpretZiWeiStream({
       ...castParams(),
       onMessage: (chunk: string) => {
         interpretation.value += chunk
+      },
+      // 后端在调模型前先发 status；首字可能要十几秒，用它把"等待中"落到界面上。
+      // 不写进 interpretation —— 那是正文容器，状态文案混进去会被存成解读内容。
+      onStatus: () => {
+        gotStatus.value = true
       },
       onComplete: async () => {
         try {
@@ -389,6 +406,7 @@ $fs-bump: 1.0;
 .answer { margin: 28rpx 8rpx 0; padding: 32rpx; background: $nx-card; border: 1rpx solid $nx-border; border-radius: 16rpx; }
 .a-title { display: block; color: $nx-accent-ziwei; font-size: 33rpx; font-weight: 600; margin-bottom: 16rpx; letter-spacing: 2rpx; }
 .a-body { display: block; line-height: 2.05; font-size: 30rpx; color: $nx-text; }
+.a-wait { display: block; line-height: 2.05; font-size: 29rpx; color: $nx-text-dim; }
 .foot-space { height: 80rpx; }
 
 /* ===== 点宫详情弹层 ===== */

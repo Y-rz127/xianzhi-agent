@@ -201,6 +201,8 @@ export const interpretZiWeiStream = (params: {
   onMessage: (chunk: string) => void
   onComplete?: () => void
   onError?: (err: any) => void
+  /** 服务端 status（"开始解读…"）：首字到达前的等待反馈 */
+  onStatus?: (message: string) => void
 } & ZiWeiCastParams & { focus?: string }) => new Promise<void>((resolve) => {
   interpretZiWeiStreamWS({
     date: params.date,
@@ -211,6 +213,7 @@ export const interpretZiWeiStream = (params: {
     focus: params.focus || '',
   }, {
     onMessage: params.onMessage,
+    onStatus: params.onStatus,
     onDone: () => { params.onComplete?.(); resolve() },
     onError: (err: string) => params.onError?.(new Error(err)),
   })
