@@ -6,7 +6,7 @@
     <view class="nav" @tap="back">‹</view>
     <scroll-view scroll-y class="scroll">
       <view class="hero">
-        <text>紫微斗数</text>
+        <text class="hero-title">紫微斗数</text>
         <small class="hero-sub">传统民俗文化参考 · 仅供自省</small>
       </view>
 
@@ -50,7 +50,7 @@
           <view :class="['seg-item', gender === '女' && 'active']" @tap="gender = '女'">女</view>
         </view>
 
-        <button class="primary" :loading="loading" :disabled="loading" @tap="doCast">排盘</button>
+        <button class="btn-cast" :loading="loading" :disabled="loading" @tap="doCast">排盘</button>
       </view>
 
       <!-- 命盘 -->
@@ -64,15 +64,11 @@
             @tap="cell.palace && openDetail(cell.palace)"
           >
             <template v-if="cell.palace">
-              <view class="mut-corner mut-lu" v-if="cell.palace.major_stars.some(s => s.mutagen === '禄')">禄</view>
-              <view class="mut-corner mut-quan" v-if="cell.palace.major_stars.some(s => s.mutagen === '权')">权</view>
-              <view class="mut-corner mut-ke" v-if="cell.palace.major_stars.some(s => s.mutagen === '科')">科</view>
-              <view class="mut-corner mut-ji" v-if="cell.palace.major_stars.some(s => s.mutagen === '忌')">忌</view>
               <view class="p-head">
                 <text class="p-name">{{ cell.palace.name }}</text>
                 <text class="p-body" v-if="cell.palace.is_body">身</text>
+                <text class="p-gz">{{ cell.palace.heavenly_stem }}{{ cell.palace.earthly_branch }}</text>
               </view>
-              <text class="p-gz">{{ cell.palace.heavenly_stem }}{{ cell.palace.earthly_branch }}</text>
               <view class="p-majors">
                 <view v-for="s in cell.palace.major_stars" :key="s.name" class="major-row">
                   <text class="major-name">{{ s.name }}</text>
@@ -88,10 +84,10 @@
               <view class="center">
                 <text class="c-title">{{ chart.gender }}命</text>
                 <text class="c-line">{{ chart.lunar_date }}</text>
-                <text class="c-line">{{ chart.time_name }}（{{ chart.time_range }}）</text>
-                <text class="c-gz">四柱 {{ chart.four_pillars.yearly }} {{ chart.four_pillars.monthly }} {{ chart.four_pillars.daily }} {{ chart.four_pillars.hourly }}</text>
-                <text class="c-line">{{ chart.five_elements_class }} · 命宫{{ chart.earthly_branch_of_soul }} 身宫{{ chart.earthly_branch_of_body }}</text>
-                <text class="c-line">命主{{ chart.soul_star }} · 身主{{ chart.body_star }}</text>
+                <text class="c-line c-time">{{ chart.time_name }}</text>
+                <text class="c-gz">{{ chart.four_pillars.yearly }} {{ chart.four_pillars.monthly }}</text>
+                <text class="c-gz">{{ chart.four_pillars.daily }} {{ chart.four_pillars.hourly }}</text>
+                <text class="c-line">{{ chart.five_elements_class }}</text>
                 <text class="c-tip">点任意宫看详情</text>
               </view>
             </template>
@@ -99,15 +95,15 @@
         </view>
 
         <view class="legend">
-          <text><text class="lg lg-lu">禄</text>化禄</text>
-          <text><text class="lg lg-quan">权</text>化权</text>
-          <text><text class="lg lg-ke">科</text>化科</text>
-          <text><text class="lg lg-ji">忌</text>化忌</text>
+          <view class="lg-item"><text class="lg lg-lu">禄</text><text>化禄</text></view>
+          <view class="lg-item"><text class="lg lg-quan">权</text><text>化权</text></view>
+          <view class="lg-item"><text class="lg lg-ke">科</text><text>化科</text></view>
+          <view class="lg-item"><text class="lg lg-ji">忌</text><text>化忌</text></view>
         </view>
 
         <view class="actions">
-          <button class="ghost" @tap="resetForm">重新输入</button>
-          <button class="primary" :loading="interpreting" :disabled="interpreting" @tap="doInterpret">AI 简批</button>
+          <button class="btn-ghost" @tap="resetForm">重新输入</button>
+          <button class="btn-cast" :loading="interpreting" :disabled="interpreting" @tap="doInterpret">AI 简批</button>
         </view>
         <view v-if="interpretation" class="answer">
           <text class="a-title">命盘简批</text>
@@ -144,8 +140,10 @@
             <text class="misc">{{ detail.adjective_stars.map(s => s.name).join('、') }}</text>
           </view>
           <view class="sec"><text class="sec-t">十二神</text>
-            <text class="misc">长生·{{ detail.changsheng12 }}　博士·{{ detail.boshi12 }}</text>
-            <text class="misc">将前·{{ detail.jiangqian12 }}　岁前·{{ detail.suiqian12 }}</text>
+            <text class="misc">长生·{{ detail.changsheng12 }}</text>
+            <text class="misc">博士·{{ detail.boshi12 }}</text>
+            <text class="misc">将前·{{ detail.jiangqian12 }}</text>
+            <text class="misc">岁前·{{ detail.suiqian12 }}</text>
           </view>
           <view class="sec"><text class="sec-t">三方四正</text>
             <text class="misc">{{ sanFangSiZheng }}</text>
@@ -304,86 +302,122 @@ $mut-lu: #C9A227;
 $mut-quan: #C0392B;
 $mut-ke: #2E8B8B;
 $mut-ji: #2C2C2C;
+$zw-accent: #5B6FC8;
+
+/* 基准字号：移动端（<768px）看得清；桌面（≥768px）放到 115% */
+$fs-bump: 1.0;
 
 .page { min-height: 100vh; background: linear-gradient(180deg, $nx-bg, $nx-bg-2 55%, $nx-bg-3); color: $nx-text; }
 .scroll { height: 100vh; }
 .nav { position: fixed; z-index: 2; top: 50rpx; left: 28rpx; font-size: 60rpx; color: $nx-text; }
-.hero { text-align: center; padding: 140rpx 0 48rpx; }
-.hero text, .hero .hero-sub { display: block; }
-.hero text { font-size: 62rpx; letter-spacing: 14rpx; color: $nx-accent-ziwei; }
-.hero .hero-sub { margin-top: 20rpx; color: $nx-text-dim; font-size: 26rpx; }
+.hero { text-align: center; padding: 140rpx 0 40rpx; }
+.hero .hero-title { display: block; font-size: 62rpx; letter-spacing: 14rpx; color: $nx-accent-ziwei; }
+.hero .hero-sub { display: block; margin-top: 20rpx; color: $nx-text-dim; font-size: 28rpx; }
 
 .panel { margin: 24rpx 36rpx 60rpx; padding: 40rpx 36rpx; border: 1rpx solid $nx-border; border-radius: 24rpx; background: $nx-card; }
-.label { display: block; color: $nx-accent-ziwei; margin: 24rpx 0 14rpx; font-size: 28rpx; font-weight: 600; letter-spacing: 2rpx; }
-.field { padding: 26rpx 28rpx; background: $nx-bg-3; color: $nx-text; border: 1rpx solid $nx-border; border-radius: 14rpx; font-size: 30rpx; }
+.label { display: block; color: $nx-accent-ziwei; margin: 24rpx 0 14rpx; font-size: 29rpx; font-weight: 600; letter-spacing: 2rpx; }
+.field { padding: 28rpx 30rpx; background: $nx-bg-3; color: $nx-text; border: 1rpx solid $nx-border; border-radius: 14rpx; font-size: 32rpx; }
 .seg { display: flex; gap: 18rpx; }
-.seg-item { flex: 1; text-align: center; padding: 24rpx 12rpx; border: 1rpx solid $nx-border; border-radius: 14rpx; color: $nx-text-dim; font-size: 30rpx; }
+.seg-item { flex: 1; text-align: center; padding: 26rpx 12rpx; border: 1rpx solid $nx-border; border-radius: 14rpx; color: $nx-text-dim; font-size: 32rpx; }
 .seg-item.active { background: rgba(91, 111, 200, .16); color: $nx-accent-ziwei; border-color: $nx-accent-ziwei; font-weight: 600; }
 .lunar-row { display: flex; gap: 16rpx; }
 .lunar-cell { flex: 1; min-width: 0; }
 .leap-line { display: flex; align-items: center; justify-content: space-between; margin-top: 24rpx; }
-.leap-text { color: $nx-text-dim; font-size: 28rpx; }
-.primary { margin-top: 44rpx; padding: 28rpx; background: linear-gradient(135deg, #4a5bb0, #7488dd); color: #fff; font-size: 32rpx; font-weight: 600; border-radius: 16rpx; letter-spacing: 4rpx; }
-.primary[disabled] { opacity: .6; }
-.ghost { padding: 28rpx; background: transparent; color: $nx-accent-ziwei; border: 1rpx solid $nx-accent-ziwei; font-size: 30rpx; border-radius: 16rpx; }
+.leap-text { color: $nx-text-dim; font-size: 29rpx; }
+
+/* 按钮（统一组件） */
+.btn-cast {
+  margin-top: 48rpx; padding: 30rpx;
+  background: linear-gradient(135deg, #4a5bb0, #7488dd); color: #fff;
+  font-size: 33rpx; font-weight: 600; letter-spacing: 5rpx;
+  border-radius: 16rpx; border: none; line-height: 1.4;
+  transition: opacity .15s, transform .15s;
+}
+.btn-cast:active { opacity: .85; transform: scale(.985); }
+.btn-cast[disabled], .btn-cast[disabled]:active { opacity: .55; transform: none; }
+.btn-ghost {
+  padding: 30rpx; background: transparent; color: $nx-accent-ziwei;
+  border: 1rpx solid $nx-accent-ziwei; font-size: 31rpx; border-radius: 16rpx;
+  line-height: 1.4; transition: opacity .15s, background .15s, transform .15s;
+}
+.btn-ghost:active { opacity: .8; background: rgba(91, 111, 200, .08); transform: scale(.985); }
+.btn-ghost[disabled], .btn-ghost[disabled]:active { opacity: .4; transform: none; background: transparent; }
 
 /* ===== 命盘 4×4 ===== */
-.chart-wrap { margin: 12rpx 20rpx; }
-.board { display: grid; grid-template-columns: repeat(4, 1fr); grid-template-rows: repeat(4, 1fr); gap: 2rpx; width: 100%; aspect-ratio: 1 / 1; background: $nx-border; border: 2rpx solid $nx-accent-ziwei; border-radius: 12rpx; overflow: hidden; }
-.cell { position: relative; background: $nx-card; padding: 8rpx 8rpx 26rpx; overflow: hidden; }
+.chart-wrap { margin: 16rpx 24rpx; }
+.board {
+  display: grid; grid-template-columns: repeat(4, 1fr); grid-template-rows: repeat(4, auto);
+  gap: 2rpx; width: 100%;
+  background: $nx-border; border: 3rpx solid $nx-accent-ziwei;
+  border-radius: 16rpx; overflow: hidden; box-shadow: 0 8rpx 30rpx rgba(0, 0, 0, .18);
+}
+.cell { position: relative; background: $nx-card; padding: 14rpx 12rpx; overflow: hidden; }
 .palace-cell:active { background: $nx-bg-3; }
-.palace-cell.soul { background: rgba(91, 111, 200, .10); }
-.p-head { display: flex; align-items: center; gap: 4rpx; }
-.p-name { font-size: 22rpx; color: $nx-accent-ziwei; font-weight: 700; }
-.p-body { font-size: 16rpx; color: #fff; background: $nx-accent-ziwei; border-radius: 4rpx; padding: 0 4rpx; }
-.p-gz { position: absolute; top: 8rpx; right: 8rpx; font-size: 16rpx; color: $nx-text-muted; }
+.palace-cell.soul { background: rgba(91, 111, 200, .12); }
+/* 宫内三段（宫名 / 主星 / 辅星 / 大限）走文档流纵向排列。
+   早先用 position:absolute 把辅星与大限钉在宫底，主星行一多就压上去互相遮挡
+   （"天机"盖住"庙 旺 红鸾"），故改为 flex 列 + 各自独立行高。 */
+.p-head { display: flex; align-items: baseline; gap: 6rpx; }
+.p-name { font-size: calc(28rpx * $fs-bump); color: $nx-accent-ziwei; font-weight: 700; line-height: 1.3; }
+.p-body { font-size: 19rpx; color: #fff; background: $nx-accent-ziwei; border-radius: 5rpx; padding: 1rpx 6rpx; line-height: 1.3; }
+.p-gz { margin-left: auto; font-size: 21rpx; color: $nx-text-muted; line-height: 1.3; }
 .p-majors { margin-top: 10rpx; }
-.major-row { display: flex; align-items: baseline; gap: 2rpx; }
-.major-name { font-size: 24rpx; color: $nx-text; font-weight: 600; }
-.major-bri { font-size: 16rpx; color: $nx-text-dim; }
-.major-mut { font-size: 16rpx; font-weight: 700; }
-.major-empty { font-size: 20rpx; color: $nx-text-muted; }
-.p-minor { position: absolute; left: 8rpx; right: 8rpx; bottom: 26rpx; font-size: 15rpx; color: $nx-text-muted; line-height: 1.3; }
-.p-dec { position: absolute; left: 8rpx; bottom: 6rpx; font-size: 15rpx; color: $nx-text-dim; }
+.major-row { display: flex; align-items: baseline; gap: 4rpx; line-height: 1.45; }
+.major-name { font-size: calc(30rpx * $fs-bump); color: $nx-text; font-weight: 600; line-height: 1.45; }
+.major-bri { font-size: 20rpx; color: $nx-text-dim; }
+.major-mut { font-size: 20rpx; font-weight: 700; }
+.major-empty { display: block; font-size: 24rpx; color: $nx-text-muted; line-height: 1.45; }
+.p-minor { display: block; margin-top: 8rpx; font-size: 20rpx; color: $nx-text-dim; line-height: 1.45; }
+.p-dec { display: block; margin-top: 6rpx; font-size: 21rpx; color: $nx-text-dim; line-height: 1.4; }
 .mut-lu { color: $mut-lu; } .mut-quan { color: $mut-quan; } .mut-ke { color: $mut-ke; } .mut-ji { color: $mut-ji; }
-.mut-corner { position: absolute; width: 22rpx; height: 22rpx; line-height: 22rpx; text-align: center; font-size: 14rpx; color: #fff; border-radius: 50%; }
-.mut-corner.mut-lu { top: 4rpx; right: 4rpx; background: $mut-lu; }
-.mut-corner.mut-quan { top: 4rpx; left: 4rpx; background: $mut-quan; }
-.mut-corner.mut-ke { bottom: 4rpx; right: 4rpx; background: $mut-ke; }
-.mut-corner.mut-ji { bottom: 4rpx; left: 4rpx; background: $mut-ji; }
 
 .center-cell { padding: 0; }
-.center { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6rpx; background: $nx-bg-3; }
-.c-title { font-size: 30rpx; color: $nx-accent-ziwei; font-weight: 700; letter-spacing: 4rpx; }
-.c-line { font-size: 20rpx; color: $nx-text; }
-.c-gz { font-size: 18rpx; color: $nx-text-dim; }
-.c-tip { margin-top: 8rpx; font-size: 16rpx; color: $nx-text-muted; }
+.center { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8rpx; background: $nx-bg-3; padding: 16rpx; }
+.c-title { font-size: 34rpx; color: $nx-accent-ziwei; font-weight: 700; letter-spacing: 4rpx; }
+.c-line { font-size: 22rpx; color: $nx-text; }
+.c-time { color: $nx-text-dim; }
+.c-gz { font-size: 20rpx; color: $nx-text-dim; }
+.c-tip { margin-top: 10rpx; font-size: 19rpx; color: $nx-text-muted; }
 
-.legend { display: flex; justify-content: center; gap: 28rpx; margin: 18rpx 0 6rpx; font-size: 22rpx; color: $nx-text-dim; }
-.legend text { display: flex; align-items: center; gap: 6rpx; }
-.lg { width: 28rpx; height: 28rpx; line-height: 28rpx; text-align: center; border-radius: 50%; color: #fff; font-size: 16rpx; }
+.legend { display: flex; justify-content: center; gap: 32rpx; margin: 22rpx 0 8rpx; font-size: 24rpx; color: $nx-text-dim; }
+.lg-item { display: flex; align-items: center; gap: 8rpx; }
+.lg { width: 32rpx; height: 32rpx; line-height: 32rpx; text-align: center; border-radius: 50%; color: #fff; font-size: 18rpx; }
 .lg-lu { background: $mut-lu; } .lg-quan { background: $mut-quan; } .lg-ke { background: $mut-ke; } .lg-ji { background: $mut-ji; }
 
-.actions { display: flex; gap: 24rpx; margin: 24rpx 8rpx 0; }
-.actions button { flex: 1; }
+.actions { display: flex; gap: 24rpx; margin: 28rpx 8rpx 0; }
+.actions button { flex: 1; margin-top: 0; }
 .answer { margin: 28rpx 8rpx 0; padding: 32rpx; background: $nx-card; border: 1rpx solid $nx-border; border-radius: 16rpx; }
-.a-title { display: block; color: $nx-accent-ziwei; font-size: 32rpx; font-weight: 600; margin-bottom: 16rpx; letter-spacing: 2rpx; }
-.a-body { display: block; line-height: 2; font-size: 29rpx; color: $nx-text; }
+.a-title { display: block; color: $nx-accent-ziwei; font-size: 33rpx; font-weight: 600; margin-bottom: 16rpx; letter-spacing: 2rpx; }
+.a-body { display: block; line-height: 2.05; font-size: 30rpx; color: $nx-text; }
 .foot-space { height: 80rpx; }
 
 /* ===== 点宫详情弹层 ===== */
 .mask { position: fixed; inset: 0; z-index: 10; background: rgba(0, 0, 0, .55); display: flex; align-items: flex-end; }
 .sheet { width: 100%; max-height: 76vh; background: $nx-bg-3; border-top-left-radius: 28rpx; border-top-right-radius: 28rpx; border-top: 4rpx solid $nx-accent-ziwei; }
 .sheet-head { display: flex; align-items: center; justify-content: space-between; padding: 30rpx 36rpx; border-bottom: 1rpx solid $nx-border; }
-.sheet-title { font-size: 34rpx; color: $nx-accent-ziwei; font-weight: 700; }
+.sheet-title { font-size: 36rpx; color: $nx-accent-ziwei; font-weight: 700; }
 .sheet-close { font-size: 34rpx; color: $nx-text-dim; padding: 0 12rpx; }
-.sheet-body { padding: 20rpx 36rpx 60rpx; }
-.sec { margin-top: 28rpx; }
-.sec-t { display: block; font-size: 26rpx; color: $nx-text-dim; letter-spacing: 2rpx; margin-bottom: 12rpx; border-left: 6rpx solid $nx-accent-ziwei; padding-left: 14rpx; }
-.star-line { display: flex; align-items: baseline; gap: 12rpx; padding: 8rpx 0; }
-.sl-name { font-size: 30rpx; color: $nx-text; font-weight: 600; }
-.sl-bri { font-size: 22rpx; color: $nx-text-dim; }
-.sl-mut { font-size: 22rpx; font-weight: 700; }
-.sl-empty { font-size: 26rpx; color: $nx-text-muted; }
-.misc { display: block; font-size: 26rpx; color: $nx-text; line-height: 1.8; }
+.sheet-body { padding: 24rpx 36rpx 70rpx; }
+.sec { margin-top: 32rpx; }
+.sec-t { display: block; font-size: 28rpx; color: $nx-text-dim; letter-spacing: 2rpx; margin-bottom: 14rpx; border-left: 6rpx solid $nx-accent-ziwei; padding-left: 14rpx; }
+.star-line { display: flex; align-items: baseline; gap: 12rpx; padding: 10rpx 0; }
+.sl-name { font-size: 33rpx; color: $nx-text; font-weight: 600; }
+.sl-bri { font-size: 24rpx; color: $nx-text-dim; }
+.sl-mut { font-size: 24rpx; font-weight: 700; }
+.sl-empty { font-size: 29rpx; color: $nx-text-muted; }
+.misc { display: block; font-size: 29rpx; color: $nx-text; line-height: 1.95; }
+
+/* ===== 桌面端（H5 ≥768px） ===== */
+@media (min-width: 768px) {
+  $fs-bump: 1.15;
+  .hero { padding: 120rpx 0 36rpx; }
+  .panel { margin: 24rpx auto 60rpx; max-width: 600rpx; padding: 44rpx 40rpx; }
+  .chart-wrap { margin: 16rpx auto; max-width: 640rpx; }
+  .board { box-shadow: 0 12rpx 40rpx rgba(0, 0, 0, .22); }
+  .legend { gap: 40rpx; }
+  .actions { margin: 32rpx auto 0; max-width: 640rpx; }
+  .answer { max-width: 640rpx; margin-left: auto; margin-right: auto; }
+  .sheet { max-width: 560rpx; margin: 0 auto; border-radius: 28rpx 28rpx 0 0; }
+  .mask { align-items: flex-end; }
+}
 </style>

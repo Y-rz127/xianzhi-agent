@@ -71,12 +71,11 @@
               :style="cell.style"
               @click="detail = cell.palace"
             >
-              <i v-if="mutagenBadge(cell.palace)" class="mut-corner" :class="mutagenBadge(cell.palace)">{{ mutagenBadge(cell.palace) }}</i>
               <div class="p-head">
                 <b>{{ cell.palace.name }}</b>
                 <em v-if="cell.palace.is_body" class="p-body">身</em>
+                <small class="p-gz">{{ cell.palace.heavenly_stem }}{{ cell.palace.earthly_branch }}</small>
               </div>
-              <small class="p-gz">{{ cell.palace.heavenly_stem }}{{ cell.palace.earthly_branch }}</small>
               <div class="p-majors">
                 <div v-for="s in cell.palace.major_stars" :key="s.name" class="major-row">
                   <span class="major-name">{{ s.name }}</span>
@@ -92,10 +91,10 @@
               <div class="center">
                 <b class="c-title">{{ chart.gender }}命</b>
                 <span>{{ chart.lunar_date }}</span>
-                <span>{{ chart.time_name }}（{{ chart.time_range }}）</span>
-                <small class="c-gz">四柱 {{ chart.four_pillars.yearly }} {{ chart.four_pillars.monthly }} {{ chart.four_pillars.daily }} {{ chart.four_pillars.hourly }}</small>
-                <span>{{ chart.five_elements_class }} · 命宫{{ chart.earthly_branch_of_soul }} 身宫{{ chart.earthly_branch_of_body }}</span>
-                <span>命主{{ chart.soul_star }} · 身主{{ chart.body_star }}</span>
+                <span>{{ chart.time_name }}</span>
+                <small class="c-gz">{{ chart.four_pillars.yearly }} {{ chart.four_pillars.monthly }}</small>
+                <small class="c-gz">{{ chart.four_pillars.daily }} {{ chart.four_pillars.hourly }}</small>
+                <span>{{ chart.five_elements_class }}</span>
                 <small class="c-tip">点任意宫看详情</small>
               </div>
             </div>
@@ -151,8 +150,10 @@
             </section>
             <section class="sec">
               <h4>十二神</h4>
-              <p class="misc">长生·{{ detail.changsheng12 }}　博士·{{ detail.boshi12 }}</p>
-              <p class="misc">将前·{{ detail.jiangqian12 }}　岁前·{{ detail.suiqian12 }}</p>
+              <p class="misc">长生·{{ detail.changsheng12 }}</p>
+              <p class="misc">博士·{{ detail.boshi12 }}</p>
+              <p class="misc">将前·{{ detail.jiangqian12 }}</p>
+              <p class="misc">岁前·{{ detail.suiqian12 }}</p>
             </section>
             <section class="sec">
               <h4>三方四正</h4>
@@ -233,12 +234,6 @@ function minorNames(p: ZiWeiPalace): string {
   const names = [...p.minor_stars.map(s => s.name), ...p.adjective_stars.filter(s => s.type === "flower" || s.type === "tough" || s.type === "soft").map(s => s.name)]
   return [...new Set(names)].slice(0, 8).join(" ")
 }
-function mutagenBadge(p: ZiWeiPalace): string {
-  for (const m of ["禄", "权", "科", "忌"]) {
-    if (p.major_stars.some(s => s.mutagen === m)) return m
-  }
-  return ""
-}
 const sanFangSiZheng = computed(() => {
   if (!detail.value || !chart.value) return ""
   const i = detail.value.index
@@ -312,13 +307,25 @@ async function interpret() {
 }
 .seg .active { color: #c4d0fa; border-color: #8fa1e8; background: rgba(143, 161, 232, .12); font-weight: 600; }
 
-.btn-center { display: flex; justify-content: center; margin: 24px 0; }
-.actions { gap: 12px; }
-.cast-btn { margin: 0; padding: 14px 40px; border: 1px solid #8fa1e8; border-radius: 10px; background: linear-gradient(135deg, #33407e, #5566b8); color: #fff; letter-spacing: 2px; cursor: pointer; font-size: 15px; font-weight: 600; transition: all .25s; }
-.cast-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 4px 16px rgba(85, 102, 184, .45); }
-.cast-btn:disabled { opacity: .6; cursor: not-allowed; }
-.ghost-btn { padding: 14px 28px; border: 1px solid #8fa1e8; border-radius: 10px; background: transparent; color: #a9b8f0; cursor: pointer; font-size: 14px; }
-.ghost-btn:disabled { opacity: .5; cursor: not-allowed; }
+.btn-center { display: flex; justify-content: center; margin: 28px 0; }
+.actions { gap: 16px; }
+.cast-btn {
+  margin: 0; padding: 14px 44px; border: 1px solid #8fa1e8; border-radius: 12px;
+  background: linear-gradient(135deg, #33407e, #5566b8); color: #fff; letter-spacing: 2px;
+  cursor: pointer; font-size: 15px; font-weight: 600; line-height: 1.4;
+  transition: transform .2s, box-shadow .2s, opacity .2s, background .2s;
+}
+.cast-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(85, 102, 184, .45); }
+.cast-btn:active:not(:disabled) { transform: translateY(0); box-shadow: 0 2px 8px rgba(85, 102, 184, .35); }
+.cast-btn:disabled { opacity: .55; cursor: not-allowed; }
+.ghost-btn {
+  padding: 14px 30px; border: 1px solid #8fa1e8; border-radius: 12px; background: transparent;
+  color: #a9b8f0; cursor: pointer; font-size: 14px; line-height: 1.4;
+  transition: transform .2s, opacity .2s, background .2s, color .2s;
+}
+.ghost-btn:hover:not(:disabled) { transform: translateY(-2px); background: rgba(143, 161, 232, .10); color: #c8d4f7; }
+.ghost-btn:active:not(:disabled) { transform: translateY(0); background: rgba(143, 161, 232, .18); }
+.ghost-btn:disabled { opacity: .4; cursor: not-allowed; }
 
 /* ===== 命盘 4×4 ===== */
 .result { border-top: 1px solid rgba(143, 161, 232, .35); margin-top: 20px; padding-top: 22px; }
@@ -326,67 +333,67 @@ async function interpret() {
 @keyframes resultIn { 0% { opacity: 0; transform: translateY(18px); } 100% { opacity: 1; transform: translateY(0); } }
 
 .board {
-  display: grid; grid-template-columns: repeat(4, 1fr); grid-template-rows: repeat(4, 1fr);
-  gap: 2px; width: 100%; max-width: 720px; aspect-ratio: 1 / 1; margin: 0 auto;
-  background: var(--border); border: 2px solid #8fa1e8; border-radius: 10px; overflow: hidden;
+  display: grid; grid-template-columns: repeat(4, 1fr); grid-template-rows: repeat(4, auto);
+  gap: 2px; width: 100%; max-width: 640px; margin: 0 auto;
+  background: var(--border); border: 2px solid #8fa1e8; border-radius: 14px; overflow: hidden;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, .35);
 }
-.cell { position: relative; background: rgba(20, 16, 26, .72); padding: 7px 7px 22px; overflow: hidden; text-align: left; }
-.palace-cell { cursor: pointer; transition: background .2s; }
+.cell { position: relative; background: rgba(20, 16, 26, .72); padding: 10px 10px; overflow: hidden; text-align: left; }
+.palace-cell { cursor: pointer; transition: background .2s, transform .15s; }
 .palace-cell:hover { background: rgba(143, 161, 232, .12); }
+.palace-cell:active { background: rgba(143, 161, 232, .20); transform: scale(.99); }
 .palace-cell.soul { background: rgba(143, 161, 232, .10); }
-.p-head { display: flex; align-items: center; gap: 4px; }
-.p-head b { font-size: 12px; color: #a9b8f0; }
-.p-body { font-style: normal; font-size: 9px; color: #fff; background: #5566b8; border-radius: 3px; padding: 0 3px; }
-.p-gz { position: absolute; top: 7px; right: 7px; font-size: 9px; color: var(--text-dim); }
-.p-majors { margin-top: 5px; }
-.major-row { display: flex; align-items: baseline; gap: 2px; }
-.major-name { font-size: 13px; font-weight: 600; color: #eee; }
-.major-bri { font-size: 9px; color: var(--text-dim); }
-.major-mut { font-style: normal; font-size: 9px; font-weight: 700; }
-.major-empty { font-size: 11px; color: var(--text-dim); }
-.p-minor { position: absolute; left: 7px; right: 7px; bottom: 15px; font-size: 9px; color: var(--text-dim); line-height: 1.3; }
-.p-dec { position: absolute; left: 7px; bottom: 3px; font-size: 9px; color: var(--text-dim); }
+/* 宫内四段走文档流纵向排列。原先辅星/大限用 position:absolute 钉在宫底，
+   主星一多就压上去互相遮挡 —— 与小程序端同一问题、同一修法。 */
+.p-head { display: flex; align-items: baseline; gap: 5px; }
+.p-head b { font-size: 13px; color: #a9b8f0; line-height: 1.35; }
+.p-body { font-style: normal; font-size: 10px; color: #fff; background: #5566b8; border-radius: 4px; padding: 1px 4px; line-height: 1.3; }
+.p-gz { margin-left: auto; font-size: 11px; color: var(--text-dim); line-height: 1.35; }
+.p-majors { margin-top: 6px; }
+.major-row { display: flex; align-items: baseline; gap: 3px; line-height: 1.5; }
+.major-name { font-size: 14px; font-weight: 600; color: #eee; line-height: 1.5; }
+.major-bri { font-size: 10px; color: var(--text-dim); }
+.major-mut { font-style: normal; font-size: 10px; font-weight: 700; }
+.major-empty { display: block; font-size: 12px; color: var(--text-dim); line-height: 1.5; }
+.p-minor { display: block; margin-top: 6px; font-size: 10px; color: var(--text-dim); line-height: 1.5; }
+.p-dec { display: block; margin-top: 4px; font-size: 11px; color: var(--text-dim); line-height: 1.45; }
 
 /* 四化语义色（固定，徽章深底白字） */
 .mut-lu { color: #e8c14a; } .mut-quan { color: #e07a6a; } .mut-ke { color: #5ec2c2; } .mut-ji { color: #9a9a9a; }
-.mut-corner {
-  position: absolute; top: 3px; right: 22px; width: 14px; height: 14px; line-height: 14px;
-  text-align: center; font-style: normal; font-size: 9px; color: #fff; border-radius: 50%;
-}
-.mut-corner.mut-lu { background: #c9a227; } .mut-corner.mut-quan { background: #c0392b; }
-.mut-corner.mut-ke { background: #2e8b8b; } .mut-corner.mut-ji { background: #555; }
 
 .center-cell { padding: 0; }
 .center {
   height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center;
-  gap: 4px; background: #171221; padding: 8px; text-align: center;
+  gap: 5px; background: #171221; padding: 12px; text-align: center;
 }
-.center span { font-size: 11px; color: #ddd; }
-.c-title { font-size: 16px; color: #a9b8f0; letter-spacing: 3px; }
-.c-gz { font-size: 10px; color: var(--text-dim); }
-.c-tip { margin-top: 4px; font-size: 9px; color: var(--text-dim); }
+.center span { font-size: 13px; color: #ddd; }
+.c-title { font-size: 17px; color: #a9b8f0; letter-spacing: 3px; }
+.c-gz { font-size: 11px; color: var(--text-dim); }
+.c-tip { margin-top: 6px; font-size: 10px; color: var(--text-dim); }
 
-.legend { display: flex; justify-content: center; gap: 22px; margin: 16px 0 0; font-size: 12px; color: var(--text-dim); }
-.legend span { display: flex; align-items: center; gap: 5px; }
-.lg { width: 16px; height: 16px; line-height: 16px; text-align: center; border-radius: 50%; color: #fff; font-style: normal; font-size: 9px; }
+.legend { display: flex; justify-content: center; gap: 28px; margin: 18px 0 0; font-size: 13px; color: var(--text-dim); }
+.legend span { display: flex; align-items: center; gap: 6px; }
+.lg { width: 18px; height: 18px; line-height: 18px; text-align: center; border-radius: 50%; color: #fff; font-style: normal; font-size: 10px; }
 .lg-lu { background: #c9a227; } .lg-quan { background: #c0392b; } .lg-ke { background: #2e8b8b; } .lg-ji { background: #555; }
 
-.ai-result { max-width: 680px; margin: 20px auto; color: #d9d4c3; text-align: left; line-height: 1.8; white-space: pre-wrap; background: rgba(255, 255, 255, .04); padding: 16px; border-radius: 8px; }
+.ai-result { max-width: 680px; margin: 20px auto; color: #d9d4c3; text-align: left; line-height: 1.9; white-space: pre-wrap; background: rgba(255, 255, 255, .04); padding: 18px; border-radius: 10px; font-size: 14px; }
 
 /* ===== 点宫详情弹层 ===== */
 .mask { position: fixed; inset: 0; z-index: 20; background: rgba(0, 0, 0, .55); display: flex; align-items: center; justify-content: center; padding: 20px; }
-.sheet { width: min(100%, 480px); max-height: 80vh; display: flex; flex-direction: column; background: #1b1626; border: 1px solid #8fa1e8; border-radius: 14px; overflow: hidden; }
+.sheet { width: min(100%, 480px); max-height: 80vh; display: flex; flex-direction: column; background: #1b1626; border: 1px solid #8fa1e8; border-radius: 16px; overflow: hidden; box-shadow: 0 20px 60px rgba(0, 0, 0, .5); }
 .sheet-head { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid var(--border); }
-.sheet-head h3 { margin: 0; font-size: 16px; color: #a9b8f0; }
-.sheet-close { border: none; background: transparent; color: var(--text-dim); font-size: 16px; cursor: pointer; padding: 4px 8px; }
-.sheet-body { overflow-y: auto; padding: 6px 20px 22px; text-align: left; }
-.sec { margin-top: 16px; }
-.sec h4 { margin: 0 0 8px; font-size: 12px; font-weight: 600; color: var(--text-dim); letter-spacing: 1px; border-left: 3px solid #8fa1e8; padding-left: 8px; }
-.star-line { display: flex; align-items: baseline; gap: 8px; padding: 4px 0; }
-.star-line b { font-size: 14px; color: #eee; }
-.star-line small { font-size: 11px; color: var(--text-dim); }
-.star-line .major-mut { font-size: 11px; }
-.misc { margin: 0; font-size: 13px; color: #ddd; line-height: 1.8; }
+.sheet-head h3 { margin: 0; font-size: 17px; color: #a9b8f0; }
+.sheet-close { border: none; background: transparent; color: var(--text-dim); font-size: 16px; cursor: pointer; padding: 4px 8px; border-radius: 6px; transition: background .15s, color .15s; }
+.sheet-close:hover { background: rgba(143, 161, 232, .12); color: #c8d4f7; }
+.sheet-body { overflow-y: auto; padding: 8px 20px 24px; text-align: left; }
+.sec { margin-top: 18px; }
+.sec h4 { margin: 0 0 8px; font-size: 13px; font-weight: 600; color: var(--text-dim); letter-spacing: 1px; border-left: 3px solid #8fa1e8; padding-left: 8px; }
+.star-line { display: flex; align-items: baseline; gap: 8px; padding: 5px 0; }
+.star-line b { font-size: 15px; color: #eee; }
+.star-line small { font-size: 12px; color: var(--text-dim); }
+.star-line .major-mut { font-size: 12px; }
+.major-empty { font-size: 13px; color: var(--text-dim); }
+.misc { margin: 0; font-size: 14px; color: #ddd; line-height: 2.0; }
 
 .toast { position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%); padding: 10px 20px; border-radius: 8px; background: #b54b62; color: #fff; z-index: 30; }
 .toast-fade-enter-active, .toast-fade-leave-active { transition: .25s; }
@@ -397,9 +404,19 @@ async function interpret() {
 @media (max-width: 640px) {
   .ziwei-card { padding: 20px; }
   .board { max-width: 100%; }
-  .major-name { font-size: 11px; }
-  .p-head b { font-size: 10px; }
-  .p-minor, .p-dec { font-size: 8px; }
-  .center span { font-size: 9px; }
+  .major-name { font-size: 12px; }
+  .p-head b { font-size: 11px; }
+  .p-gz { font-size: 10px; }
+  .p-minor, .p-dec { font-size: 9px; }
+  .p-bri { font-size: 8px; }
+  .center span { font-size: 10px; }
+  .c-title { font-size: 14px; }
+  .c-gz { font-size: 9px; }
+  .p-body { font-size: 8px; }
+  .major-bri { font-size: 8px; }
+  .major-mut { font-size: 8px; }
+  .lg { width: 15px; height: 15px; line-height: 15px; font-size: 8px; }
+  .cast-btn, .ghost-btn { padding: 12px 24px; font-size: 14px; }
+  .legend { gap: 16px; font-size: 11px; }
 }
 </style>
