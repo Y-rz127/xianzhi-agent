@@ -139,8 +139,17 @@ class XianzhiWorkflow:
     # ===== LLM 意图拆解 =====
     _DECOMPOSE_SYSTEM = domain_sysprompt
 
-    def _decompose_query(self, user_prompt: str) -> QuestionIntent | None:
+    def _decompose_query(
+        self,
+        user_prompt: str,
+        history: list[BaseMessage] | None = None,
+        summary: str = "",
+    ) -> QuestionIntent | None:
         """用 LLM 拆解用户问题 → 意图分类 + 精准检索词。
+
+        附上最近对话（compact_history：3 轮 + 会话摘要）供**指代消解与话题延续**：
+        「那我的呢」「他呢」「继续」「还有呢」这类短追问，脱离前文无法判定领域，
+        只看当前句必然拆错（2026-10-08 用户提议）。无历史时保持原格式，行为不变。
 
         失败时返回 None，调用方 fallback 到 classify_question。
         使用独立的拆解模型（轻量快速），而非主模型。
@@ -150,7 +159,7 @@ class XianzhiWorkflow:
         try:
             messages = [
                 SystemMessage(content=self._DECOMPOSE_SYSTEM),
-                HumanMessage(content=user_prompt),
+                HumanMessage(content=self._decompose_user_block(user_prompt, history, summary)),
             ]
             resp = self._decompose_model.invoke(messages)
             raw = (getattr(resp, "content", "") or "").strip()
@@ -213,6 +222,27 @@ class XianzhiWorkflow:
             log.warning("[LLM拆解] 失败，fallback到关键词分类: {}", e)
             return None
 
+    @staticmethod
+    def _decompose_user_block(
+        user_prompt: str, history: list[BaseMessage] | None, summary: str = ""
+    ) -> str:
+        """拆解调用的用户消息：有历史时前置【前文对话】，无历史时保持原样（纯问题）。
+
+        措辞要点（防两类误判）：
+        - 前文**仅供指代消解**，不能据此改写当前意图 —— 前文聊命理不代表当前这句也是命理
+          （用户可能接着突然寒暄），也不能把前文的领域直接搬过来当本句的 domain。
+        - 当前消息过短且无实义时（「继续」「他呢」），结合前文补全其真实所指。
+        """
+        ctx = compact_history(list(history or []), summary)
+        if ctx == "（无）":
+            return user_prompt
+        return (
+            "【前文对话（仅供理解指代与话题延续，不要重复回答，也不要据此改写当前意图）】\n"
+            f"{ctx}\n\n"
+            "【当前用户消息】\n"
+            f"{user_prompt}"
+        )
+
     def answer(
         self,
         user_prompt: str,
@@ -229,6 +259,8 @@ class XianzhiWorkflow:
         # 闲聊短路：关键词命中 chitchat 时直接走分类，不调用 LLM 拆解（节省 API 调用+时间）
         # 例外：用户有「6岁那年」「30岁当时」等年龄指认 + 命理信号词时，强制走拆解路径，
         # 否则会被误判为 chitchat 短路、扩盘与岁运关系全部丢失。
+        # 注：零关键词命中的短追问（「继续」「他呢」）本就落到下方 else 走拆解
+        # （detect_domain 未命中返回空串而非 chitchat），无需额外放行条件。
         _chitchat_kw = detect_domain(user_prompt)
         _has_age_cue = bool(
             chart_context
@@ -244,7 +276,7 @@ class XianzhiWorkflow:
             intent = replace(intent, domain="chitchat", label="闲聊问候")
             log.info("[LLM拆解] 长文本无命理信号，跳过 LLM 拆解 → domain=chitchat")
         else:
-            intent = self._decompose_query(user_prompt) or classify_question(user_prompt)
+            intent = self._decompose_query(user_prompt, history, summary) or classify_question(user_prompt)
         # ===== 合婚双盘：解析对方命盘（用户已挂载自己的盘，问题中给出对方盘）=====
         # 必须在 LangGraph 调用之前完成，否则图内节点读取不到 second_chart/match_basis
         if intent.domain == "match":

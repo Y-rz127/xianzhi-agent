@@ -128,6 +128,119 @@ def test_decompose_query_fallback_when_no_chat_model():
     assert workflow._decompose_query("任何问题") is None
 
 
+class _RecordingModel:
+    """记录每次 invoke 收到的 messages，返回固定 JSON（用于断言注入内容）。"""
+
+    def __init__(self, response: str):
+        self._response = response
+        self.seen: list[list] = []
+
+    def invoke(self, messages, **kwargs):
+        self.seen.append(list(messages))
+        from langchain_core.messages import AIMessage
+
+        return AIMessage(content=self._response)
+
+
+_LOVE_JSON = '{"domain":"love","queries":["感情 正缘"],"needs_chart":true}'
+
+
+def test_decompose_query_injects_history_for_pronoun():
+    """有历史时拆解请求带【前文对话】——「那我的呢」这类指代句靠它才能定 domain。
+
+    事故锚点（2026-10-08 用户提议）：短追问脱离前文无法判定领域，
+    只看当前句必然拆错。
+    """
+    from langchain_core.messages import AIMessage, HumanMessage
+
+    model = _RecordingModel(_LOVE_JSON)
+    workflow = XianzhiWorkflow(chat_model=model)
+    history = [
+        HumanMessage(content="我什么时候能遇到正缘"),
+        AIMessage(content="从你的盘看，正缘偏晚……"),
+    ]
+    intent = workflow._decompose_query("那我的呢", history, "")
+    assert intent is not None and intent.domain == "love"
+    human = model.seen[0][-1].content
+    assert "前文对话" in human, human
+    assert "我什么时候能遇到正缘" in human, human
+    assert "当前用户消息" in human and "那我的呢" in human, human
+
+
+def test_decompose_query_without_history_keeps_plain_prompt():
+    """无历史时保持原格式（纯问题）——避免无谓的 prompt 变化。"""
+    model = _RecordingModel('{"domain":"theory","queries":["格局"],"needs_chart":false}')
+    workflow = XianzhiWorkflow(chat_model=model)
+    workflow._decompose_query("什么是格局")
+    assert model.seen[0][-1].content == "什么是格局"
+
+
+def test_decompose_query_summary_only_still_injected():
+    """只有会话摘要（无消息历史）时也要带上——老会话靠摘要续接上下文。"""
+    model = _RecordingModel(_LOVE_JSON)
+    workflow = XianzhiWorkflow(chat_model=model)
+    workflow._decompose_query("继续说说", [], "用户已婚，问婚姻经营。")
+    human = model.seen[0][-1].content
+    assert "前文对话" in human and "用户已婚" in human, human
+
+
+class _FakeGraph:
+    """替换 LangGraph：只记录传入 state，返回固定 final_answer。"""
+
+    def __init__(self):
+        self.state = None
+
+    def invoke(self, state, *args, **kwargs):
+        self.state = state
+        return {"final_answer": "ok"}
+
+
+def _answer_and_capture(workflow, prompt, history):
+    graph = _FakeGraph()
+    workflow._graph = graph
+    ctx = build_chart_context("1990-05-20 14:30", MALE)
+    workflow.answer(prompt, ctx, history=history, summary="")
+    return graph.state
+
+
+def test_answer_followup_decompose_carries_history():
+    """「继续」类短追问走拆解时，请求里必须带前文（本次核心修复）。
+
+    注：短追问零关键词命中，本就落到拆解分支（detect_domain 未命中返回空串），
+    缺的一直是**拆解看不到前文**——所以只断言「拆解请求带前文 + domain 定对」。
+    """
+    from langchain_core.messages import AIMessage, HumanMessage
+
+    model = _RecordingModel(_LOVE_JSON)
+    workflow = XianzhiWorkflow(chat_model=model)
+    history = [
+        HumanMessage(content="我什么时候能遇到正缘"),
+        AIMessage(content="从你的盘看，正缘偏晚……"),
+    ]
+    state = _answer_and_capture(workflow, "继续", history)
+    assert len(model.seen) == 1, "应调用拆解模型"
+    human = model.seen[0][-1].content
+    assert "前文对话" in human and "正缘" in human, human
+    assert state["intent"].domain == "love", state["intent"].domain
+
+
+def test_answer_decompose_plain_when_no_history():
+    """无历史时拆解请求保持纯问题（不注入空的前文块）。"""
+    model = _RecordingModel(_LOVE_JSON)
+    workflow = XianzhiWorkflow(chat_model=model)
+    _answer_and_capture(workflow, "我想问感情", [])
+    assert model.seen[0][-1].content == "我想问感情"
+
+
+def test_answer_chitchat_keyword_still_short_circuits():
+    """明确闲聊词（命中 chitchat 关键词）仍走短路——省一次拆解调用不被本次改动破坏。"""
+    model = _RecordingModel(_LOVE_JSON)
+    workflow = XianzhiWorkflow(chat_model=model)
+    state = _answer_and_capture(workflow, "你好", [])
+    assert len(model.seen) == 0, "「你好」不应调拆解模型"
+    assert state["intent"].domain == "chitchat"
+
+
 def test_needs_chart_overrides_skip_facts():
     """needs_chart=True 时，theory worker 的 skip_facts 被覆盖，注入命盘事实"""
     llm_output = '{"domain":"theory","queries":["枭神夺食"],"needs_chart":true}'

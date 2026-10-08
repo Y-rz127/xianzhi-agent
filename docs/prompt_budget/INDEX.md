@@ -56,7 +56,7 @@ LangGraph 图：classify → chart(扩盘) → retrieve(知识检索) → genera
 | 文档 | 对话方式 / 调用 | 一句话说明 | LLM 调用 |
 |---|---|---|---|
 | [workflow_intent_routing.md](./workflow_intent_routing.md) | 意图分类防护链路（调用 A 之前） | `detect_domain`→`_looks_off_topic`→`_decompose_query`+`classify_question` 兜底；闲聊命中即跳过 LLM 拆解（用户口中的"三层判断"即指此） | 0~1 次 |
-| [workflow_decompose.md](./workflow_decompose.md) | 意图拆解（调用 A） | 非闲聊且非离题时，先 LLM 拆 domain/queries；可被短路跳过；用独立 decompose_model | ≤1 次 |
+| [workflow_decompose.md](./workflow_decompose.md) | 意图拆解（调用 A） | 非闲聊且非离题时，先 LLM 拆 domain/queries（附最近 3 轮前文供指代消解）；可被短路跳过；用独立 decompose_model | ≤1 次 |
 | [workflow_chitchat.md](./workflow_chitchat.md) | Worker 主回答·闲聊（调用 B） | 已挂命盘走 Workflow 的闲聊；跳过事实/命例，知识库固定 15 字占位；**跳过 LLM 深审** | 1 次 |
 | [workflow_theory.md](./workflow_theory.md) | Worker 主回答·理论（调用 B） | 纯命理理论/术语；默认跳过事实/命例（needs_chart=True 时仍注入），真检索知识库 | 1 次（+深审 D） |
 | [workflow_regular.md](./workflow_regular.md) | Worker 主回答·常规断事（调用 B） | career/wealth/health 等断事；注入排盘事实+断事参考+知识库（相似命例注入已移除） | 1 次（+深审 D） |
@@ -97,7 +97,7 @@ LangGraph 图：classify → chart(扩盘) → retrieve(知识检索) → genera
 | `REACT_NEXT_STEP_PROMPT`（ReAct 工具指引，仅注入一次） | 797 | prompts.py:59 |
 | `REACT_FACT_GUARDRAILS`（有命盘时追加） | 398 | prompts.py:83 |
 | `CHITCHAT_SYSTEM`（ReAct 闲聊短路 System） | 581 | prompts.py:127 |
-| `domain_sysprompt`（Workflow 拆解 = `_DECOMPOSE_SYSTEM`） | 1221 | prompts.py:361 |
+| `domain_sysprompt`（Workflow 拆解 = `_DECOMPOSE_SYSTEM`） | 1694 | prompts.py:401 |
 | Workflow 基础 System（ORACLE_BASE + FACT_REDLINE 拼接） | 1823 | workflow_messages.py:74 |
 | `WORKFLOW_FACT_REDLINE`（Workflow 事实红线段） | 563 | prompts.py:43 |
 | Worker 通用断法抬头 `WORKER_PREAMBLE_TEMPLATE` | 87 | prompts.py:38 |
