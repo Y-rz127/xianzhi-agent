@@ -9,7 +9,10 @@
   天德合同理走同一分支判断。
 - **月德只查四柱天干**，不查藏干 —— 口诀"亥卯未月甲干栖"的"干"即天干；
   查藏干会把三合木局误报成月德。
-- 德秀贵人是"德干优先、无德才看秀干"的 for/else 结构，顺序不能颠倒。
+- **天德同样不查藏干**（问真查法"以月支查四柱干支"）：曾查藏干导致年柱藏干含天德字即被
+  误标（2026-10-08 现场）。
+- 德秀贵人是"以月令查天干"的**逐柱判定**：四柱天干各自判德/秀，命中即标，可多柱同时命中。
+  曾误写成"德干优先、命中一个就 break"，只产出一条（2026-10-08 现场）。
 """
 
 from __future__ import annotations
@@ -45,10 +48,11 @@ def collect(ctx: ShenshaContext) -> Iterator[tuple[str, str, str]]:
                     if p.zhi == c:
                         yield ("天德贵人", "逢凶化吉", p.name)
                 else:
-                    # 天德是天干，查天干（透出，力显）和藏干（暗藏，力弱需引动）
+                    # 天德是天干：只查四柱天干（问真查法"以月支查四柱干支"）。
+                    # 曾额外查藏干，导致年柱藏干含癸即被误标（2026-10-08 现场：
+                    # 庚辰 甲申 辛酉 癸巳，申月天德为癸，年柱藏干癸 → 年柱多标，
+                    # 而问真只在时柱标）。藏干不算"见"。
                     if p.gan == c:
-                        yield ("天德贵人", "逢凶化吉", p.name)
-                    elif any(hs == c for hs in p.hidden_stems):
                         yield ("天德贵人", "逢凶化吉", p.name)
 
     # 月德贵人只查四柱天干
@@ -77,19 +81,18 @@ def collect(ctx: ShenshaContext) -> Iterator[tuple[str, str, str]]:
             if p.gan == yue_de_he:
                 yield ("月德合", "化解灾难、福禄双全", p.name)
 
-    # 德秀贵人（月令查天干：德干优先，无德干才看秀干）
+    # 德秀贵人（以月令查天干：四柱天干逐个判德/秀，命中即标——可多柱同时命中）
+    # 旧实现"德干优先、命中一个就 break"是错的：申子辰月德干{壬癸戊己}、秀干{丙辛甲己}，
+    # 庚辰 甲申 辛酉 癸巳 应按月干甲(秀)/日干辛(秀)/时干癸(德)标三柱，
+    # 旧逻辑只产出时柱癸一条（2026-10-08 现场，问真三柱都有）。
     de_xiu = DE_XIU.get(month_zhi)
     if de_xiu:
         de_set, xiu_set = de_xiu
         for p in pillars:
             if p.gan in de_set:
                 yield ("德秀贵人", "温厚聪慧、才华横溢", p.name)
-                break
-        else:
-            for p in pillars:
-                if p.gan in xiu_set:
-                    yield ("德秀贵人", "清秀之气、多才多艺", p.name)
-                    break
+            elif p.gan in xiu_set:
+                yield ("德秀贵人", "清秀之气、多才多艺", p.name)
 
     # 天医（月支查，对齐 07_神煞初探.md）
     tianyi_med = TIAN_YI_MED.get(month_zhi)

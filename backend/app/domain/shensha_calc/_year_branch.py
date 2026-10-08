@@ -14,6 +14,8 @@
   且含月柱自身（"亥月→亥"自映射），故血刃不跳过任何柱，见 `collect_year_branch` 内注释。
 - 勾绞煞只取命前三辰一位（问真查法单表：子见卯、丑见辰…亥见寅），命后三辰之绞不另计；
   元辰依"年干阴阳 + 性别"定向：阳男阴女顺推、阴男阳女逆推。
+- **天罗地网走问真查法一**（以年支+日支查余三支），且**记录在触发柱**而非参照柱；
+  天罗/地网保持两个独立名字，不合并（用户要求）。
 """
 
 from __future__ import annotations
@@ -79,7 +81,11 @@ def collect_year_day_branch(ctx: ShenshaContext) -> Iterator[tuple[str, str, str
 
 
 def collect_year_branch(ctx: ShenshaContext) -> Iterator[tuple[str, str, str]]:
-    """只以年支查（排除年柱），另含血刃、勾绞煞、元辰、天罗地网。"""
+    """只以年支查（排除年柱），另含血刃、勾绞煞、元辰、天罗地网。
+
+    天罗地网例外：**以年支+日支双查余三支**（问真查法一），记录在触发柱，
+    见函数内注释。
+    """
     pillars = ctx.pillars
 
     for name, table, desc in _YEAR_BRANCH_LOOKUPS:
@@ -128,12 +134,25 @@ def collect_year_branch(ctx: ShenshaContext) -> Iterator[tuple[str, str, str]]:
             if p.zhi == yuan:
                 yield ("元辰", "别而不合、诸事不顺", p.name)
 
-    # 天罗地网（戌亥为天罗、辰巳为地网；需戌亥互见 / 辰巳互见）
-    # 标注到具体柱：天罗标含"戌"的柱，地网标含"辰"的柱
-    all_zhi = ctx.all_zhi
-    if "戌" in all_zhi and "亥" in all_zhi:
-        p_xu = next((p for p in pillars if p.zhi == "戌"), None)
-        yield ("天罗", "困顿羁绊、难挣脱", p_xu.name if p_xu else "")
-    if "辰" in all_zhi and "巳" in all_zhi:
-        p_chen = next((p for p in pillars if p.zhi == "辰"), None)
-        yield ("地网", "困顿羁绊、事业受阻", p_chen.name if p_chen else "")
+    # 天罗地网（问真查法一：以**年支、日支**查余三支）
+    #   戌见亥 / 亥见戌 → 天罗；辰见巳 / 巳见辰 → 地网。
+    # 记录到**触发柱**（"被见到的那个字"所在柱），而非参照柱 ——
+    # 旧实现全盘扫"戌亥/辰巳"同时出现、并把字标在含"辰"/"戌"的柱上，
+    # 导致 庚辰 甲申 辛酉 癸巳 的"地网"标到年柱（问真标时柱，2026-10-08 现场）。
+    # 两字互见（如年支辰+日支巳）时，各参照点各标一次，按柱名去重。
+    # 注：yield 的神煞名必须写字面量 —— tests/bazi_golden.py 的 AST 名册守卫按字面量提取。
+    _LW_TARGET = {"戌": "亥", "亥": "戌", "辰": "巳", "巳": "辰"}
+    seen_lw: set[str] = set()
+    for key_zhi, skip_idx in ((ctx.year_zhi, 0), (ctx.day_zhi, 2)):
+        target = _LW_TARGET.get(key_zhi)
+        if not target:
+            continue
+        for i, p in enumerate(pillars):
+            if i == skip_idx or p.name in seen_lw:
+                continue
+            if p.zhi == target:
+                seen_lw.add(p.name)
+                if key_zhi in ("戌", "亥"):
+                    yield ("天罗", "困顿羁绊、难挣脱，男命尤忌", p.name)
+                else:
+                    yield ("地网", "困顿羁绊、事业受阻，女命尤忌", p.name)

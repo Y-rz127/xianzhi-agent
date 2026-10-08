@@ -8,8 +8,9 @@
 口径要点（改动前请先核对 `knowledge_docs/07_神煞初探.md` 对应条目）：
 - **三奇贵人必须"顺次连续、不隔柱"**：只认 年-月-日 与 月-日-时 两个连续窗口，
   用 `window == triple` 精确比较元组，逆序/乱序/隔柱一律不中（"凑齐即算"已废弃）。
-- 天赦/天转地转/四废以**出生季节**（月支）查日柱；金神为"日柱优先，否则看时柱"
-  的 if/elif —— 二者互斥，不能改成两个独立 if。
+- 天赦/天转地转/四废以**出生季节**（月支）查日柱；天转日与地转日各有独立表
+  （`TIAN_ZHUAN`/`DI_ZHUAN`），**不可合并判定**（曾共用一张表导致"命中任一即两煞全报"，
+  2026-10-08 现场）；金神为"日柱优先，否则看时柱"的 if/elif —— 二者互斥，不能改成两个独立 if。
 - 飞刃 = 羊刃对冲位，其羊刃位来自 `_day_stem.yang_ren_zhi`（与族一同源）。
 - 空亡为年柱与日柱旬空的**并集**，任一落空即标记该柱。
 """
@@ -23,6 +24,7 @@ from app.domain.shensha_calc._context import ShenshaContext
 from app.domain.tables import (
     BA_ZHUAN,
     CHONG_ZHI,
+    DI_ZHUAN,
     GONG_LU,
     GU_LUAN,
     JIN_SHEN,
@@ -33,8 +35,8 @@ from app.domain.tables import (
     SHI_E_DA_BAI,
     SHI_LING,
     SI_FEI,
-    TIAN_DI_ZHUAN,
     TIAN_SHE,
+    TIAN_ZHUAN,
     YIN_CHA_YANG_CUO,
 )
 
@@ -77,9 +79,13 @@ def collect_combinations(ctx: ShenshaContext) -> Iterator[tuple[str, str, str]]:
     elif len(pillars) > 3 and pillars[3].ganzhi in JIN_SHEN:
         yield ("金神", "刚烈果断、具开拓改革精神，危机能当重任", "时柱")
 
-    # 天转日 / 地转日（以月支查日柱，二者同表）
-    if day_gz in TIAN_DI_ZHUAN.get(season, ()):
+    # 天转日 / 地转日（以月支/季节查日柱；两煞各有其表，独立判定）
+    # 春(乙卯/辛卯)、夏(丙午/戊午)、秋(辛酉/癸酉)、冬(壬子/丙子)，前者天转、后者地转。
+    # 旧实现用 `day_gz in 合并表` 判"命中任一即两煞全报"，
+    # 导致 庚辰 甲申 辛酉 癸巳（秋·辛酉=天转）被多标一个"地转日"（2026-10-08 现场）。
+    if day_gz == TIAN_ZHUAN.get(season):
         yield ("天转日", "干支纳音俱专、旺于四时，时来运转亦防过旺", "日柱")
+    if day_gz == DI_ZHUAN.get(season):
         yield ("地转日", "干支纳音俱专、旺于四时，转运改命亦防过旺", "日柱")
 
     # 四废日（以出生季节查日柱）
