@@ -148,8 +148,64 @@ def test_align_args_keeps_valid_names():
 
     agent = _make_agent([t])
     assert agent._align_args(t, {"a": "x"}) == {"a": "x"}
-    # 部分命中也算对齐成功，未命中的键原样保留（交由工具自己报错，信息更明确）
+    # 已知键 + 无法配对的多余键：多余的键原样保留（交由工具自己报错，信息更明确）
     assert agent._align_args(t, {"a": "x", "zzz": 1}) == {"a": "x", "zzz": 1}
+
+
+def test_align_args_unique_gap_no_common_substring():
+    """现场第二次漂移：bazi → pillars（二字无公共子串，子串匹配够不着）。
+
+    2026-10-08 实测：模型给 {"bazi": "己丑 癸酉 甲子 壬申", "gender": "男"}，
+    子串规则匹配不上 ⇒ 工具报 "pillars Field required" ⇒ 白跑一轮。
+    """
+
+    @tool
+    def bazi_infer_dates(pillars: str, gender: str, top_n: int = 3) -> str:
+        """反推出生日期。"""
+        return "{}|{}".format(pillars, gender)
+
+    agent = _make_agent([bazi_infer_dates])
+    aligned = agent._align_args(bazi_infer_dates, {"bazi": "己丑 癸酉 甲子 壬申", "gender": "男"})
+    assert aligned == {"pillars": "己丑 癸酉 甲子 壬申", "gender": "男"}
+
+
+def test_align_args_type_mismatch_not_paired():
+    """类型不符时不许硬塞：宁可让工具报缺参，也不能猜错位。"""
+
+    @tool
+    def t(count: int) -> str:
+        """测试。"""
+        return str(count)
+
+    agent = _make_agent([t])
+    # 值为字符串，目标参数声明 integer ⇒ 不配对，原样保留
+    assert agent._align_args(t, {"num": "abc"}) == {"num": "abc"}
+
+
+def test_align_args_ambiguous_not_paired():
+    """多处空缺/多个未知键时不做推测（多对多无法确定映射）。"""
+
+    @tool
+    def t(a: str, b: str) -> str:
+        """测试。"""
+        return a + b
+
+    agent = _make_agent([t])
+    # 2 个未知键 + 2 个空缺：不猜
+    assert agent._align_args(t, {"x": "1", "y": "2"}) == {"x": "1", "y": "2"}
+
+
+def test_align_args_does_not_overwrite_known_value():
+    """唯一空缺配对不得覆盖已正确给出的参数。"""
+
+    @tool
+    def t(a: str, b: str) -> str:
+        """测试。"""
+        return a + b
+
+    agent = _make_agent([t])
+    # a 已正确给出；b 空缺且只有一个未知键 ⇒ 可配对
+    assert agent._align_args(t, {"a": "ok", "wrongname": "v"}) == {"a": "ok", "b": "v"}
 
 
 def test_think_restores_text_calls():

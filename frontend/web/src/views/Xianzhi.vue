@@ -510,20 +510,11 @@ const tryExtractBirth = async (text: string) => {
     const time = standard[1].replace(/年|月/g, "-").replace("日", "").replace("：", ":").trim()
     lastBirthInfo.value = { time, gender }
     fetchChartData(time, gender)
-    return
   }
-  // 干支四柱（如 甲申 庚午 壬申 甲辰）：**不自动挂盘**。
-  // 四柱只能反推出多个候选年（同一组干支在历史上会重复出现几十次），
-  // 替用户挑第一条就是替他决定出生时间，答案必然是错的（2026-10-08 现场：
-  // 问「癸巳甲子丁酉甲辰」被直接挂成 1953-12-12 08:00）。
-  // 候选与确认由后端 bazi_infer_dates → _bazi_pending 流程负责，
-  // 用户回「第一个/1992年」后由后端排盘并经 chart_context 通知回填。
-  if (gender) {
-    const pillars = (text.match(/[甲乙丙丁戊己庚辛壬癸][子丑寅卯辰巳午未申酉戌亥]/g) || []).slice(0, 4).join("")
-    if (pillars.length === 8) {
-      toastMsg.value = `已收到四柱 ${pillars}，正在为你反推候选出生年份…`
-    }
-  }
+  // 干支四柱（如 甲申 庚午 壬申 甲辰）：前端**完全静默**。
+  // 反推候选由后端 bazi_infer_dates → _bazi_pending 流程负责，模型会在回复里
+  // 列出候选并请用户确认；前端不挂盘、也不弹提示——提示会先于模型回复出现，
+  // 与"正在推演"的等待感重复，反而突兀（2026-10-08 现场反馈）。
 }
 
 const formatContent = (text: string) => {

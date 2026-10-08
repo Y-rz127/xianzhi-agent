@@ -11,6 +11,30 @@ from app.tools.dsml import has_text_tool_calls, parse_text_tool_calls
 from app.tools.text_clean import clean_think_tags, strip_user_input_boundary
 
 
+def _value_fits_spec(value, spec: dict) -> bool:
+    """值是否与参数的 schema 类型声明兼容（用于参数名漂移时的安全配对）。
+
+    spec 形如 ``{"title": "Pillars", "type": "string"}``。只认 JSON Schema 的基础类型；
+    声明缺失或类型不认识时返回 False——**配对宁缺勿滥**，猜错位比报缺参更难排查。
+    """
+    if not isinstance(spec, dict):
+        return False
+    declared = str(spec.get("type") or "").lower()
+    if declared == "string":
+        return isinstance(value, str)
+    if declared == "integer":
+        return isinstance(value, int) and not isinstance(value, bool)
+    if declared == "number":
+        return isinstance(value, (int, float)) and not isinstance(value, bool)
+    if declared == "boolean":
+        return isinstance(value, bool)
+    if declared == "array":
+        return isinstance(value, list)
+    if declared == "object":
+        return isinstance(value, dict)
+    return False
+
+
 class ToolCallAgent(ReActAgent):
     """工具调用代理（对应 Java ToolCallAgent）：绑定 LLM 工具，实现 think/act/observe。"""
     def __init__(self, name, chat_model, tools, system_prompt="", next_step_prompt="", max_steps=5):
@@ -116,33 +140,59 @@ class ToolCallAgent(ReActAgent):
     def _align_args(self, tool, tool_args: dict) -> dict:
         """把模型给的参数名对齐到工具真实签名。
 
-        文本形式的工具调用（DeepSeek 系走 ``content`` 通道）经常自造参数名：
-        实测 ``bazi_infer_dates`` 的 ``pillars`` 被写成 ``four_pillars``（2026-10-08）。
-        正常 tool_calls 通道由 schema 约束不会出现这种漂移，所以这里只对
-        **签名里没有的键**做就近匹配：已合法的键一律原样保留（含全部命中时的空转），
-        匹配不上的键也原样保留，让工具照常报缺参——错误信息比静默丢参更明确。
+        文本形式的工具调用（DeepSeek 系走 ``content`` 通道）经常自造参数名，
+        实测 ``bazi_infer_dates`` 的 ``pillars`` 被写成 ``four_pillars``，
+        以及完全无公共子串的 ``bazi``（2026-10-08 现场两次）。
+
+        两级对齐：
+        ① **子串匹配**：``four_pillars`` ⊃ ``pillars``，命中即用（高置信）。
+        ② **唯一空缺配对**：子串匹配不到时（``bazi`` ↔ ``pillars`` 无公共子串），
+           若「未识别键」与「未填充的必填参数」都是一对一，且值类型与该参数声明
+           兼容，则配对。多对多或类型不符一律不动——宁可让工具报缺参，
+           也不猜错位（错误信息比静默塞错值更可查）。
+        匹配不上的键原样保留，交由工具自己报错。
         """
         if not tool_args:
             return tool_args
         try:
-            valid = set(tool.args.keys()) if hasattr(tool, "args") else set()
+            specs = dict(getattr(tool, "args", None) or {})
         except Exception:
             return tool_args
-        if not valid:
+        if not specs:
             return tool_args
-        aligned = {}
+
+        aligned: dict = {}
+        unknown: dict = {}
         for key, value in tool_args.items():
-            if key in valid:
-                aligned[key] = value
-                continue
-            # four_pillars → pillars：子串包含匹配，取最长的合法名
-            candidates = [v for v in valid if v in key or key in v]
+            (aligned if key in specs else unknown)[key] = value
+        if not unknown:
+            return aligned
+
+        # ① 子串匹配（取最长的空缺席位）
+        for key in list(unknown):
+            candidates = [
+                name for name in specs if name not in aligned and (name in key or key in name)
+            ]
             if candidates:
                 target = max(candidates, key=len)
-                log.info("  参数名对齐: {} → {}", key, target)
-                aligned.setdefault(target, value)
-            else:
-                aligned[key] = value
+                log.info("  参数名对齐(子串): {} → {}", key, target)
+                aligned[target] = unknown.pop(key)
+
+        # ② 唯一空缺配对：仅当各剩一个、且值类型与目标参数声明兼容
+        if len(unknown) == 1:
+            missing = [
+                name
+                for name, spec in specs.items()
+                if name not in aligned and "default" not in (spec or {})
+            ]
+            if len(missing) == 1:
+                key, value = next(iter(unknown.items()))
+                if _value_fits_spec(value, specs.get(missing[0]) or {}):
+                    target = missing[0]
+                    log.info("  参数名对齐(唯一空缺): {} → {}", key, target)
+                    aligned[target] = unknown.pop(key)
+
+        aligned.update(unknown)
         return aligned
 
     def _find_tool(self, name):
