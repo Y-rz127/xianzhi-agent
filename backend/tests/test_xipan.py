@@ -26,10 +26,16 @@ from app.domain.xipan import (
 BIRTH = "2004-06-22 08:00"
 
 
-def _chart_xipan(gender: str = "男") -> dict:
-    return chart_to_api_dict(build_bazi_chart(BIRTH, gender, liunian_start_year=2026, liunian_years=1))[
-        "xipan"
-    ]
+def _chart_xipan(gender: str = "男", today: datetime.date | None = None) -> dict:
+    """集成路径：走 build_bazi_chart + chart_to_api_dict，测的是 API 层relations 契约。
+
+    today 必须显式传入：细盘的"当前岁运"按当天节气定位（build_bazi_chart 会透传给
+    build_xipan，见其 docstring「today 可注入以便测试」），不冻结的话用例会在节气
+    交替当天挂掉——2026-10-08 就因过了白露、流月由丁酉变戊戌而失败。
+    """
+    return chart_to_api_dict(
+        build_bazi_chart(BIRTH, gender, liunian_start_year=2026, liunian_years=1, today=today)
+    )["xipan"]
 
 
 def _direct_xipan(birth: str, gender_int: int, direction: str, today: datetime.date) -> dict:
@@ -429,12 +435,16 @@ def test_xiaoyun_shensha_index_covers_every_xiaoyun():
 
 
 def test_relations_match_professional_software():
-    """岁运/原局分析六栏（2026-09-07 丁酉流月，白露节气当日）。
+    """岁运/原局分析六栏（2026-09-07 白露当日 ⇒ 丁酉流月）。
 
     天干栏口径已按产品要求收窄：四冲按「相冲」报（壬丙不得降格写「相克」），
     非冲的天干相克（丙庚、丁庚）不列。
+
+    today 必须冻结：suiyun 三栏（大运·流年·流月）取的是**当天节气**所在月柱，
+    不冻结则用例会在每年白露/立春当天翻车（2026-10-08 就因过了白露
+    流月由丁酉变戊戌而失败）。基准日沿用 docstring 声明的 2026-09-07。
     """
-    r = _chart_xipan("男")["relations"]
+    r = _chart_xipan("男", today=datetime.date(2026, 9, 7))["relations"]
     assert r["suiyun"]["label"] == "壬申 · 丙午 · 丁酉"
     gan = r["suiyun"]["gan"]
     assert "丙壬冲" in gan, gan  # 流年丙 冲 大运壬：必须报冲，不报克
