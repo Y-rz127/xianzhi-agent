@@ -1,0 +1,66 @@
+{
+  "name": "先知",
+  "appid": "",
+  "description": "先知 - 八字命理分析预测智能体",
+  "versionName": "0.1.0",
+  "versionCode": "100",
+  "transformPx": false,
+  "app-plus": {
+    "usingComponents": true,
+    "nvueStyleCompiler": "uni-app",
+    "compilerVersion": 3,
+    "splashscreen": {
+      "alwaysShowBeforeRender": true,
+      "waiting": true,
+      "autoclose": true,
+      "delay": 0
+    },
+    "modules": {},
+    "distribute": {
+      "android": {
+        "permissions": [
+          "<uses-permission android:name=\"android.permission.INTERNET\"/>"
+          ,"<uses-permission android:name=\"android.permission.RECORD_AUDIO\"/>"
+        ]
+      },
+      "ios": {},
+      "sdkConfigs": {}
+    }
+  },
+  "quickapp": {},
+  "mp-weixin": {
+    "appid": "wxcc524b2e1d47808a",
+    "setting": {
+      "urlCheck": false,
+      "es6": true,
+      "postcss": true,
+      "minified": true
+    },
+    "permission": {
+      "scope.record": {
+        "desc": "用于将您的语音问题转换为文字后发送给先知"
+      }
+    },
+    "usingComponents": true
+  },
+  "h5": {
+    "title": "先知",
+    "router": { "mode": "hash", "base": "./" },
+    "devServer": {
+      "port": 8080,
+      "proxy": {
+        "/api": {
+          "target": "http://localhost:8123",
+          "changeOrigin": true,
+          "secure": false
+        },
+        "/ws": {
+          "target": "ws://localhost:8123",
+          "ws": true,
+          "changeOrigin": true
+        }
+      }
+    }
+  },
+  "vueCompiler": "vue3"
+}

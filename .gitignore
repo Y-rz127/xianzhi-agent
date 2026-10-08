@@ -1,0 +1,69 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.eggs/
+build/
+dist/
+.installed.cfg
+*.egg
+
+# 虚拟环境
+.venv/
+venv/
+env/
+ENV/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# 配置与敏感信息
+.env
+.env.local
+*.secret
+
+# 运行时数据
+data/
+logs/
+*.log
+
+# 测试
+.pytest_cache/
+# pytest 在临时目录不可写时会回退到当前工作目录，落这些目录（每跑一次一个）
+pytest-cache-files-*/
+.coverage
+htmlcov/
+
+# 类型检查
+.mypy_cache/
+.ruff_cache/
+
+#笔记内容
+学习资料/*
+# TypeScript 增量构建缓存
+*.tsbuildinfo
+
+# TRAE 工作区记忆
+.workbuddy/
+
+# 前端构建生成的类型声明/编译产物（源文件为 *.config.ts，产物不得入库）
+frontend/web/*.config.d.ts
+frontend/web/*.config.js
+frontend/uniapp/*.config.d.ts
+frontend/uniapp/*.config.js
+
+# 类型检查误跑 `vue-tsc -b` 会把产物 emit 回源码目录（uniapp 的 tsconfig 已补 noEmit，
+# 这里再兜一层）。源文件是 *.ts / *.vue，src 与 shared 下不该有手写 .js。
+frontend/uniapp/src/**/*.js
+frontend/uniapp/src/**/*.js.map
+frontend/shared/**/*.js
+frontend/shared/**/*.js.map
+
+# 本地向量模型
+models/*

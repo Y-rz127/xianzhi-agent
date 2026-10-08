@@ -1,0 +1,46 @@
+"""REST 接口（对应 Java AiController）。"""
+
+from __future__ import annotations
+
+from fastapi import APIRouter
+
+from app.api.admin_accounts import router as admin_accounts_router
+from app.api.admin_users import router as admin_users_router
+from app.api.ai_interpretation_records import router as ai_interpretation_records_router
+from app.api.asr import router as asr_router
+from app.api.auth import router as auth_router
+from app.api.cases import router as cases_router
+from app.api.favorites import router as favorites_router
+from app.api.feedback import router as feedback_router
+from app.api.llm_chain import router as llm_chain_router
+from app.api.me import router as me_router
+from app.api.observability import router as observability_router
+from app.api.profiles import router as profiles_router
+from app.api.rag import mgmt_router as rag_mgmt_router
+from app.api.xianzhi import router as xianzhi_router
+from app.sub_app.hehun.routes import router as hehun_router
+from app.sub_app.huangli.routes import router as huangli_router
+from app.sub_app.liuyao.routes import router as liuyao_router
+from app.sub_app.tarot.routes import router as tarot_router
+from app.sub_app.ziwei.routes import router as ziwei_router
+
+router = APIRouter(prefix="/ai", tags=["AI"])
+router.include_router(auth_router)
+router.include_router(asr_router)
+router.include_router(cases_router, prefix="/xianzhi")
+router.include_router(xianzhi_router)
+router.include_router(tarot_router)
+router.include_router(liuyao_router)
+router.include_router(rag_mgmt_router)
+router.include_router(hehun_router)
+router.include_router(huangli_router)
+router.include_router(ziwei_router)
+router.include_router(observability_router)
+router.include_router(profiles_router)
+router.include_router(favorites_router)
+router.include_router(ai_interpretation_records_router)
+router.include_router(feedback_router)
+router.include_router(me_router)
+router.include_router(admin_users_router)
+router.include_router(admin_accounts_router)
+router.include_router(llm_chain_router)

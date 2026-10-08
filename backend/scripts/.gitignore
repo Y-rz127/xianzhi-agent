@@ -1,0 +1,3 @@
+# 紫微斗数黄金快照生成器（gen_ziwei_oracle.js）的一次性开发依赖：iztro 及其依赖树。
+# 仅本机生成 oracle fixtures 时使用，绝不入库（引擎为 Python 自研，无运行时依赖）。
+node_modules/

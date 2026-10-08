@@ -1,0 +1,50 @@
+"""先知图咨询流程确定性，此处对其答案做离线确定性检查（必含/禁含词、长度、报告体、事实校验），无需调用模型。"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any
+
+from app.agent.workflow.orchestrator import XianzhiWorkflow
+from app.agent.workflow.workflow_support import build_chart_context
+
+REPORT_MARKERS = ("【基本信息】", "【四柱】", "【五行】", "完整报告", "第一章", "第二章")
+
+
+@dataclass(frozen=True)
+class EvalResult:
+    """单条评估结果：命例 id、是否通过、问题列表。"""
+
+    case_id: str
+    ok: bool
+    issues: list[str]
+
+
+def evaluate_answer_case(case: dict[str, Any], answer: str) -> EvalResult:
+    """对单条答案做确定性离线评估：必含/禁含词、长度区间、报告体检测 + 命盘事实校验。"""
+    issues: list[str] = []
+    required_terms = case.get("required_terms", [])
+    forbidden_terms = case.get("forbidden_terms", [])
+    max_chars = int(case.get("max_chars", 900))
+    min_chars = int(case.get("min_chars", 40))
+
+    issues += [f"missing required term: {term}" for term in required_terms if term not in answer]
+    issues += [f"contains forbidden term: {term}" for term in forbidden_terms if term in answer]
+
+    if len(answer) < min_chars:
+        issues.append(f"answer too short: {len(answer)} < {min_chars}")
+    if len(answer) > max_chars:
+        issues.append(f"answer too long: {len(answer)} > {max_chars}")
+
+    if not case.get("allow_report_style", False) and any(marker in answer for marker in REPORT_MARKERS):
+        issues.append("answer looks like a report dump")
+
+    chart = build_chart_context(
+        case["birth_time"],
+        case["gender"],
+        case.get("sect", 2),
+        case.get("yun_sect", 1),
+    )
+    fact_check = XianzhiWorkflow(chat_model=None).check_facts(answer, chart.chart)
+    issues.extend(fact_check.issues)
+
+    return EvalResult(case_id=case["id"], ok=not issues, issues=issues)

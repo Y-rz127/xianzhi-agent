@@ -1,0 +1,50 @@
+{
+  "base": {
+    "complement": {
+      "aCovers": false,
+      "aNeeds": "火",
+      "bCovers": true,
+      "bNeeds": "金"
+    },
+    "dayZhi": {
+      "a": "子",
+      "b": "午",
+      "relation": "冲"
+    },
+    "points": {
+      "complement": 1.0,
+      "dayMasterRelation": 0.5,
+      "palace": -2.0
+    },
+    "relationKind": "同类",
+    "score": 48.0
+  },
+  "cases": [
+    {
+      "birth": "1971-11-23 00:00",
+      "desc": "专旺·润下格（壬水一行独旺）",
+      "gender": "男",
+      "id": "zhuanwang_runxia"
+    },
+    {
+      "birth": "1906-06-07 12:00",
+      "desc": "真从·从财格（壬水无根，月令午火财当令，无官杀透支）",
+      "gender": "男",
+      "id": "cong_true_cai"
+    }
+  ],
+  "dimension": "comprehensive",
+  "maxAge": 80,
+  "pair": "zhuanwang_runxia__cong_true_cai",
+  "years": {
+    "align": "-3.24,-0.83,-3.12,-6.04,-3.19,-3.4,-4.18,0.6,2.02,-1.94",
+    "count": 10,
+    "end": 1985,
+    "ganzhi": "丙辰,丁巳,戊午,己未,庚申,辛酉,壬戌,癸亥,甲子,乙丑",
+    "palace": "2.5,0,-5,0.5,2.5,-2,2.5,0,-5,0.5",
+    "resonance": "45.2,43.1,37,35.1,42.3,36.5,46.5,45.5,40.7,37.1",
+    "start": 1976,
+    "sync": "-6,-6,0,-6,-6,-6,0,-6,-6,-6",
+    "trend": "3.92,1.92,-2.88,-1.4,0.96,-0.08,0.2,2.92,1.64,-3.44"
+  }
+}

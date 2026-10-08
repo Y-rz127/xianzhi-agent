@@ -1,0 +1,563 @@
+import datetime as dt
+from dataclasses import replace
+
+from langchain_core.language_models.fake_chat_models import FakeListChatModel
+
+from app.agent.workflow.orchestrator import XianzhiWorkflow
+from app.agent.workflow.workflow_messages import (
+    build_sui_section,
+    compact_facts,
+    fact_block,
+)
+from app.agent.workflow.workflow_models import FactCheckResult
+from app.agent.workflow.workflow_retrieval import build_theory_queries
+from app.agent.workflow.workflow_support import (
+    build_chart_context,
+    classify_question,
+)
+from app.agent.xianzhi import Xianzhi
+from app.rag.retrieval import detect_theory_topic
+
+MALE = "\u7537"
+
+
+def test_classify_question_extracts_domain_and_relative_years():
+    intent = classify_question("今年适合换工作吗？", today=dt.date(2026, 7, 5))
+
+    assert intent.domain == "career"
+    assert intent.target_years == [2026]
+    assert intent.wants_report is False
+
+
+def test_classify_question_keeps_weather_queries_out_of_chitchat():
+    intent = classify_question("南宁今天天气怎么样？")
+
+    assert intent.domain == "general"
+    assert intent.domain != "chitchat"
+
+
+def test_classify_question_keeps_search_queries_out_of_chitchat():
+    intent = classify_question("帮我查一下网上关于AI的最新新闻")
+
+    assert intent.domain == "general"
+    assert intent.domain != "chitchat"
+
+
+def test_workflow_extends_liunian_for_target_year():
+    workflow = XianzhiWorkflow(chat_model=None)
+    ctx = build_chart_context("1990-05-20 14:30", MALE)
+    intent = classify_question("2036年财运怎么样？", today=dt.date(2026, 7, 5))
+
+    extended = workflow._extend_chart_if_needed(ctx, intent)
+
+    assert any(item.year == 2036 for item in extended.chart.liunian)
+    assert any(item.dayun_ganzhi for item in extended.chart.liunian if item.year == 2036)
+
+
+def test_detect_theory_topic_basic_concept():
+    """理论术语识别：单概念 → 单条精准 query"""
+    topic, query = detect_theory_topic("请问用神是什么意思")
+    assert topic == "用神"
+    assert "用神" in query
+    assert "调候" in query
+
+
+def test_detect_theory_topic_prefers_longer_keyword():
+    """长关键词优先于短关键词（如"长生十二宫" 优先于 "长生"）"""
+    topic, _ = detect_theory_topic("长生十二宫是怎么排的")
+    assert topic == "长生十二宫"
+
+
+def test_detect_theory_topic_returns_none_for_unrelated():
+    """无关问题 → None，走 fallback"""
+    assert detect_theory_topic("你好") is None
+    assert detect_theory_topic("今天适合跳槽吗") is None
+
+
+def test_build_theory_queries_uses_focused_queries():
+    """理论问题：识别到术语时以用户原句为首条、术语精准 query 其次，
+    不叠加个性化/命例/古籍/断法"""
+    _workflow = XianzhiWorkflow(chat_model=None)
+    queries, meta = build_theory_queries("用神是什么")
+    assert len(queries) == 2
+    assert meta.startswith("topic=")
+    assert queries[0] == "用神是什么"  # 用户原句置首
+    assert "用神" in queries[1]  # 术语精准 query
+    # 验证不含无关的"空亡 桃花 神煞 禄神"等内容
+    assert "空亡" not in queries[0] and "空亡" not in queries[1]
+    assert "桃花" not in queries[0] and "桃花" not in queries[1]
+
+
+def test_build_theory_queries_fallback_when_no_topic():
+    """未识别到具体术语时走 fallback：仅保留用户原句，不追加泛化 query。
+
+    口径变更（降噪）：泛化兜底 query 总会命中术语白话对照表 chunk，
+    对综合性理论回答引入噪音，故 fallback 不再叠加。
+    """
+    _workflow = XianzhiWorkflow(chat_model=None)
+    queries, meta = build_theory_queries("命理学有哪些流派")
+    assert meta == "fallback"
+    assert len(queries) == 1
+    assert queries[0] == "命理学有哪些流派"
+
+
+def test_decompose_query_parses_llm_json():
+    """LLM 拆解：枭神夺食问题 → theory 域 + 精准 query + needs_chart=True"""
+    llm_output = '{"domain":"theory","queries":["枭神夺食 偏印 食神 条件"],"needs_chart":true}'
+    model = FakeListChatModel(responses=[llm_output])
+    workflow = XianzhiWorkflow(chat_model=model)
+    intent = workflow._decompose_query("我命盘是不是枭神夺食了")
+    assert intent is not None
+    assert intent.domain == "theory"
+    assert intent.needs_chart is True
+    assert len(intent.queries) == 1
+    assert "枭神夺食" in intent.queries[0]
+
+
+def test_decompose_query_fallback_on_invalid_json():
+    """LLM 输出非法 JSON → 返回 None，调用方走 classify_question"""
+    model = FakeListChatModel(responses=["这不是JSON"])
+    workflow = XianzhiWorkflow(chat_model=model)
+    intent = workflow._decompose_query("随便问个问题")
+    assert intent is None
+
+
+def test_decompose_query_fallback_when_no_chat_model():
+    """无 chat_model → 直接返回 None"""
+    workflow = XianzhiWorkflow(chat_model=None)
+    assert workflow._decompose_query("任何问题") is None
+
+
+def test_needs_chart_overrides_skip_facts():
+    """needs_chart=True 时，theory worker 的 skip_facts 被覆盖，注入命盘事实"""
+    llm_output = '{"domain":"theory","queries":["枭神夺食"],"needs_chart":true}'
+    model = FakeListChatModel(responses=[llm_output, "你的命盘没有枭神夺食。"])
+    workflow = XianzhiWorkflow(chat_model=model)
+    ctx = build_chart_context("1990-05-20 14:30", MALE)
+    intent = workflow._decompose_query("我是不是枭神夺食了")
+    assert intent is not None and intent.needs_chart
+    # 验证 _build_messages 不 skip facts
+    messages = workflow._build_messages("我是不是枭神夺食了", intent, ctx, "知识", [], None)
+    human_content = [m for m in messages if hasattr(m, "content") and "用户问题" in m.content][-1].content
+    assert "系统排盘事实" in human_content
+
+
+def test_build_messages_no_longer_injects_similar_cases_for_duanshi():
+    """回归：相似命例注入已在重构中移除（f150847 移除相似命盘检索），断事类不再注入命例参考。"""
+    workflow = XianzhiWorkflow(chat_model=None)
+    ctx = build_chart_context("1990-05-20 14:30", MALE)
+    intent = classify_question("我的婚姻感情怎么样？", today=dt.date(2026, 7, 5))
+
+    messages = workflow._build_messages("我的婚姻感情怎么样？", intent, ctx, "知识", [], None)
+    human_content = [m for m in messages if hasattr(m, "content") and "用户问题" in m.content][-1].content
+
+    assert "相似命例参考" not in human_content
+    assert "不得照搬结论" not in human_content
+
+
+def test_build_messages_skips_similar_cases_for_theory():
+    """理论解释不注入案例，避免概念问答被命例带偏。"""
+    workflow = XianzhiWorkflow(chat_model=None)
+    ctx = build_chart_context("1990-05-20 14:30", MALE)
+    intent = classify_question("用神是什么意思", today=dt.date(2026, 7, 5))
+
+    messages = workflow._build_messages("用神是什么意思", intent, ctx, "知识", [], None)
+    human_content = [m for m in messages if hasattr(m, "content") and "用户问题" in m.content][-1].content
+
+    assert "相似命例参考" not in human_content
+
+
+def test_skip_facts_workers_still_see_mounted_chart_anchor():
+    """回归（2026-09-19 23:15 / 2026-09-20 13:25 实测）：
+
+    闲聊/术语 Worker 的 skip_facts=True 会拿掉【系统排盘事实】，而用户生辰来自出生信息面板
+    （WS 参数），聊天文本里没有 —— 模型侧零痕迹就会反问"你生辰还没报给我"。
+    因此跳过事实注入时，必须补上「命盘已挂载」锚点。
+    """
+    workflow = XianzhiWorkflow(chat_model=None)
+    ctx = build_chart_context("2026-09-16 10:00", MALE)
+    intent = classify_question("看了吗？")
+
+    assert intent.domain == "chitchat"  # 与线上日志一致：短追问被判为闲聊
+    messages = workflow._build_messages("看了吗？", intent, ctx, "知识", [], None)
+    human_content = [m for m in messages if hasattr(m, "content") and "用户问题" in m.content][-1].content
+
+    assert "系统排盘事实" not in human_content  # 闲聊仍不注入全量事实（省 token）
+    assert "命盘已挂载" in human_content
+    assert "2026-09-16 10:00" in human_content
+    assert MALE in human_content
+    assert "四柱" in human_content
+
+
+def test_theory_worker_also_gets_chart_anchor_when_facts_skipped():
+    """术语 Worker（skip_facts=True）同样要看见已挂载命盘。"""
+    workflow = XianzhiWorkflow(chat_model=None)
+    ctx = build_chart_context("1990-05-20 14:30", MALE)
+    intent = classify_question("用神是什么意思", today=dt.date(2026, 7, 5))
+
+    messages = workflow._build_messages("用神是什么意思", intent, ctx, "知识", [], None)
+    human_content = [m for m in messages if hasattr(m, "content") and "用户问题" in m.content][-1].content
+
+    assert "命盘已挂载" in human_content
+    assert "1990-05-20 14:30" in human_content
+
+
+def test_repair_messages_keep_chart_anchor_when_facts_skipped():
+    """修复路径同口径：跳过事实时也带锚点，避免修复稿里出现"没收到生辰"。"""
+    workflow = XianzhiWorkflow(chat_model=None)
+    ctx = build_chart_context("1990-05-20 14:30", MALE)
+    intent = classify_question("用神是什么意思", today=dt.date(2026, 7, 5))
+    checked = FactCheckResult(ok=False, issues=["测试用 issue"])
+
+    messages = workflow._build_repair_messages("原回答", checked, "用神是什么意思", intent, ctx, "知识", None)
+    human_content = [m for m in messages if hasattr(m, "content") and "原回答" in m.content][-1].content
+
+    assert "命盘已挂载" in human_content
+    assert "1990-05-20 14:30" in human_content
+
+
+def test_fact_checker_catches_wrong_liunian_and_pillar():
+    workflow = XianzhiWorkflow(chat_model=None)
+    ctx = build_chart_context("1990-05-20 14:30", MALE)
+
+    result = workflow.check_facts("2026年是乙巳年，年柱是辛未。", ctx.chart)
+
+    assert not result.ok
+    assert any("2026年流年应为丙午" in issue for issue in result.issues)
+    assert any("年柱应为庚午" in issue for issue in result.issues)
+
+
+def test_fact_checker_allows_correct_facts():
+    workflow = XianzhiWorkflow(chat_model=None)
+    ctx = build_chart_context("1990-05-20 14:30", MALE)
+
+    result = workflow.check_facts("2026年是丙午年，年柱是庚午。", ctx.chart)
+
+    assert result.ok
+
+
+def test_xianzhi_prefers_workflow_when_chart_context_exists():
+    model = FakeListChatModel(responses=["2026年可以看机会，但不建议裸辞。2026年是丙午年，年柱是庚午。"])
+    agent = Xianzhi(chat_model=model, local_tools=[])
+    agent.set_conversation_id("test-workflow")
+    agent.set_chart_context("1990-05-20 14:30", MALE)
+
+    result = agent.run("今年适合换工作吗？")
+
+    assert "不建议裸辞" in result
+    assert "丙午" in result
+
+
+def test_fact_block_exposes_special_pattern_and_useful_hint():
+    """命盘事实须显式携带：用神提示（取用神参考）+ 特殊格局分类（专旺/从格），
+    供 LLM 在其上叠加合化/调候/大运破格推理。"""
+    _workflow = XianzhiWorkflow(chat_model=None)
+    ctx = build_chart_context("1990-05-20 14:30", MALE)
+    intent = classify_question("我的命局用神是什么", today=dt.date(2026, 7, 5))
+
+    facts = fact_block(ctx.chart, intent)
+
+    # 取用神参考：必须进事实
+    assert "用神提示:" in facts
+    # 方案B：特殊格局分类显式成行，取值须为 {无, 专旺, 从格}
+    sp_lines = [ln for ln in facts.splitlines() if ln.startswith("特殊格局:")]
+    assert sp_lines, "事实块缺少「特殊格局:」行"
+    sp_val = sp_lines[0].split("特殊格局:", 1)[1].strip()
+    assert sp_val in ("无", "专旺", "从格")
+
+
+def test_compact_facts_injects_domain_brief_and_sui():
+    """needs_chart 且领域有投影映射时，事实块应携带【本领域盘面要素】与【岁运关系】。"""
+    ctx = build_chart_context("1990-05-20 14:30", MALE)
+    intent = replace(
+        classify_question("今年感情怎么样？", today=dt.date(2026, 7, 5)),
+        needs_chart=True,
+    )
+
+    facts = compact_facts(ctx.chart, intent)
+
+    assert intent.domain == "love"
+    assert "【本领域盘面要素 · 恋爱感情】" in facts
+    assert "【岁运关系】" in facts
+
+
+def test_compact_facts_omits_projection_for_theory():
+    """零投影领域（理论解释）即使 needs_chart=True 也不注入领域要素/岁运关系段。"""
+    ctx = build_chart_context("1990-05-20 14:30", MALE)
+    intent = replace(
+        classify_question("用神是什么意思", today=dt.date(2026, 7, 5)),
+        needs_chart=True,
+    )
+
+    facts = compact_facts(ctx.chart, intent)
+
+    assert "【本领域盘面要素" not in facts
+    assert "【岁运关系】" not in facts
+
+
+def test_build_sui_section_binds_explicit_year():
+    """点名超出默认流年区间的年份时，扩盘后岁运段仍应含该年岁运。"""
+    workflow = XianzhiWorkflow(chat_model=None)
+    ctx = build_chart_context("1990-05-20 14:30", MALE)
+    intent = replace(
+        classify_question("2036年财运怎么样？", today=dt.date(2026, 7, 5)),
+        needs_chart=True,
+    )
+    chart = workflow._extend_chart_if_needed(ctx, intent).chart
+
+    sui = build_sui_section(chart, intent)
+
+    assert "2036" in sui
+
+
+def test_build_sui_section_tongxian_placeholder():
+    """童限期（未交大运）指认「当前」时，岁运段以当年小运占位并标注未交大运。"""
+    from app.domain.chart_builder import build_bazi_chart
+
+    chart = build_bazi_chart("2020-06-15 10:00", MALE, liunian_years=3, liunian_start_year=2026)
+    intent = replace(
+        classify_question("我现在的运势怎么样", today=dt.date(2026, 7, 5)),
+        needs_chart=True,
+        target_dayun="当前",
+    )
+
+    sui = build_sui_section(chart, intent)
+
+    assert "童限期" in sui
+    assert "未交大运" in sui
+
+
+def test_extend_chart_if_needed_preserves_longitude():
+    """扩盘重排时必须透传 longitude，避免真太阳时校正丢失。"""
+    workflow = XianzhiWorkflow(chat_model=None)
+    ctx = build_chart_context("1990-05-20 14:30", MALE, longitude=104.07)  # 成都
+    intent = replace(
+        classify_question("2036年财运怎么样？", today=dt.date(2026, 7, 5)),
+        needs_chart=True,
+    )
+
+    extended = workflow._extend_chart_if_needed(ctx, intent)
+
+    assert extended.longitude == 104.07
+    # 真太阳时校正：104.07°E 距 120°E 差 15.93° → 约 +64 分钟；charts.warnings 应有校正提示
+    assert any("真太阳时" in w for w in extended.chart.warnings)
+
+
+def test_extract_target_years_handles_short_year():
+    """「23年」/「24 年」简写应解析为 20NN；「5年」「6岁」等量词不应误识别。"""
+    from app.agent.workflow.workflow_support import _extract_target_years
+
+    today = dt.date(2026, 7, 5)
+    # 短年份：当前年份附近优先 20NN
+    assert _extract_target_years("我23年的运势怎么样", today) == [2023]
+    assert _extract_target_years("24 年会发生什么事", today) == [2024]
+    # 4 位年份照常
+    assert _extract_target_years("2026 财运如何", today) == [2026]
+    # 4 位 + 短年份并存
+    assert _extract_target_years("23年和2025年哪个更适合跳槽", today) == [2023, 2025]
+    # "今年"/"明年"
+    assert _extract_target_years("今年事业", today) == [2026]
+    assert _extract_target_years("明年", today) == [2027]
+    # 量词不应被误识别
+    assert _extract_target_years("事业有5年的积累", today) == []
+    assert _extract_target_years("6岁开始上学", today) == []
+    # 3 位及以上数字带"年"不当作 2 位简写（被 (?<!\d) 阻塞）
+    assert _extract_target_years("2023 年与 1990 年", today) == [1990, 2023]
+
+
+def test_workflow_extends_liunian_for_short_year():
+    """用户说「23年的健康」应触发扩盘至 2023 并注入 2023 流年岁运关系。"""
+    from app.agent.workflow.workflow_support import _extract_target_years
+
+    workflow = XianzhiWorkflow(chat_model=None)
+    ctx = build_chart_context("1990-05-20 14:30", MALE)
+    # 直接验证抽取结果与扩盘/岁运三段链路
+    years = _extract_target_years("我23年的健康情况", today=dt.date(2026, 7, 5))
+    assert years == [2023]
+    intent = replace(
+        classify_question("我23年的健康情况", today=dt.date(2026, 7, 5)),
+        needs_chart=True,
+        target_years=years,
+    )
+    extended = workflow._extend_chart_if_needed(ctx, intent)
+    assert any(item.year == 2023 for item in extended.chart.liunian)
+
+
+def test_age_to_years_resolves_xusui_convention():
+    """虚岁约定：今年虚岁 N → 公历出生年 = today.year - N + 1（命理口径）。"""
+    from app.agent.workflow.workflow_support import _age_to_years
+
+    today = dt.date(2026, 7, 5)
+    birth = "1990-05-20 14:30"
+    # 1990 生，2026 年虚岁 37；37岁→2026-37+1=1990（诞生年）
+    assert _age_to_years("我37岁那年", birth, today) == [1990]
+    # 6 岁 → 2021
+    assert _age_to_years("我6岁时差点溺水", birth, today) == [2021]
+    # 0 岁/200 岁越界 → 跳
+    assert _age_to_years("我0岁", birth, today) == []
+    assert _age_to_years("我200岁", birth, today) == []
+    # 数字后跟岁、但前导数字被 175 阻塞
+    assert _age_to_years("身高175岁的人", birth, today) == []
+    # 出生前不可能的虚岁（对应 solar_year < by）→ 跳
+    assert _age_to_years("我200岁那年", "2010-01-01", today) == []
+    # 出生时间格式容错：YYYY/MM/DD、YYYY年MM月DD日
+    assert _age_to_years("我6岁那年", "1990/05/20", today) == [2021]
+    assert _age_to_years("我6岁那年", "1990年05月20日", today) == [2021]
+
+
+def test_workflow_injects_age_year_into_intent():
+    """问句含「6岁那年」+ 已挂载 chart_context 时，answer 入口应把 2021 补入 target_years
+    并触发扩盘，注入 2021 流年岁运关系。
+    """
+    from app.agent.workflow.workflow_support import build_chart_context
+
+    workflow = XianzhiWorkflow(chat_model=None)
+    ctx = build_chart_context("1990-05-20 14:30", MALE)
+    # 模拟"年龄补全"分支
+    from app.agent.workflow.workflow_support import _age_to_years
+
+    user_prompt = "我6岁那年差点溺水，命里那年有什么劫？"
+    age_years = _age_to_years(user_prompt, "1990-05-20 14:30", today=dt.date(2026, 7, 5))
+    assert age_years == [2021]
+    intent = replace(
+        classify_question(user_prompt, today=dt.date(2026, 7, 5)),
+        needs_chart=True,
+        target_years=age_years,
+    )
+    extended = workflow._extend_chart_if_needed(ctx, intent)
+    # 扩盘到 2021：流年 1996-2030 覆盖；2021 必在
+    assert any(item.year == 2021 for item in extended.chart.liunian)
+    # 扩盘覆盖的流年窗口起止
+    years = sorted({li.year for li in extended.chart.liunian})
+    assert years[0] <= 2021 <= years[-1]
+
+
+def test_fact_block_uses_line_breaks_for_dayun_liunian():
+    """fact_block 大运/流年段按行排版（不再用 ； 连成长串），目标大运置首 + ← 目标 标记。"""
+    import re as _re
+
+    from app.agent.workflow.workflow_retrieval import extend_chart_if_needed
+
+    ctx = build_chart_context("1990-05-20 14:30", MALE, longitude=104.07)
+    intent = replace(
+        classify_question("我30-40岁那步大运的事业运", today=dt.date(2026, 7, 5)),
+        needs_chart=True, target_dayun="30-40",
+    )
+    ext = extend_chart_if_needed(ctx, intent)
+    text = fact_block(ext.chart, intent)
+    m = _re.search(r"大运:\n((?:.+\n){1,60})相关流年:", text)
+    assert m, "fact_block 缺大运段"
+    dayun_block = m.group(1)
+    # 大运每步 3 行；目标大运置前，前 6 行里应同时含甲申/乙酉首行
+    first_six = dayun_block.split("\n")[:6]
+    head_lines = [ln for ln in first_six if not ln.startswith("    ")]
+    assert any("甲申" in ln and "← 目标" in ln for ln in head_lines)
+    assert any("乙酉" in ln and "← 目标" in ln for ln in head_lines)
+    assert _re.search(r"神煞（按柱）:\n  年柱:.+\n  月柱:.+\n  日柱:.+\n  时柱:.+", text), \
+        "神煞段未按柱分行"
+    m_ln = _re.search(r"相关流年:\n((?:.+\n){1,80})口径:", text)
+    assert m_ln, "fact_block 缺相关流年段"
+    liunian_block = m_ln.group(1)
+    lines = liunian_block.rstrip("\n").split("\n")
+    for ln in lines[::3]:
+        assert "；" not in ln, f"流年首行不应有 ；: {ln!r}"
+    assert "2021年:辛丑" in liunian_block
+
+
+# ============================================================
+# 神煞柱位归属：按小句配对（2026-09-11 修"同句共现即判错"的系统性误报）
+# 真实误报背景：性格轮"再加上时柱华盖、日柱学堂"被报成"华盖关联日柱/学堂关联时柱"；
+# 恋爱轮"冲到你月柱午中丁火正财，流年还带红艳煞"被报成"红艳煞属于无，却关联到月柱"。
+# ============================================================
+
+def _shensha_case_chart():
+    """固定盘（2004-06-22 08:00 男）：华盖→时柱、学堂→日柱；红艳煞只见于 2032 壬子流年。"""
+    from app.domain.chart_builder import build_bazi_chart
+
+    return build_bazi_chart("2004-06-22 08:00", MALE, liunian_start_year=2026, liunian_years=13)
+
+
+def _shensha_case_facts(chart, domain="personality", label="性格心性", target_years=()):
+    from app.agent.workflow.workflow_models import QuestionIntent
+
+    intent = QuestionIntent(
+        domain=domain, label=label, needs_chart=True, target_years=list(target_years)
+    )
+    return compact_facts(chart, intent)
+
+
+def test_shensha_pillar_check_allows_multi_pillar_enumeration():
+    """「时柱华盖、日柱学堂」是并列枚举：每个小句各含一个柱名，不得交叉配成错绑。"""
+    workflow = XianzhiWorkflow(chat_model=None)
+    chart = _shensha_case_chart()
+    facts = _shensha_case_facts(chart)
+
+    for answer in (
+        "再加上时柱华盖、日柱学堂，身上有股书卷气。",
+        "日柱带学堂、时柱带华盖，书卷气挺重。",
+    ):
+        result = workflow.check_facts(answer, chart, None, True, facts)
+        assert result.ok, f"{answer!r} 被误报: {result.issues}"
+
+
+def test_shensha_pillar_check_still_flags_real_misbinding():
+    """真错绑必须仍然报错：华盖属时柱、学堂属日柱。"""
+    workflow = XianzhiWorkflow(chat_model=None)
+    chart = _shensha_case_chart()
+    facts = _shensha_case_facts(chart)
+
+    result = workflow.check_facts("你日柱带华盖，爱琢磨艺术。", chart, None, True, facts)
+    assert not result.ok
+    assert any("华盖" in i and "属于时柱" in i and "日柱" in i for i in result.issues), result.issues
+
+    result2 = workflow.check_facts("你时柱带学堂，读书有底子。", chart, None, True, facts)
+    assert not result2.ok
+    assert any("学堂" in i and "属于日柱" in i for i in result2.issues), result2.issues
+
+
+def test_shensha_pillar_check_ignores_dynamic_shensha_in_liunian_clause():
+    """流年神煞（2032 壬子带红艳煞）与原局柱名同句但不同小句时，不算柱位错绑。"""
+    workflow = XianzhiWorkflow(chat_model=None)
+    chart = _shensha_case_chart()
+    facts = _shensha_case_facts(chart, "love", "恋爱感情", (2032, 2033, 2034))
+
+    answer = "冲到你月柱午中丁火正财，流年还带红艳煞。"
+    result = workflow.check_facts(answer, chart, None, True, facts)
+    assert result.ok, result.issues
+
+    # 但把岁运神煞绑到原局柱、且小句内无岁运语境 → 仍要报错
+    result2 = workflow.check_facts("你时柱带红艳煞，异性缘过旺。", chart, None, True, facts)
+    assert not result2.ok
+    assert any("红艳煞" in i and "只出现在大运/流年" in i for i in result2.issues), result2.issues
+
+
+def test_shensha_pillar_check_keeps_negation_and_correct_attribution_passing():
+    """否定式归属与正确归属继续放行。"""
+    workflow = XianzhiWorkflow(chat_model=None)
+    chart = _shensha_case_chart()
+    facts = _shensha_case_facts(chart)
+
+    for answer in (
+        "你日柱没有金舆，金舆在时柱。",
+        "你时柱华盖、日柱学堂，都在盘里。",
+        "时柱的金舆、福星贵人、华盖说明晚运有人帮。",
+    ):
+        result = workflow.check_facts(answer, chart, None, True, facts)
+        assert result.ok, f"{answer!r} 被误报: {result.issues}"
+
+
+def test_shensha_substring_names_not_cross_attributed():
+    """「正学堂」含子串「学堂」：不得把正学堂的柱位当成学堂的柱位来判（后者属日柱）。
+
+    本盘只有日柱学堂、没有正学堂，因此正确结果只有一条「排盘事实中无正学堂」，
+    不应再冒出「学堂属于日柱，回答却关联到时柱」。
+    """
+    workflow = XianzhiWorkflow(chat_model=None)
+    chart = _shensha_case_chart()
+    facts = _shensha_case_facts(chart)
+
+    result = workflow.check_facts("你时柱正学堂，学问正统。", chart, None, True, facts)
+
+    assert any("正学堂" in i for i in result.issues), result.issues
+    assert not any("「学堂」" in i for i in result.issues), result.issues
+    assert not any("「词馆」" in i for i in result.issues), result.issues

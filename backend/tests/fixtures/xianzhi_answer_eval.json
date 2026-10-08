@@ -1,0 +1,45 @@
+{
+  "cases": [
+    {
+      "id": "career_change_2026",
+      "question": "\u4eca\u5e74\u9002\u5408\u6362\u5de5\u4f5c\u5417\uff1f",
+      "birth_time": "1990-05-20 14:30",
+      "gender": "\u7537",
+      "required_terms": ["2026\u5e74", "\u4e19\u5348", "\u4e59\u9149", "\u5de5\u4f5c"],
+      "forbidden_terms": ["\u4e59\u5df3\u5e74", "\u5e9a\u5348\u5e74", "\u5fc5\u7136", "\u4e00\u5b9a"],
+      "min_chars": 80,
+      "max_chars": 700
+    },
+    {
+      "id": "love_timing_2027",
+      "question": "2027\u5e74\u611f\u60c5\u6709\u673a\u4f1a\u5417\uff1f",
+      "birth_time": "1990-05-20 14:30",
+      "gender": "\u5973",
+      "required_terms": ["2027\u5e74", "\u4e01\u672a", "\u4e01\u4e11", "\u611f\u60c5"],
+      "forbidden_terms": ["\u4e19\u5348\u5e74", "\u5fc5\u5a5a", "\u5fc5\u79bb"],
+      "min_chars": 80,
+      "max_chars": 700
+    },
+    {
+      "id": "wealth_2036",
+      "question": "2036\u5e74\u8d22\u8fd0\u600e\u4e48\u6837\uff1f",
+      "birth_time": "1990-05-20 14:30",
+      "gender": "\u7537",
+      "required_terms": ["2036\u5e74", "\u4e19\u8fb0", "\u4e19\u620c", "\u8d22"],
+      "forbidden_terms": ["\u4e59\u9149\u5927\u8fd0", "\u4e59\u5df3\u5e74", "\u7a33\u8d5a"],
+      "min_chars": 80,
+      "max_chars": 700
+    },
+    {
+      "id": "report_request",
+      "question": "\u7ed9\u6211\u505a\u4e00\u4efd\u5b8c\u6574\u5206\u6790",
+      "birth_time": "1988-12-01 23:30",
+      "gender": "\u7537",
+      "required_terms": ["\u5b50\u65f6", "\u4e01\u536f", "\u7acb\u6625"],
+      "forbidden_terms": ["\u7edd\u5bf9", "\u5305\u8d5a"],
+      "allow_report_style": true,
+      "min_chars": 120,
+      "max_chars": 1400
+    }
+  ]
+}

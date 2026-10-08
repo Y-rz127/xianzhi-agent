@@ -1,0 +1,73 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: xianzhi-pg
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_DB: xianzhi
+      POSTGRES_USER: postgres
+      # 本地开发默认 postgres；部署时应在 .env / 环境变量中设置 POSTGRES_PASSWORD 覆盖
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    volumes:
+      - xianzhi-pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d xianzhi"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: xianzhi-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - xianzhi-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  api:
+    build: ./backend
+    container_name: xianzhi-api
+    ports:
+      # 容器内 main.py 强制监听 80 端口，主机 8123 映射到容器 80
+      - "8123:80"
+    env_file:
+      # 通过 .env 文件注入 DASHSCOPE_API_KEY、EMBEDDING_API_KEY、API_KEYS 等关键变量
+      - ./backend/.env
+    environment:
+      POSTGRES_CONNECTION_STRING: postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/xianzhi
+      VECTOR_STORE_TYPE: postgres
+      MEMORY_STORE_TYPE: postgres
+      # 容器内服务名互访；本机直跑后端时在 .env 填 redis://localhost:6379/0
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend/app:/app/app
+      - ./backend/data:/app/data
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend/web
+      dockerfile: Dockerfile
+    container_name: xianzhi-frontend
+    ports:
+      - "5174:80"
+    depends_on:
+      - api
+    restart: unless-stopped
+
+volumes:
+  xianzhi-pg-data:
+  xianzhi-redis-data:

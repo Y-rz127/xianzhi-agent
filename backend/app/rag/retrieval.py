@@ -1,0 +1,323 @@
+"""统一 RAG 检索策略：领域识别 + 检索词构造 + 去重检索执行。
+
+ReAct 工具路径（app/tools/rag_search.py）与 workflow 路径（app/agent/workflow/xianzhi_workflow.py）
+共用本模块，避免两套体系各自维护、行为漂移：
+- 本模块：领域关键词、领域检索词、理论术语检索词、query 构造、跨 query 去重检索（唯一入口 retrieve_for_context）
+- rag_search.py（ReAct 工具）：结果格式化（来源标签人性化）与工具协议
+- xianzhi_workflow.py（workflow）：意图分类、命盘个性化 query 叠加、prompt 组装
+"""
+from __future__ import annotations
+
+import concurrent.futures
+import threading
+
+from app.core.logger import log
+from app.domain.domain_keywords import DOMAIN_KEYWORDS, detect_domain
+from app.rag.vector_store import get_knowledge_base
+
+DOMAIN_RULE_QUERIES = {
+    # 领域规则 query：前缀对齐知识库文档标题（chunk 前缀 [标题]），最大化 2-gram 覆盖率
+    "career": ("事业工作 断法 官杀 印星 食伤 升职",),
+    "wealth": ("财运收入 断法 正财 偏财 食伤生财 财库",),
+    "love": ("婚恋关系 规则卡 桃花 配偶星 合冲",),
+    "marriage": ("婚恋关系 规则卡 配偶宫 夫妻星 合冲刑害",),
+    "health": ("健康伤病 断法 五行失衡 寒暖燥湿 冲克",),
+    "liunian": ("大运流年 规则卡 作用关系 流年原局 立春",),
+    "study": ("学业功名 断法 印星 食伤 官星 文昌",),
+    "social": ("社交人际 断法 比劫 贵人 小人 合伙",),
+    "family": ("六亲完整 断法 父母 子女 印星 食伤 宫位",),
+    "personality": ("性格心性 详断 日主 十神 心性 天赋",),
+    "migration": ("方位迁移 断法 用神 驿马 方位 发展",),
+    "naming": ("起名改名 规则 喜用神 五行 命名",),
+    "auspicious": ("择吉择日 断法 黄道吉日 用事 择日",),
+    "match": ("合婚配对 断法 配偶宫 夫妻星 刑冲",),
+    "children": ("子女子嗣 断法 食伤 官杀 子女宫",),
+    "appearance": ("身材样貌 断法 五行 十神 桃花 体形",),
+    # theory 走精准概念路径，fallback 对齐 [术语白话对照表] 标题
+    "theory": ("术语白话 对照表 十神 用神 含义",),
+    "chitchat": (),
+    "general": ("八字 用神 喜忌 大运流年 综合分析",),
+}
+
+
+# 理论术语 → 精准检索词
+# 设计原则：单一概念 + 必要的同义/近义扩展，避免一次拉一堆无关主题
+THEORY_TOPIC_QUERIES: dict[str, str] = {
+    # 取用体系
+    "用神": "用神 取用 喜忌 调候 扶抑 病药",
+    "喜神": "喜神 用神 喜忌",
+    "忌神": "忌神 用神 喜忌 仇神",
+    "仇神": "仇神 忌神 用神",
+    "格局": "格局 取格 月令 用神 成格 破格",
+    "调候": "调候 用神 寒暖燥湿",
+    # 十神
+    "十神": "十神 正官 七杀 正印 偏印 食神 伤官 正财 偏财 比肩 劫财",
+    "正官": "正官 官星 含义 作用",
+    "七杀": "七杀 偏官 含义 制化",
+    "正印": "正印 印星 含义 作用",
+    "偏印": "偏印 枭神 含义 夺食",
+    "食神": "食神 含义 作用 制杀",
+    "伤官": "伤官 含义 作用 伤官见官",
+    "正财": "正财 财星 含义",
+    "偏财": "偏财 财星 含义",
+    "比肩": "比肩 兄弟 同辈 朋友 相助",
+    "劫财": "劫财 姐妹 异性 争财 分财",
+    # 复合术语 / 格局断法
+    "枭神夺食": "枭神夺食 偏印 食神 条件 判断",
+    "枭神": "枭神 偏印 含义 夺食",
+    "夺食": "枭神夺食 偏印 食神",
+    "食神制杀": "食神制杀 七杀 食神 条件",
+    "制杀": "食神制杀 七杀 食神",
+    "伤官见官": "伤官见官 伤官 正官 为祸百端",
+    "官杀混杂": "官杀混杂 七杀 正官 条件 影响",
+    "杀印相生": "杀印相生 七杀 印星 化杀",
+    "财星破印": "财星破印 财 印星 破印",
+    "财破印": "财星破印 财 印星",
+    "贪合忘生": "贪合忘生 合化 忘生",
+    "贪合": "贪合忘生 合化",
+    "化气": "化气 化合 五行化气",
+    "合化": "合化 化气 条件",
+    "从格": "从格 从强 从弱 专旺",
+    "从强": "从强 从格 专旺",
+    "从弱": "从弱 从格",
+    "从财": "从财格 从格 财星",
+    "从杀": "从杀格 从格 七杀",
+    "身旺": "身旺 日主强 根气 旺衰",
+    "身弱": "身弱 日主弱 根气 旺衰",
+    "任财官": "任财官 身旺 财官",
+    "建禄": "建禄格 月令 比肩",
+    "月刃": "月刃格 羊刃 月令",
+    "泄秀": "食伤泄秀 日主 泄秀",
+    "食伤泄秀": "食伤泄秀 日主 泄秀",
+    "比劫夺财": "比劫夺财 比肩 劫财 财星",
+    "印星": "印星 正印 偏印 含义",
+    "食伤": "食伤 食神 伤官 含义",
+    "官星": "官星 正官 七杀 含义",
+    "财星": "财星 正财 偏财 含义",
+    # 神煞
+    "空亡": "空亡 旬空 含义",
+    "桃花": "桃花 咸池 子午卯酉 含义",
+    "神煞": "神煞 吉神 凶煞 含义",
+    "禄神": "禄神 禄 临官 财禄 衣食",
+    "羊刃": "羊刃 阳刃 帝旺 刚烈 血光 刑伤",
+    "华盖": "华盖 含义 孤寡",
+    "天乙贵人": "天乙 贵人 含义",
+    "天乙": "天乙 贵人",
+    "驿马": "驿马 迁移 奔波 出行 变动 调动",
+    "将星": "将星 权威 领导 威望 掌权",
+    "太极贵人": "太极贵人 贵人 含义 聪明 玄学",
+    "文昌贵人": "文昌 文昌贵人 文采 学业 含义",
+    "词馆": "词馆 学堂 文采 才学 含义",
+    "金舆": "金舆 金舆星 含义 富贵 荫护",
+    "福星贵人": "福星贵人 福星 含义 福气",
+    "天德贵人": "天德贵人 天德 化解 含义 逢凶化吉",
+    "月德贵人": "月德贵人 月德 化解 含义 化煞",
+    "劫煞": "劫煞 含义 破财 伤身",
+    "灾煞": "灾煞 含义 灾厄 意外",
+    "亡神": "亡神 含义 耗散 心机",
+    "红鸾": "红鸾 红鸾星 婚恋 桃花 含义",
+    "天喜": "天喜 天喜星 喜事 含义",
+    "天医": "天医 医药 健康 医护 保健",
+    "国印贵人": "国印 国印贵人 权威 公职 权力",
+    "德秀贵人": "德秀 德秀贵人 才华 聪慧 清秀",
+    "天德合": "天德合 天德 逢凶化吉",
+    "月德合": "月德合 月德 化解 福禄",
+    "天赦日": "天赦日 天赦 逢凶化吉 天恩",
+    "六秀日": "六秀日 六秀 聪秀 才艺",
+    "天厨贵人": "天厨 天厨贵人 衣食 财帛 美食",
+    "拱禄": "拱禄 禄 财禄 拱夹",
+    "十灵日": "十灵日 十灵 通灵 灵性 玄学",
+    "天转日": "天转日 天地转 转运 时来运转",
+    "地转日": "地转日 天地转 转运 柳暗花明",
+    "金神": "金神 刚烈 武贵 改革",
+    "八专日": "八专日 八专 专一 禄旺",
+    "勾绞煞": "勾绞煞 勾绞 官非 纠纷 羁绊",
+    "飞刃": "飞刃 阳刃对冲 血光 伤害",
+    "血刃": "血刃 血光 外伤 手术",
+    "披麻": "披麻 孝服 丧事 伤病",
+    "元辰": "元辰 颠倒 是非 不顺",
+    "流霞": "流霞 流血煞 血光 产厄",
+    "九丑日": "九丑日 九丑 容貌 名声 感情",
+    "四废日": "四废日 四废 有始无终 徒劳",
+    "阴差阳错": "阴差阳错 婚姻 夫妻不和 波折",
+    "孤鸾煞": "孤鸾 孤鸾煞 婚姻不顺 克夫克妻",
+    "红艳煞": "红艳煞 红艳 桃花 色欲 感情纠葛",
+    "童子煞": "童子煞 童子 小人 婚姻迟缓 灵性",
+    "丧门": "丧门 孝服 丧事 悲伤",
+    "吊客": "吊客 丧吊 悲伤 情绪低落",
+    "病符": "病符 疾病 健康 小恙",
+    "天罗": "天罗 天罗地网 困顿 羁绊",
+    "地网": "地网 天罗地网 困顿 事业受阻",
+    "正学堂": "正学堂 学堂 学问 正统 功名",
+    "正词馆": "正词馆 词馆 文章 文采 锦绣",
+    "三奇贵人": "三奇 三奇贵人 甲戊庚 乙丙丁 壬癸辛",
+    "孤辰": "孤辰 含义 孤独 亲情",
+    "寡宿": "寡宿 含义 寂寞 晚景",
+    "魁罡": "魁罡 含义 刚强 掌权",
+    "十恶大败": "十恶大败 含义 破财 祖业",
+    # 地支关系
+    "刑冲合害": "刑 冲 合 害 地支关系",
+    "六合": "六合 地支合 含义",
+    "三合": "三合 地支合 局",
+    "六冲": "六冲 地支冲 含义",
+    "相刑": "相刑 地支刑 含义",
+    "相害": "相害 地支害 六害",
+    # 长生体系
+    "长生": "长生 十二长生 帝旺 墓库",
+    "十二长生": "长生 沐浴 冠带 临官 帝旺 衰 病 死 墓 绝 胎 养",
+    "长生十二宫": "长生 帝旺 衰 死 墓",
+    "通根": "通根 根气 强弱",
+    "透干": "透干 透出 天干 显露 发力",
+    "墓库": "墓库 库 含义 刑冲",
+    "纳音": "纳音 含义 甲子",
+    "伏吟": "伏吟 反吟 含义",
+    "反吟": "反吟 伏吟 含义",
+    # 基础
+    "天干": "天干 甲乙丙丁戊己庚辛壬癸 含义",
+    "地支": "地支 子丑寅卯辰巳午未申酉戌亥 含义",
+    "五行": "五行 金木水火土 相生相克",
+    "大运": "大运 起运 顺排 逆排 排法",
+    "流年": "流年 太岁 作用 关系",
+    "小运": "小运 含义 排法",
+    "四柱": "四柱 年柱 月柱 日柱 时柱 含义",
+    "日柱": "日柱 日主 命主 含义",
+    "月令": "月令 令 提纲 含义",
+}
+
+# 理论术语识别：key 越长越具体，优先匹配
+_THEORY_TOPIC_SORTED: tuple[tuple[str, str], ...] = tuple(
+    sorted(THEORY_TOPIC_QUERIES.items(), key=lambda x: -len(x[0]))
+)
+
+
+def detect_theory_topic(text: str) -> tuple[str, str] | None:
+    """从用户问题中识别具体理论术语。
+
+    Returns:
+        (topic, query) 元组，未识别到返回 None。
+
+    Examples:
+        >>> detect_theory_topic("请问用神是什么意思")
+        ('用神', '用神 取用 喜忌 调候 扶抑 病药')
+        >>> detect_theory_topic("今天天气真好")
+        None
+    """
+    if not text:
+        return None
+    for topic, query in _THEORY_TOPIC_SORTED:
+        if topic in text:
+            return topic, query
+    return None
+
+
+# 模块级可复用检索线程池：检索调用频繁（每次对话多 query 并发），复用避免反复创建/销毁线程池
+_search_pool: "concurrent.futures.ThreadPoolExecutor | None" = None
+_search_pool_lock = threading.Lock()
+
+
+def _get_search_pool() -> "concurrent.futures.ThreadPoolExecutor":
+    global _search_pool
+    with _search_pool_lock:
+        if _search_pool is None:
+            _search_pool = concurrent.futures.ThreadPoolExecutor(
+                max_workers=8, thread_name_prefix="rag-search"
+            )
+        return _search_pool
+
+
+def expand_knowledge_queries(query: str, limit: int = 4) -> list[str]:
+    """把用户问题扩展为一小组领域感知检索词（ReAct 工具路径使用）。
+
+    构造顺序：原文 → 理论术语精准 query（命中时）→ 领域规则 query。
+    """
+    text = (query or "").strip()
+    queries = [text] if text else []
+    match = detect_theory_topic(text)
+    if match:
+        queries.append(match[1])
+    domain = detect_domain(text)
+    # 理论术语已命中时，跳过 theory 领域规则 query（避免追加"命理 术语 概念 解释"这类泛化词）
+    if domain and not (match and domain == "theory"):
+        queries.extend(DOMAIN_RULE_QUERIES.get(domain, ()))
+    # 含流年信号（今年/明年/流年…）且主域非 liunian 时，追加流年规则 query——
+    # 单域打分无法同时表达"事业+今年"两个维度
+    if domain != "liunian" and any(kw in text for kw in DOMAIN_KEYWORDS["liunian"]):
+        queries.extend(DOMAIN_RULE_QUERIES["liunian"])
+    if not queries:
+        queries.append("八字 命理 基础 大运 流年 用神")
+    deduped: list[str] = []
+    for q in queries:
+        if q and q not in deduped:
+            deduped.append(q)
+    return deduped[:limit]
+
+
+def retrieve_for_context(
+    queries: list[str],
+    max_docs: int = 4,
+    max_chars_per_chunk: int = 600,
+    verbose: bool = False,
+):
+    """统一检索入口：对多条 query 并发检索并跨 query 去重，返回 [(query, doc), ...]。
+
+    ReAct 工具路径与 workflow 路径均经此入口，去重/截断口径单一实现，
+    两侧差异仅以参数表达（max_docs / max_chars_per_chunk / verbose）。
+
+    - 每条 query 优先取 top-1 最相关 chunk；top-1 与已选结果重复时，
+      依次尝试次优结果（results[1:]），全部重复才放弃该 query
+    - 去重键：(来源文件, 内容前120字)
+    - 控量：单 chunk 截断 ≤ max_chars_per_chunk，最多 max_docs 条
+    """
+    # 并发检索：每条 query 的 search 是独立 I/O（embedding + 向量查询），串行时单条慢查询/
+    # 空命中会线性拖垮全部；search() 已用锁保护缓存（_cache_lock / _init_lock），线程安全，
+    # 结果按原始 query 顺序归并，跨 query 去重口径与串行一致
+    kb = get_knowledge_base()
+    ex = _get_search_pool()
+    order: dict[object, int] = {}
+    for i, q in enumerate(queries):
+        order[ex.submit(kb.search, q)] = i
+    raw: dict[int, list] = {}
+    for fut in concurrent.futures.as_completed(order):
+        i = order[fut]
+        try:
+            raw[i] = fut.result()
+        except Exception as e:  # 单条失败不影响其它 query
+            if verbose:
+                log.warning("[检索] query={} 检索异常: {}", queries[i], e)
+            raw[i] = []
+
+    docs = []
+    seen = set()
+    dedup_count = 0
+    for idx, q in enumerate(queries, 1):
+        results = raw.get(idx - 1, [])
+        if not results:
+            if verbose:
+                log.info("[检索] [{}/{}] query={} 无匹配", idx, len(queries), q)
+            continue
+        # 只取 top-1 最相关 chunk；与已选结果重复则丢弃该 query
+        # （次优候选往往相关性下降，强行选用会引入噪音知识）
+        doc = results[0]
+        key = (doc.metadata.get("source", ""), doc.page_content[:120])
+        if key in seen:
+            dedup_count += 1
+            if verbose:
+                log.info("[检索] [{}/{}] query={} top-1与已选结果重复，跳过", idx, len(queries), q)
+            continue
+        seen.add(key)
+        # 单 chunk 截断兜底
+        if len(doc.page_content) > max_chars_per_chunk:
+            from langchain_core.documents import Document as _Doc
+            doc = _Doc(page_content=doc.page_content[:max_chars_per_chunk] + "…",
+                       metadata=doc.metadata)
+        docs.append((q, doc))
+        if verbose:
+            preview = doc.page_content.replace("\n", " ")[:200]
+            log.info("[检索] [{}/{}] query={} 命中={}字", idx, len(queries), q, len(doc.page_content))
+            log.info("[检索] [{}/{}] 内容预览: {}", idx, len(queries), preview)
+        if len(docs) >= max_docs:
+            break
+    if verbose:
+        log.info("[检索] 汇总: {}条query → {}条有效结果(并发检索), 去重跳过{}条chunk",
+                 len(queries), len(docs), dedup_count)
+    return docs

@@ -1,0 +1,120 @@
+/**
+ * uni.scss - 全局样式变量（主题化）
+ * 变量重定向到 CSS 自定义属性 var(--x-*)，运行时随页面根节点 .t-light/.t-dark
+ * 切换（两套值定义在 styles/theme.scss；默认白天纸墨，暗夜对齐 Web 端）。
+ * 变量名沿用旧"水墨"体系（改值不改名），页面内 $color-* 用法零改动。
+ * 注意：这些变量已非编译期色值，禁止对其做 rgba($x)/darken 等 SCSS 颜色函数运算。
+ */
+
+/* === 品牌主色系 === */
+$color-primary: var(--x-primary);
+$color-primary-light: var(--x-primary-light);
+$color-primary-lighter: var(--x-primary-lighter);
+$color-primary-lightest: var(--x-primary-lightest);
+$color-primary-dark: var(--x-primary-dark);
+$color-primary-darker: var(--x-primary-darker);
+
+/* === 文字系 === */
+$color-ink: var(--x-ink);
+$color-ink-light: var(--x-ink-light);
+$color-ink-lighter: var(--x-ink-lighter);
+$color-ink-lightest: var(--x-ink-lightest);
+
+/* === 朱砂红（点缀，警示/重要） === */
+$color-vermilion: var(--x-vermilion);
+$color-vermilion-light: var(--x-vermilion-light);
+
+/* === 底色系 === */
+$color-paper: var(--x-bg);
+$color-paper-warm: var(--x-bg-warm);
+$color-paper-dark: var(--x-bg-card);
+
+/* === 状态色 === */
+$state-success: var(--x-success);
+$state-warning: var(--x-warning);
+$state-error: var(--x-error);
+$state-info: var(--x-info);
+
+/* === 中性色 === */
+$color-bg: var(--x-bg);
+$color-bg-warm: var(--x-bg-warm);
+$color-bg-card: var(--x-bg-card);
+$color-bg-elevated: var(--x-bg-elevated);
+$color-bg-inverse: var(--x-ink);
+$color-border: var(--x-border);
+$color-border-light: var(--x-border-light);
+$color-surface-divider: var(--x-divider);
+
+/* === 阴影（投影黑度两套通用） === */
+$shadow-sm: 0 2rpx 8rpx rgba(0, 0, 0, 0.18);
+$shadow-md: 0 8rpx 24rpx rgba(0, 0, 0, 0.22);
+$shadow-elevated: 0 16rpx 48rpx rgba(0, 0, 0, 0.28);
+$glow-primary: 0 0 32rpx rgba(212, 175, 55, 0.12);
+$glow-gold: 0 0 24rpx rgba(212, 175, 55, 0.1);
+
+/* === 字体（书法感） === */
+$font-family-display: 'STKaiti', 'KaiTi', 'PingFang SC', 'Noto Serif SC', serif;
+$font-family-body: 'PingFang SC', 'Microsoft YaHei', 'Noto Sans SC', sans-serif;
+
+/* === 圆角 === */
+$radius-sm: 8rpx;
+$radius-md: 12rpx;
+$radius-lg: 16rpx;
+$radius-xl: 20rpx;
+$radius-full: 9999rpx;
+
+/* === 间距 === */
+$spacing-xs: 8rpx;
+$spacing-sm: 16rpx;
+$spacing-md: 24rpx;
+$spacing-base: 32rpx;
+$spacing-lg: 40rpx;
+$spacing-xl: 48rpx;
+$spacing-2xl: 64rpx;
+
+/* === 玩法页 token（随主题映射：暗夜=夜光玻璃基底，白天=纸墨卡片） === */
+$nx-bg: var(--x-bg);
+$nx-bg-2: var(--x-bg-warm);
+$nx-bg-3: var(--x-bg-card);
+$nx-card: var(--x-panel-bg);
+$nx-card-solid: var(--x-bg-card);
+$nx-border: var(--x-panel-border);
+$nx-border-strong: var(--x-gold);
+$nx-text: var(--x-ink);
+$nx-text-dim: var(--x-ink-lighter);
+$nx-text-muted: var(--x-ink-lightest);
+$nx-gold: var(--x-gold);
+$nx-gold-light: var(--x-gold-light);
+/* 模块 accent（固定色，两套主题下均成立） */
+$nx-accent-hehun: #C08A5E;
+$nx-accent-tarot: #9A6FD4;
+$nx-accent-liuyao: var(--x-gold);
+$nx-accent-huangli: var(--x-gold);
+$nx-accent-ziwei: #5B6FC8;
+/* 宜/忌/toast 语义色 */
+$nx-yi: var(--x-yi);
+$nx-ji: var(--x-ji);
+$nx-toast: var(--x-toast);
+
+/* === 旧变量兼容（保持 uni-app 内置组件主题色） === */
+$uni-color-primary: $color-primary;
+$uni-color-success: $state-success;
+$uni-color-warning: $color-primary;
+$uni-color-error: $state-error;
+
+$uni-text-color: $color-ink;
+$uni-text-color-inverse: #050810;
+$uni-text-color-grey: $color-ink-light;
+$uni-text-color-placeholder: $color-ink-lighter;
+
+$uni-bg-color: $color-bg;
+$uni-bg-color-hover: $color-bg-warm;
+$uni-border-color: $color-border;
+
+$uni-font-size-sm: 26rpx;
+$uni-font-size-base: 30rpx;
+$uni-font-size-lg: 34rpx;
+$uni-spacing-row-sm: 16rpx;
+$uni-spacing-row-base: 32rpx;
+$uni-spacing-col-sm: 12rpx;
+$uni-spacing-col-base: 24rpx;

@@ -1,0 +1,20 @@
+[run]
+# 覆盖率统计范围：聚焦命理核心算法层（domain / workflow / core / agent 编排）
+# 排除外部依赖与胶水层（web API、数据访问、重型工具、DB/向量库依赖），
+# 这些层由集成测试覆盖，不计入单测覆盖率门槛。
+# 对应 docs/code-review-standard.md §3.6（核心模块建议 ≥80%，用 .coveragerc 分模块强化）。
+omit =
+    app/api/*
+    app/db/*
+    app/tools/pdf_report.py
+    app/tools/report_generator.py
+    app/tools/web_search.py
+    app/tools/terminate.py
+    app/tools/mcp_client.py
+    app/rag/case_store.py
+    app/rag/vector_store.py
+    app/memory/postgres_memory.py
+    app/tarot/*
+
+[report]
+show_missing = True

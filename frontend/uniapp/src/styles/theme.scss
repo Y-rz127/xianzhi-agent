@@ -1,0 +1,271 @@
+/**
+ * theme.scss - 主题系统（白天纸墨 / 暗夜玻璃）
+ *
+ * 通过 CSS 自定义属性实现运行时切换：页面根节点绑定 .t-light / .t-dark
+ * （由 useTheme() 的 themeClass 提供），所有颜色经 var(--x-*) 解析。
+ * uni.scss 的 $color-* 已重定向到这些 var()，页面内 SCSS 变量用法不变。
+ *
+ * 适配背景：默认白天（纸墨浅色，观感对齐改造前）；暗夜对齐 Web 端 style.css。
+ */
+
+/* ============ 白天 · 纸墨（宣纸白底 + 墨字 + 朱砂） ============ */
+.t-light {
+  --x-bg: #FAFAF8;
+  --x-bg-warm: #F5F3EF;
+  --x-bg-card: #FFFFFF;
+  --x-bg-elevated: #FFFFFF;
+  --x-bg-inverse: #F5F7FA;
+
+  --x-primary: #2C2C2C;
+  --x-primary-light: #555555;
+  --x-primary-lighter: #888888;
+  --x-primary-lightest: #AAAAAA;
+  --x-primary-dark: #1A1A1A;
+  --x-primary-darker: #111111;
+
+  --x-ink: #1A1A1A;
+  --x-ink-light: #555555;
+  --x-ink-lighter: #888888;
+  --x-ink-lightest: #AAAAAA;
+
+  --x-vermilion: #B8483C;
+  --x-vermilion-light: #D45D4F;
+
+  --x-border: rgba(0, 0, 0, 0.08);
+  --x-border-light: rgba(0, 0, 0, 0.04);
+  --x-divider: rgba(0, 0, 0, 0.06);
+
+  --x-success: #4A7A3A;
+  --x-warning: #8B7D3A;
+  --x-error: #B8483C;
+  --x-info: #3A6B7A;
+
+  --x-gold: #B08A2E;
+  --x-gold-light: #8A6A1E;
+
+  /* 聊天页山水背景层（浅底：墨山 + 白雾） */
+  --x-mountain-far: rgba(26, 26, 26, 0.22);
+  --x-mountain-mid: rgba(26, 26, 26, 0.38);
+  --x-mountain-near: rgba(26, 26, 26, 0.6);
+  --x-mist: rgba(250, 250, 248, 0.85);
+  --x-bird: rgba(26, 26, 26, 0.45);
+
+  /* 玩法页深色面板的替代（浅色下走卡片实底） */
+  --x-panel-bg: #FFFFFF;
+  --x-panel-border: rgba(0, 0, 0, 0.08);
+  --x-input-bg: #F5F3EF;
+  --x-accent-text: #8A6A1E;
+  --x-accent-dim: #99895F;
+  --x-yi: #4A7A3A;
+  --x-ji: #B8483C;
+  --x-toast: #B8483C;
+}
+
+/* ============ 暗夜 · 玻璃（对齐 Web：深蓝黑底 + 亮字 + 主金） ============ */
+.t-dark {
+  --x-bg: #050810;
+  --x-bg-warm: #0a0f1a;
+  --x-bg-card: #0f1520;
+  --x-bg-elevated: #131b2a;
+  --x-bg-inverse: #050810;
+
+  --x-primary: #d4af37;
+  --x-primary-light: #e8c964;
+  --x-primary-lighter: #8fa3b8;
+  --x-primary-lightest: #5a6c82;
+  --x-primary-dark: #a8862b;
+  --x-primary-darker: #7c6320;
+
+  --x-ink: #f5f7fa;
+  --x-ink-light: #b9c6d4;
+  --x-ink-lighter: #7c8fa5;
+  --x-ink-lightest: #5a6c82;
+
+  --x-vermilion: #e0655a;
+  --x-vermilion-light: #ef8a80;
+
+  --x-border: rgba(138, 180, 220, 0.12);
+  --x-border-light: rgba(138, 180, 220, 0.07);
+  --x-divider: rgba(138, 180, 220, 0.10);
+
+  --x-success: #6fbf73;
+  --x-warning: #d9b45a;
+  --x-error: #e0655a;
+  --x-info: #6fa8c9;
+
+  --x-gold: #d4af37;
+  --x-gold-light: #f1d894;
+
+  /* 聊天页山水背景层（深底：冷色剪影 + 微冷雾） */
+  --x-mountain-far: rgba(138, 180, 220, 0.10);
+  --x-mountain-mid: rgba(138, 180, 220, 0.16);
+  --x-mountain-near: rgba(138, 180, 220, 0.22);
+  --x-mist: rgba(150, 185, 225, 0.10);
+  --x-bird: rgba(180, 205, 235, 0.45);
+
+  /* 玩法页深色面板 */
+  --x-panel-bg: rgba(15, 21, 32, 0.85);
+  --x-panel-border: rgba(138, 180, 220, 0.12);
+  --x-input-bg: #0f1520;
+  --x-accent-text: #f1d894;
+  --x-accent-dim: #7c8fa5;
+  --x-yi: #8fce9f;
+  --x-ji: #e79ba1;
+  --x-toast: #b54b62;
+}
+
+/* ============ 暗夜全局星空背景（所有 .t-dark 页面根节点） ============ */
+.page.t-dark {
+  background-color: #050810;
+  background-image:
+    /* 主星群：21 颗，白/金/紫三色，2-3px */
+    radial-gradient(2.5px 2.5px at 8% 6%, rgba(255, 255, 255, 0.85) 50%, transparent 51%),
+    radial-gradient(3px 3px at 22% 14%, rgba(240, 208, 96, 0.75) 50%, transparent 51%),
+    radial-gradient(2px 2px at 37% 5%, rgba(255, 255, 255, 0.6) 50%, transparent 51%),
+    radial-gradient(2.5px 2.5px at 52% 10%, rgba(184, 134, 232, 0.6) 50%, transparent 51%),
+    radial-gradient(3px 3px at 68% 4%, rgba(255, 255, 255, 0.8) 50%, transparent 51%),
+    radial-gradient(2px 2px at 84% 12%, rgba(240, 208, 96, 0.55) 50%, transparent 51%),
+    radial-gradient(2.5px 2.5px at 94% 8%, rgba(255, 255, 255, 0.7) 50%, transparent 51%),
+    radial-gradient(2px 2px at 14% 26%, rgba(255, 255, 255, 0.5) 50%, transparent 51%),
+    radial-gradient(3px 3px at 30% 33%, rgba(255, 255, 255, 0.65) 50%, transparent 51%),
+    radial-gradient(2px 2px at 46% 24%, rgba(240, 208, 96, 0.5) 50%, transparent 51%),
+    radial-gradient(2.5px 2.5px at 62% 30%, rgba(184, 134, 232, 0.5) 50%, transparent 51%),
+    radial-gradient(2px 2px at 78% 22%, rgba(255, 255, 255, 0.55) 50%, transparent 51%),
+    radial-gradient(3px 3px at 91% 35%, rgba(255, 255, 255, 0.6) 50%, transparent 51%),
+    radial-gradient(2px 2px at 6% 48%, rgba(240, 208, 96, 0.45) 50%, transparent 51%),
+    radial-gradient(2.5px 2.5px at 25% 55%, rgba(255, 255, 255, 0.5) 50%, transparent 51%),
+    radial-gradient(2px 2px at 43% 47%, rgba(255, 255, 255, 0.4) 50%, transparent 51%),
+    radial-gradient(3px 3px at 58% 60%, rgba(184, 134, 232, 0.45) 50%, transparent 51%),
+    radial-gradient(2px 2px at 74% 52%, rgba(255, 255, 255, 0.45) 50%, transparent 51%),
+    radial-gradient(2.5px 2.5px at 88% 66%, rgba(240, 208, 96, 0.4) 50%, transparent 51%),
+    radial-gradient(2px 2px at 15% 78%, rgba(255, 255, 255, 0.35) 50%, transparent 51%),
+    radial-gradient(2.5px 2.5px at 96% 82%, rgba(255, 255, 255, 0.3) 50%, transparent 51%),
+    /* 顶部紫色星云 + 深蓝黑底 */
+    radial-gradient(90% 55% at 50% 0%, rgba(124, 77, 255, 0.10), transparent 70%),
+    linear-gradient(180deg, #0a0f1a 0%, #050810 60%);
+}
+
+/* 流星 + 闪烁星层：两个固定层各带一组闪烁星点 + 两条流星（::before/::after），
+   共 4 颗流星，左上→右下慢速划过；尾迹在头后方（头右亮、尾左淡）。 */
+.t-dark .meteor {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+}
+/* 闪烁星点层（两层错峰呼吸） */
+.t-dark .meteor-1 {
+  background:
+    radial-gradient(3px 3px at 18% 16%, rgba(255, 255, 255, 0.9) 50%, transparent 51%),
+    radial-gradient(2.5px 2.5px at 64% 9%, rgba(240, 208, 96, 0.8) 50%, transparent 51%),
+    radial-gradient(2px 2px at 40% 38%, rgba(255, 255, 255, 0.6) 50%, transparent 51%),
+    radial-gradient(2.5px 2.5px at 86% 44%, rgba(184, 134, 232, 0.6) 50%, transparent 51%);
+  animation: starTwinkle 3.4s ease-in-out infinite;
+}
+.t-dark .meteor-2 {
+  background:
+    radial-gradient(2.5px 2.5px at 30% 24%, rgba(255, 255, 255, 0.8) 50%, transparent 51%),
+    radial-gradient(3px 3px at 76% 18%, rgba(255, 255, 255, 0.7) 50%, transparent 51%),
+    radial-gradient(2px 2px at 52% 52%, rgba(240, 208, 96, 0.6) 50%, transparent 51%),
+    radial-gradient(2px 2px at 10% 60%, rgba(255, 255, 255, 0.5) 50%, transparent 51%);
+  animation: starTwinkle 4.6s ease-in-out infinite 1.7s;
+}
+.t-dark .meteor-3 {
+  background:
+    radial-gradient(2.5px 2.5px at 22% 68%, rgba(255, 255, 255, 0.7) 50%, transparent 51%),
+    radial-gradient(3px 3px at 58% 76%, rgba(240, 208, 96, 0.6) 50%, transparent 51%),
+    radial-gradient(2px 2px at 82% 62%, rgba(255, 255, 255, 0.55) 50%, transparent 51%),
+    radial-gradient(2px 2px at 44% 88%, rgba(184, 134, 232, 0.5) 50%, transparent 51%);
+  animation: starTwinkle 5.2s ease-in-out infinite 0.9s;
+}
+@keyframes starTwinkle {
+  0%, 100% { opacity: 0.45; }
+  50% { opacity: 1; }
+}
+/* 流星本体：头在右（亮），尾在左（淡），旋转 35° 后沿 +X 向右下移动 */
+.t-dark .meteor::before,
+.t-dark .meteor::after {
+  content: "";
+  position: absolute;
+  width: 150rpx;
+  height: 2.5rpx;
+  border-radius: 3rpx;
+  background: linear-gradient(to left, rgba(255, 255, 255, 0.95), rgba(240, 208, 96, 0.45) 45%, transparent);
+  opacity: 0;
+  transform: rotate(35deg) translateX(0);
+}
+/* 六颗流星：起点沿"右上→左下"对角带散布全屏，统一向右下划去，错峰错速 */
+.t-dark .meteor-1::before { top: 6%;  left: 62%; animation: meteorRun 24s linear infinite 1s; }
+.t-dark .meteor-1::after  { top: 18%; left: 28%; animation: meteorRun 30s linear infinite 9s; }
+.t-dark .meteor-2::before { top: 30%; left: 74%; animation: meteorRun 27s linear infinite 15s; }
+.t-dark .meteor-2::after  { top: 45%; left: 12%; animation: meteorRun 32s linear infinite 21s; }
+.t-dark .meteor-3::before { top: 58%; left: 48%; animation: meteorRun 26s linear infinite 5s; }
+.t-dark .meteor-3::after  { top: 70%; left: 8%;  animation: meteorRun 29s linear infinite 17s; }
+
+@keyframes meteorRun {
+  0% { transform: rotate(35deg) translateX(0); opacity: 0; }
+  1% { opacity: 0.9; }
+  11% { transform: rotate(35deg) translateX(170vh); opacity: 0; }
+  100% { transform: rotate(35deg) translateX(170vh); opacity: 0; }
+}
+
+/* 暗夜下聊天页山水层让位给星空 */
+.t-dark .landscape { display: none; }
+
+/* ============ 塔罗页主题变量（白天浅紫纸感 / 暗夜紫金） ============ */
+.t-light {
+  --x-tarot-page: linear-gradient(180deg, #FAFAF8 0%, #F5F3EF 100%);
+  --x-tarot-text: #2A2438;
+  --x-tarot-dim: #6F6880;
+  --x-tarot-gold: #8A6A1E;
+  --x-tarot-star: #B08A2E;
+  --x-tarot-line: rgba(122, 90, 180, 0.35);
+  --x-tarot-line-strong: rgba(122, 90, 180, 0.55);
+  --x-tarot-panel: rgba(255, 255, 255, 0.6);
+  --x-tarot-panel2: rgba(255, 255, 255, 0.7);
+  --x-tarot-card: linear-gradient(135deg, #F6F1FC 0%, #E7DCF7 100%);
+  --x-tarot-cardback: linear-gradient(135deg, #EFE7FA 0%, #DFD0F2 100%);
+  --x-tarot-core: radial-gradient(circle, rgba(122, 90, 180, 0.14) 0%, transparent 70%);
+  --x-tarot-glow: 0 0 32rpx rgba(122, 90, 180, 0.25);
+}
+.t-dark {
+  --x-tarot-page: linear-gradient(180deg, #0a0f1a 0%, #0c0a1c 40%, #150f30 70%, #0a0f1a 100%);
+  --x-tarot-text: #e8e0f0;
+  --x-tarot-dim: rgba(232, 224, 240, 0.6);
+  --x-tarot-gold: #f0d060;
+  --x-tarot-star: #f0d060;
+  --x-tarot-line: rgba(240, 208, 96, 0.2);
+  --x-tarot-line-strong: rgba(240, 208, 96, 0.35);
+  --x-tarot-panel: rgba(240, 208, 96, 0.05);
+  --x-tarot-panel2: rgba(42, 24, 96, 0.4);
+  --x-tarot-card: linear-gradient(135deg, #2a1860 0%, #1a1040 100%);
+  --x-tarot-cardback: linear-gradient(135deg, #1a1040 0%, #0d0b1a 100%);
+  --x-tarot-core: radial-gradient(circle, rgba(240, 208, 96, 0.4) 0%, transparent 70%);
+  --x-tarot-glow: 0 0 32rpx rgba(240, 208, 96, 0.4);
+}
+
+/* ============ 装饰叠加层（hero 光晕/警示框底等，两套主题各自透明度） ============ */
+.t-light {
+  --x-glow-blue: rgba(107, 123, 142, 0.35);
+  --x-glow-red: rgba(184, 72, 60, 0.22);
+  --x-hint-bg: rgba(107, 123, 142, 0.06);
+  --x-warn-bg: rgba(184, 72, 60, 0.08);
+  --x-warn-border: rgba(184, 72, 60, 0.25);
+  --x-ok-bg: rgba(107, 142, 90, 0.12);
+  --x-ok-border: rgba(107, 142, 90, 0.4);
+  --x-fail-bg: rgba(184, 72, 60, 0.12);
+  --x-fail-border: rgba(184, 72, 60, 0.4);
+  --x-hero-shadow: 0 0 24rpx rgba(107, 123, 142, 0.8);
+}
+.t-dark {
+  --x-glow-blue: rgba(124, 168, 224, 0.22);
+  --x-glow-red: rgba(224, 101, 90, 0.16);
+  --x-hint-bg: rgba(138, 180, 220, 0.07);
+  --x-warn-bg: rgba(224, 101, 90, 0.08);
+  --x-warn-border: rgba(224, 101, 90, 0.3);
+  --x-ok-bg: rgba(111, 191, 115, 0.12);
+  --x-ok-border: rgba(111, 191, 115, 0.4);
+  --x-fail-bg: rgba(224, 101, 90, 0.14);
+  --x-fail-border: rgba(224, 101, 90, 0.4);
+  --x-hero-shadow: 0 0 24rpx rgba(212, 175, 55, 0.5);
+}

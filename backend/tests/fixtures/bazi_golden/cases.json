@@ -1,0 +1,51 @@
+{
+  "_comment": [
+    "黄金命盘用例清单。改动本文件会让同名快照失效，需用 UPDATE_GOLDEN=1 重生成并人工确认差异。",
+    "覆盖维度：10 日干 × 专旺五格（曲直/炎上/稼穑/从革/润下）× 从格八子格（真从/假从 × 财杀儿势）× 神煞 59 名 × 强弱五档 × 边界（子时、立春前后、经度校正、女命逆排）。",
+    "全部名册类覆盖承诺都有断言把关（见 tests/test_bazi_golden.py 的 test_case_set_* 系列）。"
+  ],
+  "reference_date": "2026-09-15",
+  "liunian_start_year": 2026,
+  "cases": [
+    {"id": "stem_geng", "desc": "日干庚（1985 连续十日取十干）", "birth": "1985-01-01 00:00", "gender": "男"},
+    {"id": "stem_xin", "desc": "日干辛", "birth": "1985-01-02 00:00", "gender": "男"},
+    {"id": "stem_ren", "desc": "日干壬", "birth": "1985-01-03 00:00", "gender": "男"},
+    {"id": "stem_gui", "desc": "日干癸", "birth": "1985-01-04 00:00", "gender": "男"},
+    {"id": "stem_jia", "desc": "日干甲（基准例，另用于女命/子时/经度变体对照）", "birth": "1985-01-05 00:00", "gender": "男"},
+    {"id": "stem_yi", "desc": "日干乙", "birth": "1985-01-06 00:00", "gender": "男"},
+    {"id": "stem_bing", "desc": "日干丙", "birth": "1985-01-07 00:00", "gender": "男"},
+    {"id": "stem_ding", "desc": "日干丁", "birth": "1985-01-08 00:00", "gender": "男"},
+    {"id": "stem_wu", "desc": "日干戊", "birth": "1985-01-09 00:00", "gender": "男"},
+    {"id": "stem_ji", "desc": "日干己", "birth": "1985-01-10 00:00", "gender": "男"},
+
+    {"id": "zhuanwang_quzhi", "desc": "专旺·曲直格（甲木一行独旺）", "birth": "1974-03-14 00:00", "gender": "男"},
+    {"id": "zhuanwang_yanshang", "desc": "专旺·炎上格（丙火一行独旺）", "birth": "1977-05-09 12:00", "gender": "男"},
+    {"id": "zhuanwang_jiaose", "desc": "专旺·稼穑格（戊土一行独旺）", "birth": "1973-07-21 08:00", "gender": "男"},
+    {"id": "zhuanwang_congge", "desc": "专旺·从革格（庚金一行独旺）", "birth": "1970-10-07 08:00", "gender": "男"},
+    {"id": "zhuanwang_runxia", "desc": "专旺·润下格（壬水一行独旺）", "birth": "1971-11-23 00:00", "gender": "男"},
+
+    {"id": "boundary_zi_hour", "desc": "子时边界 23:00（触发日柱流派提示）", "birth": "1985-01-05 23:00", "gender": "男"},
+    {"id": "boundary_lichun_before", "desc": "立春前（年柱仍甲子 → 阳年男顺排）", "birth": "1985-02-04 04:00", "gender": "男"},
+    {"id": "boundary_lichun_after", "desc": "立春后（年柱转乙丑 → 阴年男逆排，方向翻转）", "birth": "1985-02-04 12:00", "gender": "男"},
+    {"id": "boundary_longitude", "desc": "真太阳时校正（东经 87.6°，跨日回退）", "birth": "1985-01-05 00:30", "gender": "男", "params": {"longitude": 87.6}},
+    {"id": "boundary_female", "desc": "女命（大运逆排）+ 极旺未成专旺", "birth": "1985-01-05 00:00", "gender": "女"},
+    {"id": "strength_ji_ruo", "desc": "极弱档（未达从格：仍有根/印星）", "birth": "1985-02-13 12:00", "gender": "男"},
+    {"id": "param_sect1", "desc": "日柱流派 sect=1（与 sect=2 基准例对照）", "birth": "1985-01-05 00:00", "gender": "男", "params": {"sect": 1}},
+    {"id": "param_dayun8", "desc": "大运步数 8（工具 bazi_dayun 默认值，口径漂移监测点）", "birth": "1985-01-05 00:00", "gender": "男", "params": {"dayun_count": 8}},
+    {"id": "param_cover_dayun", "desc": "liunian_cover_dayun=True（前端流年神煞需整运十年）", "birth": "1985-01-05 00:00", "gender": "男", "params": {"liunian_cover_dayun": true}},
+
+    {"id": "shensha_tiangang", "desc": "神煞补齐：地网 + 拱禄 + 正学堂 + 魁罡", "birth": "1970-05-12 12:00", "gender": "男"},
+    {"id": "shensha_sanqi", "desc": "神煞补齐：三奇贵人（顺次连续不隔柱）+ 天罗", "birth": "1970-06-12 18:00", "gender": "男"},
+    {"id": "shensha_zhengciguan", "desc": "神煞补齐：正词馆", "birth": "1970-01-07 00:00", "gender": "男"},
+    {"id": "shensha_tianshe", "desc": "神煞补齐：天赦日", "birth": "1970-02-27 00:00", "gender": "男"},
+
+    {"id": "cong_true_sha", "desc": "真从·从杀格（己土无根，月令卯木官杀当令，无食伤制杀）", "birth": "1903-03-12 00:00", "gender": "男"},
+    {"id": "cong_true_er", "desc": "真从·从儿格（丙火无根，月令丑土食伤当令）", "birth": "1902-01-13 00:00", "gender": "男"},
+    {"id": "cong_true_cai", "desc": "真从·从财格（壬水无根，月令午火财当令，无官杀透支）", "birth": "1906-06-07 12:00", "gender": "男"},
+    {"id": "cong_true_shi", "desc": "真从·从势格（戊土无根，财官两行相当）", "birth": "1900-09-12 06:00", "gender": "男"},
+    {"id": "cong_fake_sha", "desc": "假从·假从杀格（日主尚存微根/虚浮印比）", "birth": "1900-05-03 00:00", "gender": "男"},
+    {"id": "cong_fake_cai", "desc": "假从·假从财格", "birth": "1900-09-12 00:00", "gender": "男"},
+    {"id": "cong_fake_er", "desc": "假从·假从儿格", "birth": "1900-10-02 06:00", "gender": "男"},
+    {"id": "cong_fake_shi", "desc": "假从·假从势格", "birth": "1900-09-03 00:00", "gender": "男"}
+  ]
+}
