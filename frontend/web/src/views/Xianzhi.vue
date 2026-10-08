@@ -252,7 +252,7 @@
 <script setup lang="ts">
 defineOptions({ name: 'Xianzhi' })
 import { ref, nextTick, computed, onMounted, onActivated, onUnmounted, watch } from "vue"
-import { chatWithXianzhi, downloadReport, parsePillars, parseWuxing, parseDayun, parseShensha, fetchSessions, deleteSession as deleteSessionApi, getSessionMessages, getSessionBirthInfo, fetchChartCases, createChartCase, deleteChartCase, getChart, inferBaziDates, submitAnswerFeedback, transcribeAudio, type ChatSession, type SessionMessage, type ChartCase, type ChartData, type SSECallbacks } from "../api/index.ts"
+import { chatWithXianzhi, downloadReport, parsePillars, parseWuxing, parseDayun, parseShensha, fetchSessions, deleteSession as deleteSessionApi, getSessionMessages, getSessionBirthInfo, fetchChartCases, createChartCase, deleteChartCase, getChart, submitAnswerFeedback, transcribeAudio, type ChatSession, type SessionMessage, type ChartCase, type ChartData, type SSECallbacks } from "../api/index.ts"
 import { matchCityByName } from "../utils/region-data.ts"
 import BaziCard from "../components/BaziCard.vue"
 import WuxingChart from "../components/WuxingChart.vue"
@@ -512,23 +512,16 @@ const tryExtractBirth = async (text: string) => {
     fetchChartData(time, gender)
     return
   }
-  // 干支四柱（如 甲申 庚午 壬申 甲辰）→ 反推出生时间
+  // 干支四柱（如 甲申 庚午 壬申 甲辰）：**不自动挂盘**。
+  // 四柱只能反推出多个候选年（同一组干支在历史上会重复出现几十次），
+  // 替用户挑第一条就是替他决定出生时间，答案必然是错的（2026-10-08 现场：
+  // 问「癸巳甲子丁酉甲辰」被直接挂成 1953-12-12 08:00）。
+  // 候选与确认由后端 bazi_infer_dates → _bazi_pending 流程负责，
+  // 用户回「第一个/1992年」后由后端排盘并经 chart_context 通知回填。
   if (gender) {
     const pillars = (text.match(/[甲乙丙丁戊己庚辛壬癸][子丑寅卯辰巳午未申酉戌亥]/g) || []).slice(0, 4).join("")
     if (pillars.length === 8) {
-      try {
-        const { candidates } = await inferBaziDates({ pillars, gender, top_n: 1 })
-        const bt = candidates?.[0]?.birth_time
-        if (bt) {
-          lastBirthInfo.value = { time: bt, gender }
-          fetchChartData(bt, gender)
-          toastMsg.value = `已按四柱 ${pillars} 反推出生时间：${bt}`
-        } else {
-          toastMsg.value = "该四柱有多个可能出生时间，请补充出生年月日时"
-        }
-      } catch {
-        toastMsg.value = "四柱反推失败，请提供标准出生年月日时"
-      }
+      toastMsg.value = `已收到四柱 ${pillars}，正在为你反推候选出生年份…`
     }
   }
 }
