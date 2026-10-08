@@ -13,6 +13,7 @@ from lunar_python import Lunar, Solar
 
 from app.domain.chart_builder import (
     build_bazi_chart,
+    normalize_gender_text,
     parse_birth,
     parse_gender,
 )
@@ -519,9 +520,12 @@ def bazi_infer_dates(pillars: str, gender: str, top_n: int = 3) -> str:
         return "八字解析失败: {}".format(e)
     except Exception as e:
         return "反推出生日期失败: {}".format(e)
+    # 回显统一用中文口径：模型可能传 male/female/m/1（实测 2026-10-08），
+    # 原样回显会吐出「（male）」给用户看
+    gender_label = normalize_gender_text(gender)
     if not candidates:
-        return "未能根据八字 {}（{}）反推出候选出生日期，请确认八字是否正确。".format(pillars, gender)
-    lines = ["根据你提供的八字 {}（{}），反推可能的出生日期如下：".format(pillars, gender)]
+        return "未能根据八字 {}（{}）反推出候选出生日期，请确认八字是否正确。".format(pillars, gender_label)
+    lines = ["根据你提供的八字 {}（{}），反推可能的出生日期如下：".format(pillars, gender_label)]
     for i, c in enumerate(candidates, 1):
         lines.append("  {}. {}（{}，{}）".format(i, c["birth_time"], c["ganzhi"], c["shi_chen"]))
     lines.append("请回复序号或具体日期确认你的实际出生日期，我再用该日期为你完整排盘。")

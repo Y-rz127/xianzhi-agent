@@ -311,6 +311,39 @@ def test_think_restores_all_three_formats():
         assert "DSML" not in last.content and "tool_call" not in last.content
 
 
+def test_gender_normalized_for_display():
+    """性别写法归一：male/female/m/1 回显必须是「男」/「女」。
+
+    事故锚点（2026-10-08 日志）：模型给 `gender: 'male'`，工具原样回显成
+    「根据你提供的八字…（male）」，前端与落库都会沾上英文写法。
+    """
+    from app.domain.chart_builder import normalize_gender_text
+
+    for raw, expect in (
+        ("male", "男"),
+        ("female", "女"),
+        ("m", "男"),
+        ("f", "女"),
+        ("1", "男"),
+        ("0", "女"),
+        ("男", "男"),
+        ("女", "女"),
+        ("MALE", "男"),
+    ):
+        assert normalize_gender_text(raw) == expect, raw
+    # 无法识别的写法原样返回（不吞错，后续 parse_gender 会明确报错）
+    assert normalize_gender_text("other") == "other"
+
+
+def test_bazi_infer_dates_echoes_chinese_gender():
+    """工具返回文案里的性别必须是中文口径。"""
+    from app.tools.bazi import bazi_infer_dates
+
+    out = str(bazi_infer_dates.invoke({"pillars": "己丑 癸酉 甲子 壬申", "gender": "male"}))
+    assert "（男）" in out, out
+    assert "male" not in out.lower(), out
+
+
 def test_think_real_tool_calls_unaffected():
     """正常 tool_calls 通道的模型行为不得被改动影响。"""
     real = AIMessage(
@@ -353,6 +386,8 @@ if __name__ == "__main__":
         test_align_args_ambiguous_not_paired,
         test_align_args_does_not_overwrite_known_value,
         test_think_restores_all_three_formats,
+        test_gender_normalized_for_display,
+        test_bazi_infer_dates_echoes_chinese_gender,
         test_think_real_tool_calls_unaffected,
     ):
         fn()

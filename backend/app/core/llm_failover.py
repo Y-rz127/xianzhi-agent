@@ -121,12 +121,18 @@ class FailoverModel(DelegatingRunnable):
         factory: Callable[[str], Any],
         *,
         bound: dict | None = None,
+        transforms: list | None = None,
     ) -> None:
         self._primary = primary
         self._factory = factory
         self._bound = dict(bound or {})
         self._instances: dict[str, Any] = {settings.dashscope_model: primary}
         self._instances_lock = threading.Lock()
+        # 派生变换（如 bind_tools / with_config 的 result）。链上备选模型是懒建的，
+        # 建好后必须补应用这些变换，否则「谁在链首谁就是唯一被调用的那个，
+        # 而它偏偏没绑工具」——模型只能照提示词里的工具说明手搓文本调用
+        # （2026-10-08 现场：链首 deepseek-v4.1-flash 每次都吐 DSML/JSON 文本）。
+        self._transforms: list = list(transforms or [])
 
     # ---- DelegatingRunnable 钩子 ----
     @property
@@ -134,18 +140,30 @@ class FailoverModel(DelegatingRunnable):
         return self._primary
 
     def _derive(self, transform: Any) -> "FailoverModel":
-        """变换主模型后重建包装器。
+        """变换主模型后重建包装器，并记下该变换供链上懒建模型复用。
 
-        只对主模型应用变换，降级链上的备选模型不参与
-        （bind_tools 与降级链合并的复杂度不值得引入）。
+        历史注释说「bind_tools 与降级链合并的复杂度不值得引入」，但那是错的：
+        链首往往不是 primary（PG 里可配任意顺序），此时真正被调用的模型没绑工具，
+        工具调用全部退化成文本形式（见 __init__ 里 _transforms 的说明）。
+        primary 仍当场变换（首调不等懒建），备选模型在 _resolve_model 里补。
         """
-        return FailoverModel(transform(self._primary), self._factory, bound=dict(self._bound))
+        return FailoverModel(
+            transform(self._primary),
+            self._factory,
+            bound=dict(self._bound),
+            transforms=[*self._transforms, transform],
+        )
 
     # ---- 派生方法 ----
     def bind(self, **kwargs: Any) -> "FailoverModel":
         # 与基类默认不同：绑定参数累积到 _bound，invoke 时与调用参数合并后投给
         # 链上每个模型——只 bind 主模型的话，降级到备选模型时参数会丢。
-        return FailoverModel(self._primary, self._factory, bound={**self._bound, **kwargs})
+        return FailoverModel(
+            self._primary,
+            self._factory,
+            bound={**self._bound, **kwargs},
+            transforms=list(self._transforms),
+        )
 
     # ---- 链解析 ----
     def _resolve_model(self, name: str) -> Any:
@@ -153,6 +171,9 @@ class FailoverModel(DelegatingRunnable):
             instance = self._instances.get(name)
             if instance is None:
                 instance = self._factory(name)
+                # 补应用派生变换：链上模型是懒建的，不补就永远是「裸模型」
+                for transform in self._transforms:
+                    instance = transform(instance)
                 self._instances[name] = instance
             return instance
 

@@ -129,6 +129,75 @@ def test_failover_does_not_switch_on_auth_error(monkeypatch):
     assert backup.calls == 0
 
 
+# ---------------- 3b. bind_tools 必须覆盖全链（不只 primary） ----------------
+# 事故锚点（2026-10-08）：模型每次都把工具调用写成文本（DSML/JSON），排查发现
+# FailoverModel._derive 只把 bind_tools 应用在 primary 上，链上备选模型是裸建的。
+# 而链首往往不是 primary（PG 里可配任意顺序），于是**真正被调用的模型没绑工具**，
+# 只能照提示词里的工具说明手搓文本调用。修后五链位全部走原生 tool_calls。
+
+
+class _FakeBindable:
+    """可 bind_tools 的假模型：记录绑没绑、绑了什么。"""
+
+    def __init__(self, name: str, tools=None):
+        self.model_name = name
+        self.tools = tools
+
+    def bind_tools(self, tools, **kwargs):
+        return _FakeBindable(self.model_name, tools)
+
+    def with_config(self, config, **kwargs):
+        return _FakeBindable(self.model_name, self.tools)
+
+    def invoke(self, *args, **kwargs):
+        return "{}:tools={}".format(self.model_name, None if self.tools is None else len(self.tools))
+
+
+def _chain_failover(monkeypatch, chain: list[str]):
+    """构造多链位 FailoverModel（primary = chain[0]）。"""
+    primary = _FakeBindable(chain[0])
+    instances = {name: _FakeBindable(name) for name in chain}
+    fm = FailoverModel(primary, lambda name: instances.get(name) or primary)
+    monkeypatch.setattr(fo, "get_active_chain", lambda: chain)
+    return fm, instances
+
+
+def test_bind_tools_covers_all_chain_models(monkeypatch):
+    """bind_tools 后，链上每个模型（含懒建的备选）都拿到工具。"""
+    chain = ["m-a", "m-b", "m-c"]
+    fm, instances = _chain_failover(monkeypatch, chain)
+
+    bound = fm.bind_tools(["T1", "T2"])
+    assert bound.invoke("x") == "m-a:tools=2", "primary 应立即可用（不用等懒建）"
+
+    for name in chain:
+        inst = bound._resolve_model(name)
+        assert inst.tools == ["T1", "T2"], f"{name} 没绑到工具（旧 bug 现场）"
+
+
+def test_bind_tools_survives_derive_chain(monkeypatch):
+    """多次派生（bind_tools → with_config）后，链上模型仍带全部变换。"""
+    chain = ["m-a", "m-b"]
+    fm, instances = _chain_failover(monkeypatch, chain)
+
+    bound = fm.bind_tools(["T"]).with_config({"tags": ["x"]})
+    for name in chain:
+        inst = bound._resolve_model(name)
+        assert inst.tools == ["T"], f"{name} 在派生链后丢了工具绑定"
+
+
+def test_bind_accumulates_for_chain(monkeypatch):
+    """bind(**kwargs) 累积到 _bound，invoke 时投给每个链位（既有行为不回归）。"""
+    chain = ["m-a", "m-b"]
+    fm, instances = _chain_failover(monkeypatch, chain)
+
+    bound = fm.bind(temperature=0.5)
+    assert bound._bound == {"temperature": 0.5}
+    # primary 失败时切到 m-b，参数同样带过去
+    instances["m-a"].invoke = lambda *a, **kw: (_ for _ in ()).throw(PermissionDeniedError(DASHSCOPE_403))
+    assert bound.invoke("x") == "m-b:tools=None"
+
+
 # ---------------- 4. 全链额度耗尽 → ModelUnavailableError ----------------
 def test_all_models_quota_exhausted_raises_model_unavailable(monkeypatch):
     fm, primary, backup = _failover(

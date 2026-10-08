@@ -38,6 +38,7 @@ from app.core.config import settings
 from app.core.llm_throttle import LLMBusyError, llm_tag
 from app.core.logger import log
 from app.core.thinking_router import use_thinking
+from app.domain.chart_builder import normalize_gender_text
 from app.domain.chart_format import find_birth_dates_from_pillars
 from app.domain.tools_catalog import BAZI_BIRTH_TOOLS
 from app.memory import create_chat_memory
@@ -201,6 +202,9 @@ class Xianzhi(ToolCallAgent):
         """
         try:
             birth_time = _normalize_birth_time(birth_time)
+            # 性别归一为中文口径再入库/通知前端：模型可能给 male/female/m/1
+            # （实测 2026-10-08），原样存会让前端表单与落库数据出现「male」
+            gender = normalize_gender_text(gender)
             longitude = birth_place_to_longitude(birth_place)
             # 归属用户粘住：payload 挂载带 uid，正则挂载（mount_chart_context）不带，
             # 不能让后者把前者写进去的 uid 抹掉
@@ -381,6 +385,9 @@ class Xianzhi(ToolCallAgent):
                     p = args.get("pillars")
                     g = args.get("gender")
                     if p and g:
+                        # 存中文口径：候选文案、确认后挂盘、落库都用同一份 gender，
+                        # 免得后续三个出口各转一次（模型可能给 male，实测 2026-10-08）
+                        g = normalize_gender_text(g)
                         try:
                             cands = find_birth_dates_from_pillars(p, g, top_n=int(args.get("top_n") or 3))
                         except Exception:

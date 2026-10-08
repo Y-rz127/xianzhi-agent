@@ -65,6 +65,19 @@ def _gender_label(gender_int: int) -> str:
     return "男" if gender_int == 1 else "女"
 
 
+def normalize_gender_text(gender: str) -> str:
+    """把各种性别写法归一为「男」/「女」；无法识别时原样返回。
+
+    用于**面向用户的回显**：模型可能给 male/female/m/1 等写法（实测 2026-10-08
+    日志出现 `gender: 'male'`，工具原样回显成「（male）」）。内部计算走
+    ``parse_gender``，不受影响；这里只为输出统一口径。
+    """
+    try:
+        return _gender_label(parse_gender(gender))
+    except ValueError:
+        return gender
+
+
 def _tai_yuan(month_pillar: str) -> tuple[str, str]:
     """按月柱推胎元：月干进一位、月支进三位。"""
     gan_seq = "甲乙丙丁戊己庚辛壬癸"
