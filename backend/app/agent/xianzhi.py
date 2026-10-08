@@ -441,10 +441,38 @@ class Xianzhi(ToolCallAgent):
             err = (self._last_error or "未知错误").strip()
             log.warning("[xianzhi] 终止于错误: {}", err)
             return "分析过程中遇到错误，请稍后重试。"
+        # 反推候选兜底：模型只调工具、不写正文就 do_terminate 时（实测 deepseek 系偶发），
+        # 候选列表若不补发就是**空回复**——此场景前端没有结构化命盘可渲染（盘还没挂，
+        # 只在等用户确认日期），静默返回 None 等于用户什么都没收到（2026-10-08 探针实测）。
+        fallback = self._pending_candidates_text()
+        if fallback:
+            log.info("[xianzhi] 终止时无文本回答，改用反推候选兜底文案")
+            return fallback
         # LLM 仅触发 do_terminate 等工具、无文本回答时，
         # 前端已通过 /api/ai/xianzhi/chart 拿到结构化命盘数据
         log.info("[xianzhi] 终止时无文本回答，仅返回工具结果")
         return None
+
+    def _pending_candidates_text(self) -> str:
+        """把「待确认八字候选」渲染成用户可读文案（供空回答兜底）。
+
+        与 ``bazi_infer_dates`` 工具返回的文案口径保持一致：用户回序号/日期即可确认。
+        """
+        pending = self._bazi_pending or {}
+        cands = pending.get("candidates") or []
+        if not pending.get("pillars") or not cands:
+            return ""
+        lines = [
+            "根据你提供的八字 {}（{}），反推可能的出生日期如下：".format(
+                pending.get("pillars"), pending.get("gender")
+            )
+        ]
+        for i, c in enumerate(cands, 1):
+            lines.append(
+                "  {}. {}（{}，{}）".format(i, c.get("birth_time"), c.get("ganzhi"), c.get("shi_chen"))
+            )
+        lines.append("请回复序号或具体日期确认你的实际出生日期，我再用该日期为你完整排盘。")
+        return "\n".join(lines)
 
     def _filter_steps(self, src_iter):
         """内部消费 ReAct 步骤（仅写日志不外发），只产出最终回答。"""

@@ -208,7 +208,86 @@ def test_align_args_does_not_overwrite_known_value():
     assert agent._align_args(t, {"a": "ok", "wrongname": "v"}) == {"a": "ok", "b": "v"}
 
 
-def test_think_restores_text_calls():
+# 现场格式三：JSON 载荷（含数组型参数与零宽字符干扰）
+SCENE_JSON = (
+    '<tool_call>{"name": "bazi_infer_dates", "arguments": '
+    '{"bazi": ["己丑", "癸酉", "甲子", "壬申"], "gender": "男"}}</tool_call>\n'
+    '<tool_call>{"name": "search_knowledge", "arguments": '
+    '{"query": "甲木生于酉月 官印相生 身弱用神取法"}}</tool_call>'
+)
+
+
+def test_parse_json_payload_scene():
+    """现场格式三：JSON 载荷，两处调用都要还原（数组参数拼回字符串）。"""
+    calls, remaining = parse_text_tool_calls(SCENE_JSON)
+    assert len(calls) == 2, f"应还原出 2 个调用，实际 {len(calls)}"
+    assert calls[0]["name"] == "bazi_infer_dates"
+    assert calls[0]["args"]["bazi"] == "己丑 癸酉 甲子 壬申"  # 数组 → 空格拼接
+    assert calls[0]["args"]["gender"] == "男"
+    assert calls[1]["name"] == "search_knowledge"
+    assert calls[1]["args"]["query"] == "甲木生于酉月 官印相生 身弱用神取法"
+    assert remaining == ""
+    assert "tool_call" not in remaining
+
+
+def test_parse_json_payload_alternate_keys():
+    """JSON 载荷的键名有变体：args/parameters/tool_name 都要认。"""
+    for body in (
+        '{"name": "t", "args": {"a": "1"}}',
+        '{"name": "t", "parameters": {"a": "1"}}',
+        '{"tool_name": "t", "arguments": {"a": "1"}}',
+    ):
+        calls, _ = parse_text_tool_calls("<tool_call>{}</tool_call>".format(body))
+        assert len(calls) == 1, body
+        assert calls[0]["name"] == "t"
+        assert calls[0]["args"] == {"a": "1"}
+
+
+def test_parse_json_payload_array_form():
+    """整个块是 JSON 数组（多调用合并写法）也要还原。"""
+    scene = '<tool_call>[{"name": "t1", "arguments": {"a": "1"}}, {"name": "t2", "arguments": {"b": "2"}}]</tool_call>'
+    calls, _ = parse_text_tool_calls(scene)
+    assert [c["name"] for c in calls] == ["t1", "t2"]
+
+
+def test_attribute_format_not_eaten_by_json_parser():
+    """属性式块不得被 JSON 解析器误吞（参数值里含 JSON 的边界）。"""
+    scene = '<tool_call name="t"><parameter name="q">{&quot;name&quot;: &quot;fake&quot;}</parameter></tool_call>'
+    calls, _ = parse_text_tool_calls(scene)
+    assert len(calls) == 1
+    assert calls[0]["name"] == "t"
+
+
+def test_call_ids_unique_across_formats():
+    """多格式混用时 id 必须全局唯一（ToolMessage 靠 id 关联）。"""
+    mixed = SCENE_DSML + "\n" + SCENE_JSON
+    calls, _ = parse_text_tool_calls(mixed)
+    ids = [c["id"] for c in calls]
+    assert len(ids) == len(set(ids)), f"id 重复: {ids}"
+
+
+def test_think_restores_all_three_formats():
+    """端到端：三种格式都要变成 tool_calls 并继续 act。"""
+
+    class _Model:
+        def __init__(self, content):
+            self._c = content
+
+        def bind_tools(self, tools, **kw):
+            return self
+
+        def invoke(self, messages):
+            return AIMessage(content=self._c)
+
+    for scene, expect_n in ((SCENE_DSML, 2), (SCENE_RAW, 1), (SCENE_JSON, 2)):
+        agent = _make_agent()
+        agent._llm_with_tools = _Model(scene)
+        assert agent.think() is True, f"应判定为「有工具调用」：{scene[:40]}"
+        assert len(agent.message_list[-1].tool_calls) == expect_n
+        assert agent.final_answer == "", f"final_answer 不应含协议标记：{agent.final_answer!r}"
+
+
+
     """端到端（Agent.think）：文本调用必须变成 tool_calls 并继续 act，而不是收尾。"""
 
     class _Model:
@@ -257,6 +336,11 @@ if __name__ == "__main__":
     for fn in (
         test_parse_dsml_scene,
         test_parse_raw_scene_with_zerowidth,
+        test_parse_json_payload_scene,
+        test_parse_json_payload_alternate_keys,
+        test_parse_json_payload_array_form,
+        test_attribute_format_not_eaten_by_json_parser,
+        test_call_ids_unique_across_formats,
         test_no_marker_passthrough,
         test_text_around_markers_preserved,
         test_truncated_block_still_parsed,
@@ -264,7 +348,11 @@ if __name__ == "__main__":
         test_strip_fallback,
         test_align_args_four_pillars_to_pillars,
         test_align_args_keeps_valid_names,
-        test_think_restores_text_calls,
+        test_align_args_unique_gap_no_common_substring,
+        test_align_args_type_mismatch_not_paired,
+        test_align_args_ambiguous_not_paired,
+        test_align_args_does_not_overwrite_known_value,
+        test_think_restores_all_three_formats,
         test_think_real_tool_calls_unaffected,
     ):
         fn()

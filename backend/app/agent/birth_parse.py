@@ -38,8 +38,20 @@ _BIRTH_INFO_RE2 = re.compile(
 # 12 小时制时段词 → 换算偏移（0 = 原值，12 = 下午/晚上加 12 小时）
 _MARKER_PM = ("中午", "下午", "晚上", "晚间", "夜里")
 
-# 从用户输入中识别八字四柱（如 "甲申庚午壬申甲辰"），用于反推候选出生日期
-_PILLARS_RE = re.compile(r"([甲乙丙丁戊己庚辛壬癸][子丑寅卯辰巳午未申酉戌亥]){4}")
+# 从用户输入中识别八字四柱（如 "甲申庚午壬申甲辰"），用于反推候选出生日期。
+# 柱间分隔符必须容忍：用户写法很随意，实测「己丑、癸酉、甲子、壬申」（顿号）、
+# 「己丑 癸酉 甲子 壬申」（空格）、「甲申年庚午月壬申日甲辰时」（带柱标注，排盘软件的
+# 标准输出格式）都是常见写法；旧正则要求 8 字紧邻，分隔符一插就整段失配 ⇒
+# 四柱识别不到 ⇒ 落到 classify_question 被判成闲聊（2026-10-08 现场）。
+# 分隔符限定为空白/常见中英标点 + 单个柱标注（年月日时），**不含其它汉字**
+# ——避免跨句把不相干的干支拼成四柱。
+_GAN_CHARS = "甲乙丙丁戊己庚辛壬癸"
+_ZHI_CHARS = "子丑寅卯辰巳午未申酉戌亥"
+_PILLARS_SEP = r"(?:[\s、,，·・/|｜\-—~～]*[年月日时]?[\s、,，·・/|｜\-—~～]*)"
+_PILLARS_RE = re.compile(
+    r"([甲乙丙丁戊己庚辛壬癸][子丑寅卯辰巳午未申酉戌亥])"
+    r"(?:{sep}([甲乙丙丁戊己庚辛壬癸][子丑寅卯辰巳午未申酉戌亥])){{3}}".format(sep=_PILLARS_SEP)
+)
 _GENDER_RE = re.compile(r"(男|女|乾造|坤造|乾命|坤命)")
 
 # 从用户输入中提取出生地（城市名，交给前端 region-data 匹配经度）
@@ -139,7 +151,11 @@ def birth_place_to_longitude(place: Optional[str]) -> float:
 
 
 def extract_pillars(text: str):
-    """从文本中提取八字四柱与性别，返回 (pillars8字, gender) 或 (None, None)。"""
+    """从文本中提取八字四柱与性别，返回 (pillars8字, gender) 或 (None, None)。
+
+    返回的干支串**已剥掉柱间分隔符**（"己丑、癸酉、甲子、壬申" → "己丑癸酉甲子壬申"），
+    下游 find_birth_dates_from_pillars 与 bazi_infer_dates 都按 8 字连续串处理。
+    """
     m = _PILLARS_RE.search(text or "")
     if not m:
         return None, None
@@ -150,24 +166,42 @@ def extract_pillars(text: str):
     gender = "男" if g in ("男", "乾造", "乾命") else ("女" if g in ("女", "坤造", "坤命") else None)
     if not gender:
         return None, None
-    return m.group(0), gender
+    # 只保留干支字，去掉分隔符（匹配段里可能混入顿号/空格等）
+    pillars = "".join(c for c in m.group(0) if c in _GAN_CHARS or c in _ZHI_CHARS)
+    if len(pillars) < 8:
+        return None, None
+    return pillars[:8], gender
+
+
+def has_pillars(text: str) -> bool:
+    """文本里是否出现 4 组干支（八字四柱，容忍柱间分隔符）。
+
+    与 extract_pillars 的区别：**不要求性别**、不返回具体柱。用于「是不是在聊
+    生辰」这类判定（意图分类、闲聊放行），供本模块外调用——别去 import
+    私有正则 ``_PILLARS_RE``。
+    """
+    return bool(_PILLARS_RE.search(text or ""))
 
 
 def detect_birth_signal(text: str) -> bool:
-    """检测文本是否含疑似生辰信号（年份 + 性别 + 时辰/农历/节日）。
+    """检测文本是否含疑似生辰信号（四柱干支 / 年份 + 性别 + 时辰/农历/节日）。
 
     用于闲聊短路放行：当精确正则（_BIRTH_INFO_RE）无法抓取但用户确实
     在提供生辰信息时（如"2004年端午节 辰时 男"），不走闲聊短路，
     让 ReAct 路径的 LLM 调 bazi_full 排盘（工具内部 _normalize_birth_time
     支持农历/节日/时辰自动转公历）。
 
-    判定条件（全部满足）：
-    1. 含年份（19xx/20xx）
-    2. 含性别（男/女/乾造/坤造等）
-    3. 含时间信号（传统时辰 / 农历 / 阴历 / 节日 / HH:MM）
+    判定条件（任一命中）：
+    A. 含八字四柱干支（4 组干支）——**不要求性别**：用户写「分析下这个八字：
+       己丑、癸酉、甲子、壬申」时性别可能在下一句才补，此时也该走 ReAct
+       让 LLM 追问，而不是当闲聊直接编造分析（2026-10-08 现场）。
+    B. 含年份（19xx/20xx）+ 性别 + 时间信号（传统时辰 / 农历 / 阴历 / 节日 / HH:MM）。
     """
     if not text:
         return False
+    # A：四柱干支本身就是最强的生辰信号，缺性别亦放行
+    if has_pillars(text):
+        return True
     has_gender = bool(_GENDER_RE.search(text))
     has_year = bool(_YEAR_RE.search(text))
     if not (has_gender and has_year):

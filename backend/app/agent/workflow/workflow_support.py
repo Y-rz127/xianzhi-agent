@@ -9,6 +9,7 @@ import json
 import re
 from typing import Any
 
+from app.agent.birth_parse import has_pillars as _has_pillars
 from app.agent.workflow.workflow_models import (
     DOMAIN_LABELS,
     QuestionIntent,
@@ -393,9 +394,16 @@ def classify_question(text: str, today: _dt.date | None = None) -> QuestionInten
     if tool_query and not years:
         best_domain = "general"
 
+    # 命理强信号：出现这些词说明用户在咨询命理，即便没命中上面的领域关键词
+    # （俗称"八字""四柱"本身不属于任何具体领域）也不能当闲聊。
+    # 反例：'分析下这个八字：己丑、癸酉、甲子、壬申，男命' 曾因干支未被领域表覆盖
+    # 而落到零信号 ⇒ 判成 chitchat ⇒ 跳过排盘直接硬编分析（2026-10-08 现场）。
+    _MINGLI_HINTS = ("八字", "四柱", "命盘", "排盘", "命局", "大运", "流年", "十神", "用神", "格局")
+    mingli_query = any(w in text for w in _MINGLI_HINTS) or _has_pillars(text)
+
     # 零命理信号 + 无年份 → 闲聊（如"为什么这么多人执着西藏"）
     # 但天气/搜索/信息查询必须保留在 general，避免被直接短路掉 ReAct。
-    if best_score == 0 and not years and best_domain == "general" and not tool_query:
+    if best_score == 0 and not years and best_domain == "general" and not tool_query and not mingli_query:
         best_domain = "chitchat"
 
     if years and best_domain == "general":

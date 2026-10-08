@@ -85,6 +85,56 @@ def test_normal_chitchat_still_works():
         print("  ✓ '哈哈，你好' 仍被识别为闲聊，走短路逻辑")
 
 
+def test_empty_answer_falls_back_to_candidates():
+    """模型只调工具、不写正文就终止时，必须补发候选文案而非空回复。
+
+    事故锚点（2026-10-08 探针实测）：模型调 bazi_infer_dates 拿到候选后
+    直接 do_terminate 且无文本 ⇒ _final_answer_or_error 返回 None ⇒ 用户收到空回复。
+    此场景前端没有结构化命盘可渲染（盘还没挂），必须由后端补候选文案。
+    """
+    with patch("app.agent.xianzhi.create_chat_memory") as m1, \
+         patch("app.agent.xianzhi.XianzhiWorkflow") as m2:
+        m1.return_value = MagicMock()
+        m2.return_value = MagicMock()
+        agent = Xianzhi(chat_model=MagicMock(), local_tools=[])
+
+        agent._bazi_pending = {
+            "pillars": "己丑癸酉甲子壬申",
+            "gender": "男",
+            "candidates": [
+                {"birth_time": "2009-09-16 16:00", "ganzhi": "己丑 癸酉 甲子 壬申", "shi_chen": "申时"},
+                {"birth_time": "1949-10-01 16:00", "ganzhi": "己丑 癸酉 甲子 壬申", "shi_chen": "申时"},
+            ],
+        }
+        agent.final_answer = ""  # 模型没写正文
+        text = agent._final_answer_or_error()
+        assert text, "候选存在时不得返回空（None）"
+        assert "己丑癸酉甲子壬申" in text
+        assert "2009-09-16 16:00" in text and "1949-10-01 16:00" in text
+        assert "序号" in text, "要引导用户回复确认方式"
+
+        # 无候选时仍走原逻辑（返回 None，交由前端渲染命盘）
+        agent._bazi_pending = None
+        assert agent._final_answer_or_error() is None
+
+
+def test_empty_answer_prefers_real_text():
+    """有正文时优先给正文，兜底文案不得顶替正常回答。"""
+    with patch("app.agent.xianzhi.create_chat_memory") as m1, \
+         patch("app.agent.xianzhi.XianzhiWorkflow") as m2:
+        m1.return_value = MagicMock()
+        m2.return_value = MagicMock()
+        agent = Xianzhi(chat_model=MagicMock(), local_tools=[])
+
+        agent._bazi_pending = {
+            "pillars": "己丑癸酉甲子壬申",
+            "gender": "男",
+            "candidates": [{"birth_time": "2009-09-16 16:00", "ganzhi": "x", "shi_chen": "申时"}],
+        }
+        agent.final_answer = "这是模型自己写的完整回答。"
+        assert agent._final_answer_or_error() == "这是模型自己写的完整回答。"
+
+
 def test_conversation_switch_clears_pending():
     """场景4：切换会话时 _bazi_pending 必须清空，避免跨会话污染。"""
     print("=== 测试 4: 切换会话清空 _bazi_pending ===")

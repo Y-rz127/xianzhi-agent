@@ -32,6 +32,7 @@ langchain 只认 ``message.tool_calls``，因此这类响应的 ``tool_calls`` �
 """
 from __future__ import annotations
 
+import json
 import re
 from typing import Any
 
@@ -131,14 +132,144 @@ def _parse_dsml(content: str) -> tuple[list[dict], str]:
     return calls, remaining
 
 
-def _parse_raw(content: str) -> tuple[list[dict], str]:
+# ---- 格式三：JSON 载荷 ----
+# <tool_call>{"name": "x", "arguments": {...}}</tool_call>（也可能是 [{...},{...}] 数组）
+# 实测于 2026-10-08 12:xx：模型把 OpenAI 风格的 function-call JSON 塞进 tool_call 标签，
+# 且四柱被拆成数组 ["己丑","癸酉","甲子","壬申"]（需要拼回字符串）。
+_JSON_BLOCK_RE = re.compile(
+    r"<\s*[\u200b\ufeff]*\s*tool_calls?\s*>(.*?)<\s*/\s*[\u200b\ufeff]*\s*tool_calls?\s*>",
+    re.DOTALL | re.IGNORECASE,
+)
+# JSON 里 name 与参数容器常见的几种键名（OpenAI 风格 arguments 为主）
+_JSON_NAME_KEYS = ("name", "tool", "tool_name", "function")
+_JSON_ARG_KEYS = ("arguments", "args", "parameters", "params", "input")
+
+
+def _extract_json_spans(body: str):
+    """按大括号/中括号平衡切出 body 里可解析的 JSON 片段（容忍前后夹带的杂字）。"""
+    n = len(body)
+    i = 0
+    while i < n:
+        if body[i] not in "{[":
+            i += 1
+            continue
+        open_ch = body[i]
+        close_ch = "}" if open_ch == "{" else "]"
+        depth = 0
+        in_str = False
+        esc = False
+        for j in range(i, n):
+            ch = body[j]
+            if in_str:
+                if esc:
+                    esc = False
+                elif ch == "\\":
+                    esc = True
+                elif ch == '"':
+                    in_str = False
+                continue
+            if ch == '"':
+                in_str = True
+            elif ch == open_ch:
+                depth += 1
+            elif ch == close_ch:
+                depth -= 1
+                if depth == 0:
+                    yield body[i : j + 1]
+                    i = j + 1
+                    break
+        else:
+            # 内层循环自然结束（无 break）⇒ 括号不平衡（多为流式截断），放弃后续扫描
+            return
+
+
+def _normalize_json_value(value: Any) -> Any:
+    """JSON 参数值归一：字符串数组拼成空格分隔的字符串。
+
+    模型常把四柱拆成 ``["己丑","癸酉","甲子","壬申"]``，而工具签名要的是字符串；
+    下游（``_parse_pillars`` / ``_PILLARS_RE``）本身就容忍空格，拼上即可对上。
+    **只处理「全字符串」的数组**，其余类型原样返回（让 schema 校验去报错）。
+    """
+    if isinstance(value, list) and value and all(isinstance(x, str) for x in value):
+        return " ".join(x.strip() for x in value)
+    return value
+
+
+def _call_from_json_obj(obj: Any) -> dict | None:
+    """从解析出的 JSON 对象里取 (name, args)；不符合工具调用形状时返回 None。"""
+    if not isinstance(obj, dict):
+        return None
+    name = ""
+    for key in _JSON_NAME_KEYS:
+        v = obj.get(key)
+        if isinstance(v, str) and v.strip():
+            name = v.strip()
+            break
+    if not name:
+        return None
+    raw_args: Any = {}
+    for key in _JSON_ARG_KEYS:
+        if key in obj:
+            raw_args = obj[key]
+            break
+    if isinstance(raw_args, str):
+        # 双编码的字符串参数体：尽力再解一层
+        try:
+            raw_args = json.loads(raw_args)
+        except Exception:
+            raw_args = {}
+    if not isinstance(raw_args, dict):
+        raw_args = {}
+    args = {k: _normalize_json_value(v) for k, v in raw_args.items()}
+    return {"name": name, "args": args}
+
+
+def _parse_json_payload(content: str) -> tuple[list[dict], str]:
+    """JSON 载荷式：``<tool_call>{"name": "x", "arguments": {...}}</tool_call>``。
+
+    注意：属性式（``name="x"``）的块必须**让给 _parse_raw**——若在这里被当成
+    "没提取到就跳过"，后面的 _parse_raw 仍能处理；但若这里误提取（参数值里恰好
+    有 name 键的 JSON），整块会被移除、真调用丢失。故先排除属性式的块。
+    """
     calls: list[dict] = []
     remaining = content
-    for block in _RAW_CALL_RE.finditer(content):
-        for seq, (name, body) in enumerate(_RAW_INNER_RE.findall(block.group(1)), 1):
-            args = {k: _coerce(v) for k, v in _RAW_PARAM_RE.findall(body)}
-            calls.append(_build(name, args, seq))
-        remaining = remaining.replace(block.group(0), "")
+    for block in _JSON_BLOCK_RE.finditer(content):
+        body = block.group(1)
+        if _RAW_INNER_RE.search(body):
+            continue  # 属性式，交给 _parse_raw
+        found_here = []
+        for span in _extract_json_spans(body):
+            try:
+                obj = json.loads(span)
+            except Exception:
+                continue
+            candidates = obj if isinstance(obj, list) else [obj]
+            for item in candidates:
+                call = _call_from_json_obj(item)
+                if call:
+                    found_here.append(call)
+        if found_here:
+            calls.extend(found_here)
+            # 只在真的提取到调用时才移除（否则留给残片清理判断）
+            remaining = remaining.replace(block.group(0), "")
+    return calls, remaining
+
+
+def _parse_raw(content: str) -> tuple[list[dict], str]:
+    """属性式：``<tool_call name="x"><parameter name="p">v</parameter></tool_call>``。
+
+    直接扫描 ``<tool_call name="...">`` 块，**不要求外面套 ``<tool_calls>`` 壳**
+    （实测模型时套时不套）。只移除真正提取到调用的块——旧版依赖外层壳且无条件移除，
+    会把「块内没有 name 属性」的 JSON 载荷块提前吃光，后面的 JSON 解析器再也看不到原文。
+    外层壳残留由 ``_RESIDUE_RES`` 统一清理。
+    """
+    calls: list[dict] = []
+    remaining = content
+    for seq, m in enumerate(_RAW_INNER_RE.finditer(content), 1):
+        name, body = m.group(1), m.group(2)
+        args = {k: _coerce(v) for k, v in _RAW_PARAM_RE.findall(body)}
+        calls.append(_build(name, args, seq))
+        remaining = remaining.replace(m.group(0), "")
     return calls, remaining
 
 
@@ -154,9 +285,14 @@ def parse_text_tool_calls(content: str) -> tuple[list[dict], str]:
 
     calls: list[dict] = []
     remaining = content
-    for parser in (_parse_dsml, _parse_raw):
+    # 三种格式依次尝试；各自只移除自己成功提取的块，互不干扰
+    for parser in (_parse_dsml, _parse_raw, _parse_json_payload):
         found, remaining = parser(remaining)
         calls.extend(found)
+
+    # id 全局重排：各解析器内部从 1 计数，混用时可能撞车（ToolMessage 靠 id 关联）
+    for seq, call in enumerate(calls, 1):
+        call["id"] = "call_txt_{}_{}".format(seq, call["name"])
 
     # 未闭合的残片（invoke/parameter 标签单独漏出）也要剥干净，别让用户看见
     for residue in _RESIDUE_RES:
