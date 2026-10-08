@@ -33,7 +33,7 @@
 
 | 段落 | 最少 | 典型 | 上限 | 说明 |
 |---|---|---|---|---|
-| System Prompt | 241 | 523 | 715 | `reflect_sysprompt`(241) + 断法抬头(87) + `worker.expertise`（chitchat/theory 类 241~508；career 523；match 715 最大，实测值） |
+| System Prompt | 241 | 523 | 715 | `reflect_sysprompt`(241) + 断法抬头(模板 87，渲染后 89) + `worker.expertise`（chitchat/theory 类 241~508；career 523；match 715 最大，实测值；本路径不含 `ORACLE_BASE_SYSTEM`，故不受其变更影响） |
 | 用户问题 | 67 | 107 | 307 | 「【用户问题】」7 + 包裹符 50 + 原问题 |
 | 原回答（被打回） | 200 | 600 | 1500 | B 产出的完整回答 |
 | Reviewer 问题列表 | 100 | 100 | 100 | 命中的红线/杜撰/合规问题（「【发现的问题】」固定格式） |

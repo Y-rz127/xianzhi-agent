@@ -16,7 +16,7 @@
 
 | 段落 | 最少 | 典型 | 上限 | 说明 |
 |---|---|---|---|---|
-| System Prompt | 1258 | 1258 | 5323 | `ORACLE_BASE_SYSTEM`（1258 字，经 prompts.py 导入，xianzhi.py:26 别名 `SYSTEM_PROMPT`）；若 `bazi_*` 工具中途挂上命盘，`Xianzhi._build_messages`（xianzhi.py:224-231）后续步骤再追加 `chart_context`（实测 ≈3170 字）+ `REACT_FACT_GUARDRAILS`（398 字） |
+| System Prompt | 1288 | 1288 | 5323 | `ORACLE_BASE_SYSTEM`（1288 字，经 prompts.py 导入，xianzhi.py:26 别名 `SYSTEM_PROMPT`）；若 `bazi_*` 工具中途挂上命盘，`Xianzhi._build_messages`（xianzhi.py:224-231）后续步骤再追加 `chart_context`（实测 ≈3170 字）+ `REACT_FACT_GUARDRAILS`（398 字） |
 | 工具 Schema | 900 | 2000 | 3200 | `bind_tools` 全部工具定义（17 个本地工具 + MCP 高德），每次 think 都发 |
 | 历史 / 工具结果 | 0 | 1200 | 5000 | 首步 0；后续累积 `AIMessage(tool_calls)` + `ToolMessage`（排盘/知识片段越长越重） |
 | 用户问题 | 80 | 100 | 300 | 首条 HumanMessage，`_wrap_user_input` 包裹符实测 50 字（base_agent.py:24-29）+ 问题 N |
@@ -36,7 +36,7 @@
 
 ## 说明
 
-- **最少**：首步、无历史、仅用户问题（1258 + 900 + 80）。
+- **最少**：首步、无历史、仅用户问题（1288 + 900 + 80）。
 - **典型**：3 步内完成、工具结果中等（排盘 + 1 次检索）、含首步指引。
 - **上限**：长链工具调用（bazi_full/ziwei_chart + 多次 search_knowledge）、工具返回超长、逼近 `max_steps`、中途挂载命盘（System 追加 ~3560 字）。
 - **这是全系统 token 最容易爆炸的路径**——工具结果逐轮全量回灌 + 工具 schema 常驻。若用户带出生信息，系统会优先走 Workflow 路径（单次重但非循环），反而更省。

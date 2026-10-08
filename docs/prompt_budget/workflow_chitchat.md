@@ -12,7 +12,7 @@
 
 | 段落 | 最少 | 典型 | 上限 | 说明 |
 |---|---|---|---|---|
-| System Prompt | 1823 | 1823 | 1823 | `ORACLE_BASE_SYSTEM`(1258) + `WORKFLOW_FACT_REDLINE`(563) 拼接（workflow_messages.py:74，实测 1823 字）；chitchat 无专属断法抬头 |
+| System Prompt | 1853 | 1853 | 1853 | `ORACLE_BASE_SYSTEM`(1288) + `WORKFLOW_FACT_REDLINE`(563) 拼接（workflow_messages.py:74，实测 1853 字）；chitchat 无专属断法抬头 |
 | 用户问题 | 67 | 107 | 307 | 「【用户问题】」7 字 + 包裹符 50 字（`_wrap_user_input` 实测）+ 原问题(N≈10~250) |
 | 识别意图 | 34 | 42 | 52 | 「【识别意图】领域=…; 目标年份=…; 置信度=…」固定模板 |
 | 历史摘要+最近对话 | 3 | 500 | 1386 | `compact_history`（workflow_messages.py:187）：会话摘要 ≤600 + **最近 3 条**（每条 `content[:250]`），空时"（无）"3 字 |
@@ -29,4 +29,4 @@
 - **典型**：已聊数轮，最近 3 条对话中等填充 + 固定知识库占位。
 - **上限**：历史摘要 600 + 最近 3 条满 250（≈1386 含头）+ 长问题 250；系统排盘事实始终为 0（闲聊不参与命理分析）。
 - 相比 7/29 版本：基础 System 1022→1823 字（合并人设基座与事实红线）；最近对话由 6 条改为 3 条；知识库占位 16→15 字；LLM 深审对闲聊整体跳过。
-- 与 `react_chitchat.md` 的区别：此处走 Workflow 编排（已挂命盘上下文时），System 用 Workflow 的 1823 字规则集而非 ReAct 的 581 字；但同样跳过命理事实注入。
+- 与 `react_chitchat.md` 的区别：此处走 Workflow 编排（已挂命盘上下文时），System 用 Workflow 的 1853 字规则集而非 ReAct 的 581 字；但同样跳过命理事实注入。

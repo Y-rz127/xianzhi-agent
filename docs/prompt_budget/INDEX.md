@@ -93,12 +93,12 @@ LangGraph 图：classify → chart(扩盘) → retrieve(知识检索) → genera
 
 | 常量 | 值（字） | 位置 |
 |---|---|---|
-| `ORACLE_BASE_SYSTEM`（ReAct 主 persona，xianzhi.py 以 `SYSTEM_PROMPT` 别名导入） | 1258 | prompts.py:99 |
+| `ORACLE_BASE_SYSTEM`（ReAct 主 persona，xianzhi.py 以 `SYSTEM_PROMPT` 别名导入） | 1288 | prompts.py:133 |
 | `REACT_NEXT_STEP_PROMPT`（ReAct 工具指引，仅注入一次） | 797 | prompts.py:59 |
 | `REACT_FACT_GUARDRAILS`（有命盘时追加） | 398 | prompts.py:83 |
 | `CHITCHAT_SYSTEM`（ReAct 闲聊短路 System） | 581 | prompts.py:127 |
 | `domain_sysprompt`（Workflow 拆解 = `_DECOMPOSE_SYSTEM`） | 1694 | prompts.py:401 |
-| Workflow 基础 System（ORACLE_BASE + FACT_REDLINE 拼接） | 1823 | workflow_messages.py:74 |
+| Workflow 基础 System（ORACLE_BASE + FACT_REDLINE 拼接） | 1853 | workflow_messages.py:74 |
 | `WORKFLOW_FACT_REDLINE`（Workflow 事实红线段） | 563 | prompts.py:43 |
 | Worker 通用断法抬头 `WORKER_PREAMBLE_TEMPLATE` | 87 | prompts.py:38 |
 | `REVIEWER_SYSTEM`（LLM 深审，12 维度） | 2359 | prompts.py:362 |
@@ -120,7 +120,8 @@ LangGraph 图：classify → chart(扩盘) → retrieve(知识检索) → genera
 | study 学习考试 | 154 | auspicious 择吉择日 | 183 |
 | liunian 大运流年 | 187 | children 子女生育 | 193 |
 
-> 各断事 worker System 总长 = 1823 + 87 + expertise，落在 2064~2295 字；chitchat 无抬头 = 1823。
+> 各断事 worker System 总长 = 1853 + 断法抬头 + expertise，实测落在 2096~2582 字（最短 study、最长 appearance）；chitchat 无抬头 = 1853。
+> 注：抬头经 `WORKER_PREAMBLE_TEMPLATE.format(领域=…)` 渲染后长度随领域名变化，故各 worker 合计**不等于**基础+固定抬头，只能实测。
 
 **硬上限（代码卡点）**
 - 知识库注入：`_MAX_TEXT_PER_QUERY=600`（workflow_retrieval.py:30，单 query/单 chunk）；query 数 LLM 拆解路径 ≤4、断事路径 ≤4、理论路径 ≤2（`retrieve_for_context` 的 `max_docs=len(queries)`）→ 单轮知识总量 ≤ **~2520 字**（含每片段 ~16~30 字来源头）；旧常量 `_MAX_KNOWLEDGE_TOTAL` 已删除
