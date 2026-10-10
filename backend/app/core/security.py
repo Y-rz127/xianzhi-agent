@@ -38,13 +38,14 @@ _EXEMPT_PREFIXES = (
 )
 
 # 管理后台路径（需 API Key 鉴权；普通用户接口不受影响）
-# 命例库/反馈管理类接口属管理操作；submit_feedback 等用户接口不在此列
+# 命例库读接口是用户功能（小程序/网页浏览、命例收藏），不在此列；
+# 其写操作（增删改/导出/导入）由路由层 require_admin 单独守护，故这里不按前缀拦。
+# submit_feedback 等用户接口不在此列
 _ADMIN_PREFIXES = (
     "/api/ai/admin/",
     "/api/ai/metrics",
     "/api/ai/rag/",
     "/api/ai/observability/",
-    "/api/ai/xianzhi/cases",
     "/api/ai/feedback/answers",
 )
 

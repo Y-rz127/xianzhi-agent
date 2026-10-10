@@ -5,7 +5,7 @@
 - §三.3 辰/午/酉/亥 自刑
 - §三.4 三刑采用「两支半刑」口径（并注明部分流派坚持三支齐全）
 - 古籍05 十二节：六破
-另：三刑名称（寅巳申=无恩 / 丑未戌=恃势）曾写反，本文件把方向钉死。
+另：三刑名称（寅巳申=无恩 / 丑戌未=恃势）曾写反，本文件把方向钉死。
 
 这层测试与黄金快照分工不同：快照保证"和上次一样"，
 本文件保证"口径与知识库一致" —— 前者对代码改动敏感，后者对口径错误敏感。
@@ -50,8 +50,8 @@ def test_full_san_he():
 
 def test_ban_he_contains_middle_branch():
     """半合 = 三合中**含中神**的两支（生半合与旺半合）。"""
-    assert "申子半合水" in _labels(_br("申", "子", "未"))["ban_he"]     # 生半合
-    assert "子辰半合水" in _labels(_br("子", "辰", "午"))["ban_he"]     # 旺半合
+    assert "申子半合水" in _labels(_br("申", "子", "未"))["ban_he"]  # 生半合
+    assert "子辰半合水" in _labels(_br("子", "辰", "午"))["ban_he"]  # 旺半合
     assert "亥卯半合木" in _labels(_br("亥", "卯", "丑"))["ban_he"]
     assert "午戌半合火" in _labels(_br("亥", "午", "戌"))["ban_he"]
     assert "巳酉半合金" in _labels(_br("巳", "酉", "辰"))["ban_he"]
@@ -91,7 +91,7 @@ def test_pair_relations_all_four_classes():
     labels = _labels(rel)
     assert "巳申合水" in labels["liu_he"]
     assert "巳申破" in labels["po"]
-    assert labels["hai"] == ()          # 巳申不在六害
+    assert labels["hai"] == ()  # 巳申不在六害
 
 
 def test_liu_chong_and_hai():
@@ -106,14 +106,14 @@ def test_liu_chong_and_hai():
 
 
 def test_san_xing_labels_are_not_swapped():
-    """寅巳申=无恩之刑、丑未戌=恃势之刑 —— 原表曾把两者写反（字典抄错类故障）。"""
+    """寅巳申=无恩之刑、丑戌未=恃势之刑 —— 原表曾把两者写反（字典抄错类故障）。"""
     labels = _labels(_br("寅", "巳", "申"))
     assert "寅巳申无恩之刑三刑" in labels["san_xing"]
     assert "持势" not in "".join(labels["san_xing"]), "寅巳申不应标为恃势"
 
     labels2 = _labels(_br("丑", "未", "戌"))
-    assert "丑未戌恃势之刑三刑" in labels2["san_xing"]
-    assert "无恩" not in "".join(labels2["san_xing"]), "丑未戌不应标为无恩"
+    assert "丑戌未恃势之刑三刑" in labels2["san_xing"]
+    assert "无恩" not in "".join(labels2["san_xing"]), "丑戌未不应标为无恩"
 
 
 def test_ban_xing_when_only_two_branches():
@@ -148,7 +148,7 @@ def test_zi_xing_named_zixing_not_xiangxing():
 
 
 def test_zi_xing_needs_duplicate_branch():
-    labels = _labels(_br("辰", "午", "酉", "亥"))    # 四支各一 → 无自刑
+    labels = _labels(_br("辰", "午", "酉", "亥"))  # 四支各一 → 无自刑
     assert labels["zi_xing"] == ()
 
 
@@ -167,7 +167,7 @@ def test_stem_he_and_chong_naming():
 def test_gan_pair_relation_prefers_he_over_chong():
     assert gan_pair_relation("甲", "己") == "甲己合土"
     assert gan_pair_relation("甲", "庚") == "甲庚冲"
-    assert gan_pair_relation("丁", "庚") == ""      # 非冲的天干相克不列
+    assert gan_pair_relation("丁", "庚") == ""  # 非冲的天干相克不列
     assert gan_pair_relation("甲", "甲") == ""
 
 

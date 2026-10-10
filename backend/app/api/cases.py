@@ -153,9 +153,13 @@ def _db_list_cases() -> list[dict[str, Any]]:
         ]
 
 
-@router.get("", dependencies=[Depends(require_admin)])
+@router.get("")
 async def list_cases():
-    """获取所有命例列表（cases 表，Bazi 结构）。"""
+    """获取所有命例列表（cases 表，Bazi 结构）。
+
+    只读接口不鉴权：命例为公开教学资料，小程序/网页命例库浏览、命例收藏均依赖它；
+    写操作仍走 require_admin（API Key）。
+    """
     if not await asyncio.to_thread(ensure_table):
         cases = _load_file_cases()
         return [
@@ -232,9 +236,9 @@ def _db_get_case(case_id: str) -> dict[str, Any] | None:
     return _row_to_case(row, with_chart=True) if row else None
 
 
-@router.get("/{case_id}", dependencies=[Depends(require_admin)])
+@router.get("/{case_id}")
 async def get_case(case_id: str):
-    """获取单个命例详情（cases 表）。"""
+    """获取单个命例详情（cases 表）。只读接口，鉴权口径同列表接口。"""
     if not await asyncio.to_thread(ensure_table):
         for c in _load_file_cases():
             if c.get("id") == case_id:
