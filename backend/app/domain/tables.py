@@ -1,6 +1,6 @@
 """八字查表数据：五行/干支基础表、合冲刑害表、神煞查表。
 
-R9 拆分自 bazi_engine.py，纯数据无逻辑；bazi_engine 门面重导出全部符号。"""
+R9 拆分自 bazi_engine.py；含表派生口径（element_state），无业务逻辑。"""
 
 from __future__ import annotations
 
@@ -60,6 +60,28 @@ CONTROLS = {"木": "土", "土": "水", "水": "火", "火": "金", "金": "木"
 
 
 WUXING_ORDER = ("金", "木", "水", "火", "土")
+
+
+def element_state(month_zhi: str, element: str) -> str:
+    """月令对指定五行的旺相休囚死（渊海子平口径）：当令旺、令生相、生令休、克令囚、令克死。
+
+    未知月支或五行返回空串。`xipan._wuxing_state`（细盘展示）与 `analysis_calc`
+    的三合化局判据（得时=旺/相）共用本函数，保证口径单源。
+    """
+    ling = ZHI_WUXING.get(month_zhi, "")
+    if not ling or element not in WUXING_ORDER:
+        return ""
+    if element == ling:
+        return "旺"
+    if GENERATES.get(ling) == element:
+        return "相"
+    if GENERATES.get(element) == ling:
+        return "休"
+    if CONTROLS.get(element) == ling:
+        return "囚"
+    if CONTROLS.get(ling) == element:
+        return "死"
+    return ""
 
 
 CHANG_SHENG = ("长生", "沐浴", "冠带", "临官", "帝旺", "衰", "病", "死", "墓", "绝", "胎", "养")

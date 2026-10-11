@@ -39,6 +39,7 @@ from app.domain.tables import (
     LIU_CHONG,
     WUXING_ORDER,
     ZHI_WUXING,
+    element_state,
 )
 
 _GAN_SEQ = ["甲", "乙", "丙", "丁", "戊", "己", "庚", "辛", "壬", "癸"]
@@ -543,19 +544,7 @@ def _build_snapshot(
 
 def _wuxing_state(month_zhi: str) -> list[dict[str, str]]:
     """月令五行定旺相休囚死：当令旺、令生相、生令休、克令囚、令克死。"""
-    ling = ZHI_WUXING.get(month_zhi, "")
-    state = {}
-    for name in WUXING_ORDER:
-        if name == ling:
-            state[name] = "旺"
-        elif GENERATES[ling] == name:
-            state[name] = "相"
-        elif GENERATES[name] == ling:
-            state[name] = "休"
-        elif CONTROLS[name] == ling:
-            state[name] = "囚"
-        elif CONTROLS[ling] == name:
-            state[name] = "死"
+    state = {name: element_state(month_zhi, name) for name in WUXING_ORDER}
     order = {"旺": 0, "相": 1, "休": 2, "囚": 3, "死": 4}
     return [{"name": n, "state": s} for n, s in sorted(state.items(), key=lambda kv: order[kv[1]])]
 

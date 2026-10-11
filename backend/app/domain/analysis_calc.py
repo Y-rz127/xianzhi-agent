@@ -14,12 +14,13 @@ from app.domain.tables import (
     SEASON_NOTES,
     WUXING_ORDER,
     ZHI_WUXING,
+    element_state,
 )
 
 # 特殊格局判定阈值
 # 引擎版本：位置权重/阈值/关系修正任一变动都必须 bump —— chart_verdicts 缓存表
 # 把它并进主键，bump 后老裁决自然失效、新裁决另起一行（历史留档可对比）。
-ENGINE_VERSION = "20261011.5"  # 印星受生条件 + 比劫根损打折（用户裁决两铁律落码）
+ENGINE_VERSION = "20261012.1"  # 三合局化局条件：化神旺/相才并入，休囚死合而不化、各归本位
 
 _ZHUANWANG_DOM_RATIO = 0.35       # 主导五行占「对日干影响」加权比例下限
 _ZHUANWANG_PRESSURE_MAX = 2.8     # 克泄耗三行合计加权上限（超过视为破局，不判专旺）
@@ -95,9 +96,12 @@ def _chart_relation_adjust(pillars: list[str], weighted: dict[str, float]) -> tu
     """原局合冲刑害对五行力量的修正，返回 (修正后 weighted, 修正说明, 被冲支索引集)。
 
     只做确定性共识的力学归并：
-    - 三合局/三会方：参与支力量**全部**并入局五行（合化成局，一行独旺）；
+    - 三会方：参与支力量**全部**并入局五行（三支齐全即当季方气聚，无条件）；
+    - 三合局：化神在月令**旺或相**（得时）才整支并入；休/囚/死一律**合而不化、
+      各归本位**（不并入——自然之泄已含在藏干权重里。判据与 `xipan._wuxing_state`
+      同源：申子辰生于辰月为「辰库收水」，不化。2026-10-12 用户裁决）；
     - 六合/干合：参与干支各折半并入合化五行（合而未化）；
-    - 六冲：被冲支的藏干力量 ×0.6（冲则根动）。
+    - 六冲：被冲支的藏干力量 ×0.75（冲则根动）。
     三刑/自刑/害/破不进强弱分 —— 它们主应事与伤病，不改变旺衰力学，
     编进来只会让阈值漂移（知识库 §四：刑害「助力应事，不改旺衰」）。
 
@@ -109,18 +113,26 @@ def _chart_relation_adjust(pillars: list[str], weighted: dict[str, float]) -> tu
     zhis = [p[1] for p in pillars]
     rel = branch_relations(zhis)
 
-    consumed: set[int] = set()  # 已被三合/三会吞掉的支（整支并入局五行）
+    consumed: set[int] = set()  # 已成局的支（整支并入局五行）
+    merges: list[tuple[str, str]] = []  # 实际成局的 (关系名, 局五行)，供第 5 步归并
 
-    # 1) 三会方 ＞ 三合局：整支并入局五行
-    for name in [*rel.hui, *rel.san_he]:
-        wx = _wu_of_relation(name)
-        if not wx:
-            continue
-        members = [c for c in name if c in zhis]
-        for i, p in enumerate(pillars):
-            if p[1] in members and i not in consumed:
-                consumed.add(i)
-        notes.append(f"{name}：参与支力量并入{wx}")
+    # 1) 三会方 > 三合局：整支并入局五行
+    #    三会无条件（三支齐全即当季方气聚）；三合须化神得时（月令旺/相）才化，
+    #    否则合而不化、各归本位（辰月申子辰=辰库收水不化，2026-10-12 用户裁决）
+    for is_san_he, names in ((False, rel.hui), (True, rel.san_he)):
+        for name in names:
+            wx = _wu_of_relation(name)
+            if not wx:
+                continue
+            if is_san_he and element_state(pillars[1][1], wx) not in ("旺", "相"):
+                notes.append(f"{name}：{wx}不当令，合而不化，各归本位")
+                continue
+            members = [c for c in name if c in zhis]
+            for i, p in enumerate(pillars):
+                if p[1] in members and i not in consumed:
+                    consumed.add(i)
+            notes.append(f"{name}：参与支力量并入{wx}")
+            merges.append((name, wx))
 
     # 2) 六合：参与支各折半并入合化五行（参与支未被三合吞掉的部分）
     for name in rel.liu_he:
@@ -185,7 +197,7 @@ def _chart_relation_adjust(pillars: list[str], weighted: dict[str, float]) -> tu
                 lose = round(r * zw * (1 - _CHART_CHONG_FACTOR), 4)
                 w[hw] = round(w[hw] - lose, 4)
 
-    # 5) 三合/三会整支归并（放在冲之后：合局成则局内支不因冲再折损）
+    # 5) 成局整支归并（放在冲之后：局成则局内支不因冲再折损；合而不化者不在此列）
     for i, p in enumerate(pillars):
         if i not in consumed:
             continue
@@ -195,10 +207,7 @@ def _chart_relation_adjust(pillars: list[str], weighted: dict[str, float]) -> tu
             if hw and hw in w:
                 move = round(r * zw, 4)
                 w[hw] = round(w[hw] - move, 4)
-    for name in [*rel.hui, *rel.san_he]:
-        wx = _wu_of_relation(name)
-        if not wx:
-            continue
+    for name, wx in merges:
         members = [c for c in name if c in zhis]
         for i, p in enumerate(pillars):
             if p[1] in members:
