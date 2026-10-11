@@ -20,7 +20,7 @@
     <!-- 状态栏占位 -->
     <view class="status-bar" :style="{ height: statusBarHeight + 'px' }"></view>
 
-    <!-- 顶部头：汉堡(左) + 标题 + 命盘 -->
+    <!-- 顶部头：汉堡(左) + 标题 + 命盘 …… 出生信息入口(右) -->
     <view class="header">
       <view class="header-top">
         <view class="header-left">
@@ -28,19 +28,17 @@
           <text class="header-title display-font">先知</text>
           <text v-if="chartData" class="icon-btn bazi-btn" @tap="openChartDetail">☯</text>
         </view>
+        <!-- 出生信息入口：收起时只剩这颗点（实心=已挂命盘，空心=还没生辰），点开才展开表单 -->
+        <view class="birth-dot-btn" @tap="showBirth = !showBirth">
+          <view :class="['birth-dot', hasBirth ? 'has' : 'empty', showBirth && 'open']"></view>
+        </view>
       </view>
     </view>
 
-    <!-- 出生信息玻璃面板 -->
-    <view class="birth-panel">
-      <view class="birth-bar" @tap="showBirth = !showBirth">
-        <view class="birth-bar-left">
-          <text class="birth-icon">✦</text>
-          <text class="birth-summary">{{ birthSummary }}</text>
-        </view>
-        <text class="arrow">{{ showBirth ? '▲' : '▼' }}</text>
-      </view>
-      <view v-if="showBirth" class="birth-form">
+    <!-- 出生信息玻璃面板（由标题行右侧圆点展开） -->
+    <view v-if="showBirth" class="birth-panel">
+      <view class="birth-form">
+        <text class="birth-summary">{{ birthSummary }}</text>
         <view class="form-row">
           <text class="label">出生日期</text>
           <picker mode="date" :value="birthDate" :end="today" @change="onDateChange">
@@ -815,6 +813,8 @@ const birthSummary = computed(() =>
     ? `${effectiveBirthTime.value} ${effectiveGender.value}${birthPlace.value ? ' · ' + birthPlace.value : ''}`
     : '点击设置出生信息'
 )
+/** 是否已挂命盘：决定标题行那颗点是实心（有生辰）还是空心（还没生辰） */
+const hasBirth = computed(() => !!effectiveBirthTime.value)
 
 const placeholderText = '请输入你的问题…'
 
@@ -1442,39 +1442,57 @@ messages.value.push({
   font-size: 40rpx;
 }
 
-/* === 出生信息面板 === */
+/* === 出生信息入口：标题行右侧的小圆点 === */
+.birth-dot-btn {
+  width: 64rpx;
+  height: 64rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.birth-dot {
+  width: 20rpx;
+  height: 20rpx;
+  border-radius: 50%;
+  box-sizing: border-box;
+  transition: transform 0.18s ease, box-shadow 0.18s ease;
+}
+/* 空心：还没提供生辰 */
+.birth-dot.empty {
+  border: 2rpx solid $color-ink-lighter;
+}
+/* 实心朱砂：已挂命盘 */
+.birth-dot.has {
+  background: $color-vermilion;
+}
+/* 展开态：点外圈一道柔光，暗示"再点收起" */
+.birth-dot.open {
+  transform: scale(1.15);
+  box-shadow: 0 0 0 8rpx rgba(184, 72, 60, 0.14);
+}
+
+/* === 出生信息面板（点圆点才出现） === */
 .birth-panel {
   background: $color-bg-card;
   border-bottom: 1rpx solid $color-border;
   position: relative;
   z-index: 1;
+  animation: birthReveal 0.18s ease-out;
 }
-.birth-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 24rpx 32rpx;
+@keyframes birthReveal {
+  from { opacity: 0; transform: translateY(-8rpx); }
+  to   { opacity: 1; transform: translateY(0); }
 }
-.birth-bar-left {
-  display: flex;
-  align-items: center;
-  gap: 16rpx;
+.birth-form {
+  padding: 20rpx 32rpx 28rpx;
 }
-.birth-icon {
-  color: $color-vermilion;
-  font-size: 28rpx;
-}
+/* 命主摘要：从原来的横条搬进面板首行 */
 .birth-summary {
+  display: block;
   color: $color-ink;
   font-size: 30rpx;
   letter-spacing: 0.05em;
-}
-.arrow {
-  color: $color-ink-lighter;
-  font-size: 22rpx;
-}
-.birth-form {
-  padding: 16rpx 32rpx 28rpx;
+  margin-bottom: 20rpx;
 }
 .form-row {
   display: flex;
