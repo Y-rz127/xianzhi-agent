@@ -196,7 +196,14 @@ async def get_kline(
         include_months: 是否附带每年 12 个节气月的分数明细
         dimension: 取象维度（comprehensive/career/wealth/love/health/study），默认综合
     """
-    from app.agent.verdict import ENGINE_VERSION, PROMPT_VERSION, chart_with_verdict
+    from app.agent.verdict import (
+        ENGINE_VERSION,
+        PROMPT_VERSION,
+        chart_with_verdict_for_api,
+        verdict_applied,
+        verdict_cache_namespace,
+    )
+    from app.db.chart_store import chart_hash_of
     from app.tools.cache import bazi_cache
 
     if not 0 < max_age <= MAX_AGE_LIMIT:
@@ -209,15 +216,26 @@ async def get_kline(
             detail=f"dimension 需为 {'/'.join(fortune_score.DIMENSIONS)} 之一",
         )
 
-    cache_tool = f"kline_api:{longitude}:{max_age}:{max_dayun}:{int(include_months)}:{dimension}:{ENGINE_VERSION}:{PROMPT_VERSION}"
+    # key 里带终审命名空间 v/p：payload 内嵌终审结论，状态不参与 key 就会
+    # "先按计算版缓存过、补判落库后也永远吐旧的"（同 /chart，2026-10-11）
+    try:
+        chash = chart_hash_of(birth_time, gender)
+    except Exception:
+        chash = ""
+    # DB 查询放线程池：别让一次连接等待卡住事件循环
+    ns = await asyncio.to_thread(verdict_cache_namespace, chash)
+    cache_tool = (
+        f"kline_api:{ns}:{longitude}:{max_age}:{max_dayun}:{int(include_months)}:"
+        f"{dimension}:{ENGINE_VERSION}:{PROMPT_VERSION}"
+    )
     payload = bazi_cache.get(birth_time, gender, sect, yun_sect, cache_tool)
     if payload is not None:
         return payload
     try:
-        # 排盘 + LLM 终审（缓存命中毫秒级，未命中一次性调 LLM 落库，失败回退计算版），
+        # 排盘 + LLM 终审（缓存命中毫秒级；已有后台补判在跑则跳过，不重复等），
         # 评分吃终审后的 strength/special_pattern；批注与评分仍同一张盘
         chart = await asyncio.to_thread(_build_chart, birth_time, gender, sect, yun_sect, longitude)
-        chart = await chart_with_verdict(chart)
+        chart = await chart_with_verdict_for_api(chart)
         payload = await asyncio.to_thread(
             _compute_kline_payload,
             birth_time,
@@ -231,7 +249,17 @@ async def get_kline(
             max_dayun=max_dayun,
             chart=chart,
         )
-        bazi_cache.set(birth_time, gender, payload, sect, yun_sect, cache_tool)
+        # 按实际生效状态落缓存（本次若应用了终审则进 v 命名空间，下次自查命中）
+        applied = "v" if verdict_applied(chart) else "p"
+        bazi_cache.set(
+            birth_time,
+            gender,
+            payload,
+            sect,
+            yun_sect,
+            f"kline_api:{applied}:{longitude}:{max_age}:{max_dayun}:{int(include_months)}:"
+            f"{dimension}:{ENGINE_VERSION}:{PROMPT_VERSION}",
+        )
         return payload
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -289,21 +317,34 @@ async def annotate_kline(
         raise HTTPException(status_code=503, detail="LLM 未就绪，批注暂不可用")
 
     anchor_year = annotator.today_year()
-    # 覆盖步数要进缓存键：批注写的是"全期最高/最低"，区间一变文案就该变
-    tool = f"{annotator.cache_tool(body.scope, body.dimension, body.year, anchor_year)}|dayun{body.max_dayun}"
+    # 覆盖步数要进缓存键：批注写的是"全期最高/最低"，区间一变文案就该变；
+    # 终审命名空间同理（批注读的是同一张盘，终审版与计算版文案会不同）
+    from app.agent.verdict import verdict_cache_namespace
+    from app.db.chart_store import chart_hash_of
+
+    try:
+        _chash = chart_hash_of(body.birth_time, body.gender)
+    except Exception:
+        _chash = ""
+    _ns = await asyncio.to_thread(verdict_cache_namespace, _chash)
+    tool = (
+        f"{annotator.cache_tool(body.scope, body.dimension, body.year, anchor_year)}"
+        f"|dayun{body.max_dayun}|{_ns}"
+    )
     hit = bazi_cache.get(body.birth_time, body.gender, body.sect, body.yun_sect, tool)
     if hit is not None:
         return {**hit, "cached": True}
 
     try:
-        from app.agent.verdict import chart_with_verdict
+        from app.agent.verdict import chart_with_verdict_for_api
 
         # 批注读的是本接口自己的载荷（同一套 max_age/维度）；命盘只 build 一次并
-        # 应用 LLM 终审，payload 与批注吃同一张盘 —— 评分图与解读文本不会分裂
+        # 应用 LLM 终审（已有后台补判在跑就跳过），payload 与批注吃同一张盘
+        # —— 评分图与解读文本不会分裂
         chart = await asyncio.to_thread(
             _build_chart, body.birth_time, body.gender, body.sect, body.yun_sect, body.longitude
         )
-        chart = await chart_with_verdict(chart)
+        chart = await chart_with_verdict_for_api(chart)
         payload = await asyncio.to_thread(
             _compute_kline_payload,
             body.birth_time,

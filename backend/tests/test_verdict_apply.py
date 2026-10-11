@@ -177,3 +177,78 @@ def test_background_verdict_dedupes_same_chart(monkeypatch):
     V._submit_background_verdict(chart, None, "hash-2")  # 另一张盘：照派
 
     assert len(_NoopThread.started) == 2
+
+
+# ---------------- 终审状态：命名空间 / 在飞判定 / 接口层跳过 ----------------
+def test_verdict_applied_flag_follows_apply():
+    from app.agent import verdict as V
+
+    chart = build_bazi_chart(*ANCHOR)
+    assert V.verdict_applied(chart) is False
+    assert V.verdict_applied(V.apply_verdict(chart, _verdict_for())) is True
+
+
+def test_chart_payload_carries_verdict_flag():
+    """载荷必须自带 verdict_applied：前端要据此提示"终审版生成中，下拉刷新"。"""
+    from app.api.xianzhi_chart import _format_chart_payload
+
+    chart = build_bazi_chart(*ANCHOR)
+    assert _format_chart_payload(chart)["verdict_applied"] is False
+    assert _format_chart_payload(V_apply(chart))["verdict_applied"] is True
+
+
+def V_apply(chart):
+    from app.agent.verdict import apply_verdict
+
+    return apply_verdict(chart, _verdict_for())
+
+
+def test_cache_namespace_switches_with_verdict_presence(monkeypatch):
+    """有 ok 裁决 → v；没有 → p；读失败 → 按计算版处理（宁可白算不误发）。"""
+    from app.agent import verdict as V
+
+    monkeypatch.setattr(V, "_get_cached_verdict", lambda chash: _verdict_for())
+    assert V.verdict_cache_namespace("h1") == "v"
+    monkeypatch.setattr(V, "_get_cached_verdict", lambda chash: None)
+    assert V.verdict_cache_namespace("h1") == "p"
+    monkeypatch.setattr(V, "_get_cached_verdict", lambda chash: (_ for _ in ()).throw(RuntimeError("db down")))
+    assert V.verdict_cache_namespace("h1") == "p"
+    assert V.verdict_cache_namespace("") == "p"
+
+
+def test_api_entry_skips_verdict_while_background_running(monkeypatch):
+    """后台正在补判这张盘时，接口层不能再判一遍：让用户白等 + 重复烧 token。"""
+    from app.agent import verdict as V
+
+    chart = build_bazi_chart(*ANCHOR)
+    monkeypatch.setattr(V, "_verdict_enabled", lambda: True)
+    called = []
+    monkeypatch.setattr(V, "chart_with_verdict", _fake_async(called, chart))
+    monkeypatch.setattr(V, "verdict_in_flight", lambda chash: True)
+
+    out = asyncio.run(V.chart_with_verdict_for_api(chart))
+
+    assert out is chart
+    assert called == []  # 没走终审
+
+
+def test_api_entry_delegates_when_no_background(monkeypatch):
+    from app.agent import verdict as V
+
+    chart = build_bazi_chart(*ANCHOR)
+    monkeypatch.setattr(V, "_verdict_enabled", lambda: True)
+    called = []
+    monkeypatch.setattr(V, "chart_with_verdict", _fake_async(called, chart))
+    monkeypatch.setattr(V, "verdict_in_flight", lambda chash: False)
+
+    asyncio.run(V.chart_with_verdict_for_api(chart))
+
+    assert len(called) == 1  # 正常走终审
+
+
+def _fake_async(record: list, ret):
+    async def _fn(chart, model=None):
+        record.append(chart)
+        return ret
+
+    return _fn

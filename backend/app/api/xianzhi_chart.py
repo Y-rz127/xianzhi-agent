@@ -139,6 +139,7 @@ def _build_chart_only(
 
 def _format_chart_payload(chart) -> dict:
     """chart → API 载荷（结构化 + 四段文本）。终审应用后段：文本与 wuxing 同源。"""
+    from app.agent.verdict import verdict_applied
     from app.domain.chart_builder import chart_to_api_dict
     from app.domain.chart_format import (
         format_analysis_text,
@@ -154,6 +155,9 @@ def _format_chart_payload(chart) -> dict:
             "analysisText": format_analysis_text(chart, "整体命盘"),
             "dayunText": format_dayun_text(chart),
             "liunianText": format_liunian_text(chart),
+            # 供前端提示"终审版生成中，下拉刷新"：载荷里嵌着终审结论，
+            # 前端必须能分辨手上这份是计算版还是终审版
+            "verdict_applied": verdict_applied(chart),
         }
     )
     return payload
@@ -179,24 +183,48 @@ async def get_chart(
     Args:
         longitude: 出生地经度（用于真太阳时校正，可选）
     """
-    from app.agent.verdict import ENGINE_VERSION, PROMPT_VERSION, chart_with_verdict
+    from app.agent.verdict import (
+        ENGINE_VERSION,
+        PROMPT_VERSION,
+        chart_with_verdict_for_api,
+        verdict_applied,
+        verdict_cache_namespace,
+    )
+    from app.db.chart_store import chart_hash_of
     from app.tools.cache import bazi_cache
 
-    # 复用与聊天工具同一套 LRU：/chart 是全量重算的 CPU 密集路径，高频请求会抢 GIL 拖垮事件循环
-    # key 追加经度（真太阳时校正会改变四柱）与引擎/提示词版本（终审口径变了旧载荷自然失效）
-    cache_tool = f"chart_api:{longitude}:{ENGINE_VERSION}:{PROMPT_VERSION}"
+    # 复用与聊天工具同一套 LRU：/chart 是全量重算的 CPU 密集路径，高频请求会抢 GIL 拖垮事件循环。
+    # key 追加经度（真太阳时校正会改变四柱）与引擎/提示词版本（终审口径变了旧载荷自然失效），
+    # 以及终审命名空间 v/p —— payload 里嵌着终审结论，状态不参与 key 的话，一张盘先按
+    # 计算版缓存过，后台补判落库后详情页也永远吐旧载荷（2026-10-11 用户实测到的问题）。
+    try:
+        chash = chart_hash_of(birth_time, gender)
+    except Exception:
+        chash = ""
+    # DB 查询放线程池：与排盘同理，别让一次连接等待卡住事件循环
+    ns = await asyncio.to_thread(verdict_cache_namespace, chash)
+    cache_tool = f"chart_api:{ns}:{longitude}:{ENGINE_VERSION}:{PROMPT_VERSION}"
     payload = bazi_cache.get(birth_time, gender, sect, yun_sect, cache_tool)
     if payload is not None:
         return payload
     try:
-        # 排盘为同步重计算，放到线程池避免阻塞事件循环；
-        # 中间插入 LLM 终审（缓存命中毫秒级，未命中一次性调 LLM 落库，失败回退计算版）
+        # 排盘为同步重计算，放到线程池避免阻塞事件循环
         chart = await asyncio.to_thread(
             _build_chart_only, birth_time, gender, sect, yun_sect, longitude
         )
-        chart = await chart_with_verdict(chart)
+        # 终审：已有后台补判在跑就跳过 —— 不让用户再等一轮，也不重复烧 token
+        chart = await chart_with_verdict_for_api(chart)
         payload = await asyncio.to_thread(_format_chart_payload, chart)
-        bazi_cache.set(birth_time, gender, payload, sect, yun_sect, cache_tool)
+        # 按**实际生效状态**落缓存：本次若成功应用了终审，直接进 v 命名空间
+        applied = "v" if verdict_applied(chart) else "p"
+        bazi_cache.set(
+            birth_time,
+            gender,
+            payload,
+            sect,
+            yun_sect,
+            f"chart_api:{applied}:{longitude}:{ENGINE_VERSION}:{PROMPT_VERSION}",
+        )
         return payload
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

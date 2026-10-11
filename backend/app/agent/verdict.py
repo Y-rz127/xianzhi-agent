@@ -328,6 +328,15 @@ def _get_cached_verdict(chash: str) -> dict[str, Any] | None:
     return row[0] if isinstance(row[0], dict) else json.loads(row[0])
 
 
+def verdict_applied(chart: BaziChart) -> bool:
+    """该 chart 是否已应用 LLM 终审（apply_verdict 会追加一条 "LLM终审[...]" 注记）。
+
+    接口层缓存的 payload 里嵌着终审结论，靠这个判断决定缓存命名空间；前端也用它
+    决定要不要提示"终审版生成中，下拉刷新"。
+    """
+    return any(str(n).startswith("LLM终审[") for n in chart.wuxing.notes)
+
+
 def apply_verdict(chart: BaziChart, verdict: dict[str, Any], relation: str = "override") -> BaziChart:
     """把终审裁决写回 chart.wuxing（不可变替换，原 chart 不动）。
 
@@ -403,6 +412,53 @@ _bg_inflight: set[str] = set()
 _bg_inflight_lock = threading.Lock()
 
 
+def _hash_of(chart: BaziChart) -> str:
+    """命盘指纹；失败返回空串（调用方按"拿不到指纹就回退计算版"处理）。"""
+    try:
+        from app.db.chart_store import chart_hash_of
+
+        return chart_hash_of(chart.birth.solar, chart.birth.gender)
+    except Exception as e:
+        log.warning("[verdict] chart_hash 计算失败: {}", _err_text(e))
+        return ""
+
+
+def verdict_in_flight(chash: str) -> bool:
+    """这张盘是否已有后台补判在跑（接口层据此避免重复判、重复等）。"""
+    if not chash:
+        return False
+    with _bg_inflight_lock:
+        return chash in _bg_inflight
+
+
+def verdict_cache_namespace(chash: str) -> str:
+    """进程内 payload 缓存的命名空间：已有 ok 裁决为 "v"，否则 "p"。
+
+    接口层缓存的 payload 里嵌着终审结论，key 不带这个状态就会出现"先按计算版缓存过、
+    此后补判落库了也永远吐旧 payload"——命盘详情页会一直停在计算版。DB 读不到时按
+    计算版处理（宁可白算一次，也不要把没终审的载荷当终审版供出去）。
+    """
+    if not chash:
+        return "p"
+    try:
+        return "v" if _get_cached_verdict(chash) is not None else "p"
+    except Exception as e:
+        log.warning("[verdict] 缓存命名空间判定失败，按计算版处理: {}", _err_text(e))
+        return "p"
+
+
+async def chart_with_verdict_for_api(chart: BaziChart, model: Any = None) -> BaziChart:
+    """/chart、/kline 等 HTTP 接口用：已有后台补判在跑就跳过终审。
+
+    重复判没有意义：后台那次跑完会落库，下次请求命中缓存自然就是终审版；这里再判
+    一次只会让用户多等（最多 _VERDICT_TIMEOUT 秒）并重复烧 token。
+    """
+    if _verdict_enabled() and verdict_in_flight(_hash_of(chart)):
+        log.info("[verdict] {} 已有后台补判在跑，本次请求直接用计算版", chart.birth.solar)
+        return chart
+    return await chart_with_verdict(chart, model)
+
+
 def chart_with_verdict_sync(chart: BaziChart, model: Any = None) -> BaziChart:
     """终审应用的同步包装（工具线程 / 挂盘路径）。
 
@@ -419,12 +475,8 @@ def chart_with_verdict_sync(chart: BaziChart, model: Any = None) -> BaziChart:
     if not _verdict_enabled():
         return chart
 
-    try:
-        from app.db.chart_store import chart_hash_of
-
-        chash = chart_hash_of(chart.birth.solar, chart.birth.gender)
-    except Exception as e:
-        log.warning("[verdict] chart_hash 计算失败，回退计算版: {}", _err_text(e))
+    chash = _hash_of(chart)
+    if not chash:
         return chart
 
     try:
