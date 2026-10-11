@@ -20,7 +20,7 @@
     <!-- 状态栏占位 -->
     <view class="status-bar" :style="{ height: statusBarHeight + 'px' }"></view>
 
-    <!-- 顶部头：汉堡(左) + 标题 + 命盘 …… 出生信息入口(右) -->
+    <!-- 顶部头：汉堡(左) + 标题 + 命盘 …… 出生信息入口(居中) -->
     <view class="header">
       <view class="header-top">
         <view class="header-left">
@@ -28,14 +28,15 @@
           <text class="header-title display-font">先知</text>
           <text v-if="chartData" class="icon-btn bazi-btn" @tap="openChartDetail">☯</text>
         </view>
-        <!-- 出生信息入口：收起时只剩这颗点（实心=已挂命盘，空心=还没生辰），点开才展开表单 -->
+        <!-- 出生信息入口：收起时只剩这颗点（实心=已挂命盘，空心=还没生辰），点开才展开表单。
+             居中而非靠右——右上角是微信胶囊的地盘，靠右会被盖住 -->
         <view class="birth-dot-btn" @tap="showBirth = !showBirth">
           <view :class="['birth-dot', hasBirth ? 'has' : 'empty', showBirth && 'open']"></view>
         </view>
       </view>
     </view>
 
-    <!-- 出生信息玻璃面板（由标题行右侧圆点展开） -->
+    <!-- 出生信息玻璃面板（由标题行圆点展开） -->
     <view v-if="showBirth" class="birth-panel">
       <view class="birth-form">
         <text class="birth-summary">{{ birthSummary }}</text>
@@ -1417,6 +1418,8 @@ messages.value.push({
   display: flex;
   align-items: center;
   justify-content: space-between;
+  /* 圆点绝对居中用：小程序右上角是微信胶囊的地盘，靠右必被挡 */
+  position: relative;
 }
 .header-left {
   display: flex;
@@ -1442,8 +1445,13 @@ messages.value.push({
   font-size: 40rpx;
 }
 
-/* === 出生信息入口：标题行右侧的小圆点 === */
+/* === 出生信息入口：标题行居中的小圆点 === */
 .birth-dot-btn {
+  /* 居中摆放：右半边留给微信胶囊按钮，靠右会被整个盖住（2026-10-11 真机反馈） */
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
   width: 64rpx;
   height: 64rpx;
   display: flex;
