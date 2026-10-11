@@ -64,6 +64,20 @@ class SessionLock:
             raise
         return self
 
+    def locked(self) -> bool:
+        """本会话是否已有请求持有锁（与 asyncio.Lock.locked() 同名同义）。
+
+        只看进程内那把锁：这个接口是给**只读诊断**用的（例如 WS 入口判断
+        "上一轮还在后台生成，本轮要排队"），不参与加锁流程，所以不查 Redis ——
+        跨副本争用会自然表现为 redis 那层排队，这里没必要也不能阻塞。
+
+        2026-10-12：ws_chat_with_xianzhi 里加排队日志时想当然直接调了
+        `lock.locked()`，而 SessionLock 当时没有这个方法 —— 每条消息都在进入
+        生成前抛 AttributeError，整轮对话直接失败。装这个方法的目的是让
+        "锁对象长得像 asyncio.Lock"这件事成立，而不是让调用方去记自定义 API。
+        """
+        return self._local.locked()
+
     async def __aexit__(self, *exc_info) -> None:
         try:
             if self._token:

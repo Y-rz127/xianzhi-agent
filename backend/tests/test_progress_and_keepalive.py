@@ -182,3 +182,24 @@ def test_disconnect_keeps_consuming_so_turn_finishes_and_persists():
     assert [m["data"] for m in ws.sent] == ["一"]  # 断开后不再往死连接上发
     assert agent.consumed_all is True  # 但流被消费完 → agent 跑完并落库
     assert agent.cancelled is False  # 且本轮没有被取消
+
+
+# ---------------- 会话锁 API（WS 入口的排队判定） ----------------
+def test_session_lock_locked_matches_asyncio_lock():
+    """SessionLock 必须像 asyncio.Lock 一样提供 locked()。
+
+    2026-10-12 线上事故：ws_chat_with_xianzhi 新增排队日志时直接调了
+    `lock.locked()`，而 SessionLock 没有该方法 —— 每条消息都在进入生成前抛
+    AttributeError（外层 except 兜住后回错误给客户端），整轮对话直接失败。
+    调用方读的是"自定义锁长得像标准锁"，这个假设得有测试兜着。
+    """
+    from app.agent.context import SessionLock
+
+    async def main():
+        lock = SessionLock("conv-locked-test", asyncio.Lock())
+        assert lock.locked() is False
+        async with lock:  # Redis 不可用时降级为仅进程内锁，行为不变
+            assert lock.locked() is True
+        assert lock.locked() is False
+
+    asyncio.run(main())
