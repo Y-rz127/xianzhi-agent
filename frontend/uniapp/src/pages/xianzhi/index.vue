@@ -28,11 +28,12 @@
           <text class="header-title display-font">先知</text>
           <text v-if="chartData" class="icon-btn bazi-btn" @tap="openChartDetail">☯</text>
         </view>
-        <!-- 出生信息入口：透明底下拉箭头（朱砂=已挂命盘，浅灰=还没生辰），点开展开表单、箭头翻转。
-             居中而非靠右——右上角是微信胶囊的地盘，靠右会被盖住 -->
-        <view class="birth-toggle-btn" @tap="showBirth = !showBirth">
-          <text :class="['birth-toggle', hasBirth ? 'has' : 'empty', showBirth && 'open']">▼</text>
-        </view>
+      </view>
+      <!-- 出生信息入口：透明底下拉箭头，骑在标题栏与聊天区的交界线上。
+           水平居中而非靠右——右上角是微信胶囊的地盘，靠右会被盖住。
+           朱砂=已挂命盘，浅灰=还没生辰；点开展开表单、箭头翻转 -->
+      <view class="birth-toggle-btn" @tap="showBirth = !showBirth">
+        <text :class="['birth-toggle', hasBirth ? 'has' : 'empty', showBirth && 'open']">▼</text>
       </view>
     </view>
 
@@ -1410,16 +1411,16 @@ messages.value.push({
   background: $color-bg;
   border-bottom: 1rpx solid $color-border;
   padding: 16rpx 32rpx 20rpx;
-  overflow: hidden;
+  /* visible：出生信息箭头要骑在底边框上，下半截探出到聊天区，hidden 会把它裁成半截 */
+  overflow: visible;
   position: relative;
-  z-index: 1;
+  /* 高于 .messages / .birth-panel（均 z-index 1）：滚动消息与展开面板从箭头底下走过 */
+  z-index: 2;
 }
 .header-top {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  /* 箭头绝对居中用：小程序右上角是微信胶囊的地盘，靠右必被挡 */
-  position: relative;
 }
 .header-left {
   display: flex;
@@ -1445,12 +1446,13 @@ messages.value.push({
   font-size: 40rpx;
 }
 
-/* === 出生信息入口：标题行居中的下拉箭头（透明底，无圆环） === */
+/* === 出生信息入口：骑在标题栏/聊天区交界线上的下拉箭头（透明底，无圆环） === */
 .birth-toggle-btn {
-  /* 居中摆放：右半边留给微信胶囊按钮，靠右会被整个盖住（2026-10-11 真机反馈） */
+  /* 水平居中：右半边留给微信胶囊按钮，靠右会被整个盖住（2026-10-11 真机反馈）；
+     垂直 top:100% + translateY(-50%) 把箭头中心压到标题栏底边框那条线上 */
   position: absolute;
   left: 50%;
-  top: 50%;
+  top: 100%;
   transform: translate(-50%, -50%);
   width: 64rpx;
   height: 64rpx;
