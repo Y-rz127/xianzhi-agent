@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from typing import Any
 
 from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
 from sse_starlette.sse import EventSourceResponse
@@ -113,9 +114,36 @@ async def chat_with_xianzhi(
     return EventSourceResponse(event_stream(), ping=int(WS_PING_SECONDS))
 
 
+async def _relay_chunks(websocket: WebSocket, agent: Any, message: str, verbose: bool) -> bool:
+    """把 agent 的流式输出转发给 websocket，返回客户端是否还活着。
+
+    客户端断开后**继续消费流**（只收不发），让 agent 跑完整轮并落库：
+    - 不能 break：跳出 async for 会关闭生成器，把本轮 LLM 链掐死在半途；
+    - 不能 request_cancel：用户切走两分钟回来会发现什么都没拿到。
+    本轮答案由 agent 自身 cleanup → _persist_history 落库，前端回前台
+    （onShow → resumePendingTurn）或断线时（onDisconnect）去会话记录里取回。
+    这条不变量由 tests/test_progress_and_keepalive.py 守着。
+    """
+    client_alive = True
+    async for chunk in agent.arun_stream(message, verbose=verbose):
+        if not client_alive:
+            continue
+        # 调试：确认发送给前端的 chunk 内容（排查"AI 回复为空"）
+        log.info("[ws] 发送 chunk {}字 :: {}", len(chunk or ""), (chunk or "")[:40])
+        if not await _safe_ws_send(websocket, {"type": "message", "data": chunk}):
+            client_alive = False
+            log.info("[ws] 客户端已断开，本轮转入后台生成：跑完落库供前端取回")
+    return client_alive
+
+
 @router.websocket("/ws")
 async def ws_chat_with_xianzhi(websocket: WebSocket):
-    """先知 WebSocket 流式对话接口（小程序无 SSE，用 WS 替代）。"""
+    """先知 WebSocket 流式对话接口（小程序无 SSE，用 WS 替代）。
+
+    断线策略与 SSE 一致：**客户端断开只停止推送，不中止本轮生成** —— 跑完照常
+    落库，前端回前台（onShow）或断线时去会话记录里取回完整答案。理由见
+    ws_keepalive_loop 的注释：等了两分钟却什么都没拿到，比多烧些 token 更糟。
+    """
     await websocket.accept()
     try:
         while True:
@@ -153,6 +181,10 @@ async def ws_chat_with_xianzhi(websocket: WebSocket):
                 if not await _safe_ws_send(websocket, {"type": "error", "data": "Xianzhi not initialized"}):
                     break
                 continue
+            # 上一轮的客户端虽然走了，生成还在后台跑；同会话串行，这里可能要排队
+            # （判定必须在抢锁之前，进锁后 locked() 恒为真）
+            if lock.locked():
+                log.info("[ws] 上一轮仍在后台生成，本轮排队等待（同会话串行）")
             async with lock:
                 agent._sect = sect
                 agent._yun_sect = yun_sect
@@ -185,24 +217,14 @@ async def ws_chat_with_xianzhi(websocket: WebSocket):
                     )
                 )
                 _mount_chart_context(agent, birth_time, gender, sect, yun_sect, uid, birth_place)
-                client_alive = True
-                # 保活：每 WS_PING_SECONDS 秒一个 ping；发不出去就认定客户端已走并取消本轮
+                # 保活：每 WS_PING_SECONDS 秒一个 ping；发不出去就认定客户端已走（不中止生成）
                 keepalive = asyncio.create_task(ws_keepalive_loop(websocket, agent))
                 try:
-                    async for chunk in agent.arun_stream(message, verbose=verbose):
-                        # 调试：确认发送给前端的 chunk 内容（排查"AI 回复为空"）
-                        log.info("[ws] 发送 chunk {}字 :: {}", len(chunk or ""), (chunk or "")[:40])
-                        if not await _safe_ws_send(websocket, {"type": "message", "data": chunk}):
-                            client_alive = False
-                            log.info("客户端已断开，停止流式发送")
-                            # 请求取消：让 agent 执行循环在当前步骤后停止，
-                            # 不再继续剩余的 LLM 调用（省 token + 省时延）
-                            agent.request_cancel()
-                            break
+                    client_alive = await _relay_chunks(websocket, agent, message, verbose)
                 except Exception as e:
                     log.exception("WebSocket stream error")
-                    if client_alive:
-                        await _safe_ws_send(websocket, {"type": "error", "data": client_error(e)})
+                    # _safe_ws_send 自带断线保护（连接已死时静默返回 False），无需再判存活
+                    await _safe_ws_send(websocket, {"type": "error", "data": client_error(e)})
                     client_alive = False
                 finally:
                     agent.set_chart_notifier(None)

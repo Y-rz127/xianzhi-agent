@@ -15,7 +15,8 @@
 验证点：
 ① 保活循环按间隔发 ping，失败即退出且不调用 request_cancel；
 ② 进度回调链路 agent → workflow，且异常被吞掉不影响生成；
-③ 进度通知器的线程安全转投。
+③ 进度通知器的线程安全转投；
+④ 断线后继续消费流（只收不发）且不取消本轮 —— 否则用户切回来什么都没有。
 """
 
 from __future__ import annotations
@@ -26,6 +27,7 @@ from unittest.mock import MagicMock, patch
 
 from app.agent.xianzhi import Xianzhi
 from app.api.xianzhi import WS_PING_SECONDS, make_progress_notifier, ws_keepalive_loop
+from app.api.xianzhi_chat import _relay_chunks
 
 
 class _FakeWS:
@@ -145,3 +147,38 @@ def test_progress_notifier_ignores_empty():
     finally:
         loop.close()
     assert pushed == []
+
+
+# ---------------- 断线后台续跑（断开只停推送，不中止本轮） ----------------
+class _FakeStreamAgent:
+    """arun_stream 产出固定 chunk；记录生成器是否被完整消费、是否被取消。"""
+
+    def __init__(self, chunks: list[str]):
+        self._chunks = chunks
+        self.consumed_all = False
+        self.cancelled = False
+
+    async def arun_stream(self, message: str, verbose: bool = False):
+        for c in self._chunks:
+            yield c
+        self.consumed_all = True
+
+    def request_cancel(self) -> None:
+        self.cancelled = True
+
+
+def test_disconnect_keeps_consuming_so_turn_finishes_and_persists():
+    """客户端断开后必须把流消费完（只收不发），且不 request_cancel。
+
+    break 会关闭 async generator、把本轮 LLM 链掐死在半途；request_cancel 会让
+    用户切走两分钟回来发现什么都没拿到。本轮答案要落库，供前端 onShow 取回。
+    """
+    ws = _FakeWS(fail_after=1)  # 第一个 chunk 发得出去，第二个开始失败
+    agent = _FakeStreamAgent(["一", "二", "三"])
+
+    alive = asyncio.run(_relay_chunks(ws, agent, "问题", False))
+
+    assert alive is False
+    assert [m["data"] for m in ws.sent] == ["一"]  # 断开后不再往死连接上发
+    assert agent.consumed_all is True  # 但流被消费完 → agent 跑完并落库
+    assert agent.cancelled is False  # 且本轮没有被取消
