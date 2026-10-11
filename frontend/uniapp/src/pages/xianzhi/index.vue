@@ -883,14 +883,21 @@ onLoad(async (query) => {
 onShow(() => {
   if (!requireLogin()) return
   const lp = uni.getStorageSync('XZ_LAUNCH')
-  if (!lp) return
-  uni.removeStorageSync('XZ_LAUNCH')
-  if (lp.conversationId) {
-    switchToSession({ id: lp.conversationId } as ChatSession)
-  } else if (lp.birthTime && lp.gender) {
-    newSession()
-    applyBirth(lp.birthTime, lp.gender, lp.name)
+  if (lp) {
+    uni.removeStorageSync('XZ_LAUNCH')
+    if (lp.conversationId) {
+      switchToSession({ id: lp.conversationId } as ChatSession)
+      return
+    }
+    if (lp.birthTime && lp.gender) {
+      newSession()
+      applyBirth(lp.birthTime, lp.gender, lp.name)
+      return
+    }
   }
+  // 没有外部带入：回到前台的第一件事是把上一轮还在后台生成的回答接上
+  // （后端断线不中止本轮，这里负责把结果取回来，用户切出去再回来不丢答案）
+  void resumePendingTurn()
 })
 
 // 切走 tab / 页面隐藏时关闭 WS，避免 socket 累积超过小程序 5 个上限
@@ -1093,17 +1100,31 @@ function downloadPdfReport() {
   if (time && g) downloadReport(time, g)
 }
 
+/** 断线取回的等待阶梯（累计约 45 秒）：连接刚断，回答通常已在收尾 */
+const RECOVER_WAITS = [2000, 3000, 5000, 8000, 12000, 15000]
+/** 切回前台补齐的等待阶梯（累计约 165 秒）：本轮是"从零继续跑"，可能还要几分钟 */
+const RESUME_WAITS = [2000, 3000, 5000, 8000, 12000, 15000, 20000, 30000, 30000, 30000]
+/** 补齐流程互斥标志：onShow 可能连续触发（切回、重开、重连） */
+let resuming = false
+
 /**
- * 断线兜底：WS 在 done 之前断开时，后端可能仍在生成（实测本轮 116 秒）。
+ * 断线兜底：WS 在 done 之前断开时，后端不再中止本轮（见后端 WS 断线策略），
  * 回答一定会落库（agent cleanup → _persist_history），所以这里轮询会话消息，
  * 用"本次提问"精确定位到它对应的回答，避免把上一轮的回答误当成本轮结果。
  */
-async function recoverAnswerAfterDisconnect(idx: number, targetList: Message[], sentText: string) {
+async function recoverAnswerAfterDisconnect(
+  idx: number,
+  targetList: Message[],
+  sentText: string,
+  waits: number[] = RECOVER_WAITS,
+  okToast = '连接中断，已取回回答',
+  progressText = '连接中断，正在取回回答…',
+) {
   const conv = conversationId.value
   const want = sentText.trim()
   const cur0 = targetList[idx]
-  if (cur0 && !cur0.content) targetList[idx] = { ...cur0, progress: '连接中断，正在取回回答…' }
-  for (const wait of [2000, 3000, 5000, 8000, 12000, 15000]) {
+  if (cur0 && !cur0.content) targetList[idx] = { ...cur0, progress: progressText }
+  for (const wait of waits) {
     await new Promise((r) => setTimeout(r, wait))
     if (conversationId.value !== conv) return // 已切会话，放弃取回
     try {
@@ -1124,7 +1145,7 @@ async function recoverAnswerAfterDisconnect(idx: number, targetList: Message[], 
         targetList[idx] = { role: 'assistant', content: ans.content }
         thinking.value = false
         scrollToBottom()
-        uni.showToast({ title: '连接中断，已取回回答', icon: 'none', duration: 2500 })
+        uni.showToast({ title: okToast, icon: 'none', duration: 2500 })
         return
       }
     } catch {
@@ -1134,10 +1155,47 @@ async function recoverAnswerAfterDisconnect(idx: number, targetList: Message[], 
   // 仍取不回：清掉"推演中…"状态，明确告诉用户去哪看，而不是一直转圈
   const cur = targetList[idx]
   if (cur && !cur.content) {
-    targetList[idx] = { role: 'assistant', content: '（连接中断，回答可能仍在生成，稍后可在会话记录里查看）' }
+    targetList[idx] = { role: 'assistant', content: '（回答仍在生成，稍后可在会话记录里查看）' }
   }
   thinking.value = false
   scrollToBottom()
+}
+
+/**
+ * 回到前台补齐上一轮。
+ *
+ * 后端断线不中止生成（WS 与 SSE 同策略），所以切出去再回来时这一轮可能还在跑：
+ * 服务端会话里"最后一条是用户提问、后面没有回答"就是这个状态。此时以服务端为准
+ * 重铺消息，挂一个占位去轮询，等回答落库后自动顶上。
+ * 覆盖三种场景：切后台再回来、小程序被杀后重开、断线重连后前端没接上。
+ */
+async function resumePendingTurn() {
+  if (resuming || thinking.value) return
+  const conv = conversationId.value
+  resuming = true
+  try {
+    const msgs = await getSessionMessages('xianzhi', conv)
+    if (conversationId.value !== conv) return // 期间切了会话
+    if (!msgs.length) return
+    const last = msgs[msgs.length - 1]
+    if (last.role !== 'user') return // 上一轮已落库，没有待补的
+    messages.value = msgs.map(m => ({ role: m.role, content: m.content }))
+    messages.value.push({ role: 'assistant', content: '', progress: '上一轮仍在生成中，正在取回…' })
+    thinking.value = true
+    scrollToBottom()
+    await recoverAnswerAfterDisconnect(
+      messages.value.length - 1,
+      messages.value,
+      last.content || '',
+      RESUME_WAITS,
+      '已取回上一轮的回答',
+      '上一轮仍在生成中，正在取回…',
+    )
+  } catch {
+    /* 取不到就算了：用户可以直接重发 */
+  } finally {
+    resuming = false
+  }
 }
 
 function onSend() {
