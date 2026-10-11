@@ -257,6 +257,8 @@ export interface XiPanData {
 
 export interface ChartData {
   birth?: Record<string, any>
+  /** 该载荷是否已应用 LLM 终审：false=计算版（后台补判中，下拉刷新可拿到终审版） */
+  verdict_applied?: boolean
   pillars: Pillar[]
   wuxing: WuxingItem[]
   dayun: DayunItem[]

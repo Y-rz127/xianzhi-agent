@@ -13,6 +13,12 @@
     <view v-else-if="!chart" class="page-state">缺少出生信息，无法排盘。请从先知对话、档案或命例库进入。</view>
 
     <template v-else>
+      <!-- 终审提示：载荷里嵌着终审结论，先出计算版、后台补判落库后下拉即为终审版 -->
+      <view v-if="!chart?.verdict_applied" class="verdict-hint">
+        <text class="verdict-hint-dot">●</text>
+        <text class="verdict-hint-text">终审版生成中 · 下拉刷新查看</text>
+      </view>
+
       <!-- tab 栏 -->
       <scroll-view class="tab-bar" scroll-x :show-scrollbar="false">
         <view class="tab-row">
@@ -25,7 +31,17 @@
         </view>
       </scroll-view>
 
-      <scroll-view class="page-body" :key="activeTab" scroll-y>
+      <!-- 下拉刷新：后台补判落库后，这一拉就能把载荷换成终审版
+           （页面主体是 scroll-view，页面级 onPullDownRefresh 不触发，故用 scroll-view 自带下拉） -->
+      <scroll-view
+        class="page-body"
+        :key="activeTab"
+        scroll-y
+        :refresher-enabled="true"
+        :refresher-triggered="refreshing"
+        :refresher-background="refresherBg"
+        @refresherrefresh="onRefresh"
+      >
         <!-- 命盘：四柱 -->
         <view class="section section-flush" v-if="activeTab === 'paipan'">
           <view class="bazi-table bazi-table-4">
@@ -547,7 +563,7 @@ import { useTheme } from '@/composables/useTheme'
 import { getChart, getRelations, generateFullReport, downloadReport, downloadFullReportPdf, isSameDayun, collapseBySelection, type ChartData, type Pillar, type WuxingItem, type DayunItem, type ShenshaItem, type LiuNianItem, type XiPanData, type XiPanLiuYue, type XiPanRelationGroup, type XiPanRelations } from '@/api'
 import MarkdownRender from '@/components/MarkdownRender/MarkdownRender.vue'
 
-const { themeClass } = useTheme()
+const { themeClass, isDark } = useTheme()
 
 type TabKey = 'paipan' | 'xipan' | 'notes'
 // 「命理 K 线」占一个 tab 位、点了跳独立页（to 标记为外链 tab，永不成为 activeTab）：
@@ -1250,6 +1266,49 @@ function goKline() {
   uni.navigateTo({ url: `/pages/kline/index?${q}${lon}` })
 }
 
+// 下拉刷新状态：scroll-view 的 refresher-triggered 需要自己置回 false，否则转圈不停
+const refreshing = ref(false)
+/** 下拉刷新指示器底色：原生属性不认 CSS 变量，只能按主题给具体色值 */
+const refresherBg = computed(() => (isDark.value ? '#050810' : '#FAFAF8'))
+
+/**
+ * 拉取命盘载荷（首次进入与下拉刷新共用）。
+ *
+ * notify=true 时给一次结果提示：后台补判是异步的，用户拉一下要么拿到终审版、
+ * 要么被告知"还在生成"，避免他反复下拉猜到底有没有生效。
+ */
+async function loadChart(notify = false) {
+  if (!birthTime.value || !gender.value) return
+  try {
+    const data = await getChart(birthTime.value, gender.value, chartSect.value, chartYunSect.value, chartLongitude.value)
+    chart.value = data
+    initXipanSelection()
+    // 初次进入：直接用 /chart 已算好的那一组（对应"今天"），避免白跑一次接口；
+    // 刷新时同样以后端返回为准
+    relations.value = data.xipan?.relations || null
+    relationsKey.value = currentRelationsKey()
+    if (notify) {
+      uni.showToast({
+        title: data.verdict_applied ? '已更新为终审版' : '终审版还在生成，稍后再下拉',
+        icon: 'none',
+        duration: 2200,
+      })
+    }
+  } catch {
+    if (notify) uni.showToast({ title: '刷新失败，请稍后再试', icon: 'none' })
+  }
+}
+
+async function onRefresh() {
+  if (refreshing.value) return
+  refreshing.value = true
+  try {
+    await loadChart(true)
+  } finally {
+    refreshing.value = false
+  }
+}
+
 onLoad((options: any) => {
   const decode = (v?: string) => {
     if (!v) return ''
@@ -1268,21 +1327,37 @@ onLoad((options: any) => {
   chartSect.value = sect
   chartYunSect.value = yunSect
   chartLongitude.value = longitude
-  getChart(birthTime.value, gender.value, sect, yunSect, longitude)
-    .then((data) => {
-      chart.value = data
-      initXipanSelection()
-      // 初次进入：直接用 /chart 已算好的那一组（对应"今天"），避免白跑一次接口
-      relations.value = data.xipan?.relations || null
-      relationsKey.value = currentRelationsKey()
-    })
-    .catch(() => { chart.value = null })
-    .finally(() => { loading.value = false })
+  loadChart().finally(() => { loading.value = false })
 })
 </script>
 
 <style lang="scss" scoped>
 .display-font { font-family: $font-family-display; }
+
+/* === 终审提示条（计算版先出、终审版后台补判时显示） === */
+.verdict-hint {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12rpx;
+  padding: 12rpx 24rpx;
+  background: $color-bg-warm;
+  border-bottom: 1rpx solid $color-border;
+}
+.verdict-hint-dot {
+  font-size: 16rpx;
+  color: $color-vermilion;
+  animation: verdictHintPulse 1.6s ease-in-out infinite;
+}
+.verdict-hint-text {
+  font-size: 24rpx;
+  color: $color-ink-light;
+  letter-spacing: 0.04em;
+}
+@keyframes verdictHintPulse {
+  0%, 100% { opacity: 0.35; }
+  50%      { opacity: 1; }
+}
 
 .page-root {
   display: flex;
