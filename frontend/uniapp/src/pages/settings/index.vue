@@ -84,9 +84,12 @@
 import { ref, onMounted } from 'vue'
 import { setConfig, getConfig } from '@/config'
 import { getHealth } from '@/api'
-import { useTheme } from '@/composables/useTheme'
+import { useTheme, useThemeNativeBar } from '@/composables/useTheme'
 
 const { isDark, setTheme, themeClass } = useTheme()
+// 本页保留原生导航栏（pages.json 未设 navigationStyle: custom）：
+// 系统控件不吃 CSS 类，暗夜下必须显式改色，否则顶部一直是一条白条
+useThemeNativeBar()
 
 const apiBase = ref('')
 const wsBase = ref('')

@@ -26,12 +26,15 @@
 </template>
 
 <script setup lang="ts">
-import { useTheme } from '@/composables/useTheme'
+import { useTheme, useThemeNativeBar } from '@/composables/useTheme'
 import { ref } from 'vue'
 import { submitFeedback } from '@/api'
 
 
 const { themeClass } = useTheme()
+// 本页保留原生导航栏（pages.json 未设 navigationStyle: custom）：
+// 系统控件不吃 CSS 类，暗夜下必须显式改色，否则顶部一直是一条白条
+useThemeNativeBar()
 const content = ref('')
 const contact = ref('')
 const errMsg = ref('')

@@ -60,7 +60,7 @@
 </template>
 
 <script setup lang="ts">
-import { useTheme } from '@/composables/useTheme'
+import { useTheme, useThemeNativeBar } from '@/composables/useTheme'
 import { ref } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import { login, register, wxLogin } from '@/api'
@@ -69,6 +69,9 @@ import { getConfig, setConfig } from '@/config'
 
 
 const { themeClass } = useTheme()
+// 本页保留原生导航栏（pages.json 未设 navigationStyle: custom）：
+// 系统控件不吃 CSS 类，暗夜下必须显式改色，否则顶部一直是一条白条
+useThemeNativeBar()
 const mode = ref<'login' | 'register'>('login')
 const nickname = ref('')
 const password = ref('')
@@ -238,7 +241,7 @@ function onLogout() {
   font-size: 28rpx;
   color: $color-ink-lighter;
   background: rgba(107, 123, 142, 0.08);
-  &.active { color: #fff; background: linear-gradient(135deg, $color-primary, $color-primary-dark); }
+  &.active { color: $color-bg; background: linear-gradient(135deg, $color-primary, $color-primary-dark); }
 }
 .url-current { font-size: 26rpx; color: $color-ink-lighter; margin-top: 12rpx; display: block; word-break: break-all; }
 .card {
