@@ -20,8 +20,9 @@ from typing import Any
 from app.core.logger import log
 from app.domain.analysis_calc import ENGINE_VERSION
 from app.domain.chart_builder import BaziChart
+from app.domain.fortune_score import detect_ailment, favor_vector
 
-PROMPT_VERSION = "v4"
+PROMPT_VERSION = "v5"
 
 _VALID_STRENGTH = ("极旺", "偏旺", "中和", "偏弱", "极弱")
 _VALID_WUXING = ("金", "木", "水", "火", "土")
@@ -92,12 +93,15 @@ def build_verdict_context(chart: BaziChart) -> str:
 
     引擎初判直接给 LLM 看（确认/推翻模式）：计算版承担确定性力学，
     LLM 在其上做格局成败、从象真伪等动态裁量——不是从零重算。
+    v5 起把引擎的关键中间结论一并透出（根气画像、强弱分构成、藏干明细、
+    K 线喜忌方向）——LLM 要"点名引擎错在哪一步"，就得看到分数怎么来的。
     """
     w = chart.wuxing
     lines = [
         f"四柱：{' '.join(p.ganzhi for p in chart.pillars)}（{chart.birth.solar} {chart.birth.gender}）",
-        f"日主：{w.day_master}（{w.day_master_wuxing}）",
+        f"日主：{w.day_master}（{w.day_master_wuxing}）；根气画像（引擎判定）：{w.root_verdict}",
         f"月令：{chart.analysis.season}；调候：{chart.analysis.adjustment}",
+        f"地支藏干：{' '.join(f'{p.zhi}[{"、".join(p.hidden_stems)}]' for p in chart.pillars)}",
         f"五行权重（对日干影响，已含位置权重与合冲刑害修正）：{w.counts}",
         f"显性五行计数：{w.visible_counts}",
         f"十神分布：{chart.analysis.ten_gods}",
@@ -111,12 +115,27 @@ def build_verdict_context(chart: BaziChart) -> str:
     rel_notes = [n for n in w.notes[3:]] if len(w.notes) > 3 else []
     if rel_notes:
         lines.append(f"合冲刑害力学修正（已应用于上述权重）：{'；'.join(rel_notes)}")
+
+    lines.append("\n【引擎初判（供审阅，可推翻但须说理，K 线喜忌方向可一并复核）】")
+    detail = w.strength_detail or {}
+    sup, pre = detail.get("support", {}), detail.get("pressure", {})
     lines.append(
-        f"\n【引擎初判（供审阅，可推翻但须说理）】\n"
         f"强弱：{w.strength}（score={w.strength_score}）\n"
-        f"格局：{w.special_pattern or '无'}{('·' + w.strength) if w.special_pattern else ''}\n"
-        f"用神方向：{w.useful_hint}"
+        f"分构成（合冲修正后权重，未乘系数）：support=比劫{sup.get('比劫', 0)}"
+        f" + 印{sup.get('印星', 0)}×{sup.get('印系数', 0.85)}"
+        f" − 虚浮折扣{sup.get('虚浮折扣', 0)} − 根损折扣{sup.get('根损折扣', 0)}；"
+        f"pressure=食伤{pre.get('食伤', 0)}×0.55 + 财{pre.get('财', 0)}×0.7"
+        f" + 官杀{pre.get('官杀', 0)}×0.8\n"
+        f"格局：{w.special_pattern or '无'}{('·' + w.strength) if w.special_pattern else ''}"
     )
+    fav = favor_vector(chart)
+    if fav:
+        fav_str = "、".join(f"{k}{v:+.2f}" for k, v in sorted(fav.items(), key=lambda x: -x[1]))
+        ailment = detect_ailment(chart)
+        lines.append(
+            f"K线用神判定：病神={ailment or '无'}；喜忌倾向（正喜负忌）：{fav_str}"
+        )
+    lines.append(f"用神方向：{w.useful_hint}")
     return "\n".join(lines)
 
 

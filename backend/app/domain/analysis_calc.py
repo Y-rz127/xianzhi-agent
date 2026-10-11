@@ -653,6 +653,23 @@ def _build_wuxing_analysis(ec) -> WuxingAnalysis:
         useful_hint=useful_hint,
         special_pattern=special_pattern,
         notes=notes,
+        root_verdict=prof.verdict,
+        # 强弱分构成透出（合冲修正后的值）：LLM 裁决要"点名引擎错在哪一步"，
+        # 必须能看到分数怎么来的，否则只能泛泛猜
+        strength_detail={
+            "support": {
+                "比劫": round(adjusted.get(same, 0.0), 2),
+                "印星": round(adjusted.get(resource, 0.0), 2),
+                "印系数": resource_coef,
+                "虚浮折扣": round(floating_discount, 2),
+                "根损折扣": round(same_discount, 2),
+            },
+            "pressure": {
+                "食伤": round(adjusted.get(output, 0.0), 2),
+                "财": round(adjusted.get(wealth, 0.0), 2),
+                "官杀": round(adjusted.get(officer, 0.0), 2),
+            },
+        },
     )
 
 

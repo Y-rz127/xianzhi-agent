@@ -100,6 +100,8 @@ class WuxingAnalysis:
     useful_hint: str
     notes: list[str]
     special_pattern: str = ""  # 特殊格局类型："专旺" / "从格"(真从) / "假从" / 空串
+    root_verdict: str = ""  # 日主根气画像三档：有力/微根/无根（印比受生、从格判定的依据）
+    strength_detail: dict = field(default_factory=dict)  # 强弱分构成（support/pressure 分项，供审计与 LLM 裁决）
 
 
 @dataclass(frozen=True)
