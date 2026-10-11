@@ -27,6 +27,7 @@ from app.agent.prompts import (
     REACT_FACT_GUARDRAILS as FACT_GUARDRAILS,
     REACT_NEXT_STEP_PROMPT as NEXT_STEP_PROMPT,
 )
+from app.agent.verdict import chart_with_verdict_sync
 from app.agent.workflow.orchestrator import XianzhiWorkflow
 from app.agent.workflow.workflow_models import WorkflowChartContext
 from app.agent.workflow.workflow_support import (
@@ -213,6 +214,9 @@ class Xianzhi(ToolCallAgent):
             workflow_context = build_chart_context(
                 birth_time, gender, sect, yun_sect, user_id, longitude=longitude
             )
+            # LLM 终审（阶段三）：loop 内不阻塞 —— 命中缓存毫秒级应用；
+            # 未命中回退计算版并后台补判落库，下一轮对话即命中
+            workflow_context.chart = chart_with_verdict_sync(workflow_context.chart)
             chart = render_full_fact_context(workflow_context)
             self.chart_context = (
                 "【当前命盘上下文】\n"

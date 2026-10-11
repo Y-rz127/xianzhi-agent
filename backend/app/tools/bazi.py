@@ -45,6 +45,18 @@ from app.domain.yun_relations import (
 )
 from app.tools.cache import bazi_cache
 
+# LLM 终审 hook（依赖倒置）：bazi_full 需要应用终审后的命盘事实，但 tools 层
+# 禁止依赖 agent（架构守卫 test_architecture），由 main.py 装配时注入
+# agent.verdict.chart_with_verdict_sync；未注册（测试/独立使用）时静默跳过
+_verdict_sync_hook = None
+
+
+def register_chart_verdict_hook(fn) -> None:
+    """main.py lifespan 调用：注入终审同步包装（chart -> chart）。"""
+    global _verdict_sync_hook
+    _verdict_sync_hook = fn
+
+
 # 节日 → 农历月日（用于把"春节/端午/中秋"等转成农历日期；冬至按节气单独处理）
 _FESTIVAL_MAP = {
     "春节": ("正", "初一"), "元旦": ("正", "初一"),
@@ -487,6 +499,10 @@ def bazi_full(birth_time: str, gender: str, sect: int = 2, yun_sect: int = 1, do
     try:
         birth_time = _normalize_birth_time(birth_time)
         chart = build_bazi_chart(birth_time, gender, sect=sect, yun_sect=yun_sect)
+        # LLM 终审（阶段三）：hook 由 main.py 装配时注入（tools 层禁依赖 agent，
+        # 见 test_architecture）——未注册（测试/独立使用）时静默走计算版
+        if _verdict_sync_hook is not None:
+            chart = _verdict_sync_hook(chart)
         result = format_fact_context(chart)
         if domain:
             brief = build_domain_brief(chart, domain)

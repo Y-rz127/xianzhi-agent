@@ -114,29 +114,18 @@ async def get_relations(
     return {"suiyun": rel["suiyun"], "yuanju": rel["yuanju"]}
 
 
-def _compute_chart_payload(
+def _build_chart_only(
     birth_time: str, gender: str, sect: int, yun_sect: int, longitude: float | None
-) -> dict:
-    """同步排盘流水线（标准化 → 校验 → 排盘 → 格式化），输入非法抛 ValueError。"""
-    from app.domain.chart_builder import (
-        build_bazi_chart,
-        chart_to_api_dict,
-        parse_birth,
-        parse_gender,
-    )
-    from app.domain.chart_format import (
-        format_analysis_text,
-        format_chart_text,
-        format_dayun_text,
-        format_liunian_text,
-    )
+):
+    """同步排盘（标准化 → 校验 → 排盘），输入非法抛 ValueError。终审应用前段。"""
+    from app.domain.chart_builder import build_bazi_chart, parse_birth, parse_gender
     from app.domain.time_parse import _normalize_birth_time
 
     # 标准化出生时间（支持公历+时辰、农历、节日等格式，与 bazi_chart 工具入口一致）
     birth_time = _normalize_birth_time(birth_time)
     parse_birth(birth_time)
     parse_gender(gender)
-    chart = build_bazi_chart(
+    return build_bazi_chart(
         birth_time,
         gender,
         sect=sect,
@@ -146,6 +135,18 @@ def _compute_chart_payload(
         longitude=longitude,
         liunian_cover_dayun=True,
     )
+
+
+def _format_chart_payload(chart) -> dict:
+    """chart → API 载荷（结构化 + 四段文本）。终审应用后段：文本与 wuxing 同源。"""
+    from app.domain.chart_builder import chart_to_api_dict
+    from app.domain.chart_format import (
+        format_analysis_text,
+        format_chart_text,
+        format_dayun_text,
+        format_liunian_text,
+    )
+
     payload = chart_to_api_dict(chart)
     payload.update(
         {
@@ -158,6 +159,17 @@ def _compute_chart_payload(
     return payload
 
 
+def _compute_chart_payload(
+    birth_time: str, gender: str, sect: int, yun_sect: int, longitude: float | None
+) -> dict:
+    """兼容入口：一次完成 build+format（不插终审）。
+
+    线上 get_chart 已拆成 build → 终审 → format 三段；本函数保留给
+    xianzhi.py 别名与测试（纯计算版，快照可重现，不依赖 LLM）。
+    """
+    return _format_chart_payload(_build_chart_only(birth_time, gender, sect, yun_sect, longitude))
+
+
 @router.get("/chart")
 async def get_chart(
     birth_time: str, gender: str, sect: int = 2, yun_sect: int = 1, longitude: float | None = None
@@ -167,19 +179,23 @@ async def get_chart(
     Args:
         longitude: 出生地经度（用于真太阳时校正，可选）
     """
+    from app.agent.verdict import ENGINE_VERSION, PROMPT_VERSION, chart_with_verdict
     from app.tools.cache import bazi_cache
 
     # 复用与聊天工具同一套 LRU：/chart 是全量重算的 CPU 密集路径，高频请求会抢 GIL 拖垮事件循环
-    # key 追加经度（真太阳时校正会改变四柱）；None 与 0 是不同 key，语义正确
-    cache_tool = f"chart_api:{longitude}"
+    # key 追加经度（真太阳时校正会改变四柱）与引擎/提示词版本（终审口径变了旧载荷自然失效）
+    cache_tool = f"chart_api:{longitude}:{ENGINE_VERSION}:{PROMPT_VERSION}"
     payload = bazi_cache.get(birth_time, gender, sect, yun_sect, cache_tool)
     if payload is not None:
         return payload
     try:
-        # 排盘为同步重计算，放到线程池避免阻塞事件循环
-        payload = await asyncio.to_thread(
-            _compute_chart_payload, birth_time, gender, sect, yun_sect, longitude
+        # 排盘为同步重计算，放到线程池避免阻塞事件循环；
+        # 中间插入 LLM 终审（缓存命中毫秒级，未命中一次性调 LLM 落库，失败回退计算版）
+        chart = await asyncio.to_thread(
+            _build_chart_only, birth_time, gender, sect, yun_sect, longitude
         )
+        chart = await chart_with_verdict(chart)
+        payload = await asyncio.to_thread(_format_chart_payload, chart)
         bazi_cache.set(birth_time, gender, payload, sect, yun_sect, cache_tool)
         return payload
     except ValueError as e:

@@ -121,9 +121,15 @@ def _compute_kline_payload(
     include_months: bool,
     dimension: str,
     max_dayun: int = 0,
+    chart=None,
 ) -> dict:
-    """同步构建 K 线载荷，输入非法抛 ValueError（由端点翻成 400）。"""
-    chart = _build_chart(birth_time, gender, sect, yun_sect, longitude)
+    """同步构建 K 线载荷，输入非法抛 ValueError（由端点翻成 400）。
+
+    `chart` 可选：端点已排盘并应用过 LLM 终审时直接传入（评分吃终审后的
+    strength/special_pattern）；测试与回测不传则走原路径自建计算版。
+    """
+    if chart is None:
+        chart = _build_chart(birth_time, gender, sect, yun_sect, longitude)
     max_age = _resolve_max_age(chart, max_age=max_age, max_dayun=max_dayun)
 
     candles = []
@@ -190,6 +196,7 @@ async def get_kline(
         include_months: 是否附带每年 12 个节气月的分数明细
         dimension: 取象维度（comprehensive/career/wealth/love/health/study），默认综合
     """
+    from app.agent.verdict import ENGINE_VERSION, PROMPT_VERSION, chart_with_verdict
     from app.tools.cache import bazi_cache
 
     if not 0 < max_age <= MAX_AGE_LIMIT:
@@ -202,11 +209,15 @@ async def get_kline(
             detail=f"dimension 需为 {'/'.join(fortune_score.DIMENSIONS)} 之一",
         )
 
-    cache_tool = f"kline_api:{longitude}:{max_age}:{max_dayun}:{int(include_months)}:{dimension}"
+    cache_tool = f"kline_api:{longitude}:{max_age}:{max_dayun}:{int(include_months)}:{dimension}:{ENGINE_VERSION}:{PROMPT_VERSION}"
     payload = bazi_cache.get(birth_time, gender, sect, yun_sect, cache_tool)
     if payload is not None:
         return payload
     try:
+        # 排盘 + LLM 终审（缓存命中毫秒级，未命中一次性调 LLM 落库，失败回退计算版），
+        # 评分吃终审后的 strength/special_pattern；批注与评分仍同一张盘
+        chart = await asyncio.to_thread(_build_chart, birth_time, gender, sect, yun_sect, longitude)
+        chart = await chart_with_verdict(chart)
         payload = await asyncio.to_thread(
             _compute_kline_payload,
             birth_time,
@@ -218,6 +229,7 @@ async def get_kline(
             include_months,
             dimension,
             max_dayun=max_dayun,
+            chart=chart,
         )
         bazi_cache.set(birth_time, gender, payload, sect, yun_sect, cache_tool)
         return payload
@@ -284,7 +296,14 @@ async def annotate_kline(
         return {**hit, "cached": True}
 
     try:
-        # 批注读的是本接口自己的载荷（同一套 max_age/维度），命盘构建走同一入口
+        from app.agent.verdict import chart_with_verdict
+
+        # 批注读的是本接口自己的载荷（同一套 max_age/维度）；命盘只 build 一次并
+        # 应用 LLM 终审，payload 与批注吃同一张盘 —— 评分图与解读文本不会分裂
+        chart = await asyncio.to_thread(
+            _build_chart, body.birth_time, body.gender, body.sect, body.yun_sect, body.longitude
+        )
+        chart = await chart_with_verdict(chart)
         payload = await asyncio.to_thread(
             _compute_kline_payload,
             body.birth_time,
@@ -296,9 +315,7 @@ async def annotate_kline(
             False,
             body.dimension,
             max_dayun=body.max_dayun,
-        )
-        chart = await asyncio.to_thread(
-            _build_chart, body.birth_time, body.gender, body.sect, body.yun_sect, body.longitude
+            chart=chart,
         )
         result = await asyncio.to_thread(
             annotator.annotate,

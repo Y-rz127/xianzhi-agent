@@ -110,6 +110,13 @@ async def lifespan(app: FastAPI):
     # LangSmith 可观测性（最早初始化，确保后续 LangChain 调用均被追踪）
     init_observability()
 
+    # LLM 终审（阶段三）：tools 层禁依赖 agent（架构守卫），bazi_full 的终审
+    # 经依赖倒置注入；排盘/K线/聊天挂载在各自层内直连 agent.verdict
+    from app.agent.verdict import chart_with_verdict_sync
+    from app.tools.bazi import register_chart_verdict_hook
+
+    register_chart_verdict_hook(chart_with_verdict_sync)
+
     # 答案生成主模型（直连 DashScope，不经系统代理）
     http = httpx.Client(trust_env=False)
     raw_chat_model = ChatOpenAI(

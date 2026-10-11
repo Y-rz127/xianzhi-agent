@@ -1,10 +1,15 @@
-"""命盘 LLM 裁决（影子模式）：计算版之外的第二意见，只落库不生效。
+"""命盘 LLM 裁决：阶段三已转正——LLM 终审为格局/强弱/用神的最终依据。
 
-影子模式的纪律
---------------
-本模块**不得**被任何线上判定路径 import（K 线/命盘/聊天仍走计算版）。
-唯一入口是 scripts/run_verdict_shadow.py 与后续的差异分析——
-等影子数据证明 LLM 裁决比计算版更准，才轮到「切最终依据」的讨论。
+演进纪律
+--------
+阶段一~二（影子模式）：本模块只被 scripts/run_verdict_shadow.py 调用，
+结果只落库 chart_verdicts 不生效。经 v4~v7 四轮影子对比（铁律遵守、
+论据质量、结构化合规均达标，模型阵容 qwen3.8-27b 主 + deepseek-v4-pro 备），
+用户拍板转正：线上通过 `chart_with_verdict` 接入——
+
+- 缓存命中（chart_hash+engine_version+prompt_version 的 ok 行）直接取，毫秒级；
+- 未命中调 LLM 裁决并落库（同盘只判一次，之后所有人复用，省时间省 token）；
+- LLM 失败/超时/invalid 一律回退计算版（引擎初判兜底，绝不阻塞主流程）。
 
 输出契约：LLM 必须回严格 JSON，字段枚举钉死；
 解析或校验失败 status=invalid 落库（raw_text 留排查），绝不静默吞掉。
@@ -13,8 +18,12 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
+import sys
+import threading
 import time
+from dataclasses import replace
 from typing import Any
 
 from app.core.logger import log
@@ -22,7 +31,10 @@ from app.domain.analysis_calc import ENGINE_VERSION
 from app.domain.chart_builder import BaziChart
 from app.domain.fortune_score import detect_ailment, favor_vector
 
-PROMPT_VERSION = "v6"
+PROMPT_VERSION = "v7"
+
+# 终审 LLM 总超时（秒）：模型层各有 timeout/重试/熔断，这里兜底防接口被拖死
+_VERDICT_TIMEOUT = 150.0
 
 _VALID_STRENGTH = ("极旺", "偏旺", "中和", "偏弱", "极弱")
 _VALID_WUXING = ("金", "木", "水", "火", "土")
@@ -52,6 +64,7 @@ confirm 与 override 的门槛（刻意不对称）：
    - 完全无根（禄刃库根皆无）：才可能判**真从**；
    - 仅余气/中气微根：不得判真从，最多讨论**假从**（实战以正格为稳妥）；
    - 禄刃强根（哪怕被冲，冲是根损不是根灭）或印比透干有地支支撑：**正格，不论从**。
+   - **例外（根变性入局）**：微根所在的地支若已合而化成**所从之神**（三合局/三会方/六合化为所从五行），根气变性归局、名存实亡，微根不碍从——可直接判**真从**。合为他行或仅合绊不化的，不适用此例外。
    盘面已给出引擎的根气画像三档判定，可对照引用，但你有权按盘面结构复核它。
 3. **印旺不等于身旺**（土重金埋）：日元须有一定力量方能受重印所生；日主无强根而印星独大成势时（如水多木漂），是印重身弱之病，不判身旺，亦不轻判从格——按印重病药论（忌印、喜财制印/比劫泄印）取用。
 4. 日主极弱无根且克泄耗一行独旺时考虑从格；一行独旺无克泄时考虑专旺。
@@ -101,11 +114,13 @@ def build_verdict_context(chart: BaziChart) -> str:
     K 线喜忌方向）——LLM 要"点名引擎错在哪一步"，就得看到分数怎么来的。
     """
     w = chart.wuxing
+    # 地支藏干串提前拼：f-string 内嵌 f-string 不能复用外层引号（Python 3.11 语法）
+    zhigan = " ".join(f"{p.zhi}[{'、'.join(p.hidden_stems)}]" for p in chart.pillars)
     lines = [
         f"四柱：{' '.join(p.ganzhi for p in chart.pillars)}（{chart.birth.solar} {chart.birth.gender}）",
         f"日主：{w.day_master}（{w.day_master_wuxing}）；根气画像（引擎判定）：{w.root_verdict}",
         f"月令：{chart.analysis.season}；调候：{chart.analysis.adjustment}",
-        f"地支藏干：{' '.join(f'{p.zhi}[{"、".join(p.hidden_stems)}]' for p in chart.pillars)}",
+        f"地支藏干：{zhigan}",
         f"五行权重（对日干影响，已含位置权重与合冲刑害修正）：{w.counts}",
         f"显性五行计数：{w.visible_counts}",
         f"十神分布：{chart.analysis.ten_gods}",
@@ -272,3 +287,138 @@ def _upsert_verdict(row: dict[str, Any]) -> None:
                 row["diff"], row["model"], row["latency_ms"], row["raw_text"],
             ),
         )
+
+
+# ---------------- 阶段三：终审应用（缓存 → LLM → 回退计算版） ----------------
+
+
+def _verdict_enabled() -> bool:
+    """终审总开关：VERDICT_ENABLED=0 关闭；pytest 内自动禁用（快照不可依赖 LLM）。"""
+    if os.environ.get("VERDICT_ENABLED") == "0":
+        return False
+    return "pytest" not in sys.modules
+
+
+def _get_cached_verdict(chash: str) -> dict[str, Any] | None:
+    """取同版本（engine+prompt）的 ok 裁决；无则 None。命中即毫秒级复用。"""
+    from app.db.pool import get_pool
+
+    with get_pool().connection() as conn:
+        row = conn.execute(
+            """
+            SELECT verdict FROM chart_verdicts
+            WHERE chart_hash = %s AND engine_version = %s AND prompt_version = %s
+              AND status = 'ok'
+            """,
+            (chash, ENGINE_VERSION, PROMPT_VERSION),
+        ).fetchone()
+    if row is None:
+        return None
+    return row[0] if isinstance(row[0], dict) else json.loads(row[0])
+
+
+def apply_verdict(chart: BaziChart, verdict: dict[str, Any], relation: str = "override") -> BaziChart:
+    """把终审裁决写回 chart.wuxing（不可变替换，原 chart 不动）。
+
+    表示法沿用引擎约定：成格时 strength 装格名（如"从杀格"）、special_pattern
+    装类别；正格时 strength 装五档。力学数值（counts/score/strength_detail）
+    保留计算版不动 —— 终审覆盖的是**结论标签**，不是力学基础。
+    """
+    w = chart.wuxing
+    pattern = "" if verdict["special_pattern"] == "无" else verdict["special_pattern"]
+    strength = verdict["special_label"] if pattern else verdict["strength"]
+    hint = f"日主{verdict['strength']}，最喜{verdict['useful_god']}，最忌{verdict['avoid_god']}（LLM 终审）。"
+    notes = [*w.notes, f"LLM终审[{PROMPT_VERSION}]：{relation}——{verdict['reason'][:80]}"]
+    return replace(
+        chart,
+        wuxing=replace(w, strength=strength, special_pattern=pattern, useful_hint=hint, notes=notes),
+    )
+
+
+async def chart_with_verdict(chart: BaziChart, model: Any = None) -> BaziChart:
+    """终审应用主入口（async 路径：/chart、/kline、聊天挂载）。
+
+    缓存命中直接应用；未命中调 LLM 裁决落库后应用；
+    关闭/失败/超时/invalid 一律原样返回计算版 chart（引擎兜底）。
+    """
+    if not _verdict_enabled():
+        return chart
+    try:
+        from app.db.chart_store import chart_hash_of
+
+        chash = chart_hash_of(chart.birth.solar, chart.birth.gender)
+    except Exception as e:  # DB 不可用：直接回退，不拖主流程
+        log.warning("[verdict] chart_hash 计算失败，回退计算版: {}", e)
+        return chart
+
+    verdict = None
+    try:
+        verdict = await asyncio.to_thread(_get_cached_verdict, chash)
+    except Exception as e:
+        log.warning("[verdict] 缓存读取失败，走 LLM 裁决: {}", e)
+
+    if verdict is None:
+        try:
+            if model is None:
+                from app.agent.context import get_sub_app_model
+
+                model = get_sub_app_model()
+            row = await asyncio.wait_for(run_shadow_verdict(chart, model), timeout=_VERDICT_TIMEOUT)
+            if row["status"] == "ok":
+                verdict = row["verdict"]
+            else:
+                log.warning("[verdict] {} 裁决 invalid，回退计算版", chart.birth.solar)
+        except Exception as e:
+            log.warning("[verdict] {} LLM 裁决失败（{}），回退计算版", chart.birth.solar, e)
+
+    if verdict is None:
+        return chart
+    return apply_verdict(chart, verdict, verdict.get("relation_to_engine", "confirm"))
+
+
+def chart_with_verdict_sync(chart: BaziChart, model: Any = None, block: bool = True) -> BaziChart:
+    """终审应用的同步包装（工具线程 / 同步挂载路径）。
+
+    - 无运行中事件循环（普通工作线程）：asyncio.run 完整流程，block=True 时
+      最长等 _VERDICT_TIMEOUT 秒（工具调用链本就是秒级，可接受）；
+    - 已在事件循环线程（async 链里的同步挂载）：**不阻塞 loop** —— 命中缓存
+      毫秒级应用；未命中回退计算版并起后台线程补判落库，下一轮对话命中。
+    """
+    if not _verdict_enabled():
+        return chart
+    try:
+        asyncio.get_running_loop()
+        in_loop = True
+    except RuntimeError:
+        in_loop = False
+
+    if not in_loop:
+        try:
+            return asyncio.run(asyncio.wait_for(chart_with_verdict(chart, model), timeout=_VERDICT_TIMEOUT)) if block else chart
+        except Exception as e:
+            log.warning("[verdict] 同步终审失败，回退计算版: {}", e)
+            return chart
+
+    try:
+        from app.db.chart_store import chart_hash_of
+
+        chash = chart_hash_of(chart.birth.solar, chart.birth.gender)
+        cached = _get_cached_verdict(chash)
+    except Exception as e:
+        log.warning("[verdict] loop 内缓存读取失败，回退计算版: {}", e)
+        return chart
+    if cached is not None:
+        return apply_verdict(chart, cached, (cached or {}).get("relation_to_engine", "confirm"))
+    # 未命中：后台补判落库（不阻塞当前 loop），下次直接命中
+    threading.Thread(
+        target=_background_verdict, args=(chart, model), name="verdict-bg", daemon=True
+    ).start()
+    return chart
+
+
+def _background_verdict(chart: BaziChart, model: Any) -> None:
+    """后台补判：独立线程里跑完整 asyncio 流程；失败只留日志。"""
+    try:
+        asyncio.run(asyncio.wait_for(chart_with_verdict(chart, model), timeout=_VERDICT_TIMEOUT))
+    except Exception as e:
+        log.warning("[verdict] 后台补判失败（{} {}）: {}", chart.birth.solar, chart.birth.gender, e)

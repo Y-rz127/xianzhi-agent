@@ -23,7 +23,7 @@ ANCHORS = [
 ]
 
 
-async def main(limit: int) -> int:
+async def main(limit: int, model_name: str, ids: str) -> int:
     from langchain_openai import ChatOpenAI
 
     from app.agent.verdict import run_shadow_verdict
@@ -31,7 +31,7 @@ async def main(limit: int) -> int:
     from tests import bazi_golden as G
 
     model = ChatOpenAI(
-        model=settings.dashscope_model,
+        model=model_name,
         base_url=settings.dashscope_url,
         api_key=settings.dashscope_api_key,
         timeout=180,
@@ -45,10 +45,13 @@ async def main(limit: int) -> int:
     for case in G.load_cases():
         jobs.append((case["id"], case["birth"], case["gender"]))
     jobs.extend(ANCHORS)
+    if ids:
+        wanted = set(ids.split(","))
+        jobs = [j for j in jobs if j[0] in wanted]
     if limit > 0:
         jobs = jobs[:limit]
 
-    print(f"影子批跑 {len(jobs)} 张盘，模型 {settings.dashscope_model}\n")
+    print(f"影子批跑 {len(jobs)} 张盘，模型 {model_name}\n")
     ok = invalid = same = diff_cnt = 0
     diff_lines = []
     for i, (cid, birth, gender) in enumerate(jobs, 1):
@@ -81,5 +84,7 @@ async def main(limit: int) -> int:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--limit", type=int, default=0, help="只跑前 N 张（冒烟）")
+    parser.add_argument("--model", default="deepseek-v4-flash-0731", help="裁决模型")
+    parser.add_argument("--ids", default="", help="逗号分隔的用例 id，只跑这些")
     args = parser.parse_args()
-    sys.exit(asyncio.run(main(args.limit)))
+    sys.exit(asyncio.run(main(args.limit, args.model, args.ids)))
