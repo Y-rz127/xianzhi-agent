@@ -192,3 +192,12 @@ def get_sub_app_model() -> Any:
     整体替换（见 `app/core/llm_health.py`），提前抓住引用会让纠正对子应用失效。
     """
     return sub_app_model_of(get_app_context())
+
+
+def get_chat_model() -> Any:
+    """主问答模型（按请求取，与 get_sub_app_model 同样的探活纠正考量）。
+
+    命盘 LLM 终审（verdict）用它：与主问答同一模型池、同一降级链，
+    不单独立配置——终审质量已由考题验证（qwen3.8-27b 铁律 8/8）。
+    """
+    return getattr(get_app_context(), "chat_model", None)

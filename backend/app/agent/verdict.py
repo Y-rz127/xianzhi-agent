@@ -11,6 +11,9 @@
 - 未命中调 LLM 裁决并落库（同盘只判一次，之后所有人复用，省时间省 token）；
 - LLM 失败/超时/invalid 一律回退计算版（引擎初判兜底，绝不阻塞主流程）。
 
+终审模型沿用主问答模型（get_chat_model，同一模型池与降级链），
+不单独走子应用配置。
+
 输出契约：LLM 必须回严格 JSON，字段枚举钉死；
 解析或校验失败 status=invalid 落库（raw_text 留排查），绝不静默吞掉。
 """
@@ -360,9 +363,10 @@ async def chart_with_verdict(chart: BaziChart, model: Any = None) -> BaziChart:
     if verdict is None:
         try:
             if model is None:
-                from app.agent.context import get_sub_app_model
+                # 终审沿用主问答模型（同一模型池与降级链），不单独走子应用配置
+                from app.agent.context import get_chat_model
 
-                model = get_sub_app_model()
+                model = get_chat_model()
             row = await asyncio.wait_for(run_shadow_verdict(chart, model), timeout=_VERDICT_TIMEOUT)
             if row["status"] == "ok":
                 verdict = row["verdict"]
