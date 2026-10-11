@@ -19,7 +19,7 @@ from app.domain.tables import (
 # 特殊格局判定阈值
 # 引擎版本：位置权重/阈值/关系修正任一变动都必须 bump —— chart_verdicts 缓存表
 # 把它并进主键，bump 后老裁决自然失效、新裁决另起一行（历史留档可对比）。
-ENGINE_VERSION = "20261011.4"  # 主气去重+位置权重+原局关系力学修正
+ENGINE_VERSION = "20261011.5"  # 印星受生条件 + 比劫根损打折（用户裁决两铁律落码）
 
 _ZHUANWANG_DOM_RATIO = 0.35       # 主导五行占「对日干影响」加权比例下限
 _ZHUANWANG_PRESSURE_MAX = 2.8     # 克泄耗三行合计加权上限（超过视为破局，不判专旺）
@@ -91,8 +91,8 @@ def _wu_of_relation(name: str) -> str:
     return ""
 
 
-def _chart_relation_adjust(pillars: list[str], weighted: dict[str, float]) -> tuple[dict[str, float], list[str]]:
-    """原局合冲刑害对五行力量的修正，返回 (修正后 weighted, 修正说明列表)。
+def _chart_relation_adjust(pillars: list[str], weighted: dict[str, float]) -> tuple[dict[str, float], list[str], set[int]]:
+    """原局合冲刑害对五行力量的修正，返回 (修正后 weighted, 修正说明, 被冲支索引集)。
 
     只做确定性共识的力学归并：
     - 三合局/三会方：参与支力量**全部**并入局五行（合化成局，一行独旺）；
@@ -205,7 +205,7 @@ def _chart_relation_adjust(pillars: list[str], weighted: dict[str, float]) -> tu
                 _, zw = _POSITION_WEIGHTS[i]
                 w[wx] = round(w[wx] + zw, 4)
 
-    return w, notes
+    return w, notes, chong_hit
 
 
 def _producer_of(element: str) -> str:
@@ -561,16 +561,51 @@ def _build_wuxing_analysis(ec) -> WuxingAnalysis:
 
     # 透干虚浮印比：地支无根则虚浮，扶助力按位置权重折半。
     # 韦千里评从杀例「乙木全无生气，岂能任之」即此意 —— 无根天干不构成有效帮扶。
+    prof = _root_profile(pillars, day_master, day_wx, resource)
     floating_discount = sum(
         _POSITION_WEIGHTS[i][0]
         * (0.85 if GAN_WUXING.get(gan) == resource else 1.0)
         * _FLOATING_STEM_FACTOR
-        for i, gan in _root_profile(pillars, day_master, day_wx, resource).floating_support
+        for i, gan in prof.floating_support
     )
     # 原局合冲刑害的力学修正（三合成局/六合半化/干合绊/冲根摇）——
     # 修正后的 weighted 只进强弱分，不回写 counts（counts 是原始影响分布）。
-    adjusted, relation_notes = _chart_relation_adjust(pillars, weighted)
-    support = adjusted.get(same, 0.0) + adjusted.get(resource, 0.0) * 0.85 - floating_discount
+    adjusted, relation_notes, chong_hit = _chart_relation_adjust(pillars, weighted)
+
+    # 印星受生条件（土重金埋）：日元须有一定力量方能受重印所生 ——
+    # 日主**完全无根**（禄刃库根与余气微根皆无）时，重印生不动身，
+    # 印星扶助系数 0.85 → 0.5。
+    # 只对无根生效、微根不动：微根印重盘（水多木漂家族）的 score 若被拉负，
+    # 会退出病药路径的 score>0 前提，方向反而变错 —— 其方向纠偏由
+    # resource_dominant 病药路径承担，档位标签的分歧交给 LLM 终审。
+    resource_coef = 0.85 if prof.verdict != _VERDICT_NONE else 0.5
+
+    # 比劫根损打折（有根有比则不从的前提是根还站着）：透干比劫的根
+    # 全部落在被冲支上时，根摇比劫折半 —— 三酉冲一卯盘的三乙不构成抗杀铁壁。
+    day_roots_hit = {
+        i for i, p in enumerate(pillars)
+        if ZHI_WUXING.get(p[1]) == day_wx and i in chong_hit
+    }
+    same_discount = 0.0
+    if day_roots_hit:
+        solid_day_roots = any(
+            i not in chong_hit for i, p in enumerate(pillars)
+            if ZHI_WUXING.get(p[1]) == day_wx
+        )
+        if not solid_day_roots:
+            same_discount = sum(
+                _POSITION_WEIGHTS[i][0] * _FLOATING_STEM_FACTOR
+                for i, p in enumerate(pillars)
+                if GAN_WUXING.get(p[0]) == day_wx and i != 2
+            )
+            if same_discount > 0:
+                relation_notes.append("比劫之根全被冲：透干比劫扶助力折半")
+
+    support = (
+        adjusted.get(same, 0.0) - same_discount
+        + adjusted.get(resource, 0.0) * resource_coef
+        - floating_discount
+    )
     pressure = (
         adjusted.get(output, 0.0) * 0.55
         + adjusted.get(wealth, 0.0) * 0.7
