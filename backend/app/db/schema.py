@@ -33,6 +33,7 @@ def _do_ensure_tables():
         _ensure_case_tables(conn)
         _ensure_kline_tables(conn)
         _ensure_kline_event_tables(conn)
+        _ensure_chart_verdicts(conn)
 
 
 def _ensure_profile_tables(conn) -> None:
@@ -166,6 +167,45 @@ def _ensure_interaction_tables(conn) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_answer_feedback_reviewed ON answer_feedback(reviewed)")
     conn.execute("ALTER TABLE answer_feedback ADD COLUMN IF NOT EXISTS case_id TEXT DEFAULT NULL")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_answer_feedback_case ON answer_feedback(case_id)")
+
+
+def _ensure_chart_verdicts(conn) -> None:
+    """命盘裁决表（影子模式）：LLM 对单张命盘的旺衰/格局/用神裁决。
+
+    为什么按 (chart_hash, engine_version, prompt_version) 做 key 而不是 TTL
+    ------------------------------------------------------------------
+    引擎阈值/权重一改（本日已改三轮），计算版口径就变，老裁决不能继续生效；
+    与其靠过期时间，不如把两个版本号并进主键 —— 迭代提示词或重标定引擎后
+    自然写新行，老行留作演进历史（对比"当时为什么判错"）。永不 TTL。
+
+    `computed` 存计算版结论快照：影子模式的全部意义就是**对比**，
+    没有它，LLM 裁决对了错了无从谈起。
+    """
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS chart_verdicts (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            chart_hash TEXT NOT NULL,
+            birth_time TEXT NOT NULL,
+            gender TEXT NOT NULL,
+            engine_version TEXT NOT NULL,
+            prompt_version TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',   -- pending/ok/invalid
+            verdict JSONB,                            -- LLM 结构化裁决
+            computed JSONB,                           -- 计算版快照（对比基准）
+            diff TEXT DEFAULT '',                     -- 差异摘要（空=一致）
+            model TEXT DEFAULT '',
+            latency_ms INT DEFAULT 0,
+            raw_text TEXT DEFAULT '',                 -- LLM 原文（invalid 时排查用）
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            UNIQUE (chart_hash, engine_version, prompt_version)
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_chart_verdicts_engine ON chart_verdicts(engine_version, prompt_version)"
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_chart_verdicts_status ON chart_verdicts(status, created_at DESC)")
 
 
 def _ensure_case_tables(conn) -> None:

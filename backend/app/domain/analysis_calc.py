@@ -7,6 +7,7 @@ from app.domain.ganzhi_relations import branch_relations, stem_relations
 from app.domain.models import DomainAnalysis, Pillar, WuxingAnalysis
 from app.domain.tables import (
     CONTROLS,
+    GAN_HE,
     GAN_WUXING,
     GENERATES,
     HIDDEN_STEMS,
@@ -16,6 +17,10 @@ from app.domain.tables import (
 )
 
 # 特殊格局判定阈值
+# 引擎版本：位置权重/阈值/关系修正任一变动都必须 bump —— chart_verdicts 缓存表
+# 把它并进主键，bump 后老裁决自然失效、新裁决另起一行（历史留档可对比）。
+ENGINE_VERSION = "20261011.4"  # 主气去重+位置权重+原局关系力学修正
+
 _ZHUANWANG_DOM_RATIO = 0.35       # 主导五行占「对日干影响」加权比例下限
 _ZHUANWANG_PRESSURE_MAX = 2.8     # 克泄耗三行合计加权上限（超过视为破局，不判专旺）
 _CONG_ROOT_MIN_HIDDEN = 0.25      # 藏干中某五行达此权重视为"中气级"（判透干印比是否有地支支撑）；
@@ -65,6 +70,142 @@ _LU = {"甲": "寅", "乙": "卯", "丙": "巳", "丁": "午", "戊": "巳", "�
 _REN = {"甲": "卯", "乙": "辰", "丙": "午", "丁": "未", "戊": "午", "己": "未",
         "庚": "酉", "辛": "戌", "壬": "子", "癸": "丑"}  # 日主羊刃地
 _KU = {"木": "未", "火": "戌", "金": "丑", "水": "辰"}  # 墓库；土寄四季，单独处理
+
+# ---------------- 原局合冲刑害的五行力量修正（确定性共识，非 LLM 裁决） ----------------
+#
+# 知识库口径：12_合冲刑害规则卡 §一「合局力量：三会＞三合＞六合＞半合＞拱合」、
+# §二「冲则根动」；33_从格专旺化气体系 §七 化气须「化神当令、地支成方局」。
+# 这里只做**力学归并**（谁的力量并给谁、打几折），不做格局成败裁决 —— 那是
+# 专旺/从格/化气判定与后续 LLM 裁决的事。
+_CHART_SANHE_SHIFT = 1.0    # 三合局/三会方：参与支力量全部并入局五行（化气成局）
+_CHART_LIUHE_SHIFT = 0.5    # 六合：参与支各折半并入合化五行（合而未化，倾向性修正）
+_CHART_GANHE_SHIFT = 0.5    # 干合：两干各折半并入合化五行（合绊）
+_CHART_CHONG_FACTOR = 0.75  # 六冲：被冲支藏干力量保留率（冲则根动，折损 25% 散失）
+
+
+def _wu_of_relation(name: str) -> str:
+    """从关系名尾字取五行：'申子辰合水局'→水、'子丑合土'→土、'卯戌合火'→火。"""
+    for wx in WUXING_ORDER:
+        if name.endswith(wx + "局") or name.endswith(wx):
+            return wx
+    return ""
+
+
+def _chart_relation_adjust(pillars: list[str], weighted: dict[str, float]) -> tuple[dict[str, float], list[str]]:
+    """原局合冲刑害对五行力量的修正，返回 (修正后 weighted, 修正说明列表)。
+
+    只做确定性共识的力学归并：
+    - 三合局/三会方：参与支力量**全部**并入局五行（合化成局，一行独旺）；
+    - 六合/干合：参与干支各折半并入合化五行（合而未化）；
+    - 六冲：被冲支的藏干力量 ×0.6（冲则根动）。
+    三刑/自刑/害/破不进强弱分 —— 它们主应事与伤病，不改变旺衰力学，
+    编进来只会让阈值漂移（知识库 §四：刑害「助力应事，不改旺衰」）。
+
+    注意与 `_build_domain_analysis` 的视图口径解耦：那里是展示映射（关系名列表），
+    这里是力学归并；两处都调 `ganzhi_relations`（单一事实源），判定口径不分叉。
+    """
+    notes: list[str] = []
+    w = dict(weighted)
+    zhis = [p[1] for p in pillars]
+    rel = branch_relations(zhis)
+
+    consumed: set[int] = set()  # 已被三合/三会吞掉的支（整支并入局五行）
+
+    # 1) 三会方 ＞ 三合局：整支并入局五行
+    for name in [*rel.hui, *rel.san_he]:
+        wx = _wu_of_relation(name)
+        if not wx:
+            continue
+        members = [c for c in name if c in zhis]
+        for i, p in enumerate(pillars):
+            if p[1] in members and i not in consumed:
+                consumed.add(i)
+        notes.append(f"{name}：参与支力量并入{wx}")
+
+    # 2) 六合：参与支各折半并入合化五行（参与支未被三合吞掉的部分）
+    for name in rel.liu_he:
+        wx = _wu_of_relation(name)
+        if not wx:
+            continue
+        members = [c for c in name if c in zhis]
+        for i, p in enumerate(pillars):
+            if p[1] in members or i in consumed:
+                continue
+            _, zw = _POSITION_WEIGHTS[i]
+            take = round(zw * _CHART_LIUHE_SHIFT, 4)
+            # 折半量从该支藏干按比抽走，并入合化五行
+            for h, r in HIDDEN_STEMS.get(p[1], ()):
+                hw = GAN_WUXING.get(h)
+                if hw and hw in w:
+                    move = round(r * take, 4)
+                    w[hw] = round(w[hw] - move, 4)
+                    w[wx] = round(w[wx] + move, 4)
+            notes.append(f"{name}：半力并入{wx}")
+
+    # 3) 干合：两干各折半并入合化五行
+    gans = [p[0] for p in pillars]
+    gan_he, _ = stem_relations(gans)
+    for gan in gan_he:
+        for name in GAN_HE.values():
+            if gan in name:
+                wx = _wu_of_relation(name)
+                if not wx:
+                    continue
+                pair = [g for g in name if g in gans and GAN_WUXING.get(g)]
+                for g in pair:
+                    i = gans.index(g)
+                    gw, _ = _POSITION_WEIGHTS[i]
+                    move = round(gw * _CHART_GANHE_SHIFT, 4)
+                    hw = GAN_WUXING.get(g)
+                    if hw in w:
+                        w[hw] = round(w[hw] - move, 4)
+                        w[wx] = round(w[wx] + move, 4)
+                notes.append(f"{name}(干合)：半力并入{wx}")
+                break
+
+    # 4) 六冲：被冲支藏干力量折损（冲则根动）；被三合吞掉的支不再打折。
+    # 成对去重：每支只折一次 —— 三酉遇一卯时，三个酉各折一次、卯只折一次
+    # （群劫冲一，不是 6×3 笛卡尔积）。折损的 (1-factor) **散失不转移**：
+    # 根摇之力泄于全局，总量不守恒是特性 —— 与六合/干合的「转移」语义不同。
+    chong_hit: set[int] = set()
+    for name in rel.chong:
+        members = [c for c in name if c in zhis]
+        hit_any = False
+        for i, p in enumerate(pillars):
+            if p[1] in members and i not in consumed:
+                chong_hit.add(i)
+                hit_any = True
+        if hit_any:
+            notes.append(f"{name}：根摇，被冲支藏干力×{_CHART_CHONG_FACTOR}（折损散失）")
+    for i in chong_hit:
+        _, zw = _POSITION_WEIGHTS[i]
+        for h, r in HIDDEN_STEMS.get(pillars[i][1], ()):
+            hw = GAN_WUXING.get(h)
+            if hw and hw in w:
+                lose = round(r * zw * (1 - _CHART_CHONG_FACTOR), 4)
+                w[hw] = round(w[hw] - lose, 4)
+
+    # 5) 三合/三会整支归并（放在冲之后：合局成则局内支不因冲再折损）
+    for i, p in enumerate(pillars):
+        if i not in consumed:
+            continue
+        _, zw = _POSITION_WEIGHTS[i]
+        for h, r in HIDDEN_STEMS.get(p[1], ()):
+            hw = GAN_WUXING.get(h)
+            if hw and hw in w:
+                move = round(r * zw, 4)
+                w[hw] = round(w[hw] - move, 4)
+    for name in [*rel.hui, *rel.san_he]:
+        wx = _wu_of_relation(name)
+        if not wx:
+            continue
+        members = [c for c in name if c in zhis]
+        for i, p in enumerate(pillars):
+            if p[1] in members:
+                _, zw = _POSITION_WEIGHTS[i]
+                w[wx] = round(w[wx] + zw, 4)
+
+    return w, notes
 
 
 def _producer_of(element: str) -> str:
@@ -426,11 +567,14 @@ def _build_wuxing_analysis(ec) -> WuxingAnalysis:
         * _FLOATING_STEM_FACTOR
         for i, gan in _root_profile(pillars, day_master, day_wx, resource).floating_support
     )
-    support = weighted.get(same, 0.0) + weighted.get(resource, 0.0) * 0.85 - floating_discount
+    # 原局合冲刑害的力学修正（三合成局/六合半化/干合绊/冲根摇）——
+    # 修正后的 weighted 只进强弱分，不回写 counts（counts 是原始影响分布）。
+    adjusted, relation_notes = _chart_relation_adjust(pillars, weighted)
+    support = adjusted.get(same, 0.0) + adjusted.get(resource, 0.0) * 0.85 - floating_discount
     pressure = (
-        weighted.get(output, 0.0) * 0.55
-        + weighted.get(wealth, 0.0) * 0.7
-        + weighted.get(officer, 0.0) * 0.8
+        adjusted.get(output, 0.0) * 0.55
+        + adjusted.get(wealth, 0.0) * 0.7
+        + adjusted.get(officer, 0.0) * 0.8
     )
     strength_score = round(support - pressure, 2)
     strength, useful_hint = _classify_strength(
@@ -459,6 +603,7 @@ def _build_wuxing_analysis(ec) -> WuxingAnalysis:
         "counts 为「各干支对日干的影响」分布（日干不计，供强弱/格局判定）；"
         "global_counts 为全局分布（加回日干本气，供五行分布图展示）。",
         "强弱为工程化初判，最终用神仍需结合格局、调候、合冲刑害与大运流年校验。",
+        *relation_notes,
     ]
     return WuxingAnalysis(
         counts=_round_counts(weighted),

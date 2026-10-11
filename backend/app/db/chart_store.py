@@ -17,6 +17,14 @@ def _chart_hash(birth_time: str, gender: str) -> str:
     return hashlib.sha256(f"{birth_time}|{gender}".encode()).hexdigest()[:16]
 
 
+def chart_hash_of(birth_time: str, gender: str) -> str:
+    """命盘指纹的公开入口（与 chart_profiles/kline_feedback 同一算法）。
+
+    命盘维度的表（如 chart_verdicts）都用它做 key，保证同盘同键。
+    """
+    return _chart_hash(birth_time, gender)
+
+
 def upsert_chart_profile(
     user_id: str,
     birth_time: str,

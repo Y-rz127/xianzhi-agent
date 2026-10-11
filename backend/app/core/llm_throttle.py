@@ -31,7 +31,7 @@ llm_usage_tag: ContextVar[str] = ContextVar("llm_usage_tag", default="unknown")
 # 会出现无法解释的行。前端 `Observability.vue` 的中文映射与此一一对应。
 #   workflow 命理问答编排（拆解/生成/审核/修复整条链） | react ReAct 工具循环
 #   chitchat 闲聊直答 | summary 会话摘要 | report 命理报告 | kline K线批注
-#   probe 启动探活 | tarot/liuyao/ziwei/hehun 子应用解读
+#   probe 启动探活 | tarot/liuyao/ziwei/hehun 子应用解读 | verdict 命盘裁决（影子）
 CANONICAL_TAGS: tuple[str, ...] = (
     "workflow",
     "react",
@@ -44,6 +44,7 @@ CANONICAL_TAGS: tuple[str, ...] = (
     "liuyao",
     "ziwei",
     "hehun",
+    "verdict",
 )
 
 # 未打标签的调用只警告一次（按模型）：成本页出现"用途 unknown"就是这里漏包 llm_tag

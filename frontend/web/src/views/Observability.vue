@@ -272,6 +272,7 @@ const LLM_TAG_LABELS: Record<string, string> = {
   liuyao: "六爻",
   ziwei: "紫微斗数",
   hehun: "合婚",
+  verdict: "命盘裁决（影子）",
   unknown: "未标注（代码里漏包 llm_tag）",
 }
 
