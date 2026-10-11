@@ -713,7 +713,7 @@ async function onAnalyze() {
 }
 .region-picker {
   width: 100%;
-  background: #fff;
+  background: $color-bg-elevated;
   border-radius: 24rpx 24rpx 0 0;
   padding-bottom: env(safe-area-inset-bottom);
   max-height: 58vh;
@@ -736,18 +736,18 @@ async function onAnalyze() {
   padding: 10rpx 28rpx;
   font-size: 26rpx;
   border-radius: 30rpx;
-  background: #f5f5f5;
-  color: #888;
+  background: $color-bg-warm;
+  color: $color-ink-lighter;
 }
 .rp-tab.active {
-  background: #1a1a1a;
-  color: #fff;
+  background: $color-primary;
+  color: $color-bg;
   font-weight: 600;
 }
 .rp-confirm {
   padding: 14rpx 36rpx;
-  background: #1a1a1a;
-  color: #fff;
+  background: $color-primary;
+  color: $color-bg;
   font-size: 26rpx;
   border-radius: 30rpx;
   font-weight: 600;
@@ -758,14 +758,14 @@ async function onAnalyze() {
   align-items: center;
   gap: 10rpx;
   padding: 16rpx 24rpx;
-  background: #f7f7f7;
+  background: $color-bg-warm;
   border-radius: 12rpx;
-  border: 1rpx solid #eee;
+  border: 1rpx solid $color-border;
   flex-shrink: 0;
 }
 .rp-search-icon { font-size: 26rpx; }
-.rp-search-input { flex: 1; font-size: 26rpx; }
-.rp-search-ph { color: #bbb; }
+.rp-search-input { flex: 1; font-size: 26rpx; color: $color-ink; }
+.rp-search-ph { color: $color-ink-lighter; }
 .rp-col-labels {
   display: flex;
   padding: 10rpx 32rpx 6rpx;
@@ -775,7 +775,7 @@ async function onAnalyze() {
   flex: 1;
   text-align: center;
   font-size: 26rpx;
-  color: #999;
+  color: $color-ink-lighter;
   font-weight: 500;
 }
 .rp-columns {
@@ -791,12 +791,12 @@ async function onAnalyze() {
   display: block;
   padding: 24rpx 16rpx;
   font-size: 30rpx;
-  color: #333;
+  color: $color-ink;
   text-align: center;
   line-height: 1.5;
 }
 .rp-item.active {
-  color: #1a1a1a;
+  color: $color-primary;
   font-weight: 700;
   background: rgba(212,175,55,0.08);
 }

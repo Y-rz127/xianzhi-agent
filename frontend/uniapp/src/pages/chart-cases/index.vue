@@ -371,5 +371,5 @@ onMounted(load)
 }
 
 .fav-btn { color: $color-vermilion; background: rgba(184, 72, 60, 0.08); border: 1rpx solid rgba(184, 72, 60, 0.25); }
-.fav-btn.active { color: #fff; background: $color-vermilion; border-color: $color-vermilion; }
+.fav-btn.active { color: $color-bg; background: $color-vermilion; border-color: $color-vermilion; }
 </style>
