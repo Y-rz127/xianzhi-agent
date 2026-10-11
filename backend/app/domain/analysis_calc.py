@@ -49,6 +49,10 @@ _POSITION_WEIGHTS = {
     i: (round(gan * _TOTAL_WEIGHT, 4), round(zhi * _TOTAL_WEIGHT, 4))
     for i, (gan, zhi) in _POSITION_RATIOS.items()
 }
+# 日干本气在**全局**五行分布里的权重：日干是八字之一，展示口径必须计回，
+# 否则「日干是木而木显示 0」。取值 1.0（一个天干字符的本气），与三天干权重
+# （0.616/1.32/0.704）同量级；只进 global_counts，不进 counts（影响口径）。
+_DAY_MASTER_GLOBAL_WEIGHT = 1.0
 
 # 原 _CONG_SELF_WX_MAX = 0.50 已删除（2026-09-15）。
 # 它比较的是"日主五行**绝对**权重"，而日干自身必然贡献 1.0，
@@ -446,12 +450,19 @@ def _build_wuxing_analysis(ec) -> WuxingAnalysis:
 
     strongest = max(weighted, key=weighted.get)
     weakest = min(weighted, key=weighted.get)
+    # 全局分布 = 影响分布 + 日干本气（展示口径，日干是八字之一必须计回）
+    global_counts = dict(weighted)
+    if day_wx in global_counts:
+        global_counts[day_wx] = round(global_counts[day_wx] + _DAY_MASTER_GLOBAL_WEIGHT, 2)
     notes = [
         "五行权重已纳入天干、地支、藏干，并对月令加权；比单纯统计八个字更稳。",
+        "counts 为「各干支对日干的影响」分布（日干不计，供强弱/格局判定）；"
+        "global_counts 为全局分布（加回日干本气，供五行分布图展示）。",
         "强弱为工程化初判，最终用神仍需结合格局、调候、合冲刑害与大运流年校验。",
     ]
     return WuxingAnalysis(
         counts=_round_counts(weighted),
+        global_counts=_round_counts(global_counts),
         visible_counts=visible_counts,
         strongest=strongest,
         weakest=weakest,

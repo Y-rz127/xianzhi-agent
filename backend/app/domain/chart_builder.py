@@ -500,8 +500,11 @@ def chart_to_api_dict(chart: BaziChart) -> dict[str, Any]:
             }
             for p in chart.pillars
         ],
+        # 五行分布图用**全局**口径（global_counts，含日干本气）——
+        # 日干是八字之一，影响口径下不计会导致「日干是木而木显示 0」。
+        # 强弱/格局判定走 chart.wuxing.counts（影响口径），不经过这里。
         "wuxing": [
-            {"name": name, "count": chart.wuxing.counts.get(name, 0), "color": colors[name]}
+            {"name": name, "count": chart.wuxing.global_counts.get(name, 0), "color": colors[name]}
             for name in WUXING_ORDER
         ],
         "analysis": {

@@ -79,9 +79,17 @@ class LiunianItem:
 
 @dataclass(frozen=True)
 class WuxingAnalysis:
-    """五行分析结果：含权重统计、日主强弱、用神提示与口径说明。"""
+    """五行分析结果：含权重统计、日主强弱、用神提示与口径说明。
+
+    两套五行口径，勿混用：
+    - `counts`：各干支**对日干的影响**分布，日干是被评估对象故不计入，
+      供强弱分、专旺/从格判定使用（总权重 = _TOTAL_WEIGHT）。
+    - `global_counts`：**全局**分布，在 counts 基础上加回日干本气，
+      供五行分布图等展示场景使用。
+    """
 
     counts: dict[str, float]
+    global_counts: dict[str, float]
     visible_counts: dict[str, int]
     strongest: str
     weakest: str

@@ -174,7 +174,8 @@ def build_domain_brief(chart: BaziChart, domain: str) -> str:
     lines.append(f"二、{_domain_god_section(domain)}相关十神落点")
     if domain == "health":
         w = chart.wuxing
-        lines.append(f"   日主 {w.day_master}({w.day_master_wuxing})；五行权重 {w.counts}")
+        lines.append(f"   日主 {w.day_master}({w.day_master_wuxing})；"
+                     f"五行对日干影响 {w.counts}；全局分布 {w.global_counts}")
         lines.append(f"   最旺 {w.strongest}；最弱 {w.weakest}")
     elif domain in ("personality", "general"):
         top = _top_gods(chart.analysis.ten_gods)

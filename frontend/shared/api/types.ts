@@ -24,6 +24,8 @@ export interface Pillar {
   zizuo?: string
 }
 
+/** 五行分布项。count 为**全局**口径（含日干本气，日干是八字之一必须计回）；
+ *  强弱/格局判定用的「对日干影响」口径（日干不计）在后端模型层，不经此字段。 */
 export interface WuxingItem { name: string; count: number; color: string }
 
 export interface DayunItem {

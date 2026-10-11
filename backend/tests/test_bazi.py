@@ -97,7 +97,8 @@ def test_legacy_tools_still_return_readable_text():
     liunian_text = bazi_liunian.invoke({"birth_time": "1990-05-20 14:30", "gender": MALE, "years": 1})
 
     assert "年柱: 庚午" in chart_text
-    assert "【五行权重】" in analysis_text
+    assert "【五行权重·对日干影响（日干不计）】" in analysis_text
+    assert "【五行分布·全局（含日干本气）】" in analysis_text
     assert "【结构判断】" in analysis_text
     # 大运行格式含十神标注：{干支}({十神}) | 年份区间 | 岁数
     assert "壬午(正印) | 1995-2004 | 6-15岁" in dayun_text
@@ -139,7 +140,8 @@ def test_bazi_chart_solar_with_zhi_hour():
 def test_all_bazi_tools_accept_lunar():
     """所有 bazi_* 工具入口均应接受农历输入（回归 _normalize_birth_time 覆盖）。"""
     analysis = bazi_analysis.invoke({"birth_time": LUNAR_BIRTH, "gender": MALE})
-    assert "【五行权重】" in analysis
+    assert "【五行权重·对日干影响（日干不计）】" in analysis
+    assert "【五行分布·全局（含日干本气）】" in analysis
 
     dayun = bazi_dayun.invoke({"birth_time": LUNAR_BIRTH, "gender": MALE})
     assert "失败" not in dayun

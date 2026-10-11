@@ -67,7 +67,8 @@ def format_analysis_text(chart: BaziChart, question: str = "整体运势") -> st
     lines = [
         f"【四柱】 {' '.join(p.ganzhi for p in chart.pillars)}",
         f"【日主】 {wx.day_master}({wx.day_master_wuxing})",
-        f"【五行权重】 {wx.counts}",
+        f"【五行权重·对日干影响（日干不计）】 {wx.counts}",
+        f"【五行分布·全局（含日干本气）】 {wx.global_counts}",
         f"【显性五行】 {wx.visible_counts}",
         f"【最旺/最弱】 {wx.strongest}({wx.counts[wx.strongest]}) / {wx.weakest}({wx.counts[wx.weakest]})",
         f"【日主强弱】 {wx.strength} (score={wx.strength_score})",
