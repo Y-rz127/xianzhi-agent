@@ -4,8 +4,14 @@
 - §一.2 从格成立条件（必须同时满足）：日主无根 / 天干无印比 / 全局气势专一 / **月令为所从之神**
 - §一.2 关键判定：'地支藏干中只要有日主微根（如甲木见辰中乙木、亥中甲木），
   即不为真从，为假从。天干虚浮一比一印，亦为假从。'
-- §八.1 假从：有微根或虚浮印比；行顺从运可发，行帮身运即破败。**现实：假从居多，真从极少。**
+- §八.1 假从：有微根或虚浮印；行顺从运可发，行帮身运即破败。**现实：假从居多，真从极少。**
 - §八.3 边界：根极弱 → 假从；根有力 → 正格；印比有力 → 正格。
+
+2026-10-11 修正：虚浮**比劫**不构成假从条件。原实现据 §一.2 成立条件第 2 条
+"天干无印比帮扶"把虚浮比劫也算微根，但同篇更具体的 §一.2 关键判定与 §八.1
+定义列举的假从触发条件均只含「地支微根」与「天干虚浮印」；典籍实例亦站此说 ——
+韦千里《千里命稿》从杀例 戊戌辛酉乙酉乙酉「乙木全无生气，岂能任之，只得从杀」、
+任铁樵《滴天髓》辛巳辛丑乙酉乙酉「干透两辛，从杀斯真」，时干皆虚浮乙木而仍判真从。
 
 `_CONG_SELF_WX_MAX = 0.50` 已于 2026-09-15 删除 —— 它比较"日主五行**绝对**权重，
 而日干自身必然贡献 1.0，该量最小值恒为 1.0（6 万样本实测），守卫恒真、从格永不成立。
@@ -37,7 +43,8 @@ ROOTLESS_MONTH_OUTPUT = ["己巳", "己午", "甲戌", "己午"]   # 月支 午=
 WEAK_ROOT = ["己巳", "戊辰", "甲戌", "己午"]               # 辰藏乙木 → 微根
 SOLID_ROOT_LU = ["己巳", "己寅", "甲戌", "己午"]           # 寅为甲禄 → 有力
 SOLID_ROOT_STEM = ["乙亥", "己戌", "甲戌", "己午"]         # 乙透干且亥藏甲 → 有力
-FLOATING_STEM = ["乙酉", "己戌", "甲戌", "己午"]           # 乙透干但地支无木 → 微根（虚浮）
+FLOATING_STEM = ["乙酉", "己戌", "甲戌", "己午"]           # 乙(比劫)透干无木 → 无根（虚浮不碍真从）
+FLOATING_RESOURCE = ["癸酉", "己戌", "甲戌", "己午"]       # 癸(印)透干无水 → 微根（虚浮印碍真从）
 # 破格之神有力的两组（其余条件都满足：无根 + 月令当令）
 IMPURE_CAI_BRANCH_METAL = ["己酉", "己戌", "甲戌", "己午"]  # 酉=金本气 → 官杀泄财
 IMPURE_SHA_STEM_FIRE = ["丙戌", "己酉", "甲戌", "己酉"]     # 丙=火透干 → 食伤制杀
@@ -84,11 +91,24 @@ def test_solid_verdict_from_stem_with_earthly_support():
     assert profile.verdict == "有力"
 
 
-def test_floating_stem_is_weak_not_solid():
-    """乙透干但地支无木 → 虚浮 → 假从，不是正格。"""
+def test_floating_stem_is_not_solid():
+    """乙（比劫）透干但地支无木 → 虚浮 → 非正格；但虚浮比劫不碍真从，verdict 为无根。
+
+    典籍依据见模块 docstring：韦千里从杀例、任铁樵「干透两辛，从杀斯真」。
+    """
     profile = A._root_profile(FLOATING_STEM, DAY_MASTER, DAY_WX, RESOURCE)
     assert profile.solid_support == ()
-    assert profile.floating_support == ("乙",)
+    assert profile.floating_support == ((0, "乙"),)
+    assert profile.floating_resource == ()
+    assert profile.verdict == "无根"
+
+
+def test_floating_resource_still_blocks_true_cong():
+    """癸（印）透干但地支无水 → 虚浮印仍碍真从（知识库 §一.2 关键判定 / §八.1）。"""
+    profile = A._root_profile(FLOATING_RESOURCE, DAY_MASTER, DAY_WX, RESOURCE)
+    assert profile.solid_support == ()
+    assert profile.floating_support == ((0, "癸"),)
+    assert profile.floating_resource == ((0, "癸"),)
     assert profile.verdict == "微根"
 
 
@@ -128,7 +148,7 @@ def test_true_congshi_when_two_elements_comparable():
 
 def test_congshi_threshold_boundary():
     """`_CONG_SECOND_RATIO` 两侧：略低 → 独旺型；达到 → 从势。"""
-    below = _conging(_weights(**{WEALTH: 2.0, OFFICER: 2.0 * 0.79}))
+    below = _conging(_weights(**{WEALTH: 2.0, OFFICER: 2.0 * 0.69}))
     at = _conging(_weights(**{WEALTH: 2.0, OFFICER: 2.0 * A._CONG_SECOND_RATIO}))
     assert below is not None and below[1] == "从财格"
     assert at is not None and at[1] == "从势格"
@@ -273,8 +293,12 @@ def test_zhuanwang_returns_kind_label_hint():
 
 
 def test_zhuanwang_uses_ratio_threshold():
-    """专旺用的是**占比**口径，从格侧已统一为根气画像 —— 二者都不再依赖绝对权重。"""
-    payload = {DAY_WX: 4.0, RESOURCE: 3.0, OUTPUT: 0.5, WEALTH: 0.3, OFFICER: 0.2}
+    """专旺用的是**占比**口径，从格侧已统一为根气画像 —— 二者都不再依赖绝对权重。
+
+    占比门槛 _ZHUANWANG_DOM_RATIO=0.35（2026-10-11 主气去重后整体下移）：
+    此处 4.0/8.8≈0.45 会压线通过，故取 3.0/8.8≈0.34 明确落在门槛内。
+    """
+    payload = {DAY_WX: 3.0, RESOURCE: 3.0, OUTPUT: 1.0, WEALTH: 1.0, OFFICER: 0.8}
     assert A._detect_zhuanwang(payload, DAY_WX, RESOURCE, OFFICER, WEALTH, OUTPUT) is None
 
 

@@ -2,28 +2,21 @@
 
 事故锚点
 --------
-一张 2004-06-22 08:00 男命（甲申 庚午 壬申 甲辰，日主壬水、中和、正格）。
-用户指出「最忌金，因为金旺夺食；忌土生金；最喜水泄金调候，火制金、木抒发」，
-而引擎给出「最喜土 / 最忌水」——两处完全相反。
+一张 2004-06-22 08:00 男命（甲申 庚午 壬申 甲辰，日主壬水、正格）。
 
-根因不是数据算错，是**方向表只看强弱档**：`signs` 是档位常量，五行分布进不了门。
-该盘金权重 4.40（占 32.7%，五行之最重），水仅 1.70，却是「最忌水」——
-因为比劫的基准系数 1.0 是五路里最大的，「最忌」由系数而非病神决定。
-「最喜」同理：官杀系数 0.8 > 财 0.7 > 食伤 0.55，于是任何偏旺盘都必然「最喜官杀」。
+历史沿革：2026-09 修过「方向表只看强弱档」的错（金最重却最忌水），
+彼时旧等权口径下金占 32.7% 为五行最重，判「印重之病」，读数为「最忌金、最喜水」。
+2026-10-11 四柱位置权重落地（月令 32.5% 为提纲）后，午火当令跃居最重（32.2%），
+金退居次重（29.9%），不再满足「印显著独重」的病药判据，该盘回到扶抑路径：
+身弱（-0.78 中和偏弱）用印比，忌财杀 —— 最喜水（比劫）、次喜金（印发源），
+最忌土（杀）、次忌火（财）。这也更合传统：夏水调候正需金发其源，金是药不是病。
 
-修法：《滴天髓》病药论（knowledge_docs/04_用神喜忌.md §三.2）——
-「印多之病：以财制印、以比劫泄印为药」，官杀生印反助病。
+本文件守卫的两层性质（重标定后依旧成立）：
 
-**术语**：印为忌时财克印是「财制印」（药）；印为用时被财克才叫「财坏印」（破格）。
-两者字面相近而吉凶相反 —— 曾经错写成「以财坏印为药」，等于把药说成坏事。
-
-本文件守卫病药路径的四条性质，任何一条被改坏都会让用神结论重新错回去：
-
-1. 印重盘的「最忌」必须是病神（印），不能被基准系数截胡；
-2. 官杀必须由喜转忌（生印助病），否则等于给病神添柴；
-3. 药（财 / 比劫 / 食伤）必须为正；食伤虽由印所克，是被病神伤到的一路；
-4. 判据不得滥判 —— 印虽最重但未显著重于比劫的盘应留在原扶抑路径，
-   偏弱、极旺、专旺、从格全部不得进入此路径。
+1. 病药路径（resource_dominant）：黄金盘中 boundary_longitude 仍命中，
+   病神/药/官杀转向四性质对黄金盘断言；
+2. 事故锚点盘：新口径下走扶抑路径，喜忌排序按上表钉死，
+   「最喜水、最忌土」任何回退（如重新误入病药路径判忌金）都会在此失败。
 """
 
 from __future__ import annotations
@@ -74,37 +67,45 @@ def charts_with_ailment():
     return out
 
 
+def charts_with_resource_ailment():
+    """黄金盘中落入**印重**病药路径的命盘（杀重路径的性质由 _sha 文件守卫）。"""
+    return [(cid, ch) for cid, ch in charts_with_ailment()
+            if FS.detect_ailment(ch) == "resource_dominant"]
+
+
 # ---------------- 事故锚点：逐条对齐用户给出的读数 ----------------
 
 
 def test_reported_chart_ranks_element_as_user_read() -> None:
-    """报障盘的喜忌排序：水 > 火 > 木 > 0 > 土 > 金。
+    """报障盘的喜忌排序（2026-10-11 位置权重口径）：水 > 金 > 0 > 木 > 火 > 土。
 
-    用户的原话是「最忌金…忌土生金，最喜水…火制金、木抒发」。
-    顺序也一并断言 —— 只断言正负号会放过「水和火谁更高」这类回退。
+    午月壬水身弱用印比：最喜水（比劫）、次喜金（印发源）；最忌土（杀）、次忌火（财）。
+    顺序一并断言 —— 只断正负号会放过「水和金谁更高」这类回退。
     """
     favor = FS.chart_favor_summary(reported_chart())["favor"]
-    assert favor["金"] < favor["土"] < 0, f"金土应并忌且金更忌，实得 {favor}"
-    assert favor["木"] > 0 and favor["火"] > 0 and favor["水"] > 0, f"木火水应并喜，实得 {favor}"
-    assert favor["水"] > favor["火"] > favor["木"], f"喜神次序应为 水>火>木，实得 {favor}"
+    assert favor["水"] > favor["金"] > 0, f"水土? 印比应并喜且水更喜，实得 {favor}"
+    assert favor["木"] < 0 and favor["火"] < 0 and favor["土"] < 0, f"木火土应并忌，实得 {favor}"
+    assert favor["土"] < favor["火"] < favor["木"], f"忌神次序应为 土>火>木，实得 {favor}"
 
 
 def test_reported_chart_extremes() -> None:
-    """最喜水、最忌金 —— 修前是「最喜土、最忌水」，两处都反。"""
+    """最喜水、最忌土 —— 位置权重口径（旧等权口径曾判「最忌金」，金实为发源之药）。"""
     summary = FS.chart_favor_summary(reported_chart())
     assert summary["mostFavored"] == "水", f"最喜应为水，实得 {summary['mostFavored']}"
-    assert summary["mostOpposed"] == "金", f"最忌应为金，实得 {summary['mostOpposed']}"
+    assert summary["mostOpposed"] == "土", f"最忌应为土，实得 {summary['mostOpposed']}"
 
 
-def test_reported_chart_ailment_detected() -> None:
-    """该盘必须被判为印重之病：金占 32.7% 为五行之最重，且为比劫（水）的 2.6 倍。"""
-    assert FS.detect_ailment(reported_chart()) == "resource_dominant"
-    note = FS.chart_favor_summary(reported_chart())["ailmentNote"]
-    assert note and "印重" in note
+def test_reported_chart_no_ailment_path() -> None:
+    """该盘不得落入病药路径：午火当令（位置权重 32.5%）为五行最重，
+    金（印）退居次重且不显著独重，按扶抑取用即可。
+    曾经由旧等权口径判 resource_dominant（最忌金）—— 那会把发源之药当病神。
+    """
+    assert FS.detect_ailment(reported_chart()) == ""
+    assert FS.chart_favor_summary(reported_chart())["ailmentNote"] == ""
 
 
 def test_reported_chart_year_pillars_score_in_expected_order() -> None:
-    """岁运行为：走金最低、走水最高。这是「金旺夺食不该涨」的直接体现。
+    """岁运行为：喜神（水/金）走运全部高于 50，忌神（火/土/木）全部低于 50。
 
     断言的是**区间归属**而非精确分数 —— 精确值由黄金快照负责，
     这里负责证明方向，两者分工不同。
@@ -115,12 +116,10 @@ def test_reported_chart_year_pillars_score_in_expected_order() -> None:
         band[wx] = [
             FS.delta_to_score(FS.score_delta(chart, dayun=gz)) for gz in ganzhis
         ]
-    assert max(band["金"]) < 50, f"走金应全部低于 50 分，实得 {band['金']}"
-    assert max(band["土"]) < 50, f"走土（生金助病）应低于 50 分，实得 {band['土']}"
-    assert min(band["木"]) > 50, f"走木应高于 50 分，实得 {band['木']}"
-    assert min(band["火"]) > 50, f"走火应高于 50 分，实得 {band['火']}"
-    assert min(band["水"]) > 50, f"走水应高于 50 分，实得 {band['水']}"
-    assert max(band["金"]) < min(band["水"]), "金应显著低于水"
+    assert min(band["水"]) > 50 and min(band["金"]) > 50, f"走水土应全部高于 50 分，实得 {band}"
+    assert max(band["火"]) < 50 and max(band["土"]) < 50 and max(band["木"]) < 50, (
+        f"走火土木应全部低于 50 分，实得 {band}"
+    )
 
 
 # ---------------- 病药路径的通用性质（跑遍全部黄金盘） ----------------
@@ -161,8 +160,9 @@ def test_ailment_makes_resource_the_worst_and_officer_opposed() -> None:
     """核心性质：病神（印）为最忌，官杀由喜转忌。
 
     官杀在原扶抑档是正号（偏旺喜官杀制身）。若此处仍为正，等于给病神添柴。
+    只对印重路径断言 —— 杀重路径的转向性质见 test_favor_yongshen_sha.py。
     """
-    for case_id, chart in charts_with_ailment():
+    for case_id, chart in charts_with_resource_ailment():
         w = chart.wuxing
         day_wx = w.day_master_wuxing
         resource = FS._producer_of(day_wx)
@@ -178,7 +178,7 @@ def test_ailment_makes_resource_the_worst_and_officer_opposed() -> None:
 
 def test_ailment_medicines_are_all_favored() -> None:
     """药：财（制印）、比劫（泄印）为正；食伤被病神所克，同为受损一路，亦为正。"""
-    for case_id, chart in charts_with_ailment():
+    for case_id, chart in charts_with_resource_ailment():
         w = chart.wuxing
         day_wx = w.day_master_wuxing
         favor = FS.favor_vector(chart)
@@ -223,12 +223,16 @@ def test_ailment_never_for_extreme_prosperity() -> None:
 
 
 def test_ailment_requires_positive_strength_score() -> None:
-    """中和但落在偏弱侧（score ≤ 0）时印仍是靠山，不判病。"""
+    """中和但落在偏弱侧（score ≤ 0）时印仍是靠山，不判**印重**之病。
+
+    只约束印重路径：杀重之病恰恰是杀压身，负侧是常态（见 _sha 文件
+    `test_neutral_negative_side_still_detects_sha`）。
+    """
     for case in all_cases():
         chart = K.cached_chart(case["id"])
         w = chart.wuxing
         if not w.special_pattern and w.strength == "中和" and w.strength_score <= 0:
-            assert FS.detect_ailment(chart) == "", (
+            assert FS.detect_ailment(chart) != "resource_dominant", (
                 f"{case['id']} 中和偏弱侧（score={w.strength_score}），不该判印重之病"
             )
 

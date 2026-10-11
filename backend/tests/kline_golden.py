@@ -136,11 +136,11 @@ DIM_FIXTURE = Path(__file__).resolve().parent / "fixtures" / "kline_dimensions.j
 
 DIM_FINGERPRINT_CASES = (
     "stem_yi",  # 正格 · 日主偏弱
-    "stem_bing",  # 正格 · 日主偏旺
+    "stem_bing",  # 正格 · 日主中和（2026-10-11 位置权重重标定，原偏弱）
     "zhuanwang_quzhi",  # 专旺 · 曲直格
     "zhuanwang_runxia",  # 专旺 · 润下格
     "cong_true_cai",  # 真从 · 从财格
-    "cong_fake_sha",  # 假从 · 假从杀格
+    "cong_fake_sha",  # 假从 · 假从势格（2026-10-11 重标定，原假从杀）
     "strength_ji_ruo",  # 极弱档
     "boundary_female",  # 女命（感情维度取用与男命相反）
 )

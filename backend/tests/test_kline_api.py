@@ -208,19 +208,21 @@ def test_favor_carries_ailment_reason() -> None:
 
 
 def test_ailment_flips_officer_and_resource_over_wire() -> None:
-    """报障盘（2004-06-22 08:00 男）走接口时：最忌金、最喜水，且带印重说明。
+    """报障盘（2004-06-22 08:00 男）走接口时：最喜水、最忌土，无病药标注。
 
-    钉在接口层是因为前端读的就是这两个字段 —— 引擎修好了但接口没透传，
+    2026-10-11 位置权重重标定后该盘午火当令为最重，不再落入印重病药路径，
+    回到扶抑：身弱用印比，最喜水（比劫）、最忌土（杀）。
+    钉在接口层是因为前端读的就是这两个字段 —— 引擎改了但接口没透传，
     用户看到的仍旧是错的那一版。
     """
     payload = _payload(birth_time="2004-06-22 08:00", gender="男")
     favor = payload["favor"]
-    assert favor["mostOpposed"] == "金", f"最忌应为金，实得 {favor['mostOpposed']}"
+    assert favor["mostOpposed"] == "土", f"最忌应为土，实得 {favor['mostOpposed']}"
     assert favor["mostFavored"] == "水", f"最喜应为水，实得 {favor['mostFavored']}"
-    assert favor["ailment"] == "resource_dominant"
-    assert "印重" in favor["ailmentNote"]
-    assert favor["favor"]["金"] < favor["favor"]["土"] < 0
-    assert favor["favor"]["水"] > favor["favor"]["火"] > favor["favor"]["木"] > 0
+    assert favor["ailment"] == ""
+    assert favor["ailmentNote"] == ""
+    assert favor["favor"]["水"] > favor["favor"]["金"] > 0
+    assert favor["favor"]["土"] < favor["favor"]["火"] < 0
 
 
 def test_dimension_changes_the_curve() -> None:

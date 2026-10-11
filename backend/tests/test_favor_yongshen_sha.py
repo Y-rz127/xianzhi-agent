@@ -165,10 +165,16 @@ def test_never_for_special_pattern() -> None:
     assert FS.detect_ailment(_StubChart(wuxing=_StubWuxing(special_pattern="假从"))) == ""
 
 
-def test_never_for_neutral_negative_side() -> None:
-    """中和负侧（score ≤ 0）方向表本就喜印比、忌官杀，不得改向。"""
-    assert FS.detect_ailment(_StubChart(wuxing=_StubWuxing(strength_score=0.0))) == ""
-    assert FS.detect_ailment(_StubChart(wuxing=_StubWuxing(strength_score=-0.5))) == ""
+def test_neutral_negative_side_still_detects_sha() -> None:
+    """中和负侧（score ≤ 0）的杀重桩盘仍须命中 —— 一刀切挡负分会漏掉整个杀重路径。
+
+    2026-10-11 日干不计入位置权重后，杀重盘的分数整体下移（事故锚点盘由 +0.44
+    跌到 -1.51），旧守卫 `strength_score <= 0` 会把它们全部放行。杀重之病的本质
+    就是杀压身，负侧是常态：比劫党众硬抗（正侧）与杀真压身（负侧）两种姿态
+    都该按病药论改向，故 score 正负不再作为杀重路径的门槛。
+    """
+    assert FS.detect_ailment(_StubChart(wuxing=_StubWuxing(strength_score=0.0))) == "officer_dominant"
+    assert FS.detect_ailment(_StubChart(wuxing=_StubWuxing(strength_score=-0.5))) == "officer_dominant"
 
 
 def test_never_when_medicine_present() -> None:
@@ -261,15 +267,22 @@ def test_officer_note_says_zhisha_not_poge() -> None:
 # ---------------- 零漂移锚点 ----------------
 
 
-def test_golden_cases_never_enter_officer_path() -> None:
-    """36 个黄金盘无一进入杀重路径 —— K 线快照全等的结构性保证。
+def test_golden_cases_enter_officer_path_only_by_exception() -> None:
+    """黄金盘中进入杀重路径的必须是**已登记的例外**，且只能是个别。
 
-    若此条失败，说明判据变松、波及了黄金盘：必须先重审判据，
-    再（若确属口径演进）重生成快照并人工核对 diff，不可顺手 UPDATE_GOLDEN。
+    2026-10-11 主气去重 + 位置权重重标定后，shensha_tianshe（庚戌 戊寅 戊寅 壬子，
+    戊土日主）由偏弱翻到中和，其结构本就可判杀重：寅月七杀当令、两寅夹克、
+    火印 1.23 不堪化、金食伤 0.73 不堪制、官杀 2.80 重于比劫 2.28 ——
+    旧权重下它落在偏弱档被守卫挡住，并非结构不符。故登记为例外而非回退判据。
+
+    若此条失败且新增了未登记的用例，说明判据变松、波及了黄金盘：
+    必须先重审判据，再（若确属口径演进）登记例外并重生成快照、人工核对 diff。
     """
-    for case in K.load_cases():
-        chart = K.cached_chart(case["id"])
-        assert FS.detect_ailment(chart) != "officer_dominant", f"{case['id']} 进入杀重路径，快照已漂移"
+    REGISTERED = {"shensha_tianshe"}
+    entered = {c["id"] for c in K.load_cases()
+               if FS.detect_ailment(K.cached_chart(c["id"])) == "officer_dominant"}
+    assert entered <= REGISTERED, f"未登记的杀重路径用例：{sorted(entered - REGISTERED)}"
+    assert len(entered) <= 2, f"杀重路径用例过多（{len(entered)} 个），判据疑过松"
 
 
 def test_ailment_path_stays_minority() -> None:

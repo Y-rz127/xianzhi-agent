@@ -615,18 +615,21 @@ _RES, _SAME, _OUT, _WEALTH, _OFF = "金", "水", "木", "火", "土"
 
 
 def test_classify_strength_five_levels_buckets():
-    """_classify_strength 五档分档阈值正确。"""
+    """_classify_strength 五档分档阈值正确（2026-10-11 主气去重+位置权重重标定：
+    极旺 3.6 / 偏旺 1.0 / 偏弱 -1.4 / 极弱 -4.4，正负不对称）。"""
     cases = [
         (11.26, "极旺"),
         (8.0, "极旺"),
-        (7.0, "极旺"),
+        (3.6, "极旺"),
         (3.0, "偏旺"),
-        (2.2, "偏旺"),
+        (1.0, "偏旺"),
+        (0.99, "中和"),
         (0.0, "中和"),
-        (-1.2, "偏弱"),
+        (-1.4, "偏弱"),
+        (-1.39, "中和"),
         (-3.0, "偏弱"),
-        (-7.0, "极弱"),
-        (-8.0, "极弱"),
+        (-4.4, "极弱"),
+        (-5.0, "极弱"),
     ]
     for score, expect in cases:
         strength, _ = _classify_strength(score, _WX, _RES, _SAME, _OUT, _WEALTH, _OFF)

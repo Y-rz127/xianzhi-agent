@@ -346,12 +346,13 @@ def favor_vector(chart: BaziChart) -> dict[str, float]:
         signs = _ailment_signs(same, resource, output, wealth, officer)
     elif (
         w.strength != "极旺"
-        and w.strength_score > 0
         and _officer_dominant(w.counts, zhis, same, resource, output, officer)
     ):
-        # 杀重之病。档位同样回答不了「克从何来」：比劫党众硬抗能把 score 顶进
-        # 中和/偏旺正侧，方向表随之给出「最喜官杀」——给病神添柴。典型事故盘：
-        # 乙酉×3 乙卯（三酉冲一卯），天干四乙把 +0.44 的贴零分补成正侧。
+        # 杀重之病。档位回答不了「克从何来」：比劫党众硬抗能把 score 顶进中和正侧，
+        # 方向表随之给出「最喜官杀」——给病神添柴；而杀真的压住身时 score 又落入负侧，
+        # 扶抑表给出「喜比劫硬抗」——同样错。两种姿态都须按病药论改向，故此处不设
+        # score 正负条件（与 detect_ailment 的口径一致）。
+        # 典型事故盘：乙酉×3 乙卯（三酉冲一卯），天干比劫党众而卯根被冲。
         # 排除条件与印重同构，另加「有制有化不为病」（杀印相生/食神制杀是成格）。
         signs = _officer_ailment_signs(same, resource, output, wealth, officer)
     elif w.strength in ("偏旺", "极旺"):
@@ -734,14 +735,18 @@ def detect_ailment(chart: BaziChart) -> str:
       顶进中和/偏旺正侧，方向表随之误判「最喜官杀」，故须按病药论改向。
     其余病种（财多身弱 / 食伤泄身太过等）在 `strength` 五档里已被
     「偏弱喜印比、忌克泄耗」覆盖，不需另立分支。
+
+    档位守卫只排除特殊格局与偏弱/极弱/极旺；`strength_score > 0` 仅约束印重路径 ——
+    印重之病旺由印撑故在正侧，而杀重之病恰恰是杀压身（分数常为负），
+    一刀切挡负分会把杀重盘全部漏掉（2026-10-11 日干不计入后分数整体下移，尤甚）。
     """
     w = chart.wuxing
-    if w.special_pattern or w.strength in ("偏弱", "极弱", "极旺") or w.strength_score <= 0:
+    if w.special_pattern or w.strength in ("偏弱", "极弱", "极旺"):
         return ""
     day_wx = w.day_master_wuxing
     if day_wx not in WUXING_ORDER:
         return ""
-    if _resource_dominant(w.counts, day_wx, _producer_of(day_wx)):
+    if w.strength_score > 0 and _resource_dominant(w.counts, day_wx, _producer_of(day_wx)):
         return "resource_dominant"
     if _officer_dominant(
         w.counts,

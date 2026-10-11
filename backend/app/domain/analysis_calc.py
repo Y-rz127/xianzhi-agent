@@ -16,11 +16,39 @@ from app.domain.tables import (
 )
 
 # 特殊格局判定阈值
-_ZHUANWANG_DOM_RATIO = 0.60       # 主导五行占全局加权比例下限
-_ZHUANWANG_PRESSURE_MAX = 2.0     # 克泄耗三行合计加权上限（超过视为破局，不判专旺）
-_CONG_ROOT_MIN_HIDDEN = 0.30      # 藏干中某五行达此权重视为"本气级"（判透干印比是否有地支支撑）
-_CONG_RESOURCE_MIN_HIDDEN = 0.30  # 同上，用于印星
-_CONG_SECOND_RATIO = 0.80         # 从势判定：次旺/最旺 ≥ 此比例视为两行相当 → 从势
+_ZHUANWANG_DOM_RATIO = 0.35       # 主导五行占「对日干影响」加权比例下限
+_ZHUANWANG_PRESSURE_MAX = 2.8     # 克泄耗三行合计加权上限（超过视为破局，不判专旺）
+_CONG_ROOT_MIN_HIDDEN = 0.25      # 藏干中某五行达此权重视为"中气级"（判透干印比是否有地支支撑）；
+                                  # 与藏干比中气 0.25 对齐（2026-10-11 藏干比 30/10→25/15 时同步，
+                                  # 保持"单中气支撑即有力"的原标定语义）
+_CONG_SECOND_RATIO = 0.70         # 从势判定：次旺/最旺 ≥ 此比例视为两行相当 → 从势
+_CONG_DOMINANT_MIN = 0.6          # 从格候选门槛：克泄耗中最旺一行须达此权重，否则无从
+
+# 强弱档位门槛（2026-10-11 随位置权重重标定；正负不对称——日干不计入后
+# 扶助力整体下移，且地支只按藏干比分配一次，分数整体约为旧口径的 55%）
+_RU = 1.0                         # 偏旺
+_RUAN = -1.4                      # 偏弱
+_EXTREME_HIGH = 3.6               # 极旺（同时为专旺候选区门槛）
+_EXTREME_LOW = -4.4               # 极弱（同时为从格候选区门槛）
+
+# 四柱位置权重：各干支「对日干的影响力量」占比（2026-10-11 重标定）。
+# 年干7% 年支5%｜月干15% 月支35%｜日干0% 日支18%｜时干8% 时支12%；
+# 天干合计 30%、地支合计 70%（传统「天干三分、地支七分」），月柱 50% 为提纲。
+# 日干是**被评估对象**，不参与「对日干影响」的计算（其本气即日主本身）；
+# 全局五行分布的 visible_counts 仍含日干，两个口径勿混用。
+# 实际权重 = 占比 × _TOTAL_WEIGHT（8.8，与历史口径同量纲，按需调整）。
+# 藏干 = 藏干比 × 本柱地支权重，月令藏干随之放大，体现「得令者旺」。
+_TOTAL_WEIGHT = 8.8
+_POSITION_RATIOS = {
+    0: (0.07, 0.05),   # 年干 7% / 年支 5% —— 距日主最远，须合冲刑害方显
+    1: (0.15, 0.35),   # 月干 15% / 月支 35% —— 提纲，旺衰之源
+    2: (0.00, 0.18),   # 日干 0%（不计）/ 日支 18% —— 日主之坐，贴身之根
+    3: (0.08, 0.12),   # 时干 8% / 时支 12% —— 归宿之地
+}
+_POSITION_WEIGHTS = {
+    i: (round(gan * _TOTAL_WEIGHT, 4), round(zhi * _TOTAL_WEIGHT, 4))
+    for i, (gan, zhi) in _POSITION_RATIOS.items()
+}
 
 # 原 _CONG_SELF_WX_MAX = 0.50 已删除（2026-09-15）。
 # 它比较的是"日主五行**绝对**权重"，而日干自身必然贡献 1.0，
@@ -80,27 +108,39 @@ _ZHUANWANG_NAME = {"水": "润下格", "火": "炎上格", "木": "曲直格", "
 #
 # 注意"微根"的门槛是**有一丝**，不是本气级 —— 故不能用 _CONG_ROOT_MIN_HIDDEN 当根气门槛。
 # 该常量现在只用于判断"透干的印比在地支有没有本气级支撑"（虚浮 vs 有力）。
+#
+# 2026-10-11 修正：原实现把"透干虚浮比劫"也算作微根（假从），依据是对 §一.2 成立条件
+# 第 2 条"天干无印比帮扶"的从宽解读。但同篇更具体的两处（§一.2 关键判定、§八.1 定义）
+# 列举的假从触发条件只有「地支微根」与「天干虚浮印」，均未含虚浮**比劫**；典籍实例亦站此说：
+#   - 韦千里《千里命稿·外格篇》从杀例 戊戌辛酉乙酉乙酉：「乙木全无生气，岂能任之，
+#     只得从杀，是即从杀格也」——时干一乙虚浮无根，仍判真从；
+#   - 任铁樵《滴天髓·从象章》辛巳辛丑乙酉乙酉：「干透两辛，从杀斯真」——同为虚浮比劫。
+# 故虚浮比劫不碍真从，虚浮印仍碍（印能生身，比劫无根则无力）。
+# 连带地，强弱分中虚浮印比的扶助力打对折（见 _FLOATING_STEM_FACTOR）。
 
 _VERDICT_SOLID = "有力"
 _VERDICT_WEAK = "微根"
 _VERDICT_NONE = "无根"
+
+_FLOATING_STEM_FACTOR = 0.5  # 透干虚浮印比的扶助力折扣：无根则虚浮，力量打对折
 
 
 @dataclass(frozen=True)
 class _RootProfile:
     """日主根气画像。`verdict` 是三档判定的唯一入口。"""
 
-    lu_ren_ku: bool                    # 地支见禄/刃/墓库根
-    hidden_day: float                  # 藏干中日主五行权重合计（含余气）
-    hidden_resource: float             # 藏干中印星五行权重合计
-    solid_support: tuple[str, ...]     # 印比透干且地支有本气级支撑
-    floating_support: tuple[str, ...]  # 印比透干但地支无支撑（虚浮）
+    lu_ren_ku: bool                     # 地支见禄/刃/墓库根
+    hidden_day: float                   # 藏干中日主五行权重合计（含余气）
+    hidden_resource: float              # 藏干中印星五行权重合计
+    solid_support: tuple[str, ...]      # 印比透干且地支有本气级支撑
+    floating_support: tuple[tuple[int, str], ...]   # (柱位, 天干) 透干但地支无支撑
+    floating_resource: tuple[tuple[int, str], ...]  # 上者中属印星者：印碍真从，比劫不碍
 
     @property
     def verdict(self) -> str:
         if self.lu_ren_ku or self.solid_support:
             return _VERDICT_SOLID
-        if self.hidden_day > 0 or self.hidden_resource > 0 or self.floating_support:
+        if self.hidden_day > 0 or self.hidden_resource > 0 or self.floating_resource:
             return _VERDICT_WEAK
         return _VERDICT_NONE
 
@@ -126,7 +166,8 @@ def _root_profile(pillars, day_master: str, day_wx: str, resource: str) -> _Root
                 hidden_resource += ratio
 
     solid: list[str] = []
-    floating: list[str] = []
+    floating: list[tuple[int, str]] = []
+    floating_resource: list[tuple[int, str]] = []
     for i, p in enumerate(pillars):
         if i == 2:  # 日柱天干即日主
             continue
@@ -140,9 +181,15 @@ def _root_profile(pillars, day_master: str, day_wx: str, resource: str) -> _Root
             )
             >= _CONG_ROOT_MIN_HIDDEN
         )
-        (solid if supported else floating).append(p[0])
+        if supported:
+            solid.append(p[0])
+        else:
+            floating.append((i, p[0]))
+            if gw == resource:
+                floating_resource.append((i, p[0]))
 
-    return _RootProfile(lu_ren_ku, hidden_day, hidden_resource, tuple(solid), tuple(floating))
+    return _RootProfile(lu_ren_ku, hidden_day, hidden_resource, tuple(solid),
+                        tuple(floating), tuple(floating_resource))
 
 
 def _detect_zhuanwang(weighted, day_wx, resource, officer, wealth, output):
@@ -232,7 +279,7 @@ def _detect_conging(weighted, pillars, day_wx, day_master, resource, officer, we
         "食伤": weighted.get(output, 0.0),
     }
     best_name = max(contenders, key=contenders.get)
-    if contenders[best_name] < 0.5:
+    if contenders[best_name] < _CONG_DOMINANT_MIN:
         return None  # 没有一行明显独旺，无从
 
     vals = sorted(contenders.values(), reverse=True)
@@ -269,18 +316,20 @@ def _detect_conging(weighted, pillars, day_wx, day_master, resource, officer, we
 
 def _detect_special_pattern(pillars, weighted, day_wx, day_master, score,
                             resource, output, wealth, officer):
-    """在 ±7 极端候选区做特殊格局识别：score ≥ 7 判专旺，score ≤ -7 判从格。
+    """在极端候选区做特殊格局识别：score ≥ _EXTREME_HIGH 判专旺，≤ _EXTREME_LOW 判从格。
 
     返回 `kind` ∈ {"专旺", "从格"(真从), "假从", ""}。真假从的区分见 `_detect_conging`
     与 `knowledge_docs/33_从格专旺化气体系.md` §八：假从仍按所从之神取用，但行帮身运即破局。
     不落入极端区或判定不自信时返回 is_special=False。
+    门槛与 `_classify_strength` 的档位门同源（_EXTREME_HIGH/_EXTREME_LOW），
+    调用方 `_build_wuxing_analysis` 已按同门过滤，此处再判一次只作防御。
     """
-    if score >= 7:
+    if score >= _EXTREME_HIGH:
         zw = _detect_zhuanwang(weighted, day_wx, resource, officer, wealth, output)
         if zw:
             kind, label, hint = zw
             return {"is_special": True, "kind": kind, "label": label, "useful_hint": hint}
-    elif score <= -7:
+    elif score <= _EXTREME_LOW:
         cg = _detect_conging(weighted, pillars, day_wx, day_master, resource, officer, wealth, output)
         if cg:
             kind, label, hint = cg
@@ -299,25 +348,26 @@ def _classify_strength(
 ) -> tuple[str, str]:
     """日主强弱五档分档（方案A），返回 (strength, useful_hint)。
 
-    |score| ≥ 7 候选特殊格局；≥ 2.2 偏旺；≤ -1.2 偏弱；其余中和。
+    档位门槛见 _RU/_RUAN/_EXTREME_HIGH/_EXTREME_LOW：
+    score ≥ 3.6 极旺（候选专旺格）；≥ 1.0 偏旺；≤ -1.4 偏弱；≤ -4.4 极弱（候选从格）；其余中和。
     极旺/极弱用神走顺势，与偏旺/偏弱的制衡/扶助方向相反。
     """
-    if score >= 7:
+    if score >= _EXTREME_HIGH:
         strength = "极旺"
         useful_hint = (
             f"日主极旺（候选专旺格），宜顺其旺势，喜{resource or '印星'}、{same or '比劫'}相扶；"
             f"若有{output or '食伤'}亦可泄秀，切忌{wealth or '财星'}、{officer or '官杀'}逆克激怒旺神。"
         )
-    elif score >= 2.2:
+    elif score >= _RU:
         strength = "偏旺"
         useful_hint = f"日主偏旺，宜取泄耗制衡之气，优先关注{output or '食伤'}、{wealth or '财星'}、{officer or '官杀'}的配合。"
-    elif score <= -7:
+    elif score <= _EXTREME_LOW:
         strength = "极弱"
         useful_hint = (
             f"日主极弱（候选从格），宜顺势相从，不喜{resource or '印星'}、{same or '比劫'}扶身反成羁绊；"
             f"具体用神需结合所从五行（从{wealth or '财'} / 从{officer or '官'} / 从{output or '儿'} 等）判定。"
         )
-    elif score <= -1.2:
+    elif score <= _RUAN:
         strength = "偏弱"
         useful_hint = f"日主偏弱，宜先扶助日主，重点看{resource or '印星'}与{same or '比劫'}是否得地。"
     else:
@@ -329,8 +379,10 @@ def _classify_strength(
 def _build_wuxing_analysis(ec) -> WuxingAnalysis:
     """基于四柱（含藏干）计算五行权重与日主强弱，并做特殊格局初判。
 
-    权重：天干计 1.0、月令天干 1.2；地支计 1.0、月令地支 1.6；藏干按比例累加。
-    强弱分 = 扶助（比劫 + 印枭×0.85）- 压制（食伤×0.55 + 财×0.7 + 官杀×0.8）。
+    权重：四柱位置加权（见 _POSITION_WEIGHTS，月令 35% 为提纲；日干为被评估对象不计），
+    藏干按比例累加。counts 是「各干支对日干的影响力量」分布，不含日干自身；
+    全局五行分布（含日干）看 visible_counts。
+    强弱分 = 扶助（比劫 + 印枭×0.85 − 虚浮印比折扣）- 压制（食伤×0.55 + 财×0.7 + 官杀×0.8）。
     """
     pillars = [ec.getYear(), ec.getMonth(), ec.getDay(), ec.getTime()]
     visible_counts = {k: 0 for k in WUXING_ORDER}
@@ -340,14 +392,15 @@ def _build_wuxing_analysis(ec) -> WuxingAnalysis:
         gan, zhi = pillar[0], pillar[1]
         gan_wx = GAN_WUXING.get(gan)
         zhi_wx = ZHI_WUXING.get(zhi)
-        stem_weight = 1.2 if index == 1 else 1.0
-        branch_weight = 1.6 if index == 1 else 1.0
+        stem_weight, branch_weight = _POSITION_WEIGHTS[index]
         if gan_wx:
             visible_counts[gan_wx] += 1
             weighted[gan_wx] += stem_weight
         if zhi_wx:
             visible_counts[zhi_wx] += 1
-            weighted[zhi_wx] += branch_weight
+        # 地支力量只按藏干比分配一次（本气/中气/余气），不再另计主气全重 ——
+        # 否则本气被算两遍（酉=辛 1.0 时地支贡献翻倍），总权重从 8.8 涨到 17.6，
+        # 「天干30%+地支70%=100%」的会计不成立。2026-10-11 修正。
         for hidden, ratio in HIDDEN_STEMS.get(zhi, ()):
             wx = GAN_WUXING.get(hidden)
             if wx:
@@ -361,7 +414,15 @@ def _build_wuxing_analysis(ec) -> WuxingAnalysis:
     wealth = CONTROLS.get(day_wx, "")
     officer = _controller_of(day_wx)
 
-    support = weighted.get(same, 0.0) + weighted.get(resource, 0.0) * 0.85
+    # 透干虚浮印比：地支无根则虚浮，扶助力按位置权重折半。
+    # 韦千里评从杀例「乙木全无生气，岂能任之」即此意 —— 无根天干不构成有效帮扶。
+    floating_discount = sum(
+        _POSITION_WEIGHTS[i][0]
+        * (0.85 if GAN_WUXING.get(gan) == resource else 1.0)
+        * _FLOATING_STEM_FACTOR
+        for i, gan in _root_profile(pillars, day_master, day_wx, resource).floating_support
+    )
+    support = weighted.get(same, 0.0) + weighted.get(resource, 0.0) * 0.85 - floating_discount
     pressure = (
         weighted.get(output, 0.0) * 0.55
         + weighted.get(wealth, 0.0) * 0.7
@@ -371,9 +432,9 @@ def _build_wuxing_analysis(ec) -> WuxingAnalysis:
     strength, useful_hint = _classify_strength(
         strength_score, day_wx, resource, same, output, wealth, officer
     )
-    # 仅在 ±7 极端候选区做特殊格局识别（专旺/从格）
+    # 仅在极端候选区做特殊格局识别（专旺/从格），门槛与强弱档位同源
     special_pattern = ""
-    if abs(strength_score) >= 7:
+    if strength_score >= _EXTREME_HIGH or strength_score <= _EXTREME_LOW:
         sp = _detect_special_pattern(
             pillars, weighted, day_wx, day_master, strength_score,
             resource, output, wealth, officer,
