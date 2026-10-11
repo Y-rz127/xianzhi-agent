@@ -295,6 +295,14 @@ def _upsert_verdict(row: dict[str, Any]) -> None:
 # ---------------- 阶段三：终审应用（缓存 → LLM → 回退计算版） ----------------
 
 
+def _err_text(e: BaseException) -> str:
+    """异常文案兜底：`str(TimeoutError())` 是空串，直接打日志会只剩一个冒号。
+
+    Asyncio 的超时/取消类异常都不带消息，统一补类型名，日志才查得下去。
+    """
+    return str(e).strip() or type(e).__name__
+
+
 def _verdict_enabled() -> bool:
     """终审总开关：VERDICT_ENABLED=0 关闭；pytest 内自动禁用（快照不可依赖 LLM）。"""
     if os.environ.get("VERDICT_ENABLED") == "0":
@@ -358,12 +366,13 @@ async def chart_with_verdict(chart: BaziChart, model: Any = None) -> BaziChart:
     try:
         verdict = await asyncio.to_thread(_get_cached_verdict, chash)
     except Exception as e:
-        log.warning("[verdict] 缓存读取失败，走 LLM 裁决: {}", e)
+        log.warning("[verdict] 缓存读取失败，走 LLM 裁决: {}", _err_text(e))
 
     if verdict is None:
         try:
             if model is None:
-                # 终审沿用主问答模型（同一模型池与降级链），不单独走子应用配置
+                # 终审沿用主问答模型（同一模型池与降级链），不单独走子应用配置。
+                # 2026-10-11：曾考虑终审改走 flash 快模型，用户验证过输出口径不可用，否决。
                 from app.agent.context import get_chat_model
 
                 model = get_chat_model()
@@ -372,57 +381,94 @@ async def chart_with_verdict(chart: BaziChart, model: Any = None) -> BaziChart:
                 verdict = row["verdict"]
             else:
                 log.warning("[verdict] {} 裁决 invalid，回退计算版", chart.birth.solar)
+        except asyncio.TimeoutError:
+            # 单独接住：TimeoutError 的 str() 是空串，混在通用分支里会打成
+            # "LLM 裁决失败（）"这种查不出所以然的日志（2026-10-11）
+            log.warning(
+                "[verdict] {} 裁决超时（{}s 预算），回退计算版",
+                chart.birth.solar,
+                int(_VERDICT_TIMEOUT),
+            )
         except Exception as e:
-            log.warning("[verdict] {} LLM 裁决失败（{}），回退计算版", chart.birth.solar, e)
+            log.warning("[verdict] {} LLM 裁决失败（{}），回退计算版", chart.birth.solar, _err_text(e))
 
     if verdict is None:
         return chart
     return apply_verdict(chart, verdict, verdict.get("relation_to_engine", "confirm"))
 
 
-def chart_with_verdict_sync(chart: BaziChart, model: Any = None, block: bool = True) -> BaziChart:
-    """终审应用的同步包装（工具线程 / 同步挂载路径）。
+# 后台补判去重：同一张盘同时只允许一个补判在跑。密集挂盘（一次对话里反复排同一张盘）
+# 会连着派发同一个 chart_hash，不去重就是判三遍——既烧 token，又跟正在跑的对话抢模型配额。
+_bg_inflight: set[str] = set()
+_bg_inflight_lock = threading.Lock()
 
-    - 无运行中事件循环（普通工作线程）：asyncio.run 完整流程，block=True 时
-      最长等 _VERDICT_TIMEOUT 秒（工具调用链本就是秒级，可接受）；
-    - 已在事件循环线程（async 链里的同步挂载）：**不阻塞 loop** —— 命中缓存
-      毫秒级应用；未命中回退计算版并起后台线程补判落库，下一轮对话命中。
+
+def chart_with_verdict_sync(chart: BaziChart, model: Any = None) -> BaziChart:
+    """终审应用的同步包装（工具线程 / 挂盘路径）。
+
+    两条路径行为一致：**命中缓存毫秒级应用；未命中原样返回计算版**，同时派一个
+    后台线程补判落库，下一轮挂到同一张盘就命中缓存。绝不为了终审阻塞主链路。
+
+    为什么不留"阻塞等终审"的选项：2026-10-11 实测，挂盘为了等终审白卡满
+    _VERDICT_TIMEOUT（150 秒）× 2 次，把整轮从半分钟拖成 4 分钟；而且超时后拿到的
+    仍是计算版——干等纯亏。终审是**影子增强**：结论写回只影响断语口径，晚一轮命中
+    没有任何损失。终审改走快模型曾被否（flash 输出口径不可用），所以只能"后台跑"。
+
+    block 参数已废弃删除：调用方（bazi_full hook / 挂盘）从未显式传过。
     """
     if not _verdict_enabled():
         return chart
-    try:
-        asyncio.get_running_loop()
-        in_loop = True
-    except RuntimeError:
-        in_loop = False
-
-    if not in_loop:
-        try:
-            return asyncio.run(asyncio.wait_for(chart_with_verdict(chart, model), timeout=_VERDICT_TIMEOUT)) if block else chart
-        except Exception as e:
-            log.warning("[verdict] 同步终审失败，回退计算版: {}", e)
-            return chart
 
     try:
         from app.db.chart_store import chart_hash_of
 
         chash = chart_hash_of(chart.birth.solar, chart.birth.gender)
+    except Exception as e:
+        log.warning("[verdict] chart_hash 计算失败，回退计算版: {}", _err_text(e))
+        return chart
+
+    try:
         cached = _get_cached_verdict(chash)
     except Exception as e:
-        log.warning("[verdict] loop 内缓存读取失败，回退计算版: {}", e)
-        return chart
-    if cached is not None:
-        return apply_verdict(chart, cached, (cached or {}).get("relation_to_engine", "confirm"))
-    # 未命中：后台补判落库（不阻塞当前 loop），下次直接命中
-    threading.Thread(
-        target=_background_verdict, args=(chart, model), name="verdict-bg", daemon=True
-    ).start()
+        # 本轮拿不到缓存（DB 抖）不影响正确性：回退计算版 + 照常派后台补判
+        log.warning("[verdict] 缓存读取失败，回退计算版: {}", _err_text(e))
+        cached = None
+    else:
+        if cached is not None:
+            return apply_verdict(chart, cached, (cached or {}).get("relation_to_engine", "confirm"))
+
+    _submit_background_verdict(chart, model, chash)
     return chart
 
 
-def _background_verdict(chart: BaziChart, model: Any) -> None:
-    """后台补判：独立线程里跑完整 asyncio 流程；失败只留日志。"""
+def _submit_background_verdict(chart: BaziChart, model: Any, chash: str) -> None:
+    """派一个后台补判线程；同一 chart_hash 已在跑则跳过（去重）。"""
+    with _bg_inflight_lock:
+        if chash in _bg_inflight:
+            return
+        _bg_inflight.add(chash)
+    threading.Thread(
+        target=_background_verdict, args=(chart, model, chash), name="verdict-bg", daemon=True
+    ).start()
+
+
+def _background_verdict(chart: BaziChart, model: Any, chash: str = "") -> None:
+    """后台补判：独立线程里跑完整 async 流程；失败只留日志。
+
+    这里**不再套自己的 wait_for**：chart_with_verdict 内部已经有 150 秒预算兜底，
+    外面再叠一层同长的等待只会先到期、取消内层，把真实原因（超时/排队/上游报错）
+    一起吞掉——2026-10-11 那 4 条只有冒号的日志就是这么来的。
+    """
     try:
-        asyncio.run(asyncio.wait_for(chart_with_verdict(chart, model), timeout=_VERDICT_TIMEOUT))
+        asyncio.run(chart_with_verdict(chart, model))
     except Exception as e:
-        log.warning("[verdict] 后台补判失败（{} {}）: {}", chart.birth.solar, chart.birth.gender, e)
+        log.warning(
+            "[verdict] 后台补判失败（{} {}）: {}",
+            chart.birth.solar,
+            chart.birth.gender,
+            _err_text(e),
+        )
+    finally:
+        if chash:
+            with _bg_inflight_lock:
+                _bg_inflight.discard(chash)

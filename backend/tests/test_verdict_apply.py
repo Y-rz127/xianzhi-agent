@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
+
+import pytest
+
 from app.agent.verdict import (
     ENGINE_VERSION,
     PROMPT_VERSION,
@@ -74,3 +78,102 @@ def test_verdict_enabled_respects_env(monkeypatch):
 def test_versions_are_bumped_together():
     """版本常量必须成对演进：cache key 与 chart_verdicts 主键都靠它们区分口径。"""
     assert ENGINE_VERSION and PROMPT_VERSION
+
+
+# ---------------- 同步包装：不阻塞主链路（2026-10-11 决策） ----------------
+@pytest.fixture(autouse=True)
+def _clean_bg_inflight():
+    """每个用例前后清掉补判去重表，避免跨用例残留。"""
+    from app.agent import verdict as V
+
+    V._bg_inflight.clear()
+    yield
+    V._bg_inflight.clear()
+
+
+def test_err_text_falls_back_to_type_name():
+    """Asyncio 的超时/取消异常 str() 是空串，日志必须补类型名才查得下去。"""
+    from app.agent import verdict as V
+
+    assert V._err_text(asyncio.TimeoutError()) == "TimeoutError"
+    assert V._err_text(RuntimeError("boom")) == "boom"
+
+
+def test_sync_wrapper_returns_computed_and_schedules_background(monkeypatch):
+    """未命中缓存：立刻返回计算版 + 派后台补判，绝不干等。
+
+    旧行为是 asyncio.run(wait_for(..., 150s))：实测挂盘白卡 150 秒 × 2 次，把整轮
+    从半分钟拖成 4 分钟，超时后拿到的还是计算版。
+    """
+    from app.agent import verdict as V
+
+    chart = build_bazi_chart(*ANCHOR)
+    monkeypatch.setattr(V, "_verdict_enabled", lambda: True)
+    monkeypatch.setattr(V, "_get_cached_verdict", lambda chash: None)
+    scheduled: list[str] = []
+    monkeypatch.setattr(V, "_submit_background_verdict", lambda c, m, h: scheduled.append(h))
+
+    out = V.chart_with_verdict_sync(chart)
+
+    assert out is chart  # 原样返回计算版
+    assert len(scheduled) == 1  # 且已派后台补判
+
+
+def test_sync_wrapper_applies_cached_verdict_without_background(monkeypatch):
+    """命中缓存：毫秒级应用终审，不再派补判。"""
+    from app.agent import verdict as V
+
+    chart = build_bazi_chart(*ANCHOR)
+    monkeypatch.setattr(V, "_verdict_enabled", lambda: True)
+    monkeypatch.setattr(V, "_get_cached_verdict", lambda chash: _verdict_for())
+    scheduled: list[str] = []
+    monkeypatch.setattr(V, "_submit_background_verdict", lambda c, m, h: scheduled.append(h))
+
+    out = V.chart_with_verdict_sync(chart)
+
+    assert out.wuxing.strength == "偏弱"
+    assert "（LLM 终审）" in out.wuxing.useful_hint
+    assert scheduled == []
+
+
+def test_sync_wrapper_survives_cache_read_error(monkeypatch):
+    """缓存读失败（DB 抖动）不应让挂盘报错：回退计算版并照常派补判。"""
+    from app.agent import verdict as V
+
+    chart = build_bazi_chart(*ANCHOR)
+    monkeypatch.setattr(V, "_verdict_enabled", lambda: True)
+    monkeypatch.setattr(V, "_get_cached_verdict", lambda chash: (_ for _ in ()).throw(RuntimeError("db down")))
+    scheduled: list[str] = []
+    monkeypatch.setattr(V, "_submit_background_verdict", lambda c, m, h: scheduled.append(h))
+
+    out = V.chart_with_verdict_sync(chart)
+
+    assert out is chart
+    assert len(scheduled) == 1
+
+
+class _NoopThread:
+    """只记录启动参数的假线程：不真的跑补判（避免用例联网/连库）。"""
+
+    started: list[tuple] = []
+
+    def __init__(self, target=None, args=(), name="", daemon=False):
+        self._args = args
+
+    def start(self) -> None:
+        _NoopThread.started.append(self._args)
+
+
+def test_background_verdict_dedupes_same_chart(monkeypatch):
+    """同一张盘只允许一个补判在跑：密集挂盘不再把同一张盘判三遍。"""
+    from app.agent import verdict as V
+
+    chart = build_bazi_chart(*ANCHOR)
+    _NoopThread.started = []
+    monkeypatch.setattr(V.threading, "Thread", _NoopThread)
+
+    V._submit_background_verdict(chart, None, "hash-1")
+    V._submit_background_verdict(chart, None, "hash-1")  # 同一张盘：跳过
+    V._submit_background_verdict(chart, None, "hash-2")  # 另一张盘：照派
+
+    assert len(_NoopThread.started) == 2
