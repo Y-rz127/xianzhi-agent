@@ -28,15 +28,15 @@
           <text class="header-title display-font">先知</text>
           <text v-if="chartData" class="icon-btn bazi-btn" @tap="openChartDetail">☯</text>
         </view>
-        <!-- 出生信息入口：收起时只剩这颗点（实心=已挂命盘，空心=还没生辰），点开才展开表单。
+        <!-- 出生信息入口：透明底下拉箭头（朱砂=已挂命盘，浅灰=还没生辰），点开展开表单、箭头翻转。
              居中而非靠右——右上角是微信胶囊的地盘，靠右会被盖住 -->
-        <view class="birth-dot-btn" @tap="showBirth = !showBirth">
-          <view :class="['birth-dot', hasBirth ? 'has' : 'empty', showBirth && 'open']"></view>
+        <view class="birth-toggle-btn" @tap="showBirth = !showBirth">
+          <text :class="['birth-toggle', hasBirth ? 'has' : 'empty', showBirth && 'open']">▼</text>
         </view>
       </view>
     </view>
 
-    <!-- 出生信息玻璃面板（由标题行圆点展开） -->
+    <!-- 出生信息玻璃面板（由标题行箭头展开） -->
     <view v-if="showBirth" class="birth-panel">
       <view class="birth-form">
         <text class="birth-summary">{{ birthSummary }}</text>
@@ -814,7 +814,7 @@ const birthSummary = computed(() =>
     ? `${effectiveBirthTime.value} ${effectiveGender.value}${birthPlace.value ? ' · ' + birthPlace.value : ''}`
     : '点击设置出生信息'
 )
-/** 是否已挂命盘：决定标题行那颗点是实心（有生辰）还是空心（还没生辰） */
+/** 是否已挂命盘：决定标题行箭头是朱砂（有生辰）还是浅灰（还没生辰） */
 const hasBirth = computed(() => !!effectiveBirthTime.value)
 
 const placeholderText = '请输入你的问题…'
@@ -1418,7 +1418,7 @@ messages.value.push({
   display: flex;
   align-items: center;
   justify-content: space-between;
-  /* 圆点绝对居中用：小程序右上角是微信胶囊的地盘，靠右必被挡 */
+  /* 箭头绝对居中用：小程序右上角是微信胶囊的地盘，靠右必被挡 */
   position: relative;
 }
 .header-left {
@@ -1445,8 +1445,8 @@ messages.value.push({
   font-size: 40rpx;
 }
 
-/* === 出生信息入口：标题行居中的小圆点 === */
-.birth-dot-btn {
+/* === 出生信息入口：标题行居中的下拉箭头（透明底，无圆环） === */
+.birth-toggle-btn {
   /* 居中摆放：右半边留给微信胶囊按钮，靠右会被整个盖住（2026-10-11 真机反馈） */
   position: absolute;
   left: 50%;
@@ -1457,29 +1457,31 @@ messages.value.push({
   display: flex;
   align-items: center;
   justify-content: center;
+  background: transparent;
+  border: none;
 }
-.birth-dot {
-  width: 20rpx;
-  height: 20rpx;
-  border-radius: 50%;
-  box-sizing: border-box;
-  transition: transform 0.18s ease, box-shadow 0.18s ease;
+.birth-toggle {
+  /* text 默认 inline，transform 不生效——必须 inline-block（与 .send-icon 同一坑） */
+  display: inline-block;
+  font-size: 22rpx;
+  line-height: 1;
+  background: transparent;
+  transition: transform 0.18s ease;
 }
-/* 空心：还没提供生辰 */
-.birth-dot.empty {
-  border: 2rpx solid $color-ink-lighter;
+/* 浅灰：还没提供生辰 */
+.birth-toggle.empty {
+  color: $color-ink-lighter;
 }
-/* 实心朱砂：已挂命盘 */
-.birth-dot.has {
-  background: $color-vermilion;
+/* 朱砂：已挂命盘 */
+.birth-toggle.has {
+  color: $color-vermilion;
 }
-/* 展开态：点外圈一道柔光，暗示"再点收起" */
-.birth-dot.open {
-  transform: scale(1.15);
-  box-shadow: 0 0 0 8rpx rgba(184, 72, 60, 0.14);
+/* 展开态：箭头翻上去，提示"再点收起" */
+.birth-toggle.open {
+  transform: rotate(180deg);
 }
 
-/* === 出生信息面板（点圆点才出现） === */
+/* === 出生信息面板（点箭头才出现） === */
 .birth-panel {
   background: $color-bg-card;
   border-bottom: 1rpx solid $color-border;
