@@ -41,6 +41,7 @@
       </view>
       <view class="bottom-spacer"></view>
     </scroll-view>
+    <ThemeDialog />
   </view>
 </template>
 
@@ -49,6 +50,8 @@ import { useTheme } from '@/composables/useTheme'
 import { ref } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import { fetchMySessions, deleteSession as deleteSessionApi, type ChatSession } from '@/api'
+import { showDialog } from '@/composables/useDialog'
+import ThemeDialog from '@/components/ThemeDialog/ThemeDialog.vue'
 
 
 const { themeClass } = useTheme()
@@ -82,12 +85,11 @@ function continueSession(s: ChatSession) {
   uni.reLaunch({ url: '/pages/xianzhi/index' })
 }
 
-function onDelete(s: ChatSession) {
-  uni.showModal({ title: '删除会话', content: '删除该会话的所有记录？', success: async (r) => {
-    if (!r.confirm) return
-    try { await deleteSessionApi('xianzhi', s.id); sessions.value = sessions.value.filter(x => x.id !== s.id) }
-    catch (e: any) { uni.showToast({ title: e?.message || '删除失败', icon: 'none' }) }
-  }})
+async function onDelete(s: ChatSession) {
+  const { confirm } = await showDialog({ title: '删除会话', content: '删除该会话的所有记录？', danger: true })
+  if (!confirm) return
+  try { await deleteSessionApi('xianzhi', s.id); sessions.value = sessions.value.filter(x => x.id !== s.id) }
+  catch (e: any) { uni.showToast({ title: e?.message || '删除失败', icon: 'none' }) }
 }
 </script>
 

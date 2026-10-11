@@ -42,6 +42,7 @@
       </view>
       <view class="bottom-spacer"></view>
     </scroll-view>
+    <ThemeDialog />
   </view>
 </template>
 
@@ -50,6 +51,8 @@ import { useTheme } from '@/composables/useTheme'
 import { ref } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import { fetchAiInterpretationRecords, deleteAiInterpretationRecord, type AiInterpretationRecord } from '@/api'
+import { showDialog } from '@/composables/useDialog'
+import ThemeDialog from '@/components/ThemeDialog/ThemeDialog.vue'
 
 const { themeClass } = useTheme()
 const statusBarHeight = ref(20)
@@ -95,12 +98,11 @@ function onCopy(r: AiInterpretationRecord) {
   })
 }
 
-function onDelete(r: AiInterpretationRecord) {
-  uni.showModal({ title: '删除记录', content: '删除这条 AI 解读记录？', success: async (modal) => {
-    if (!modal.confirm) return
-    try { await deleteAiInterpretationRecord(r.id); records.value = records.value.filter(x => x.id !== r.id) }
-    catch (e: any) { uni.showToast({ title: e?.message || '删除失败', icon: 'none' }) }
-  }})
+async function onDelete(r: AiInterpretationRecord) {
+  const { confirm } = await showDialog({ title: '删除记录', content: '删除这条 AI 解读记录？', danger: true })
+  if (!confirm) return
+  try { await deleteAiInterpretationRecord(r.id); records.value = records.value.filter(x => x.id !== r.id) }
+  catch (e: any) { uni.showToast({ title: e?.message || '删除失败', icon: 'none' }) }
 }
 </script>
 

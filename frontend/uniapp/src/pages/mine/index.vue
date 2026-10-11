@@ -64,11 +64,15 @@
       <view v-if="user" class="logout-btn" @tap="onLogout">退出登录</view>
       <view class="bottom-spacer"></view>
     </scroll-view>
+
+    <ThemeDialog />
   </view>
 </template>
 
 <script setup lang="ts">
 import { useTheme } from '@/composables/useTheme'
+import { showDialog } from '@/composables/useDialog'
+import ThemeDialog from '@/components/ThemeDialog/ThemeDialog.vue'
 import { ref, computed } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import { getUser, clearAuth } from '@/utils/storage'
@@ -130,39 +134,38 @@ function goAbout() { uni.navigateTo({ url: '/pages/about/index' }) }
 function goFeedback() { uni.navigateTo({ url: '/pages/feedback/index' }) }
 function goPrivacy() { uni.navigateTo({ url: '/pages/legal/privacy' }) }
 
-function onHeaderTap() {
+async function onHeaderTap() {
   if (!user.value) { goLogin(); return }
-  uni.showModal({
+  // 原 uni.showModal(editable) 是系统弹窗、永远白底，暗夜下极突兀 → 换 ThemeDialog
+  const { confirm, content } = await showDialog({
     title: '修改昵称',
-    editable: true,
     content: user.value.nickname,
-    placeholderText: '2-20 个字符',
-    success: async (r) => {
-      if (!r.confirm) return
-      const name = (r.content || '').trim()
-      if (name.length < 2 || name.length > 20) { uni.showToast({ title: '昵称需 2-20 字', icon: 'none' }); return }
-      try {
-        const res = await updateMe({ nickname: name })
-        user.value = res.user
-        uni.setStorageSync('XZ_USER', res.user)
-        uni.showToast({ title: '已更新', icon: 'success' })
-      } catch (e: any) {
-        uni.showToast({ title: e?.message || '更新失败', icon: 'none' })
-      }
-    },
+    editable: true,
+    placeholder: '2-20 个字符',
+    maxlength: 20,
   })
+  if (!confirm) return
+  const name = content
+  if (name.length < 2 || name.length > 20) { uni.showToast({ title: '昵称需 2-20 字', icon: 'none' }); return }
+  try {
+    const res = await updateMe({ nickname: name })
+    user.value = res.user
+    uni.setStorageSync('XZ_USER', res.user)
+    uni.showToast({ title: '已更新', icon: 'success' })
+  } catch (e: any) {
+    uni.showToast({ title: e?.message || '更新失败', icon: 'none' })
+  }
 }
 
-function onLogout() {
-  uni.showModal({ title: '退出登录', content: '确定退出当前账号？', success: (r) => {
-    if (!r.confirm) return
-    clearAuth()
-    user.value = null
-    profiles.value = []
-    favorites.value = []
-    aiRecords.value = []
-    uni.showToast({ title: '已退出', icon: 'none' })
-  }})
+async function onLogout() {
+  const { confirm } = await showDialog({ title: '退出登录', content: '确定退出当前账号？', danger: true })
+  if (!confirm) return
+  clearAuth()
+  user.value = null
+  profiles.value = []
+  favorites.value = []
+  aiRecords.value = []
+  uni.showToast({ title: '已退出', icon: 'none' })
 }
 </script>
 

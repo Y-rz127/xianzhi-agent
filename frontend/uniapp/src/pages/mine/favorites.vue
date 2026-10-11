@@ -52,6 +52,7 @@
       :keypoints="infoCase?.keypoints"
       @close="infoCase = null"
     />
+    <ThemeDialog />
   </view>
 </template>
 
@@ -61,6 +62,8 @@ import { ref } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import { fetchFavorites, removeFavorite, type FavoriteCase } from '@/api'
 import CaseInfoModal from '@/components/CaseInfoModal/CaseInfoModal.vue'
+import { showDialog } from '@/composables/useDialog'
+import ThemeDialog from '@/components/ThemeDialog/ThemeDialog.vue'
 
 
 const { themeClass } = useTheme()
@@ -111,12 +114,11 @@ function viewDetail(f: FavoriteCase) {
   })
 }
 
-function onRemove(f: FavoriteCase) {
-  uni.showModal({ title: '取消收藏', content: `取消收藏「${f.name}」？`, success: async (r) => {
-    if (!r.confirm) return
-    try { await removeFavorite(f.caseId); favorites.value = favorites.value.filter(x => x.caseId !== f.caseId) }
-    catch (e: any) { uni.showToast({ title: e?.message || '操作失败', icon: 'none' }) }
-  }})
+async function onRemove(f: FavoriteCase) {
+  const { confirm } = await showDialog({ title: '取消收藏', content: `取消收藏「${f.name}」？`, danger: true })
+  if (!confirm) return
+  try { await removeFavorite(f.caseId); favorites.value = favorites.value.filter(x => x.caseId !== f.caseId) }
+  catch (e: any) { uni.showToast({ title: e?.message || '操作失败', icon: 'none' }) }
 }
 </script>
 

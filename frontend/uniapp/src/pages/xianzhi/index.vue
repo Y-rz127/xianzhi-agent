@@ -299,6 +299,9 @@
         </view>
       </view>
     </view>
+
+    <!-- 主题化确认/输入弹窗宿主（替代 uni.showModal） -->
+    <ThemeDialog />
   </view>
 </template>
 
@@ -307,6 +310,8 @@ import { ref, computed, nextTick, watch, onMounted, onBeforeUnmount } from 'vue'
 import { onLoad, onHide, onShow } from '@dcloudio/uni-app'
 import { requireLogin } from '@/utils/authGuard'
 import { useTheme } from '@/composables/useTheme'
+import { showDialog } from '@/composables/useDialog'
+import ThemeDialog from '@/components/ThemeDialog/ThemeDialog.vue'
 import { chatWithXianzhiWS, closeAllWS } from '@/api/chat'
 import {
   downloadReport, getChart,
@@ -348,12 +353,13 @@ async function ensureRecordAuth(): Promise<boolean> {
   const auth = setting?.authSetting?.['scope.record']
   if (auth === true) return true
   if (auth === false) {
-    uni.showModal({
+    // uni.showModal 是系统弹窗、不随 .t-dark 换肤 → 用 ThemeDialog
+    const { confirm } = await showDialog({
       title: '需要麦克风权限',
       content: '请在设置里开启「录音」后重试',
       confirmText: '去设置',
-      success: (res) => { if (res.confirm) uni.openSetting({}) },
     })
+    if (confirm) uni.openSetting({})
     return false
   }
   return new Promise<boolean>((resolve) => uni.authorize({ scope: 'scope.record', success: () => resolve(true), fail: () => resolve(false) }))
@@ -710,23 +716,22 @@ async function switchToSession(session: ChatSession) {
 }
 
 async function deleteHistorySession(id: string) {
-  uni.showModal({
+  const { confirm } = await showDialog({
     title: '删除会话',
     content: '确定删除该会话的所有记录吗？',
-    success: async (res) => {
-      if (!res.confirm) return
-      try {
-        await deleteSessionApi('xianzhi', id)
-        // 如果删除的是当前会话，新建一个
-        if (id === conversationId.value) {
-          newSession()
-        }
-        await loadHistorySessions()
-      } catch (e) {
-        uni.showToast({ title: '删除失败', icon: 'none' })
-      }
-    },
+    danger: true,
   })
+  if (!confirm) return
+  try {
+    await deleteSessionApi('xianzhi', id)
+    // 如果删除的是当前会话，新建一个
+    if (id === conversationId.value) {
+      newSession()
+    }
+    await loadHistorySessions()
+  } catch (e) {
+    uni.showToast({ title: '删除失败', icon: 'none' })
+  }
 }
 
 function formatSessionTime(t: string): string {
@@ -1598,7 +1603,7 @@ messages.value.push({
   width: 72rpx;
   height: 72rpx;
   border-radius: 50%;
-  background: #fff;
+  background: $color-bg-elevated;
   box-shadow: 0 4rpx 20rpx rgba(0,0,0,0.12);
   display: flex;
   align-items: center;
@@ -1608,7 +1613,7 @@ messages.value.push({
 }
 .scroll-bottom-icon {
   font-size: 36rpx;
-  color: #666;
+  color: $color-ink-light;
   font-weight: 600;
 }
 @keyframes fadeInUp {
@@ -1797,7 +1802,7 @@ messages.value.push({
 }
 .feedback-modal {
   width: 600rpx;
-  background: #fff;
+  background: $color-bg-elevated;
   border-radius: 24rpx;
   padding: 40rpx 32rpx 32rpx;
   display: flex;
@@ -1837,7 +1842,7 @@ messages.value.push({
 .feedback-modal-submit {
   padding: 16rpx 40rpx;
   font-size: 26rpx;
-  color: #fff;
+  color: $color-bg;
   background: $color-primary;
   border-radius: 20rpx;
 }
@@ -1884,13 +1889,13 @@ messages.value.push({
   justify-content: center;
   /* 与输入框水平对齐（input-bar 为 flex-end，这里单独让按钮垂直居中） */
   align-self: center;
-  background: #fff;
+  background: $color-bg-elevated;
   border-radius: 50%;
   transition: all 0.2s ease;
 }
 .send-btn:active:not(.disabled) {
   transform: scale(0.92);
-  background: #f0f0f0;
+  background: $color-bg-warm;
 }
 .send-btn.disabled {
   opacity: 0.3;
@@ -1956,7 +1961,7 @@ messages.value.push({
 }
 .send-icon {
   display: inline-block;
-  color: #333;
+  color: $color-ink;
   font-size: 52rpx;
   line-height: 1;
   font-weight: 500;
@@ -2210,7 +2215,7 @@ messages.value.push({
 }
 .region-picker {
   width: 100%;
-  background: #fff;
+  background: $color-bg-elevated;
   border-radius: 24rpx 24rpx 0 0;
   padding-bottom: env(safe-area-inset-bottom);
   max-height: 58vh;
@@ -2233,18 +2238,18 @@ messages.value.push({
   padding: 10rpx 28rpx;
   font-size: 26rpx;
   border-radius: 30rpx;
-  background: #f5f5f5;
-  color: #888;
+  background: $color-bg-warm;
+  color: $color-ink-lighter;
 }
 .rp-tab.active {
-  background: #1a1a1a;
-  color: #fff;
+  background: $color-primary;
+  color: $color-bg;
   font-weight: 600;
 }
 .rp-confirm {
   padding: 14rpx 36rpx;
-  background: #1a1a1a;
-  color: #fff;
+  background: $color-primary;
+  color: $color-bg;
   font-size: 26rpx;
   border-radius: 30rpx;
   font-weight: 600;
@@ -2255,14 +2260,14 @@ messages.value.push({
   align-items: center;
   gap: 10rpx;
   padding: 16rpx 24rpx;
-  background: #f7f7f7;
+  background: $color-bg-warm;
   border-radius: 12rpx;
-  border: 1rpx solid #eee;
+  border: 1rpx solid $color-border;
   flex-shrink: 0;
 }
 .rp-search-icon { font-size: 26rpx; }
-.rp-search-input { flex: 1; font-size: 26rpx; }
-.rp-search-ph { color: #bbb; }
+.rp-search-input { flex: 1; font-size: 26rpx; color: $color-ink; }
+.rp-search-ph { color: $color-ink-lighter; }
 .rp-col-labels {
   display: flex;
   padding: 10rpx 32rpx 6rpx;
@@ -2272,7 +2277,7 @@ messages.value.push({
   flex: 1;
   text-align: center;
   font-size: 26rpx;
-  color: #999;
+  color: $color-ink-lighter;
   font-weight: 500;
 }
 /* 三列滚动容器 */
@@ -2289,12 +2294,12 @@ messages.value.push({
   display: block;
   padding: 24rpx 16rpx;
   font-size: 30rpx;
-  color: #333;
+  color: $color-ink;
   text-align: center;
   line-height: 1.5;
 }
 .rp-item.active {
-  color: #1a1a1a;
+  color: $color-primary;
   font-weight: 700;
   background: rgba(212,175,55,0.08);
 }

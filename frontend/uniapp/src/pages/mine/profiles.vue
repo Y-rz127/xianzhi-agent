@@ -47,6 +47,7 @@
 
       <view class="bottom-spacer"></view>
     </scroll-view>
+    <ThemeDialog />
   </view>
 </template>
 
@@ -55,6 +56,8 @@ import { useTheme } from '@/composables/useTheme'
 import { ref } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import { fetchProfiles, deleteProfile, type BaziProfile } from '@/api'
+import { showDialog } from '@/composables/useDialog'
+import ThemeDialog from '@/components/ThemeDialog/ThemeDialog.vue'
 
 
 const { themeClass } = useTheme()
@@ -104,12 +107,11 @@ function viewDetail(p: BaziProfile) {
   })
 }
 
-function onDelete(p: BaziProfile) {
-  uni.showModal({ title: '删除档案', content: `删除「${p.name}」？`, success: async (r) => {
-    if (!r.confirm) return
-    try { await deleteProfile(p.id); profiles.value = profiles.value.filter(x => x.id !== p.id) }
-    catch (e: any) { uni.showToast({ title: e?.message || '删除失败', icon: 'none' }) }
-  }})
+async function onDelete(p: BaziProfile) {
+  const { confirm } = await showDialog({ title: '删除档案', content: `删除「${p.name}」？`, danger: true })
+  if (!confirm) return
+  try { await deleteProfile(p.id); profiles.value = profiles.value.filter(x => x.id !== p.id) }
+  catch (e: any) { uni.showToast({ title: e?.message || '删除失败', icon: 'none' }) }
 }
 </script>
 
