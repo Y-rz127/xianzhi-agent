@@ -171,6 +171,9 @@ async def list_cases():
                 "gender": c.get("gender", ""),
                 "createdAt": c.get("createdAt", ""),
                 "updatedAt": c.get("updatedAt", ""),
+                "bio": c.get("bio", ""),
+                "analysis": c.get("analysis", ""),
+                "keypoints": c.get("keypoints", ""),
                 "bazi": extract_bazi_brief(c.get("chartData") or c.get("chart_data")),
             }
             for c in sorted(cases, key=lambda x: x.get("updatedAt", ""), reverse=True)

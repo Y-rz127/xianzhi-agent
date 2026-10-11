@@ -804,6 +804,9 @@ export interface FavoriteCase {
   birthTime: string
   gender: string
   chartData?: ChartData
+  bio?: string
+  analysis?: string
+  keypoints?: string
   createdAt: string
 }
 

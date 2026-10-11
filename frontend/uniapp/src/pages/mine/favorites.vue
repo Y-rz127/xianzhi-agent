@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <view class="page" :class="themeClass">
     <view class="nav-placeholder" :style="{ height: (statusBarHeight + navBarHeight) + 'px' }"></view>
     <view class="nav-bar">
@@ -28,6 +28,7 @@
         v-for="f in favorites"
         :key="f.caseId"
         class="card"
+        @tap="openInfo(f)"
       >
         <view class="card-head">
           <text class="card-title">{{ f.name }}</text>
@@ -42,6 +43,15 @@
       </view>
 
     </scroll-view>
+
+    <CaseInfoModal
+      :show="!!infoCase"
+      :title="infoCase?.name || ''"
+      :bio="infoCase?.bio"
+      :analysis="infoCase?.analysis"
+      :keypoints="infoCase?.keypoints"
+      @close="infoCase = null"
+    />
   </view>
 </template>
 
@@ -50,6 +60,7 @@ import { useTheme } from '@/composables/useTheme'
 import { ref } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import { fetchFavorites, removeFavorite, type FavoriteCase } from '@/api'
+import CaseInfoModal from '@/components/CaseInfoModal/CaseInfoModal.vue'
 
 
 const { themeClass } = useTheme()
@@ -64,6 +75,11 @@ try {
 
 const favorites = ref<FavoriteCase[]>([])
 const loading = ref(false)
+const infoCase = ref<FavoriteCase | null>(null)
+
+function openInfo(f: FavoriteCase) {
+  infoCase.value = f
+}
 
 onShow(() => {
   loadFavorites()

@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <view class="page" :class="themeClass">
     <view class="status-bar" :style="{ height: statusBarHeight + 'px' }"></view>
 
@@ -29,7 +29,7 @@
       </view>
 
       <view v-else class="list">
-        <view v-for="c in cases" :key="c.id" class="case-card">
+        <view v-for="c in cases" :key="c.id" class="case-card" @tap="openInfo(c)">
           <view class="case-top">
             <view class="case-head">
               <text class="case-name">{{ c.name }}</text>
@@ -52,6 +52,15 @@
       </view>
     </view>
 
+    <CaseInfoModal
+      :show="!!infoCase"
+      :title="infoCase?.name || ''"
+      :bio="infoCase?.bio"
+      :analysis="infoCase?.analysis"
+      :keypoints="infoCase?.keypoints"
+      @close="infoCase = null"
+    />
+
   </view>
 </template>
 
@@ -60,6 +69,7 @@ import { useTheme } from '@/composables/useTheme'
 import { ref, onMounted } from 'vue'
 import { fetchChartCases, fetchFavorites, addFavorite, removeFavorite, type ChartCase } from '@/api'
 import { isLoggedIn } from '@/utils/storage'
+import CaseInfoModal from '@/components/CaseInfoModal/CaseInfoModal.vue'
 
 
 const { themeClass } = useTheme()
@@ -72,6 +82,11 @@ try {
 const cases = ref<ChartCase[]>([])
 const favIds = ref<Set<string>>(new Set())
 const loading = ref(false)
+const infoCase = ref<ChartCase | null>(null)
+
+function openInfo(c: ChartCase) {
+  infoCase.value = c
+}
 
 async function load() {
   loading.value = true

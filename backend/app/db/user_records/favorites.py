@@ -45,7 +45,8 @@ def list_favorites(user_id: str) -> list:
         # 联 cases 表（八字命例）
         rows_cases = conn.execute(
             """
-            SELECT f.case_id, c.name, c.tags, c.birth_time, c.gender, c.chart_data, f.created_at
+            SELECT f.case_id, c.name, c.tags, c.birth_time, c.gender, c.chart_data, f.created_at,
+                   c.bio, c.analysis, c.keypoints
             FROM chart_favorites f
             LEFT JOIN cases c ON c.id::text = f.case_id
             WHERE f.user_id = %s AND c.id IS NOT NULL
@@ -65,6 +66,9 @@ def list_favorites(user_id: str) -> list:
                     "tags": list(r[2] or []),
                     "chartData": chart_data,
                     "bazi": extract_bazi_brief(chart_data),
+                    "bio": r[7] or "",
+                    "analysis": r[8] or "",
+                    "keypoints": r[9] or "",
                     "createdAt": str(r[6]) if r[6] else "",
                 }
             )
