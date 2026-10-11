@@ -387,7 +387,7 @@
             <view class="section inner" v-if="pillars.length">
               <text class="section-title">四柱神煞</text>
               <view v-for="p in pillars" :key="p.name" class="ss-row">
-                <text class="ss-gz" :style="{ color: '#8a6d3b' }">{{ p.ganzhi }}</text>
+                <text class="ss-gz ss-gz-bazi">{{ p.ganzhi }}</text>
                 <view class="ss-list">
                   <text v-if="!(shenshaByPillar[p.name] || []).length" class="ss-empty">—</text>
                   <text v-for="(s, i) in (shenshaByPillar[p.name] || [])" :key="i" :class="['ss-tag', 'ss-' + s._cat]" @tap="showShenshaDesc(s)">{{ s.name }}</text>
@@ -1456,7 +1456,7 @@ onLoad((options: any) => {
 
 
 /* 命盘六列：当前大运/流年列高亮 */
-.bt-cur-head { background: rgba(212, 175, 55, 0.18); color: #8a6d3b; font-weight: 700; }
+.bt-cur-head { background: rgba(212, 175, 55, 0.18); color: $nx-gold-light; font-weight: 700; }
 .bt-day-master { font-size: 30rpx; font-weight: 700; color: $color-vermilion; font-family: $font-family-display; }
 .bt-cs { font-size: 26rpx; color: $color-ink; }
 .bt-nayin { font-size: 24rpx; color: $color-ink-light; }
@@ -1485,6 +1485,8 @@ onLoad((options: any) => {
 
 /* 神煞按柱竖向排列：4 列网格 */
 .ss-empty { font-size: 22rpx; color: $color-ink-lighter; padding: 6rpx 0; }
+/* 四柱干支名：原为内联 #8a6d3b，暗夜卡底糊成一片 → 走金色变量 */
+.ss-gz-bazi { color: $nx-gold-light; }
 .ss-tag { font-size: 22rpx; padding: 4rpx 14rpx; border-radius: 8rpx; line-height: 1.5; color: #718096; background: rgba(113,128,150,0.1); transition: transform 0.15s, opacity 0.15s; }
 .ss-tag:active { opacity: 0.7; transform: scale(0.96); }
 .ss-good { color: #38a169; background: rgba(56,161,105,0.1); }
@@ -1509,7 +1511,7 @@ onLoad((options: any) => {
 .pd-cell:last-child { border-right: none; }
 .pd-label { flex: 0 0 76rpx; font-size: 22rpx; color: $color-ink-light; background: rgba(0, 0, 0, 0.03); }
 .pd-col-head { font-size: 24rpx; font-weight: 600; color: $color-ink; letter-spacing: 2rpx; padding: 14rpx 2rpx; }
-.pd-cur-head { color: #8a6d3b; font-weight: 700; }
+.pd-cur-head { color: $nx-gold-light; font-weight: 700; }
 .pd-day-master { font-size: 26rpx; font-weight: 700; color: $color-vermilion; font-family: $font-family-display; }
 .pd-shishen { font-size: 22rpx; color: $color-ink; line-height: 1.4; }
 .pd-click { transition: opacity 0.15s; }
@@ -1580,7 +1582,7 @@ onLoad((options: any) => {
 .sc-tongxian { color: $color-ink; }
 .sc-cs { font-size: 24rpx; color: $color-ink; }
 .sc-xy { font-size: 24rpx; color: $color-vermilion; }
-.strip-cur .sc-year, .strip-cur .sc-jie, .strip-cur .sc-cs { color: #8a6d3b; font-weight: 600; }
+.strip-cur .sc-year, .strip-cur .sc-jie, .strip-cur .sc-cs { color: $nx-gold-light; font-weight: 600; }
 .strip-sel .sc-year, .strip-sel .sc-jie { color: $color-vermilion; font-weight: 700; }
 
 /* 五行 */
@@ -1621,7 +1623,7 @@ onLoad((options: any) => {
 .xp-top-sub { font-size: 22rpx; color: $color-ink-light; line-height: 1.5; }
 .xp-top-meta { display: flex; flex-direction: column; align-items: flex-end; justify-content: center; text-align: right; gap: 6rpx; }
 .xp-top-age { font-size: 26rpx; color: $color-ink; font-weight: 600; }
-.xp-top-siling { font-size: 24rpx; color: #8a6d3b; }
+.xp-top-siling { font-size: 24rpx; color: $nx-gold-light; }
 
 /* 当前快照已并入 .pd-table 命盘大表 */
 
@@ -1631,7 +1633,7 @@ onLoad((options: any) => {
 .xp-state-items { display: flex; flex-wrap: wrap; gap: 10rpx; }
 .xp-state-item { font-size: 26rpx; padding: 4rpx 16rpx; border-radius: 8rpx; border: 1rpx solid $color-border; color: $color-ink; }
 .xs-0 { color: #c53030; border-color: rgba(197,48,48,0.35); }
-.xs-1 { color: #b7791f; border-color: rgba(183,121,31,0.35); }
+.xs-1 { color: $nx-gold; border-color: rgba(183,121,31,0.35); }
 .xs-2 { color: #2b6cb0; border-color: rgba(43,108,176,0.35); }
 .xs-3 { color: #6b46c1; border-color: rgba(107,70,193,0.35); }
 .xs-4 { color: #718096; border-color: rgba(113,128,150,0.35); }
