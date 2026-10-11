@@ -460,8 +460,8 @@ onMounted(() => {
 .info .v { color: $nx-text; font-size: 28rpx; line-height: 1.4; }
 .info .v.small { font-size: 26rpx; line-height: 1.5; }
 .info .zx-tag { font-size: 22rpx; padding: 2rpx 10rpx; margin: 0 8rpx; border-radius: 6rpx; }
-.info .zx-tag.good { color: #7fc79e; background: rgba(127, 199, 158, .18); }
-.info .zx-tag.bad { color: #d99393; background: rgba(217, 147, 147, .18); }
+.info .zx-tag.good { color: $nx-cat-green; background: rgba(127, 199, 158, .18); }
+.info .zx-tag.bad { color: $nx-cat-red; background: rgba(217, 147, 147, .18); }
 /* 建星/二十八宿内容较长，独占一行；彭祖百忌同理 */
 .info:nth-child(3), .info:nth-child(5), .info:nth-child(8) { width: 100%; }
 

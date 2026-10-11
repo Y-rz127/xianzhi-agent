@@ -244,6 +244,29 @@
   --x-tarot-glow: 0 0 32rpx rgba(240, 208, 96, 0.4);
 }
 
+/* ============ 语义分类色（吉/凶/喜/忌/五行等小标签 chip） ============
+   原散在 chart-detail / huangli 里的 Chakra 风中间色（#c53030/#2b6cb0/#6b46c1…）
+   是为白底设计的，压暗夜卡底 #0f1520 偏暗；huangli 反过来用了暗夜向的浅绿浅粉，
+   压白天白卡又糊。统一收进变量，两套各给一个够对比度的值。 */
+.t-light {
+  --x-cat-red: #c53030;
+  --x-cat-amber: #b7791f;
+  --x-cat-blue: #2b6cb0;
+  --x-cat-purple: #6b46c1;
+  --x-cat-pink: #b83280;
+  --x-cat-green: #2f855a;
+  --x-cat-slate: #718096;
+}
+.t-dark {
+  --x-cat-red: #f08a80;
+  --x-cat-amber: #e8c964;
+  --x-cat-blue: #7fb3e8;
+  --x-cat-purple: #b79cf0;
+  --x-cat-pink: #ef8ac4;
+  --x-cat-green: #7fc79e;
+  --x-cat-slate: #a8b8c8;
+}
+
 /* ============ 装饰叠加层（hero 光晕/警示框底等，两套主题各自透明度） ============ */
 .t-light {
   --x-glow-blue: rgba(107, 123, 142, 0.35);

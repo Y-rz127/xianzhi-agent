@@ -59,6 +59,13 @@ page {
   --x-yi: #4A7A3A;
   --x-ji: #B8483C;
   --x-toast: #B8483C;
+  --x-cat-red: #c53030;
+  --x-cat-amber: #b7791f;
+  --x-cat-blue: #2b6cb0;
+  --x-cat-purple: #6b46c1;
+  --x-cat-pink: #b83280;
+  --x-cat-green: #2f855a;
+  --x-cat-slate: #718096;
 }
 
 /* 通用文本 */

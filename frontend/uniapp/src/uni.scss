@@ -95,6 +95,14 @@ $nx-accent-ziwei: #5B6FC8;
 $nx-yi: var(--x-yi);
 $nx-ji: var(--x-ji);
 $nx-toast: var(--x-toast);
+/* 语义分类色（吉/凶/喜/忌/五行 chip，两套主题各给够对比度的值） */
+$nx-cat-red: var(--x-cat-red);
+$nx-cat-amber: var(--x-cat-amber);
+$nx-cat-blue: var(--x-cat-blue);
+$nx-cat-purple: var(--x-cat-purple);
+$nx-cat-pink: var(--x-cat-pink);
+$nx-cat-green: var(--x-cat-green);
+$nx-cat-slate: var(--x-cat-slate);
 
 /* === 旧变量兼容（保持 uni-app 内置组件主题色） === */
 $uni-color-primary: $color-primary;

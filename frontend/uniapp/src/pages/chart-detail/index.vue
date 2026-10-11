@@ -1487,13 +1487,13 @@ onLoad((options: any) => {
 .ss-empty { font-size: 22rpx; color: $color-ink-lighter; padding: 6rpx 0; }
 /* 四柱干支名：原为内联 #8a6d3b，暗夜卡底糊成一片 → 走金色变量 */
 .ss-gz-bazi { color: $nx-gold-light; }
-.ss-tag { font-size: 22rpx; padding: 4rpx 14rpx; border-radius: 8rpx; line-height: 1.5; color: #718096; background: rgba(113,128,150,0.1); transition: transform 0.15s, opacity 0.15s; }
+.ss-tag { font-size: 22rpx; padding: 4rpx 14rpx; border-radius: 8rpx; line-height: 1.5; color: $nx-cat-slate; background: rgba(113,128,150,0.1); transition: transform 0.15s, opacity 0.15s; }
 .ss-tag:active { opacity: 0.7; transform: scale(0.96); }
-.ss-good { color: #38a169; background: rgba(56,161,105,0.1); }
-.ss-bad { color: #c53030; background: rgba(197,48,48,0.1); }
-.ss-love { color: #b83280; background: rgba(184,50,128,0.1); }
-.ss-career { color: #2b6cb0; background: rgba(43,108,176,0.1); }
-.ss-other { color: #718096; background: rgba(113,128,150,0.1); }
+.ss-good { color: $nx-cat-green; background: rgba(56,161,105,0.1); }
+.ss-bad { color: $nx-cat-red; background: rgba(197,48,48,0.1); }
+.ss-love { color: $nx-cat-pink; background: rgba(184,50,128,0.1); }
+.ss-career { color: $nx-cat-blue; background: rgba(43,108,176,0.1); }
+.ss-other { color: $nx-cat-slate; background: rgba(113,128,150,0.1); }
 .ss-cur-row { background: rgba(212,175,55,0.06); border-radius: 10rpx; padding: 8rpx 4rpx; }
 .ss-toggle { font-size: 22rpx; color: $color-vermilion; padding: 4rpx 8rpx; }
 
@@ -1632,11 +1632,11 @@ onLoad((options: any) => {
 .xp-state-title { display: block; font-size: 24rpx; color: $color-ink-light; letter-spacing: 4rpx; margin-bottom: 14rpx; }
 .xp-state-items { display: flex; flex-wrap: wrap; gap: 10rpx; }
 .xp-state-item { font-size: 26rpx; padding: 4rpx 16rpx; border-radius: 8rpx; border: 1rpx solid $color-border; color: $color-ink; }
-.xs-0 { color: #c53030; border-color: rgba(197,48,48,0.35); }
-.xs-1 { color: $nx-gold; border-color: rgba(183,121,31,0.35); }
-.xs-2 { color: #2b6cb0; border-color: rgba(43,108,176,0.35); }
-.xs-3 { color: #6b46c1; border-color: rgba(107,70,193,0.35); }
-.xs-4 { color: #718096; border-color: rgba(113,128,150,0.35); }
+.xs-0 { color: $nx-cat-red; border-color: rgba(197,48,48,0.35); }
+.xs-1 { color: $nx-cat-amber; border-color: rgba(183,121,31,0.35); }
+.xs-2 { color: $nx-cat-blue; border-color: rgba(43,108,176,0.35); }
+.xs-3 { color: $nx-cat-purple; border-color: rgba(107,70,193,0.35); }
+.xs-4 { color: $nx-cat-slate; border-color: rgba(113,128,150,0.35); }
 .xp-siling { font-size: 30rpx; color: $color-vermilion; font-weight: 700; }
 .xp-siling-detail { display: block; font-size: 22rpx; color: $color-ink-light; margin-top: 10rpx; line-height: 1.6; }
 
