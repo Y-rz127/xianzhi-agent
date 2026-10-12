@@ -35,7 +35,7 @@ from app.domain.analysis_calc import ENGINE_VERSION
 from app.domain.chart_builder import BaziChart
 from app.domain.fortune_score import detect_ailment, favor_vector
 
-PROMPT_VERSION = "v7"
+PROMPT_VERSION = "v8"
 
 # 终审 LLM 总超时（秒）：模型层各有 timeout/重试/熔断，这里兜底防接口被拖死
 _VERDICT_TIMEOUT = 150.0
