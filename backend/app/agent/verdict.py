@@ -17,6 +17,7 @@
 输出契约：LLM 必须回严格 JSON，字段枚举钉死；
 解析或校验失败 status=invalid 落库（raw_text 留排查），绝不静默吞掉。
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -44,9 +45,20 @@ _VALID_WUXING = ("金", "木", "水", "火", "土")
 _VALID_KIND = ("无", "专旺", "从格", "假从")
 _VALID_RELATION = ("confirm", "override")
 _VALID_LABELS = (
-    "无", "曲直格", "炎上格", "稼穑格", "从革格", "润下格",
-    "从财格", "从杀格", "从儿格", "从势格",
-    "假从财格", "假从杀格", "假从儿格", "假从势格",
+    "无",
+    "曲直格",
+    "炎上格",
+    "稼穑格",
+    "从革格",
+    "润下格",
+    "从财格",
+    "从杀格",
+    "从儿格",
+    "从势格",
+    "假从财格",
+    "假从杀格",
+    "假从儿格",
+    "假从势格",
 )
 
 VERDICT_SYSTEM_PROMPT = """你是严谨的子平命理审盘人。引擎已按确定性规则算出初判（位置权重、藏干比、合冲刑害力学修正都已在其中），你的任务是复核这份初判并给出最终裁决。
@@ -56,9 +68,9 @@ VERDICT_SYSTEM_PROMPT = """你是严谨的子平命理审盘人。引擎已按�
 confirm 与 override 的门槛（刻意不对称）：
 - **confirm**：初判的强弱/格局与盘面结构不矛盾，即可确认。盘面接近档位边界（初判分数在门槛附近）时，**必须 confirm**——边界盘的裁量不构成推翻依据。
 - **override**：必须同时满足三条，缺一不可——
-  a) 存在引擎力学**无法表达**的结构性论据（如禄根被冲而力散于全局、微根被合化截断而无生克通路、虚浮天干不受生）；
+  a) 存在引擎力学**无法表达**的结构性论据（如禄根被冲而力散于全局、微根被合化截断而无生克通路、虚浮天干不受生等）；
   b) 该论据**直接改变**旺衰档位或格局结论（仅"轻重之别"不够）；
-  c) 论据出自给定材料或主流命理共识（子平/滴天髓口径），不是你的个人发挥。
+  c) 论据出自给定材料或主流命理共识（子平/滴天髓等权威古籍口径），不是你的个人发挥。
 - 以下情形**一律 confirm**：你的论据其实已被引擎涵盖（合冲修正 notes 里已列出的机制）；你只是对权重占比有不同感觉；你说不出引擎具体哪一步算错。
 
 其余纪律：
@@ -68,9 +80,9 @@ confirm 与 override 的门槛（刻意不对称）：
    - 仅余气/中气微根：不得判真从，最多讨论**假从**（实战以正格为稳妥）；
    - 禄刃强根（哪怕被冲，冲是根损不是根灭）或印比透干有地支支撑：**正格，不论从**。
    - **例外（根变性入局）**：微根所在的地支若已合而化成**所从之神**（三合局/三会方/六合化为所从五行），根气变性归局、名存实亡，微根不碍从——可直接判**真从**。合为他行或仅合绊不化的，不适用此例外。
-   盘面已给出引擎的根气画像三档判定，可对照引用，但你有权按盘面结构复核它。
+   - 合化成立的条件是合化的五行在原局处于旺相状态，不然合而不化(引擎已经有了这个逻辑)。盘面已给出引擎的根气画像三档判定，可对照引用，但你有权按盘面结构复核它。
 3. **印旺不等于身旺**（土重金埋）：日元须有一定力量方能受重印所生；日主无强根而印星独大成势时（如水多木漂），是印重身弱之病，不判身旺，亦不轻判从格——按印重病药论（忌印、喜财制印/比劫泄印）取用。
-4. 日主极弱无根且克泄耗一行独旺时考虑从格；一行独旺无克泄时考虑专旺。
+4. 日主极弱无根或微根被冲克受损、合化变性且克泄耗一行独旺时考虑从格；一行独旺无克泄或克泄耗极低可忽略不计时考虑专旺。
 5. 用神唯一：正格按扶抑（弱喜印比、旺喜克泄耗），从格喜所从之神、忌印比，专旺顺其旺势。
 6. reason 须引用至少一条具体盘面事实（如"三酉冲一卯，禄根被伤"），不得空话；override 时须点名引擎错在哪一步。
 
@@ -154,9 +166,7 @@ def build_verdict_context(chart: BaziChart) -> str:
     if fav:
         fav_str = "、".join(f"{k}{v:+.2f}" for k, v in sorted(fav.items(), key=lambda x: -x[1]))
         ailment = detect_ailment(chart)
-        lines.append(
-            f"K线用神判定：病神={ailment or '无'}；喜忌倾向（正喜负忌）：{fav_str}"
-        )
+        lines.append(f"K线用神判定：病神={ailment or '无'}；喜忌倾向（正喜负忌）：{fav_str}")
     lines.append(f"用神方向：{w.useful_hint}")
     return "\n".join(lines)
 
@@ -283,11 +293,18 @@ def _upsert_verdict(row: dict[str, Any]) -> None:
                           raw_text = EXCLUDED.raw_text, created_at = NOW()
             """,
             (
-                row["chart_hash"], row["birth_time"], row["gender"],
-                row["engine_version"], row["prompt_version"], row["status"],
+                row["chart_hash"],
+                row["birth_time"],
+                row["gender"],
+                row["engine_version"],
+                row["prompt_version"],
+                row["status"],
                 json.dumps(row["verdict"], ensure_ascii=False) if row["verdict"] else None,
                 json.dumps(row["computed"], ensure_ascii=False),
-                row["diff"], row["model"], row["latency_ms"], row["raw_text"],
+                row["diff"],
+                row["model"],
+                row["latency_ms"],
+                row["raw_text"],
             ),
         )
 
