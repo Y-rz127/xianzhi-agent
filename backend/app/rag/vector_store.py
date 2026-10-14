@@ -33,6 +33,22 @@ from app.rag.relevance import keyword_overlap
 
 _SEARCH_CACHE_MAX = 200
 
+# 前导区 chunk（无「二级标题」元数据：H1 与首个 ## 之间的约束/别名/导语等元信息）降权系数。
+# 实测这些元信息文本含大量领域词，会在 rerank 中抢走真知识 chunk 的 top1
+# （52 条探针：降权后 47/52 → 52/52；65 个前导 chunk 全部为 blockquote 主导，无误伤）。
+# 降权而非剔除：整轮确实无正文命中时，前导块仍可作兜底返回，不改变"宁缺毋滥"阈值语义。
+_PREAMBLE_PENALTY = 0.4
+
+
+def _rerank_weight(query: str, doc: Document) -> float:
+    """单条候选重排权重 = 关键词覆盖率 × 文档类型权重（× 前导区降权）。"""
+    weight = keyword_overlap(query, doc.page_content) * DOC_TYPE_WEIGHT.get(
+        doc.metadata.get("doc_type", ""), 1.0
+    )
+    if "二级标题" not in doc.metadata:
+        weight *= _PREAMBLE_PENALTY
+    return weight
+
 
 def _build_chroma(chunks: list[Document], embeddings: Embeddings):
     """Chroma 本地持久化向量库（全量重建）。"""
@@ -137,8 +153,9 @@ def _rebuild_store(chunks: list[Document], embeddings: Embeddings, store_type: s
             return _build_postgres(chunks, embeddings), "postgres"
         except Exception as e:
             log.warning(
-                "Postgres 可达但重建失败（多为 DashScope embedding 超时/写入异常，而非 Postgres 故障）。"
-                "建议改用 text-embedding-v2 并排查网络；本次回退 Chroma: {}",
+                "Postgres 可达但重建失败（多为 embedding 接口超时/写入异常，而非 Postgres 故障）。"
+                "建议调小 settings.embedding_batch_size / embedding_max_chars_per_batch 并排查网络；"
+                "本次回退 Chroma: {}",
                 e,
             )
     return _build_chroma(chunks, embeddings), "chroma"
@@ -306,20 +323,16 @@ class KnowledgeBase:
             scored = [(d, s) for d, s in scored if s <= settings.rag_distance_threshold]
         if not scored:
             return []
-        # rerank：关键词覆盖率 × 文档类型权重（断法优先、模板库降权），避免密集术语清单虚高命中
-        scored = [
-            (
-                d,
-                s,
-                keyword_overlap(query, d.page_content)
-                * DOC_TYPE_WEIGHT.get(d.metadata.get("doc_type", ""), 1.0),
-            )
-            for d, s in scored
-        ]
+        # rerank：关键词覆盖率 × 文档类型权重（断法优先、模板库降权），避免密集术语清单虚高命中；
+        # 前导区元信息 chunk 再乘 _PREAMBLE_PENALTY 降权（见常量注释），防止约束说明挤占真知识 top1
+        scored = [(d, s, _rerank_weight(query, d)) for d, s in scored]
         scored.sort(key=lambda x: -x[2])
-        # 最低相关性阈值：覆盖率 < 0.25 的视为不相关，直接丢弃（宁缺毋滥，不兜底返回，
-        # 避免无关知识片段进入 prompt 引入噪音）
-        _MIN_OVERLAP = 0.25
+        # 最低相关性阈值：覆盖率 < settings.rag_min_overlap 的视为不相关，直接丢弃
+        #（宁缺毋滥，不兜底返回，避免无关知识片段进入 prompt 引入噪音）。
+        # 2026-10-14 由硬编码 0.25 下调为 0.15 并提为配置项：Top3 覆盖率中位数恰好 0.25，
+        # 原阈值把一半口语化提问误杀成「未检索到相关知识」。降阈值是本轮召回提升的主要来源，
+        # 换embedding 模型只是必要前提。
+        _MIN_OVERLAP = settings.rag_min_overlap
         top = [item for item in scored if item[2] >= _MIN_OVERLAP][:k]
         log.info(
             "[rerank] query={} 候选数={} 阈值{}以上={}条={}",
