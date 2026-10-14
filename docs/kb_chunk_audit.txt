@@ -1,0 +1,127 @@
+==============================================================================
+PRODUCT RAG KNOWLEDGE BASE - CHUNK AUDIT
+==============================================================================
+docs: 49   chunks: 790   CHUNK_SIZE=600   META_VERSION=2
+chunks/doc: min=9 max=76 mean=16.1 median=14
+top-10 docs hold 33.9% of all chunks; top-20 hold 54.4%
+
+Produced by loading and splitting the real corpus through
+app.rag.knowledge.load_knowledge_docs() / split_chunks() in the project venv,
+with app.core.logger stubbed so the run stays read-only w.r.t. backend/logs.
+Evidence for docs/knowledge-base-engineering-review.md sections 一 / 六.
+
+ALL DOCS BY CHUNK COUNT (retrieval surface):
+  07_神煞初探.md                                 76 chunks   9.6%  theory
+  27_命例案例库.md                                29 chunks   3.7%  case
+  35_身材样貌断法.md                               25 chunks   3.2%  rule
+  01_天干地支基础.md                               22 chunks   2.8%  theory
+  14_格局完整体系.md                               21 chunks   2.7%  rule
+  25_术语白话对照表.md                              20 chunks   2.5%  ref
+  古籍05_三命通会精选条文.md                           20 chunks   2.5%  classic
+  13_大运流年咨询规则卡.md                            19 chunks   2.4%  rule
+  11_婚恋关系规则卡.md                              18 chunks   2.3%  rule
+  26_问答模板库.md                                18 chunks   2.3%  template
+  古籍03_穷通宝鉴十天干十二月喜忌.md                       18 chunks   2.3%  classic
+  04_用神喜忌.md                                 17 chunks   2.2%  theory
+  24_标准分析流程.md                               17 chunks   2.2%  process
+  古籍02_子平真诠全文摘录.md                           17 chunks   2.2%  classic
+  15_六亲完整断法.md                               16 chunks   2.0%  rule
+  33_从格专旺化气体系.md                             16 chunks   2.0%  theory
+  古籍06_神峰通考精选.md                             16 chunks   2.0%  classic
+  03_十神详解.md                                 15 chunks   1.9%  theory
+  17_学业功名断法.md                               15 chunks   1.9%  rule
+  古籍04_滴天髓注解核心.md                            15 chunks   1.9%  classic
+  古籍08_造化元钥徐乐吾评注精选.md                        15 chunks   1.9%  classic
+  09_玄学史古籍.md                                14 chunks   1.8%  theory
+  16_健康伤病断法.md                               14 chunks   1.8%  rule
+  19_性格心性断法.md                               14 chunks   1.8%  rule
+  23_流月流日断事细则.md                             14 chunks   1.8%  rule
+  古籍10_拦江网余氏调候补遗.md                          14 chunks   1.8%  classic
+  02_五行生克关系.md                               13 chunks   1.6%  theory
+  08_八字排盘基础.md                               13 chunks   1.6%  theory
+  10b_财运收入断法.md                              13 chunks   1.6%  rule
+  18_官非口舌出行.md                               13 chunks   1.6%  rule
+  20_子女子嗣断法.md                               13 chunks   1.6%  rule
+  21_贫富层次断法.md                               13 chunks   1.6%  rule
+  22_男女命差异化论命.md                             13 chunks   1.6%  rule
+  29_社交人际断法.md                               13 chunks   1.6%  rule
+  古籍01_渊海子平核心赋诀.md                           13 chunks   1.6%  classic
+  古籍07_盲派实用口诀.md                             13 chunks   1.6%  classic
+  00_知识库总索引.md                               12 chunks   1.5%  theory
+  10_事业工作断法.md                               12 chunks   1.5%  rule
+  30_方位迁移断法.md                               12 chunks   1.5%  rule
+  31_择吉择日断法.md                               12 chunks   1.5%  rule
+  34_高频神煞专论_空亡羊刃桃花.md                        12 chunks   1.5%  theory
+  05_大运流年.md                                 11 chunks   1.4%  theory
+  12_合冲刑害规则卡.md                              11 chunks   1.4%  rule
+  28_起名改名规则.md                               11 chunks   1.4%  theory
+  32_合婚配对断法.md                               11 chunks   1.4%  rule
+  古籍09_星平会海精选.md                             11 chunks   1.4%  classic
+  古籍12_袁树珊命理探原核心节选.md                        11 chunks   1.4%  classic
+  06_纳音五行.md                                 10 chunks   1.3%  theory
+  古籍11_女命大成古今女命汇集.md                          9 chunks   1.1%  classic
+
+chunk chars: min=95 max=666 mean=433 median=448 p95=628
+chunks > CHUNK_SIZE: 167 (21.1%)
+NOTE: retrieve_for_context truncates each chunk to 600 chars
+      (retrieval.py:309-312), so every chunk longer than 600 loses its tail at
+      injection time. workflow_retrieval.py:112 passes _MAX_TEXT_PER_QUERY=600
+      as that cap, so this is the live production path, not a default.
+
+doc_type distribution (chunks):
+  rule        292  (rerank weight 1.15)
+  theory      242  (rerank weight 1.00)
+  classic     172  (rerank weight 1.00)
+  case         29  (rerank weight 0.95)
+  ref          20  (rerank weight 0.90)
+  template     18  (rerank weight 0.70)
+  process      17  (rerank weight 0.80)
+
+INDEX DOCUMENT CHECK (00_知识库总索引.md):
+  chunks=12  doc_type=theory
+  -> the index is retrievable at the SAME weight as real theory content
+     (DOC_TYPE_WEIGHT["theory"]=1.00), because infer_doc_type() falls through
+     to its final `return "theory"` (knowledge.py:54). It occupies ~1.5% of the
+     chunk pool and competes for the max_docs slots.
+  sample chunk:
+    [知识库总索引｜八字命理知识库总索引]
+    > 本文档为八字命理预测智能体（Xianzhi-Agent）知识库的总目录，含全部文档的定位、适用场景、分层调用优先级。供 RAG 检索路由、Worker 调用、知识库维护参考。
+    > **知识库版本**：v2.0（2026-08-16 整理修正版）
+    > **文档总数**：47 份（基础理论 9 + 断法规则 26 + 古籍 12）
+  NOTE: "47 份" is stale - the corpus holds 48 content docs (+ this index = 49);
+        35_身材样貌断法.md is not referenced by the index at all.
+
+duplicate chunks (identical after whitespace normalisation): 0 groups
+
+REPEATED LONG LINES ACROSS DOCS (>=40 chars, in >=3 distinct docs):
+  distinct lines appearing in >=3 docs: 4
+   [11 docs] > 📌**典籍标注说明**：以下后缀均为知识库**主题检索标签**，**非古籍原始篇名**。AI 输出时不得写 `《XX·论XX》云：xxx` 格式。
+   [7 docs] > 📌**典籍标注说明**：引用典籍后缀为知识库主题检索标签，非古籍原始篇名。AI 输出时不得写 `《XX·论XX》云：xxx` 格式，须改为 `按《XX》要义：xxx` 或直接引真实原文。
+   [3 docs] > 📌**典籍标注说明**：以下后缀均为知识库主题检索标签，**非古籍原始篇名**。AI 输出时不得写 `《XX·论XX》云：xxx` 格式。
+   [3 docs] - **八正格**：正官格、七杀格、正财格、偏财格、正印格、偏印格、食神格、伤官格。
+  -> the disclaimer exists in two different wordings and covers only 26 of 49
+     docs; all 12 古籍* files lack it entirely (see report section 四).
+
+docs with no H2 (whole doc is one header-splitter piece): 0 []
+
+docs where H3 is used heavily (H3 is NOT a split boundary, so a long H3
+section yields many chunks that all share one [title|H1|H2] prefix):
+  07_神煞初探.md                                58 H3
+  古籍03_穷通宝鉴十天干十二月喜忌.md                      45 H3
+  24_标准分析流程.md                              42 H3
+  33_从格专旺化气体系.md                            37 H3
+  13_大运流年咨询规则卡.md                           35 H3
+  古籍05_三命通会精选条文.md                          34 H3
+  27_命例案例库.md                               34 H3
+  25_术语白话对照表.md                             32 H3
+  14_格局完整体系.md                              32 H3
+  26_问答模板库.md                               31 H3
+  19_性格心性断法.md                              31 H3
+  15_六亲完整断法.md                              30 H3
+
+source docs over 20 KB:
+  01_天干地支基础.md                               22.4 KB
+  07_神煞初探.md                                 91.8 KB
+  14_格局完整体系.md                               22.2 KB
+  27_命例案例库.md                                29.1 KB
+  35_身材样貌断法.md                               25.3 KB
