@@ -26,6 +26,7 @@ ENV/
 # 配置与敏感信息
 .env
 .env.local
+.env.bak*
 *.secret
 
 # 运行时数据

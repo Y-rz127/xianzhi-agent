@@ -60,8 +60,14 @@ def get_embeddings() -> Embeddings:
     注意：必须走 compatible-mode/v1 而非原生 DashScopeEmbeddings（原生 SDK 端点）。
     qwen3.7-text-embedding-flash 在原生端点长输入会挂死 300s 无响应（2026-09-04 排查）。
     但实测该 flash 模型即便在兼容端点，单条 ≥600 字 / 一批总字符 ≈8.2k 时仍会挂死不返回
-    （约 60s 客户端超时），因此默认 embedding 模型请用 text-embedding-v2（长输入与大批量均稳定 <2s）。
-    批量条数与单次总字符上限见 settings.embedding_batch_size / embedding_max_chars_per_batch。
+    （约 60s 客户端超时）。
+
+    **默认模型是 qwen3.7-text-embedding（1024维），2026-10-14 由 text-embedding-v2 换来的**：
+    本项目 797 chunk / 40 条口语探针实测 recall@3 33/40→39/40、MRR 0.792→0.929，
+    单价同档（0.0005 元/千 token）。原先 docstring 里"默认用 text-embedding-v2"的建议
+    是 2026-09-04 排查 flash 挂死时的临时结论，flash 挂死问题已由 BatchEmbeddings 解决，该建议作废。
+    批次条数与单次总字符上限见 settings.embedding_batch_size / embedding_max_chars_per_batch；
+    **API 硬上限按模型不同**（v2=25 / v4=10 / qwen3.7=20），当前默认 10 对三者均安全。
     """
     from langchain_openai import OpenAIEmbeddings
 

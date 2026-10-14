@@ -144,7 +144,10 @@ class Settings(BaseSettings):
     embedding_local_model: str = Field(
         default="./models/Xorbits/bge-small-zh-v1.5", alias="EMBEDDING_LOCAL_MODEL"
     )
-    embedding_model: str = Field(default="text-embedding-v2", alias="EMBEDDING_MODEL")
+    # 2026-10-14 起默认 qwen3.7-text-embedding（默认 1024 维）：本项目 797 chunk 实测
+    # recall@3 33/40→39/40、MRR 0.792→0.929，单价与 v4 同档，优于老的 text-embedding-v2。
+    # 代码默认值必须与 .env 保持一致，否则不读 .env 的部署会静默退回最差模型。
+    embedding_model: str = Field(default="qwen3.7-text-embedding", alias="EMBEDDING_MODEL")
     embedding_api_key: str = Field(default="", alias="EMBEDDING_API_KEY")
     # 向量数据库类型：chroma | postgres
     vector_store_type: str = Field(default="chroma", alias="VECTOR_STORE_TYPE")
@@ -155,6 +158,17 @@ class Settings(BaseSettings):
     rag_mmr_lambda: float = Field(default=0.7, alias="RAG_MMR_LAMBDA")
     # 检索距离阈值（仅对支持 score 的后端有效，如 Chroma L2 距离）；None 表示不过滤
     rag_distance_threshold: Optional[float] = Field(default=None, alias="RAG_DISTANCE_THRESHOLD")
+    # rerank 关键词覆盖率下限：低于此值视为不相关直接丢弃（宁缺毋滥、不兜底返回）。
+    # 2026-10-14 实测定标（52 提问 × 3 query = 156 条真实 query，走 retrieve_for_context
+    # 整轮口径，每格 = 整轮至少1条正确 / 整轮全空 / 注入错文档数）：
+    #   阈值 0.05 → 45/0/12 ｜ 0.10 → 45/0/12 ｜ 0.15 → 41/6/7 ｜ 0.20 → 38/9/5 ｜ 0.25 → 33/15/4
+    # ⇒ 取 0.10：整轮成功 41→45、整轮全空 6→0，代价仅是多注入 5 条错文档。
+    # 为何不是 0.25（原值）：2-gram 覆盖率天然上限 p10=0.111/p25=0.167/中位 0.300，
+    # 「<0.10」仅 2/52、「<0.15」有 10/52——0.15 正好切在分布最陡处，0.25 更在陡坡之后。
+    # 为何不更低（0.05）：与 0.10 完全等效（45/0/12），没有额外收益，不必再降。
+    # 注意评估口径：单 query top-1 与整轮口径结论相反（单 query 下 0.15 优于 0.05，
+    # 因为它怕错答；整轮下多 query 互为兜底，错答代价远小于整轮全空）。改阈值前先看 DETAILS。
+    rag_min_overlap: float = Field(default=0.10, alias="RAG_MIN_OVERLAP")
     # PostgreSQL + pgvector 连接串（VECTOR_STORE_TYPE=postgres 时使用）
     postgres_connection_string: str = Field(
         default="postgresql://postgres:postgres@localhost:5433/xianzhi",
