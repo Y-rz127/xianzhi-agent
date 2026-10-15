@@ -381,3 +381,102 @@ def test_computed_shensha_names_are_all_known_to_checker():
         for item in _compute_shensha(chart.pillars, parse_gender(chart.birth.gender)):
             produced.add(item.get("name", ""))
     assert produced <= known, f"计算器产出但审核名单缺失: {sorted(produced - known)}"
+
+
+# ============================================================
+# B 关键行锚点：回答提及年份/大运 → 事实行摘出注入审核请求
+# 2026-10-15 恋爱轮实测：qwen3.8-flash 在长事实里漏读整行，把确实存在的
+# 红鸾/驿马判"无"；把行摘到眼前 + issue 自相矛盾过滤（C）双保险兜底
+# ============================================================
+
+def _make_capturing_review_model(captured: dict, response: str) -> FakeListChatModel:
+    """记录最后一次审核 prompt 的假模型（pydantic 限定，prompt 存入外部 dict）。"""
+
+    class _M(FakeListChatModel):
+        def invoke(self, messages, *args, **kwargs):
+            captured["prompt"] = "\n".join(str(getattr(m, "content", "")) for m in messages)
+            return super().invoke(messages, *args, **kwargs)
+
+    return _M(responses=[response])
+
+
+def test_extract_fact_rows_matches_year_ganzhi_and_dayun():
+    from app.domain.chart_format import extract_fact_rows
+
+    rows = extract_fact_rows("2031辛亥年驿马动，走癸酉运。", CHART)
+    assert any(r.startswith("2031年: 辛亥") for r in rows), rows
+    assert any(r.startswith("癸酉(") for r in rows), rows
+    # 未覆盖年份/空文本不锚定（事实窗口边界：不脑补）
+    assert extract_fact_rows("2099年注意变动。", CHART) == []
+    assert extract_fact_rows("", CHART) == []
+
+
+def test_llm_review_injects_key_fact_rows_anchor():
+    item = next(i for i in CHART.liunian if i.year == 2031)
+    assert item.shensha, "该盘 2031 流年应有神煞，用于本用例"
+    captured: dict = {}
+    worker = ReviewerWorker(chat_model=_make_capturing_review_model(captured, '{"pass": true, "issues": []}'))
+    answer = f"{item.year}年{item.ganzhi}驿马动，社交面打开。"
+    result = worker._llm_review(answer, CHART, "知识", "问题", None, None)
+    assert result.ok
+    assert "【关键行锚点】" in captured["prompt"]
+    assert f"{item.year}年: {item.ganzhi}" in captured["prompt"], "锚点必须携带该年事实原文行"
+    names = "、".join(s["name"] for s in item.shensha)
+    assert names in captured["prompt"], "锚点行必须包含完整神煞字段"
+
+
+def test_contradicted_absence_issues_are_dropped():
+    """issue 断言"无X"但 X 就在该年事实行里 → 自相矛盾误报，过滤后改判通过。"""
+    import json
+
+    item = CHART.liunian[0]
+    name = item.shensha[0]["name"]
+    verdict = json.dumps(
+        {"pass": False, "issues": [f"{item.year}年{item.ganzhi}神煞无{name}，回答称带{name}与排盘事实不符。"]},
+        ensure_ascii=False,
+    )
+    worker = ReviewerWorker(chat_model=FakeListChatModel(responses=[verdict]))
+    result = worker._llm_review(
+        f"{item.year}年是{item.ganzhi}年，流年带{name}。", CHART, "知识", "问题", None, None
+    )
+    assert result.ok is True, result.issues
+    assert result.issues == []
+
+
+def test_branch_negation_issue_is_dropped():
+    """「藏干非X」型（如实测的'丙在巳非寅'）：X 确在该年藏干里 → 丢弃。"""
+    import json
+
+    item = next(i for i in CHART.liunian if len(i.hidden_stems) >= 2)
+    stem = item.hidden_stems[0]
+    verdict = json.dumps(
+        {"pass": False, "issues": [f"{item.year}年{item.ganzhi}藏干非{stem}，回答称藏{stem}错误。"]},
+        ensure_ascii=False,
+    )
+    worker = ReviewerWorker(chat_model=FakeListChatModel(responses=[verdict]))
+    result = worker._llm_review(
+        f"{item.year}年{item.ganzhi}藏有{stem}，注意积累。", CHART, "知识", "问题", None, None
+    )
+    assert result.ok is True, result.issues
+
+
+def test_legitimate_issues_are_kept():
+    """锚定不到行 / 所指内容确实不在行里 / 无否定断言的 issue 一律保留（宁可不滤）。"""
+    import json
+
+    from app.agent.workflow.fact_check import SHENSHA_NAMES
+
+    item = CHART.liunian[0]
+    row_names = {s["name"] for s in item.shensha}
+    missing = next(n for n in SHENSHA_NAMES if n not in row_names)
+    verdicts = [
+        # 所指神煞确实不在该年 → 保留
+        json.dumps({"pass": False, "issues": [f"{item.year}年{item.ganzhi}神煞无{missing}，回答却断言带{missing}。"]}, ensure_ascii=False),
+        # 锚定不到流年/大运行 → 保留
+        json.dumps({"pass": False, "issues": ["回答取用神与自身强弱论述矛盾"]}, ensure_ascii=False),
+    ]
+    for verdict in verdicts:
+        worker = ReviewerWorker(chat_model=FakeListChatModel(responses=[verdict]))
+        result = worker._llm_review(f"{item.year}年是{item.ganzhi}年。", CHART, "知识", "问题", None, None)
+        assert result.ok is False, verdict
+        assert result.issues, verdict

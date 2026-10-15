@@ -118,6 +118,14 @@ def _yun_extra_text(item) -> str:
     )
 
 
+def _dayun_row(item) -> str:
+    """单步大运事实行（format_dayun_text 与 extract_fact_rows 共用，保证口径一致）。"""
+    return (
+        f"{item.ganzhi}({item.shishen_gan}) | {item.start_year}-{item.end_year} | {item.start_age}-{item.end_age}岁 "
+        f"{_yun_extra_text(item)}"
+    )
+
+
 def format_dayun_text(chart: BaziChart) -> str:
     """格式化大运文本（起运信息 + 每柱大运的干支/年份区间/年龄）。"""
     lines = [
@@ -130,12 +138,18 @@ def format_dayun_text(chart: BaziChart) -> str:
         f"【大运列表】(共 {len(chart.dayun)} 柱)",
     ]
     for item in chart.dayun:
-        lines.append(
-            f"  {item.ganzhi}({item.shishen_gan}) | {item.start_year}-{item.end_year} | {item.start_age}-{item.end_age}岁 "
-            f"{_yun_extra_text(item)}"
-        )
+        lines.append(f"  {_dayun_row(item)}")
     lines += ["", "注: 大运由 lunar-python 起运算法生成，顺逆与起运时间已结构化保存。"]
     return "\n".join(lines)
+
+
+def _liunian_row(item) -> str:
+    """单条流年事实行（format_liunian_text 与 extract_fact_rows 共用，保证口径一致）。"""
+    dy = f" | 所在大运: {item.dayun_ganzhi}" if item.dayun_ganzhi else ""
+    return (
+        f"{item.year}年: {item.ganzhi}({item.shishen_gan}) | {item.age}虚岁{dy} "
+        f"{_yun_extra_text(item)}"
+    )
 
 
 def format_liunian_text(chart: BaziChart) -> str:
@@ -143,11 +157,7 @@ def format_liunian_text(chart: BaziChart) -> str:
     start_year = chart.liunian[0].year if chart.liunian else datetime.date.today().year
     lines = [f"【流年推算】从 {start_year} 年起往后 {len(chart.liunian)} 年", ""]
     for item in chart.liunian:
-        dy = f" | 所在大运: {item.dayun_ganzhi}" if item.dayun_ganzhi else ""
-        lines.append(
-            f"  {item.year}年: {item.ganzhi}({item.shishen_gan}) | {item.age}虚岁{dy} "
-            f"{_yun_extra_text(item)}"
-        )
+        lines.append(f"  {_liunian_row(item)}")
     lines += ["", "注: 流年干支采用立春口径，并逐年绑定所在大运。"]
     return "\n".join(lines)
 
@@ -248,6 +258,25 @@ def _date_from_jdn(j: int) -> tuple[int, int, int]:
     month = m + 3 - 12 * (m // 10)
     year = 100 * b + d - 4800 + m // 10
     return year, month, day
+
+
+def extract_fact_rows(text: str, chart: BaziChart) -> list[str]:
+    """摘出 text 中提及年份/流年干支/大运干支对应的排盘事实原文行（流年行 + 大运行）。
+
+    供 LLM 审核作「关键行锚点」（2026-10-15 恋爱轮实测：审核模型在长事实里自行找行
+    漏读，把确实存在的红鸾/驿马/寅中藏丙判为"无"），以及过滤"断言无X但X就在该行"的
+    自相矛盾 issue。行文本与 format_fact_context 输出逐字一致。
+    """
+    if not text:
+        return []
+    rows: list[str] = []
+    for item in chart.liunian:
+        if item.ganzhi and (str(item.year) in text or item.ganzhi in text):
+            rows.append(_liunian_row(item))
+    for item in chart.dayun:
+        if item.ganzhi and item.ganzhi in text:
+            rows.append(_dayun_row(item))
+    return rows
 
 
 def format_fact_context(chart: BaziChart) -> str:

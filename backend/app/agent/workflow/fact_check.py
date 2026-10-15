@@ -27,6 +27,7 @@ from app.domain.chart_builder import (
     _compute_shensha,
     parse_gender,
 )
+from app.domain.chart_format import extract_fact_rows
 
 # ───────────────────────── 模块级常量（原闭包/局部常量上提） ─────────────────────────
 
@@ -538,6 +539,46 @@ def _check_shensha_pillar(ctx: _FactCheckCtx, issues: list[str]) -> None:
                     f"「{name}」只出现在大运/流年（原局无此神煞），回答却关联到{nearest[0]}，与神煞事实不符"
                 )
             break
+
+
+# ───────────────────────── LLM issue 自相矛盾过滤 ─────────────────────────
+
+# 2026-10-15 恋爱轮实测：审核模型（qwen3.8-flash）连续把排盘事实里确实存在的
+# 红鸾/驿马判为"神煞无X"、把寅中藏丙判为"丙在巳非寅"，修复器盲信后把正确内容改坏。
+# 这里用确定性核对兜底：issue 断言"无X"，而 X 就在对应流年/大运事实行里 → 自相矛盾，按误报丢弃。
+# 只匹配紧邻的否定形式（无X/没有X/非X…），不做全文语义推断，宁可不滤也不错滤。
+_FACT_NAMES = sorted(
+    (set(SHENSHA_NAMES) | set(SHISHEN_NAMES)) - {"日主"}, key=len, reverse=True
+)
+_STEM_BRANCH_CHARS = "甲乙丙丁戊己庚辛壬癸子丑寅卯辰巳午未申酉戌亥"
+_NEG_ASSERT_RE = re.compile(
+    r"(?:无|没有|不带|未见|查无|查不到|非)("
+    + "|".join(_FACT_NAMES)
+    + r"|[" + _STEM_BRANCH_CHARS + r"])"
+)
+
+
+def drop_contradicted_issues(
+    issues: list[str], chart: BaziChart, second_chart: BaziChart | None = None
+) -> tuple[list[str], list[str]]:
+    """过滤"断言无X但X就在对应事实行里"的 LLM 误报 issue。
+
+    返回 (保留, 丢弃)。issue 需锚定到具体流年/大运行（提及年份或干支）才可核对；
+    锚定不到行的 issue 一律保留（宁可不滤）。LLM issue 前面已过正则事实校验，
+    存在性硬错误正则层本来就能查，这里丢掉的只可能是审核模型漏读导致的误报。
+    """
+    kept: list[str] = []
+    dropped: list[str] = []
+    for issue in issues:
+        rows = extract_fact_rows(issue, chart)
+        if second_chart is not None:
+            rows += extract_fact_rows(issue, second_chart)
+        negated = _NEG_ASSERT_RE.findall(issue)
+        if rows and negated and any(tok in "\n".join(rows) for tok in negated):
+            dropped.append(issue)
+        else:
+            kept.append(issue)
+    return kept, dropped
 
 
 # ───────────────────────── 编排器 ─────────────────────────

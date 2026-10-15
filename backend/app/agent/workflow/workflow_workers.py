@@ -12,13 +12,14 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.agent.prompts import CLASSIC_BOOK_WHITELIST, REVIEWER_SYSTEM
+from app.agent.workflow.fact_check import drop_contradicted_issues
 from app.agent.workflow.workflow_models import DomainWorker, FactCheckResult
 from app.agent.workflow.workflow_support import _parse_json, invoke_review_with_meta
 from app.core.llm_health import is_thinking_restricted, report_once
 from app.core.logger import log
 from app.core.observability import record_error
 from app.domain.chart_builder import BaziChart
-from app.domain.chart_format import format_fact_context
+from app.domain.chart_format import extract_fact_rows, format_fact_context
 
 _REVIEWER_SYSTEM = REVIEWER_SYSTEM
 
@@ -523,10 +524,24 @@ class ReviewerWorker:
         facts = format_fact_context(chart)
         if second_chart is not None:
             facts += "\n\n【对方命盘事实】\n" + format_fact_context(second_chart)
+        # 关键行锚点：把回答提及年份/大运对应的事实行摘出来放到审核员眼前，
+        # 避免其在几百行长事实里自行找行漏读（2026-10-15 恋爱轮实测）。
+        # 事实窗口边界同口径：只摘排盘事实里真实存在的行，不帮模型脑补未覆盖年份。
+        anchor_rows = extract_fact_rows(answer, chart)
+        if second_chart is not None:
+            other_rows = extract_fact_rows(answer, second_chart)
+            if other_rows:
+                anchor_rows += ["— 对方命盘 —"] + other_rows
+        anchor_block = ""
+        if anchor_rows:
+            anchor_block = (
+                "\n\n【关键行锚点】(回答提及年份/大运在【系统排盘事实】中的对应原文行，"
+                "判断某年/某大运的十神、藏干、神煞有无时以此为准)\n" + "\n".join(anchor_rows)
+            )
         sui_block = f"\n\n【岁运关系】\n{sui_text}" if sui_text else ""
 
         human_content = (
-            f"【系统排盘事实】\n{facts}{sui_block}\n\n"
+            f"【系统排盘事实】\n{facts}{anchor_block}{sui_block}\n\n"
             f"【命理规则检索】\n{knowledge}\n\n"
             f"【用户问题】\n{user_prompt}\n\n"
             f"【待审核回答】\n{answer}"
@@ -584,6 +599,19 @@ class ReviewerWorker:
                 log.warning("[Reviewer] LLM 判不通过但未给出 issues，按通过处理（避免空修复轮）")
                 record_error("reviewer_pass_without_issues")
                 passed = True
+            if not passed and issues:
+                # 自相矛盾误报过滤：issue 断言"无X"但 X 明确在对应流年/大运事实行里，
+                # 是审核模型漏读（修复器盲信会把正确内容改坏），确定性核对后丢弃。
+                issues, dropped = drop_contradicted_issues(issues, chart, second_chart)
+                if dropped:
+                    for d in dropped:
+                        log.warning(
+                            "[Reviewer] issue 断言「无X」但 X 在对应事实行中，按自相矛盾误报丢弃: {}", d
+                        )
+                    record_error("reviewer_issue_contradicts_facts")
+                    if not issues:
+                        log.info("[Reviewer] 全部 issue 均与排盘事实自相矛盾 → 改判通过")
+                        passed = True
             if not passed:
                 log.info("[Reviewer] LLM 深审发现问题: {} 条 issue", len(issues))
             return FactCheckResult(ok=passed, issues=issues, source="llm")
