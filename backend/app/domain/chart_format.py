@@ -143,6 +143,65 @@ def format_dayun_text(chart: BaziChart) -> str:
     return "\n".join(lines)
 
 
+def format_review_context(chart: BaziChart) -> str:
+    """审核员专用精简事实：只保留"核对回答与排盘是否相符"所需的内容。
+
+    职责边界：审核员判断的是回答有没有事实错误，不需要出生日期、旬空口诀、
+    口径说明 notes，更不需要全量大运/流年列表——被提及的年份/大运原文行由
+    `extract_fact_rows` 作【关键行锚点】按需注入（审核员漏读大表正是 2026-10-15
+    恋爱轮误判的根因）；干支/大运/神煞的存在性硬校验由正则层确定性兜底。
+    """
+    shensha_by_pillar = _shensha_by_pillar(chart)
+    wx = chart.wuxing
+    lines = [
+        f"【性别/生肖】 {chart.birth.gender} / {chart.birth.shengxiao}",
+        "",
+        "【四柱】",
+    ]
+    for p in chart.pillars:
+        mark = "  ← 日主" if p.name == "日柱" else ""
+        lines.append(f"  {p.name}: {p.ganzhi} ({p.nayin}){mark}")
+        lines.append(
+            f"    藏干: {', '.join(p.hidden_stems) or '-'} | "
+            f"副星: {', '.join(p.shishen_zhi) or '-'} | "
+            f"星运: {p.changsheng or '-'} | 自坐: {p.zizuo or '-'}"
+        )
+    lines += [
+        "",
+        "【五行与日主】",
+        f"  日主: {wx.day_master}({wx.day_master_wuxing})",
+        f"  五行权重·对日干影响（日干不计）: {wx.counts}",
+        f"  显性五行: {wx.visible_counts}",
+        f"  最旺/最弱: {wx.strongest}({wx.counts[wx.strongest]}) / {wx.weakest}({wx.counts[wx.weakest]})",
+        f"  日主强弱: {wx.strength} (score={wx.strength_score})",
+        f"  特殊格局: {wx.special_pattern or '无（普通正格/未达极端候选）'}",
+        f"  用神提示: {wx.useful_hint}",
+        "",
+        "【结构判断】",
+        f"  十神分布: {chart.analysis.ten_gods}",
+        f"  透干: {', '.join(chart.analysis.exposed_stems) or '-'}",
+        f"  通根: {', '.join(chart.analysis.rooted_stems) or '-'}",
+        f"  合: {', '.join(chart.analysis.combinations) or '-'}",
+        f"  冲: {', '.join(chart.analysis.clashes) or '-'}",
+        f"  害: {', '.join(chart.analysis.harms) or '-'}",
+        f"  破: {', '.join(chart.analysis.breaks) or '-'}",
+        f"  刑: {', '.join(chart.analysis.punishments) or '-'}",
+        f"  调候: {chart.analysis.adjustment}",
+        "",
+        "【命宫/身宫】",
+        f"  命宫: {chart.ming_gong} ({chart.ming_gong_nayin})",
+        f"  身宫: {chart.shen_gong} ({chart.shen_gong_nayin})",
+        "",
+        f"【起运】 {chart.start_yun['startYear']}年{chart.start_yun['startMonth']}月起运（{chart.start_yun['direction']}）",
+        "",
+        "【神煞（按柱）】",
+    ]
+    for p in chart.pillars:
+        names = shensha_by_pillar.get(p.name, [])
+        lines.append(f"  {p.name}: {'、'.join(names) if names else '—'}")
+    return "\n".join(lines)
+
+
 def _liunian_row(item) -> str:
     """单条流年事实行（format_liunian_text 与 extract_fact_rows 共用，保证口径一致）。"""
     dy = f" | 所在大运: {item.dayun_ganzhi}" if item.dayun_ganzhi else ""

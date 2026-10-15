@@ -19,7 +19,7 @@ from app.core.llm_health import is_thinking_restricted, report_once
 from app.core.logger import log
 from app.core.observability import record_error
 from app.domain.chart_builder import BaziChart
-from app.domain.chart_format import extract_fact_rows, format_fact_context
+from app.domain.chart_format import extract_fact_rows, format_review_context
 
 _REVIEWER_SYSTEM = REVIEWER_SYSTEM
 
@@ -431,8 +431,8 @@ class ReviewerWorker:
             fact_checker: 复用 XianzhiWorkflow.check_facts 方法
             second_chart: 合婚双盘时的对方命盘
             user_prompt: 原始用户问题（LLM 审核判断是否答非所问）
-            ctx: WorkflowChartContext（**当前未使用**：LLM 深审的事实上下文由 `format_fact_context(chart)`
-                构建，此处保留参数仅为调用方签名稳定）
+            ctx: WorkflowChartContext（**当前未使用**：LLM 深审的事实上下文由 `format_review_context(chart)`
+                精简构建，此处保留参数仅为调用方签名稳定）
             skip_llm: 跳过 LLM 深审，仅依赖正则
             needs_chart: 当前回答是否属于"绑定命盘分析"场景（命盘分析/合婚/流年大运推演等）。
                 True 时十神/神煞存在性严格校验；False（理论问答）时仅校验归属断言。
@@ -521,12 +521,14 @@ class ReviewerWorker:
         self, answer, chart, knowledge, user_prompt, ctx, second_chart, sui_text: str = ""
     ) -> FactCheckResult:
         """第2层：LLM 深度审核。"""
-        facts = format_fact_context(chart)
+        # 审核专用精简事实：只给核对回答所需的部分（四柱/强弱格局/结构/神煞按柱），
+        # 全量大运/流年表不注入——被提及的行由【关键行锚点】按需摘出，
+        # 审核员在大表里漏读整行正是 2026-10-15 恋爱轮误判的根因。
+        facts = format_review_context(chart)
         if second_chart is not None:
-            facts += "\n\n【对方命盘事实】\n" + format_fact_context(second_chart)
-        # 关键行锚点：把回答提及年份/大运对应的事实行摘出来放到审核员眼前，
-        # 避免其在几百行长事实里自行找行漏读（2026-10-15 恋爱轮实测）。
-        # 事实窗口边界同口径：只摘排盘事实里真实存在的行，不帮模型脑补未覆盖年份。
+            facts += "\n\n【对方命盘事实】\n" + format_review_context(second_chart)
+        # 关键行锚点：回答提及年份/大运的对应原文行，同时是流年/大运事实的唯一来源
+        # （存在性硬校验由正则层兜底；未覆盖年份按事实窗口边界规则不得判"无"）。
         anchor_rows = extract_fact_rows(answer, chart)
         if second_chart is not None:
             other_rows = extract_fact_rows(answer, second_chart)
@@ -535,7 +537,7 @@ class ReviewerWorker:
         anchor_block = ""
         if anchor_rows:
             anchor_block = (
-                "\n\n【关键行锚点】(回答提及年份/大运在【系统排盘事实】中的对应原文行，"
+                "\n\n【关键行锚点】(回答提及年份/大运在排盘事实中的对应原文行，"
                 "判断某年/某大运的十神、藏干、神煞有无时以此为准)\n" + "\n".join(anchor_rows)
             )
         sui_block = f"\n\n【岁运关系】\n{sui_text}" if sui_text else ""

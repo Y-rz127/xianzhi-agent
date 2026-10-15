@@ -425,6 +425,25 @@ def test_llm_review_injects_key_fact_rows_anchor():
     assert names in captured["prompt"], "锚点行必须包含完整神煞字段"
 
 
+def test_llm_review_facts_are_slimmed_to_review_scope():
+    """审核员只看核对回答所需的事实：全量大运/流年表/旬空口诀/口径说明不注入。
+
+    2026-10-15 恋爱轮误判根因之一是审核员在长事实里漏读整行；被提及的年份/大运
+    由【关键行锚点】按需注入，存在性硬校验由正则层兜底。
+    """
+    captured: dict = {}
+    worker = ReviewerWorker(chat_model=_make_capturing_review_model(captured, '{"pass": true, "issues": []}'))
+    result = worker._llm_review("你日柱辛金，性子直。", CHART, "知识", "问题", None, None)
+    assert result.ok
+    prompt = captured["prompt"]
+    # 必须保留：核对回答所需的最小事实集
+    for section in ("【四柱】", "【神煞（按柱）】", "【命宫/身宫】", "日主强弱:", "【结构判断】"):
+        assert section in prompt, f"审核事实缺少 {section}"
+    # 必须裁剪：回答不会引用、或只会诱发漏读/越权判断的部分
+    for section in ("【大运列表】", "【流年推算】", "【旬空口诀】", "【口径说明】", "【基本信息】"):
+        assert section not in prompt, f"审核事实不应包含 {section}"
+
+
 def test_contradicted_absence_issues_are_dropped():
     """issue 断言"无X"但 X 就在该年事实行里 → 自相矛盾误报，过滤后改判通过。"""
     import json
