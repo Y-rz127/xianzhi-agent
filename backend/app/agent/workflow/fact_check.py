@@ -148,6 +148,11 @@ _ASSERT_ANCHORS = (
 # 句切分（归属断言按句判定）
 _SENT_SPLIT = re.compile(r"[。；;！!？?\n\r]")
 
+# 成语合称不算单神煞出现：「天罗地网」切不出单独的「天罗」「地网」。
+# 2026-10-16 现场：讲规则口径的"按天罗地网口径参考"被当成断言命盘带地网，
+# 误触整轮修复。掩盖后"命带天罗地网"类断言不再由正则判存在性，由 LLM 深审兜底。
+_COMPOUND_SHENSHA_IDIOMS = ("天罗地网",)
+
 # 多字否定词：直接命中即视为否定
 _NEG_TOKENS = (
     "没见",
@@ -406,6 +411,9 @@ def _scan_text_for(answer: str, name: str) -> str:
     for longer in SHENSHA_NAMES:
         if len(longer) > len(name) and name in longer and longer in text:
             text = text.replace(longer, "○" * len(longer))
+    for idiom in _COMPOUND_SHENSHA_IDIOMS:
+        if name in idiom and idiom in text:
+            text = text.replace(idiom, "○" * len(idiom))
     return text
 
 
@@ -556,6 +564,44 @@ _NEG_ASSERT_RE = re.compile(
     + "|".join(_FACT_NAMES)
     + r"|[" + _STEM_BRANCH_CHARS + r"])"
 )
+
+# 引文归一化（古籍句级复核与 issue 矛盾过滤共用同一口径）：只留实义文字
+QUOTE_STRIP_RE = re.compile(r"[\s，。、；：！？,.;:!?\"'“”‘’「」（）()《》—…·\-]")
+
+# "伪造古籍"类 issue 的判定标记 + 书名/引文抽取
+_CITATION_FALSE_MARKERS = ("伪造", "杜撰", "并非原文", "非原文", "无此句")
+_CITED_BOOK_RE = re.compile(r"《([^》]{1,12})》")
+_ISSUE_QUOTED_RE = re.compile(r"[“\"'「]([^”\"'」]{4,60})[”\"'」]")
+
+
+def normalize_citation(text: str) -> str:
+    """引文归一化：只留实义文字，便于与检索片段做包含比对。"""
+    return QUOTE_STRIP_RE.sub("", text or "")
+
+
+def drop_contradicted_citation_issues(issues: list[str], knowledge: str) -> tuple[list[str], list[str]]:
+    """过滤"判伪造古籍但引文就在检索片段里"的审核误报。
+
+    正则层古籍核验（引文∈检索片段）是引文存在性的权威判定；LLM 深审再翻案时
+    （2026-10-16 现场：把规则卡"坊间说法非《三命通会》"的勘误注，读成了引文非原文），
+    用确定性核对兜底：issue 声称某书无某句、而该句就在检索片段中 → 自相矛盾，丢弃。
+    只处理带书名且引号引文≥6 实义字的 issue，宁可不滤。
+    """
+    kept: list[str] = []
+    dropped: list[str] = []
+    if not knowledge or "未检索到相关知识" in knowledge:
+        return list(issues), []
+    norm_knowledge = normalize_citation(knowledge)
+    for issue in issues:
+        contradicted = False
+        if any(m in issue for m in _CITATION_FALSE_MARKERS) and _CITED_BOOK_RE.search(issue):
+            for q in _ISSUE_QUOTED_RE.finditer(issue):
+                frag = normalize_citation(q.group(1))
+                if len(frag) >= 6 and frag in norm_knowledge:
+                    contradicted = True
+                    break
+        (dropped if contradicted else kept).append(issue)
+    return kept, dropped
 
 
 def drop_contradicted_issues(

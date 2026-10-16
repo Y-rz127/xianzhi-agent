@@ -12,7 +12,11 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.agent.prompts import CLASSIC_BOOK_WHITELIST, REVIEWER_SYSTEM
-from app.agent.workflow.fact_check import drop_contradicted_issues
+from app.agent.workflow.fact_check import (
+    drop_contradicted_citation_issues,
+    drop_contradicted_issues,
+    normalize_citation,
+)
 from app.agent.workflow.workflow_models import DomainWorker, FactCheckResult
 from app.agent.workflow.workflow_support import _parse_json, invoke_review_with_meta
 from app.core.llm_health import is_thinking_restricted, report_once
@@ -391,13 +395,11 @@ class ReviewerWorker:
     )
     # 引用标记后紧邻的引号原句（用于句级复核）：原文：“壬水通河，能泄金气。”
     _QUOTED_AFTER_MARKER_RE = re.compile(r"[\s：:，,、]*[“\"'「](?P<quote>[^”\"'」]{4,80})[”\"'」]")
-    # 句级比对前去掉标点/空白，避免断句与标点差异造成误判
-    _QUOTE_STRIP_RE = re.compile(r"[\s，。、；：！？,.;:!?\"'“”‘’「」（）()《》—…·\-]")
 
     @classmethod
     def _normalize_quote(cls, text: str) -> str:
-        """引文归一化：只留实义文字，便于与检索片段做包含比对。"""
-        return cls._QUOTE_STRIP_RE.sub("", text or "")
+        """引文归一化：委托 fact_check.normalize_citation（issue 矛盾过滤共用同一口径）。"""
+        return normalize_citation(text)
 
     @classmethod
     def _following_quote(cls, text: str, pos: int) -> str:
@@ -602,17 +604,26 @@ class ReviewerWorker:
                 record_error("reviewer_pass_without_issues")
                 passed = True
             if not passed and issues:
-                # 自相矛盾误报过滤：issue 断言"无X"但 X 明确在对应流年/大运事实行里，
-                # 是审核模型漏读（修复器盲信会把正确内容改坏），确定性核对后丢弃。
+                # 自相矛盾误报过滤（两层，均确定性核对）：
+                # ① 断言"无X"但 X 明确在对应流年/大运事实行里（审核模型漏读，修复器盲信会改坏正确内容）
                 issues, dropped = drop_contradicted_issues(issues, chart, second_chart)
-                if dropped:
+                # ② 判"伪造古籍"但引文就在检索片段里（正则层已核验过，审核员翻案）
+                issues, dropped_cite = drop_contradicted_citation_issues(issues, knowledge)
+                if dropped or dropped_cite:
                     for d in dropped:
                         log.warning(
                             "[Reviewer] issue 断言「无X」但 X 在对应事实行中，按自相矛盾误报丢弃: {}", d
                         )
-                    record_error("reviewer_issue_contradicts_facts")
+                    for d in dropped_cite:
+                        log.warning(
+                            "[Reviewer] issue 判伪造古籍但引文在检索片段中，按自相矛盾误报丢弃: {}", d
+                        )
+                    if dropped:
+                        record_error("reviewer_issue_contradicts_facts")
+                    if dropped_cite:
+                        record_error("reviewer_citation_issue_contradicts")
                     if not issues:
-                        log.info("[Reviewer] 全部 issue 均与排盘事实自相矛盾 → 改判通过")
+                        log.info("[Reviewer] 全部 issue 均与已核验事实自相矛盾 → 改判通过")
                         passed = True
             if not passed:
                 log.info("[Reviewer] LLM 深审发现问题: {} 条 issue", len(issues))

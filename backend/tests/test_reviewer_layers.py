@@ -499,3 +499,63 @@ def test_legitimate_issues_are_kept():
         result = worker._llm_review(f"{item.year}年是{item.ganzhi}年。", CHART, "知识", "问题", None, None)
         assert result.ok is False, verdict
         assert result.issues, verdict
+
+
+# ============================================================
+# 天罗地网成语切词 + 伪造古籍误报过滤（2026-10-16 现场双误报）
+# 现场链路：用户问天罗地网 → 原稿"按天罗地网口径参考"被正则当成断言带地网
+# （成语切词误报）触发 54s 修复；修复稿 LLM 深审又把检索片段里"坊间说法
+# 非《三命通会》"的勘误注读成"引文非原文"（伪造古籍误报）
+# ============================================================
+
+def test_tianluo_diwang_idiom_not_treated_as_assertion():
+    """「天罗地网」是成语合称，切不出单独的「地网」断言：讲规则口径不触发修复。"""
+    chart = build_bazi_chart("2026-10-16 16:00", "女", liunian_start_year=2026, liunian_years=10)
+    facts = compact_facts(chart, QuestionIntent(domain="theory", label="术语理论", needs_chart=False))
+    # 现场原稿句式：盘锚点 + 成语 + 无否定词；该盘无辰巳 → 排盘事实中确无「地网」
+    answer = "落到你这张盘：你四柱有戌、亥同见，按天罗地网口径会先参考牵绊、受阻的象，但显不显要看官杀和岁运。"
+    result = WORKFLOW.check_facts(answer, chart, None, False, facts)
+    assert result.issues == [], result.issues
+
+
+def test_scan_text_masks_compound_idiom_only_for_idiom_names():
+    from app.agent.workflow.fact_check import _scan_text_for
+
+    masked = _scan_text_for("按天罗地网口径参考，命带地网另说。", "地网")
+    assert "天罗地网" not in masked, "成语合称必须被掩盖"
+    assert "地网" in masked, "单独出现的「地网」不受影响，仍参与断言判定"
+
+
+def test_citation_contradicted_issue_is_dropped():
+    """issue 判"伪造古籍"但引文就在检索片段里 → 按自相矛盾误报丢弃（现场原句）。"""
+    from app.agent.workflow.fact_check import drop_contradicted_citation_issues
+
+    knowledge = (
+        "男忌天罗（戌亥），女忌地网（辰巳）——依《三命通会》原文"
+        "“戌亥为天罗，辰巳为地网。男忌天罗，女忌地网”（见 古籍05）。"
+        "注：坊间另有“男忌亥、女忌戌”等说法，非《三命通会》原文，不可直引。"
+    )
+    issue = "伪造古籍原文：《三命通会》无“男忌天罗，女忌地网”句，且规则卡明确标注此非原文"
+    kept, dropped = drop_contradicted_citation_issues([issue], knowledge)
+    assert dropped == [issue]
+    assert kept == []
+
+
+def test_citation_issue_with_absent_quote_is_kept():
+    """引文确实不在检索片段里 → 真伪造，保留。"""
+    from app.agent.workflow.fact_check import drop_contradicted_citation_issues
+
+    issue = "伪造古籍原文：《滴天髓》无“庚金带煞，刚健为最”句"
+    kept, dropped = drop_contradicted_citation_issues([issue], "【命理规则检索】无关片段")
+    assert kept == [issue]
+    assert dropped == []
+
+
+def test_llm_review_drops_citation_contradicted_issue():
+    """端到端：深审翻案已核验引文 → 过滤后改判通过（不再触发无效修复轮）。"""
+    verdict = '{"pass": false, "issues": ["伪造古籍原文：《三命通会》无“男忌天罗，女忌地网”句"]}'
+    worker = ReviewerWorker(chat_model=FakeListChatModel(responses=[verdict]))
+    knowledge = "依《三命通会》原文“戌亥为天罗，辰巳为地网。男忌天罗，女忌地网”（见 古籍05）。"
+    result = worker._llm_review("回答正文", CHART, knowledge, "问题", None, None)
+    assert result.ok is True
+    assert result.issues == []
