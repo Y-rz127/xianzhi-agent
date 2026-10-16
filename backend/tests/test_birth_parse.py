@@ -125,6 +125,64 @@ def test_extract_pillars_does_not_misfire():
     assert extract_pillars("甲子日出生的人，乙丑年 男") == (None, None)
 
 
+# ============================================================
+# 八字候选序号解析（2026-10-16 现场：模型调换展示顺序 → "选2挂1"）
+# ============================================================
+
+_REORDERED_PENDING = {
+    "candidates": [
+        {"birth_time": "2026-10-16 16:00", "ganzhi": "丙午 戊戌 癸亥 庚申", "shi_chen": "申时"},
+        {"birth_time": "1966-10-31 16:00", "ganzhi": "丙午 戊戌 癸亥 庚申", "shi_chen": "申时"},
+    ]
+}
+# 现场模型的真实展示顺序：1966 在前（接口顺序是 2026 在前）
+_REORDERED_REPLY = (
+    "这个盘我收到了，丙午 戊戌 癸亥 庚申，男命。符合这个八字的出生时间有两个可能：\n"
+    "1. 1966年10月31日 下午4点前后（申时）\n"
+    "2. 2026年10月16日 下午4点前后（申时）\n"
+    "你实际是哪一年出生的？"
+)
+
+
+def test_record_display_order_captures_model_reordering():
+    from app.agent.birth_parse import record_bazi_display_order
+
+    pending = dict(_REORDERED_PENDING)
+    record_bazi_display_order(_REORDERED_REPLY, pending)
+    assert pending["display_order"] == [1, 0], "展示顺序 1966 在前 → 候选下标 [1, 0]"
+
+
+def test_resolve_ordinal_follows_display_order():
+    """用户按展示顺序回"2"（想要 2026）：必须挂 2026，而不是接口顺序的第 2 个 1966。"""
+    from app.agent.birth_parse import record_bazi_display_order, resolve_bazi_selection
+
+    pending = dict(_REORDERED_PENDING)
+    record_bazi_display_order(_REORDERED_REPLY, pending)
+    assert resolve_bazi_selection("2", pending) == "2026-10-16 16:00"
+    assert resolve_bazi_selection("第一个", pending) == "1966-10-31 16:00"
+    # 年份回复优先级最高，不受展示顺序影响
+    assert resolve_bazi_selection("2026年", pending) == "2026-10-16 16:00"
+
+
+def test_resolve_ordinal_falls_back_to_api_order_without_display_order():
+    """未记录展示顺序（如进程重启丢状态）时维持接口顺序解析，不回归成报错。"""
+    from app.agent.birth_parse import resolve_bazi_selection
+
+    pending = dict(_REORDERED_PENDING)
+    assert resolve_bazi_selection("2", pending) == "1966-10-31 16:00"
+
+
+def test_record_display_order_requires_two_visible_years():
+    """回复里认不出至少两个候选年份 → 展示顺序不可信，不落 display_order。"""
+    from app.agent.birth_parse import record_bazi_display_order
+
+    pending = dict(_REORDERED_PENDING)
+    record_bazi_display_order("符合的出生时间有两个可能，请回复序号确认。", pending)
+    assert "display_order" not in pending
+    record_bazi_display_order("", pending)
+    assert "display_order" not in pending
+
+
 def test_birth_signal_covers_pillars_without_gender():
     """四柱本身就是生辰信号，缺性别也要放行（让 LLM 追问性别）。"""
     assert detect_birth_signal("分析下这个八字：己丑、癸酉、甲子、壬申") is True

@@ -17,6 +17,7 @@ from app.agent.birth_parse import (  # 解耦：生辰解析职责独立成模�
     extract_birth_info,
     extract_birth_place,
     extract_pillars,
+    record_bazi_display_order,
     resolve_bazi_selection,
 )
 from app.agent.core.base_agent import AgentState, BaseAgent
@@ -313,7 +314,7 @@ class Xianzhi(ToolCallAgent):
                         block += "  {}. {}（{}，{}）\n".format(
                             i, c.get("birth_time"), c.get("ganzhi"), c.get("shi_chen")
                         )
-                    block += "请直接向用户展示以上候选，请其确认实际出生日期（回复序号『第一个』或具体年份『2004年』均可）。待用户确认后，用对应 birth_time 调用排盘工具，不要自行猜测日期排盘。\n"
+                    block += "请逐字按上述编号与顺序向用户展示候选（不得调换顺序、不得重新编号），请其确认实际出生日期（回复序号『第一个』或具体年份『2004年』均可）。待用户确认后，用对应 birth_time 调用排盘工具，不要自行猜测日期排盘。\n"
                 else:
                     block += "  未能反推出候选日期，请直接向用户说明并索取精确出生时间或确认八字是否有误。\n"
                 content += block
@@ -758,6 +759,12 @@ class Xianzhi(ToolCallAgent):
             return ""
 
     def cleanup(self):
+        # 记录候选在模型回复中的展示顺序：序号选择必须按用户看到的顺序解析，
+        # 否则模型调换展示顺序时会发生"选2挂1"（2026-10-16 现场）
+        try:
+            record_bazi_display_order(self.final_answer or "", self._bazi_pending or {})
+        except Exception as e:
+            log.warning("[xianzhi] 记录候选展示顺序失败: {}", e)
         # 持久化失败不应阻断状态重置，否则实例永久卡死在 RUNNING
         try:
             self._persist_history()

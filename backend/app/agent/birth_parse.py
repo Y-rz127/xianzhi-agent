@@ -215,10 +215,35 @@ def detect_birth_signal(text: str) -> bool:
     return has_time_signal
 
 
+def record_bazi_display_order(reply: str, pending: dict) -> None:
+    """记录候选在模型回复中的实际展示顺序，供序号选择按展示顺序解析。
+
+    背景（2026-10-16 现场）：反推候选按日期倒序返回（最新在前），注入提示词让模型
+    "直接展示以上候选"，但模型自行调换了顺序（把当天出生的候选排到后面）；用户按
+    展示顺序回"2"，resolve 却按接口顺序取第 2 个 → 选非所选（挂错 1966/2026）。
+    回合结束时扫描回复中各候选年份的出现位置，落 pending["display_order"]。
+    """
+    cands = pending.get("candidates") or []
+    if len(cands) < 2 or not reply:
+        return
+    positions: list[tuple[int, int]] = []  # (年份在回复中的位置, 候选下标)
+    for i, c in enumerate(cands):
+        y = (c.get("birth_time") or "")[:4]
+        if y:
+            pos = reply.find(y)
+            if pos >= 0:
+                positions.append((pos, i))
+    if len(positions) < 2:
+        return  # 回复里认不出至少两个候选年份 → 展示顺序不可信，维持接口顺序
+    positions.sort()
+    pending["display_order"] = [i for _, i in positions]
+
+
 def resolve_bazi_selection(text: str, pending: dict) -> Optional[str]:
     """把用户回复解析为已选定的出生日期（birth_time）。
 
     支持：①回复候选序号（"第一个"/"第2个"/"选2"/"1"）；②回复候选年份（"2004年"）。
+    序号按模型上一轮回复中的展示顺序解析（display_order），未记录时退回接口顺序。
     未匹配返回 None，交由 LLM 继续追问。
     """
     cands = pending.get("candidates") or []
@@ -246,6 +271,11 @@ def resolve_bazi_selection(text: str, pending: dict) -> Optional[str]:
                 idx = None
         if idx is not None:
             idx -= 1
+            # 序号按展示顺序解析：模型可能调换展示顺序（见 record_bazi_display_order）
+            order = pending.get("display_order") or []
+            ordered = [cands[i] for i in order if isinstance(i, int) and 0 <= i < len(cands)]
+            if len(ordered) == len(cands):
+                cands = ordered
             if 0 <= idx < len(cands):
                 return cands[idx].get("birth_time")
     return None
