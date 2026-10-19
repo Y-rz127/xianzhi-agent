@@ -35,19 +35,27 @@ MAX_AGE_LIMIT = 120
 
 # 按步数覆盖时的上限：与 `_build_chart(dayun_count=12)` 对齐，要第 13 步得先改那里
 MAX_DAYUN_LIMIT = 12
+# 按步数覆盖时的**岁数**护栏（只约束 max_dayun 这条路线，不动用户可传的 MAX_AGE_LIMIT）：
+# 12 步大运 = 起运（常见 1-10 岁）+ 120 年，必然略超 120 —— 实测 1990-05-20 男、起运 6 岁，
+# 第 12 步是 2105-2114 即虚岁 125，被 120 卡掉后前端永远只画得出 11 段（用户看到的"少一步"）。
+# 140 足够覆盖"起运 20 岁"这类极端盘，同时仍是一道硬护栏（起运极晚时第 N 步照样被跳过）。
+MAX_DAYUN_AGE_LIMIT = 140
 
 
 def _dayun_end_year(chart, max_dayun: int) -> int | None:
-    """第 `max_dayun` 步大运的结束年；若该步已越过年龄上限（起运极晚）则返回 None。
+    """第 `max_dayun` 步大运的结束年；若该步已越过岁数护栏（起运极晚）则返回 None。
 
     为什么按"整段大运"收尾而不是按岁数截断：K 线末段只落进几年时，前端那格宽度
     只剩几十 rpx，干支两个字会被 `overflow:hidden` 裁掉 —— 看上去就是最右边那个
     大运"被遮挡"。收在大运边界上，末段才是完整的十年，标签才画得下。
+
+    护栏用 `MAX_DAYUN_AGE_LIMIT` 而非 `MAX_AGE_LIMIT`：后者是**用户可传**的
+    `max_age` 上限，这条路线说的是"画完整第 N 步大运"，两件事不该共用一个数。
     """
     birth_year = fortune_score.birth_year_of(chart)
     end = None
     for d in chart.dayun[:max_dayun]:
-        if d.end_year - birth_year + 1 <= MAX_AGE_LIMIT:
+        if d.end_year - birth_year + 1 <= MAX_DAYUN_AGE_LIMIT:
             end = d.end_year
     return end
 
@@ -71,6 +79,9 @@ def _dayun_bands(chart) -> list[dict]:
 
     K 线是「大运为纲、流年为目」：`fortune_score` 里大运权重 0.5 高于流年 0.3，
     本函数把这条口径在可视化层显式化，而不是让前端自己从 dayun 字段猜。
+
+    `changsheng` 是**日干在该步大运地支上的十二长生**（由 chart_builder 的 `zizuo` 口径算好）：
+    前端在年份轴下方按大运中轴逐段显示，用来交代"这十年的气势处在长生十二宫的哪一段"。
     """
     return [
         {
@@ -81,9 +92,24 @@ def _dayun_bands(chart) -> list[dict]:
             "startAge": d.start_age,
             "endAge": d.end_age,
             "shishenGan": d.shishen_gan,
+            "changsheng": d.changsheng,
         }
         for d in chart.dayun
     ]
+
+
+def _favor_payload(chart) -> dict:
+    """喜忌摘要 + 终审五神（用/喜/忌/仇/平）。
+
+    计算版没有 LLM 终审，`gods` 为空 → 前端显示引擎的「最喜/最忌」；
+    终审版带上五神 → 前端改显示五神（判不出来的类别缺席，不显示空标签）。
+    """
+    from app.agent.verdict import verdict_applied, verdict_five_gods
+
+    favor = fortune_score.chart_favor_summary(chart)
+    favor["verdictApplied"] = verdict_applied(chart)
+    favor["gods"] = verdict_five_gods(chart)
+    return favor
 
 
 def _build_chart(birth_time: str, gender: str, sect: int, yun_sect: int, longitude: float | None):
@@ -141,7 +167,7 @@ def _compute_kline_payload(
 
     years = fortune_score.kline_years(chart, max_age=max_age)
     return {
-        "favor": fortune_score.chart_favor_summary(chart),
+        "favor": _favor_payload(chart),
         "candles": candles,
         "dayunBands": _dayun_bands(chart),
         "meta": {
@@ -414,8 +440,9 @@ def _compute_resonance_payload(
     payload = kline_resonance.build_resonance(chart_a, chart_b, max_age=max_age, dimension=dimension)
     # 两盘各自的喜忌摘要随共振线一起给：前端画共振线时通常要在同一屏显示双方用神，
     # 缺了它前端得再打两次 /kline，而这两张盘后端刚刚已经建好了。
-    payload["favorA"] = fortune_score.chart_favor_summary(chart_a)
-    payload["favorB"] = fortune_score.chart_favor_summary(chart_b)
+    # 与单盘载荷同形（都过 `_favor_payload`）：前端只按一套字段读，不必判断来源。
+    payload["favorA"] = _favor_payload(chart_a)
+    payload["favorB"] = _favor_payload(chart_b)
     payload["meta"]["dimensionLabel"] = fortune_score.DIMENSION_LABELS.get(dimension, "")
     payload["meta"]["availableDimensions"] = [
         {

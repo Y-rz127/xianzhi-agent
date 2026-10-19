@@ -27,7 +27,6 @@ _VERDICT = {
     "reason": "三酉冲一卯，禄根被伤；天干三比劫根损折半，正格身弱杀重论。",
 }
 
-
 def _verdict_for(**over) -> dict:
     return {**_VERDICT, **over}
 
@@ -197,6 +196,27 @@ def test_chart_payload_carries_verdict_flag():
     assert _format_chart_payload(V_apply(chart))["verdict_applied"] is True
 
 
+def test_chart_payload_carries_five_gods(monkeypatch):
+    """命盘详情页在「喜忌用神」处显示五神：载荷必须带 gods，且只含判得出来的类别。
+
+    计算版 `gods == {}`（前端整块不出现）；终审版才逐条给出用/喜/忌/仇/平。
+    """
+    from app.agent import verdict as V
+    from app.api.xianzhi_chart import _format_chart_payload
+
+    chart = build_bazi_chart(*ANCHOR)
+    assert _format_chart_payload(chart)["gods"] == {}
+
+    verdict = _verdict_for(xishen=["木"], choushen=["水"])
+    applied = V.apply_verdict(chart, verdict)
+    monkeypatch.setattr(V, "_hash_of", lambda c: "hash-gods")
+    monkeypatch.setattr(V, "_get_cached_verdict", lambda chash: verdict)
+
+    gods = _format_chart_payload(applied)["gods"]
+    assert gods == {"yongshen": "火", "xishen": "木", "jishen": "金", "choushen": "水"}
+    assert "pingshen" not in gods, "没判出来的类别不该出现空标签"
+
+
 def V_apply(chart):
     from app.agent.verdict import apply_verdict
 
@@ -252,3 +272,114 @@ def _fake_async(record: list, ret):
         return ret
 
     return _fn
+
+
+# ---------------- 五神（用/喜/忌/仇/平） ----------------
+#
+# 契约：用神、忌神必填（apply_verdict 的 hint 与缓存口径都依赖它们）；
+# 喜神/仇神/平神**可选**——分析不出就不给，不允许因此把整份裁决判成 invalid。
+
+_JSON_BASE = (
+    '{"relation_to_engine":"confirm","strength":"中和","special_pattern":"无","special_label":"无",'
+    '"useful_god":"水","avoid_god":"土",'
+)
+
+
+def _verdict_json(extra: str = "", reason: str = "壬水生于午月身弱，取印比为用，土为杀最忌。") -> str:
+    return _JSON_BASE + extra + f'"reason":"{reason}"' + "}"
+
+
+def test_parse_verdict_reads_optional_gods():
+    from app.agent.verdict import parse_verdict
+
+    v = parse_verdict(_verdict_json('"xishen":["金"],"choushen":["火"],"pingshen":["木"],'))
+    assert v["xishen"] == ["金"]
+    assert v["choushen"] == ["火"]
+    assert v["pingshen"] == ["木"]
+
+
+def test_parse_verdict_tolerates_missing_optional_gods():
+    """模型没给喜/仇/平 → 空的，不是无效：漏给 ≠ 写错。"""
+    from app.agent.verdict import parse_verdict
+
+    v = parse_verdict(_verdict_json())
+    assert v["xishen"] == [] and v["choushen"] == [] and v["pingshen"] == []
+    # 空数组同样合法（"分析不出"的显式写法）
+    v2 = parse_verdict(_verdict_json('"xishen":[],"choushen":[],"pingshen":[],'))
+    assert v2["xishen"] == []
+
+
+def test_parse_verdict_accepts_gods_written_as_string():
+    """容忍 "金、水" 这种串行写法（模型偶尔不按数组输出）。"""
+    from app.agent.verdict import parse_verdict
+
+    v = parse_verdict(_verdict_json('"xishen":"金、木",'))
+    assert v["xishen"] == ["金", "木"]
+
+
+def test_parse_verdict_dedupes_across_categories_and_caps_size():
+    """一行只归一类的口径：用神/忌神占过的五行不再进其它类；每类最多两个。"""
+    from app.agent.verdict import parse_verdict
+
+    v = parse_verdict(_verdict_json('"xishen":["水","金","木","火"],"choushen":["土","火"],'))
+    assert v["xishen"] == ["金", "木"], "水在用神、土在忌神，且每类最多两个"
+    # 火被"每类最多两个"挤出喜神后，仍可作为仇神显示——不因截断把整类吞掉
+    assert v["choushen"] == ["火"]
+
+
+def test_parse_verdict_rejects_illegal_god():
+    from app.agent.verdict import parse_verdict
+
+    with pytest.raises(ValueError):
+        parse_verdict(_verdict_json('"xishen":["雷"],'))
+
+
+def test_five_gods_only_include_categories_that_were_judged():
+    """判得出来的才出键：前端按"有就显示"渲染，缺项不显示空标签。"""
+    from app.agent.verdict import five_gods_from_verdict
+
+    gods = five_gods_from_verdict({
+        "useful_god": "水", "avoid_god": "土", "xishen": ["金"], "choushen": [], "pingshen": [],
+    })
+    assert gods == {"yongshen": "水", "xishen": "金", "jishen": "土"}
+    assert "choushen" not in gods and "pingshen" not in gods
+
+
+def test_five_gods_join_multiple_elements():
+    from app.agent.verdict import five_gods_from_verdict
+
+    gods = five_gods_from_verdict({"useful_god": "水", "avoid_god": "土", "xishen": ["金", "木"]})
+    assert gods["xishen"] == "金、木"
+
+
+def test_verdict_five_gods_empty_for_computed_chart():
+    """计算版没有终审结论 → 空 dict（前端回退「最喜/最忌」），且不该去碰 DB。"""
+    from app.agent import verdict as V
+
+    chart = build_bazi_chart(*ANCHOR)
+    assert V.verdict_five_gods(chart) == {}
+
+
+def test_verdict_five_gods_reads_cached_verdict(monkeypatch):
+    from app.agent import verdict as V
+
+    chart = V.apply_verdict(build_bazi_chart(*ANCHOR), _verdict_for(xishen=["木"], choushen=["水"]))
+    monkeypatch.setattr(V, "_hash_of", lambda c: "hash-x")
+    monkeypatch.setattr(V, "_get_cached_verdict", lambda chash: _verdict_for(xishen=["木"], choushen=["水"]))
+
+    gods = V.verdict_five_gods(chart)
+    assert gods["yongshen"] == "火" and gods["jishen"] == "金"
+    assert gods["xishen"] == "木"
+    # 水同时被当成仇神与"用神候选"的冲突由 parse 层处理，这里只验透传
+    assert gods["choushen"] == "水"
+
+
+def test_verdict_five_gods_survives_db_failure(monkeypatch):
+    """读不到裁决不能让接口挂掉：降级为空 dict。"""
+    from app.agent import verdict as V
+
+    chart = V.apply_verdict(build_bazi_chart(*ANCHOR), _verdict_for())
+    monkeypatch.setattr(V, "_hash_of", lambda c: "hash-y")
+    monkeypatch.setattr(V, "_get_cached_verdict", lambda chash: (_ for _ in ()).throw(RuntimeError("db down")))
+
+    assert V.verdict_five_gods(chart) == {}

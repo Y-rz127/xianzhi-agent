@@ -184,11 +184,24 @@ def build_prompt(
         facts = compact_facts(chart, _intent(dimension, payload))
 
     favor_lines = "、".join(f"{k} {v:+.4g}" for k, v in (favor.get("favor") or {}).items())
-    human = (
-        f"【命盘事实】\n{facts}\n\n"
-        f"【喜忌方向（原局，正=喜 负=忌）】\n{favor_lines}\n"
-        f"最喜 {favor.get('mostFavored') or '—'}、最忌 {favor.get('mostOpposed') or '—'}"
-    )
+    human = f"【命盘事实】\n{facts}\n\n【喜忌方向（原局，正=喜 负=忌）】\n{favor_lines}\n"
+    # 终审版带五神：批注口径必须与页面一致（页面显示五神时，正文却按"最喜/最忌"讲会自相矛盾）
+    gods = favor.get("gods") or {}
+    if gods.get("yongshen"):
+        god_lines = "、".join(
+            f"{label}{gods[key]}"
+            for key, label in (
+                ("yongshen", "用神"),
+                ("xishen", "喜神"),
+                ("jishen", "忌神"),
+                ("choushen", "仇神"),
+                ("pingshen", "平神"),
+            )
+            if gods.get(key)
+        )
+        human += f"【终审五神（LLM 裁决）】\n{god_lines}"
+    else:
+        human += f"最喜 {favor.get('mostFavored') or '—'}、最忌 {favor.get('mostOpposed') or '—'}"
     if favor.get("ailmentNote"):
         human += f"\n定喜忌的依据：{favor['ailmentNote']}"
     human += (

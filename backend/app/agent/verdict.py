@@ -35,10 +35,10 @@ from app.domain.analysis_calc import ENGINE_VERSION
 from app.domain.chart_builder import BaziChart
 from app.domain.fortune_score import detect_ailment, favor_vector
 
-PROMPT_VERSION = "v8"
+PROMPT_VERSION = "v9"
 
 # 终审 LLM 总超时（秒）：模型层各有 timeout/重试/熔断，这里兜底防接口被拖死
-_VERDICT_TIMEOUT = 150.0
+_VERDICT_TIMEOUT = 180.0
 
 _VALID_STRENGTH = ("极旺", "偏旺", "中和", "偏弱", "极弱")
 _VALID_WUXING = ("金", "木", "水", "火", "土")
@@ -80,20 +80,31 @@ confirm 与 override 的门槛（刻意不对称）：
    - 仅余气/中气微根：不得判真从，最多讨论**假从**（实战以正格为稳妥）；
    - 禄刃强根（哪怕被冲，冲是根损不是根灭）或印比透干有地支支撑：**正格，不论从**。
    - **例外（根变性入局）**：微根所在的地支若已合而化成**所从之神**（三合局/三会方/六合化为所从五行），根气变性归局、名存实亡，微根不碍从——可直接判**真从**。合为他行或仅合绊不化的，不适用此例外。
-   - 合化成立的条件是合化的五行在原局处于旺相状态，不然合而不化(引擎已经有了这个逻辑)。盘面已给出引擎的根气画像三档判定，可对照引用，但你有权按盘面结构复核它。
+   - 合化成立的条件是合化的五行在原局处于旺/相状态，不然合而不化(引擎已经有了这个逻辑)。盘面已给出引擎的根气画像三档判定，可对照引用，但你有权按盘面结构复核它。
 3. **印旺不等于身旺**（土重金埋）：日元须有一定力量方能受重印所生；日主无强根而印星独大成势时（如水多木漂），是印重身弱之病，不判身旺，亦不轻判从格——按印重病药论（忌印、喜财制印/比劫泄印）取用。
 4. 日主极弱无根或微根被冲克受损、合化变性且克泄耗一行独旺时考虑从格；一行独旺无克泄或克泄耗极低可忽略不计时考虑专旺。
-5. 用神唯一：正格按扶抑（弱喜印比、旺喜克泄耗），从格喜所从之神、忌印比，专旺顺其旺势。
-6. reason 须引用至少一条具体盘面事实（如"三酉冲一卯，禄根被伤"），不得空话；override 时须点名引擎错在哪一步。
+5. 通用规则：正格按扶抑（弱喜印比、旺喜克泄耗），从格喜所从之神、忌印比，专旺顺其旺势。
+6. **五神取用（子平口径）**，按五行的**功能**分五类，不要混用：
+   - **用神**（useful_god，必填）：对命局起关键救应作用的那一行，全局的枢纽；
+   - **忌神**（avoid_god，必填）：克用神或助长病神者（如用神水而土克水）；
+   - **喜神**（xishen，可选）：生扶用神、助其成用者（如用神水，则金生水为喜）；
+   - **仇神**（choushen，可选）：克喜神、生忌神者，属"帮凶"性质（如喜金而火克金、火又生土）；
+   - **平神**（pingshen，可选）：既非喜亦非忌的闲神，只在盘面确实中立时才填。
+   后三类**不是每张盘都能判出来**：分析不出就留空数组，绝不为了凑数硬填；
+   注意：五神取用需结合具体盘面结构和五行生克制化关系综合判断；某一五行即使对日主有帮助，但是过旺也可能导致五行失衡，转药为病。
+7. reason 须引用至少一条具体盘面事实（如"三酉冲一卯，禄根被伤"），不得空话；override 时须点名引擎错在哪一步。
 
 输出**严格 JSON**（无 markdown 代码块、无多余文字）：
 {"relation_to_engine": "confirm|override 之一",
  "strength": "极旺|偏旺|中和|偏弱|极弱 之一",
  "special_pattern": "无|专旺|从格|假从 之一",
  "special_label": "无|曲直格|炎上格|稼穑格|从革格|润下格|从财格|从杀格|从儿格|从势格|假从财格|假从杀格|假从儿格|假从势格 之一",
- "useful_god": "金|木|水|火|土 之一",
- "avoid_god": "金|木|水|火|土 之一",
- "reason": "≤150字裁决依据，须引用具体盘面事实；override 时须点名引擎错在哪一步"}"""
+ "useful_god": "金|木|水|火|土 之一（用神，必填）",
+ "avoid_god": "金|木|水|火|土 之一（忌神，必填）",
+ "xishen": ["金|木|水|火|土", "…"],   // 喜神，可空数组（判断不出就给 []）
+ "choushen": ["金|木|水|火|土", "…"],  // 仇神，可空数组
+ "pingshen": ["金|木|水|火|土", "…"],  // 平神，可空数组
+ "reason": "≤300字裁决依据，须引用具体盘面事实；override 时须点名引擎错在哪一步"}"""
 
 
 def computed_snapshot(chart: BaziChart) -> dict[str, Any]:
@@ -171,6 +182,31 @@ def build_verdict_context(chart: BaziChart) -> str:
     return "\n".join(lines)
 
 
+def _parse_god_list(data: dict[str, Any], key: str) -> list[str]:
+    """解析可选五神数组（喜神/仇神/平神）：缺省或空 → []，非法五行 → 整份裁决 invalid。
+
+    契约是"分析不出就留空"，所以缺字段、null、空串、空数组一律视为"没判出来"，
+    只有**写了但写错**（非五行、非数组）才算 invalid —— 不能因为模型少给一类就整份作废。
+    """
+    raw = data.get(key)
+    if raw is None or raw == "":
+        return []
+    if isinstance(raw, str):  # 容忍 "金、水" 这种串行写法
+        raw = [p for p in re.split(r"[、,，/\s]+", raw) if p]
+    if not isinstance(raw, list):
+        raise ValueError(f"{key} 需为数组（或省略）")
+    out: list[str] = []
+    for item in raw:
+        s = str(item).strip()
+        if not s:
+            continue
+        if s not in _VALID_WUXING:
+            raise ValueError(f"{key} 含非法五行: {s!r}")
+        if s not in out:
+            out.append(s)
+    return out
+
+
 def parse_verdict(text: str) -> dict[str, Any]:
     """从 LLM 回复中提取并校验裁决 JSON；不合规抛 ValueError（status=invalid）。"""
     m = re.search(r"\{.*\}", text, re.DOTALL)
@@ -196,6 +232,17 @@ def parse_verdict(text: str) -> dict[str, Any]:
         raise ValueError("pattern=无 但 label 非无")
     if data["special_pattern"] != "无" and data["special_label"] == "无":
         raise ValueError("pattern 非无 但 label=无")
+    # 五神去重：用神/忌神已占用的五行不再留在喜/仇/平里（口径"一行只归一类"）；
+    # 只在**留下的**那几个之间继续占位——被"每类最多两个"截掉的不算已归类，
+    # 否则模型多写一个喜神，会把本可以显示的同类仇神/平神一起悄悄吃掉。
+    taken = {data["useful_god"], data["avoid_god"]}
+    gods: dict[str, list[str]] = {}
+    for key in ("xishen", "choushen", "pingshen"):
+        kept = [w for w in _parse_god_list(data, key) if w not in taken]
+        # 每类最多两个：五神本就少见堆砌，写多了是模型在凑，保留前两个即可
+        kept = kept[:2]
+        taken.update(kept)
+        gods[key] = kept
     return {
         "relation_to_engine": data["relation_to_engine"],
         "strength": data["strength"],
@@ -203,6 +250,7 @@ def parse_verdict(text: str) -> dict[str, Any]:
         "special_label": data["special_label"],
         "useful_god": data["useful_god"],
         "avoid_god": data["avoid_god"],
+        **gods,
         "reason": reason,
     }
 
@@ -370,6 +418,55 @@ def apply_verdict(chart: BaziChart, verdict: dict[str, Any], relation: str = "ov
         chart,
         wuxing=replace(w, strength=strength, special_pattern=pattern, useful_hint=hint, notes=notes),
     )
+
+
+def five_gods_from_verdict(verdict: dict[str, Any]) -> dict[str, str]:
+    """裁决 JSON → 五神可读串（用神/喜神/忌神/仇神/平神）。
+
+    **只返回判得出来的类别**：某类没给（或给的数组为空）就整键缺席，前端据此不显示，
+    而不是显示一个空标签或"未定"。键与前端约定一致：yongshen/xishen/jishen/choushen/pingshen。
+    """
+
+    def _join(*groups: Any) -> str:
+        out: list[str] = []
+        for group in groups:
+            items = group if isinstance(group, (list, tuple)) else [group]
+            for item in items:
+                s = str(item or "").strip()
+                if s and s not in out:
+                    out.append(s)
+        return "、".join(out)
+
+    gods = {
+        "yongshen": _join(verdict.get("useful_god")),  # 用神
+        "xishen": _join(verdict.get("xishen") or []),  # 喜神
+        "jishen": _join(verdict.get("avoid_god")),  # 忌神
+        "choushen": _join(verdict.get("choushen") or []),  # 仇神
+        "pingshen": _join(verdict.get("pingshen") or []),  # 平神
+    }
+    return {k: v for k, v in gods.items() if v}
+
+
+def verdict_five_gods(chart: BaziChart) -> dict[str, str]:
+    """已应用终审 → 五神（缺项缺席）；未终审或读不到裁决 → 空 dict。
+
+    为什么回读 DB 而不是把五神塞进 chart.wuxing：`WuxingAnalysis` 是纯力学事实载体，
+    往里加展示字段会污染命盘快照（36 例黄金快照逐字比对）。终审结论本来就以
+    chart_verdicts 为准，展示层按需回读更干净；失败一律降级为 `{}`（前端回退「最喜/最忌」）。
+    """
+    if not verdict_applied(chart):
+        return {}
+    chash = _hash_of(chart)
+    if not chash:
+        return {}
+    try:
+        cached = _get_cached_verdict(chash)
+    except Exception as e:
+        log.warning("[verdict] 五神回读失败（前端回退计算版喜忌）: {}", _err_text(e))
+        return {}
+    if not cached:
+        return {}
+    return five_gods_from_verdict(cached)
 
 
 async def chart_with_verdict(chart: BaziChart, model: Any = None) -> BaziChart:

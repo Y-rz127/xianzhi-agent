@@ -154,12 +154,21 @@ def test_max_dayun_beats_max_age() -> None:
 
 
 def test_max_dayun_beyond_built_steps_falls_back() -> None:
-    """步数顶到上限时：超出年龄上限的那几步被跳过，右端仍收在完整大运边界上。"""
+    """步数顶到上限（12 步）时必须**完整覆盖每一步大运**，右端仍收在整段边界上。
+
+    旧口径用 `MAX_AGE_LIMIT`(120) 卡岁数：12 步大运 = 起运 + 120 年，必然略超，
+    于是第 12 步被静默跳过（1990-05-20 男、起运 6 岁 → 第 12 步到虚岁 125），
+    用户看到的就是"只有 11 段大运"。现按步数路线单列 `MAX_DAYUN_AGE_LIMIT` 护栏。
+    """
     p = _payload(max_dayun=xianzhi_kline.MAX_DAYUN_LIMIT)
-    last = p["candles"][-1]["year"]
-    visible = [b for b in p["dayunBands"] if b["startYear"] <= last]
+    candles, bands = p["candles"], p["dayunBands"]
+    last = candles[-1]["year"]
+    visible = [b for b in bands if b["startYear"] <= last]
+    assert len(visible) == xianzhi_kline.MAX_DAYUN_LIMIT, f"应覆盖 12 步大运，实际 {len(visible)}"
     assert visible[-1]["endYear"] == last
-    assert p["candles"][-1]["age"] <= xianzhi_kline.MAX_AGE_LIMIT
+    for b in visible:
+        assert b["startYear"] >= candles[0]["year"] and b["endYear"] <= last
+    assert candles[-1]["age"] <= xianzhi_kline.MAX_DAYUN_AGE_LIMIT
 
 
 def test_meta_records_weights_for_traceability() -> None:
@@ -242,6 +251,85 @@ def test_dimension_does_not_change_relations_over_wire() -> None:
         if dim == fortune_score.DIM_COMPREHENSIVE:
             continue
         assert [c["relations"] for c in _payload(dimension=dim)["candles"]] == base
+
+
+# ---------------- 大运带：12 步 + 十二长生 ----------------
+
+
+def test_dayun_bands_cover_twelve_steps_with_changsheng() -> None:
+    """图要能画出 12 步大运，且每一步都带十二长生（前端长生行直接读它）。
+
+    长生是「日干在本步大运地支上的长生」，前端不做二次换算 —— 缺字段只会静默少画一行。
+    """
+    payload = _payload(max_dayun=xianzhi_kline.MAX_DAYUN_LIMIT)
+    bands = payload["dayunBands"]
+
+    assert xianzhi_kline.MAX_DAYUN_LIMIT == 12, "接口上限变了，前端 MAX_DAYUN 也要跟着改"
+    assert len(bands) == 12, f"大运带应为 12 步，实得 {len(bands)}"
+    assert all(b["changsheng"] for b in bands), "有的大运带没带十二长生"
+    assert {b["changsheng"] for b in bands} <= set(_CHANGSHENG_NAMES), "长生名不在十二长生表内"
+    # 12 步必须**全部落在蜡烛区间内**，否则前端那一段没有蜡烛可对齐，长生标签就飘在外面
+    first, last = payload["candles"][0]["year"], payload["candles"][-1]["year"]
+    assert all(first <= b["startYear"] and b["endYear"] <= last for b in bands), (
+        "有的大运带超出 K 线年份范围，前端画不出完整的一段"
+    )
+    # 出生 1990-05-20 男：起运步与 K 线年份必须首尾相接（末段截半会让最右那格的标签被裁）
+    assert bands == sorted(bands, key=lambda b: b["startYear"])
+    for prev, cur in zip(bands, bands[1:]):
+        assert cur["startYear"] == prev["endYear"] + 1
+
+
+_CHANGSHENG_NAMES = (
+    "长生", "沐浴", "冠带", "临官", "帝旺", "衰",
+    "病", "死", "墓", "绝", "胎", "养",
+)
+
+
+# ---------------- 喜忌：计算版 vs 终审版 ----------------
+
+
+def test_favor_defaults_to_computed_version_when_no_verdict() -> None:
+    """未终审（计算版）：保留「最喜/最忌」，五神为空 —— 前端据此走老显示。"""
+    favor = _payload()["favor"]
+    assert favor["verdictApplied"] is False
+    assert favor["gods"] == {}
+    assert favor["mostFavored"] and favor["mostOpposed"]
+
+
+def test_favor_carries_five_gods_when_verdict_applied(monkeypatch) -> None:
+    """终审版：五神随 favor 一起出（前端改显示用神/喜神/忌神/仇神/平神）。
+
+    这里只验"接口把裁决里的五神透出去"，命盘对象用已应用终审的图造，
+    裁决回读打个桩 —— 真 LLM 与 DB 由 test_verdict_apply 覆盖。
+    """
+    from app.agent import verdict as V
+    from app.domain.chart_builder import build_bazi_chart
+
+    chart = V.apply_verdict(
+        build_bazi_chart(BIRTH_TIME, GENDER),
+        {
+            "relation_to_engine": "confirm",
+            "strength": "中和",
+            "special_pattern": "无",
+            "special_label": "无",
+            "useful_god": "水",
+            "avoid_god": "土",
+            "xishen": ["金"],
+            "choushen": ["火"],
+            "pingshen": [],
+            "reason": "壬水午月身弱，用印比，土为杀最忌，火为财助杀。",
+        },
+    )
+    monkeypatch.setattr(V, "_get_cached_verdict", lambda chash: {
+        "useful_god": "水", "avoid_god": "土",
+        "xishen": ["金"], "choushen": ["火"], "pingshen": [],
+    })
+
+    favor = xianzhi_kline._favor_payload(chart)
+    assert favor["verdictApplied"] is True
+    assert favor["gods"] == {"yongshen": "水", "xishen": "金", "jishen": "土", "choushen": "火"}
+    # 平神没判出来 → 整个键缺席（前端不显示空标签）
+    assert "pingshen" not in favor["gods"]
 
 
 # ---------------- 入参校验 ----------------
