@@ -259,6 +259,11 @@ export interface ChartData {
   birth?: Record<string, any>
   /** 该载荷是否已应用 LLM 终审：false=计算版（后台补判中，下拉刷新可拿到终审版） */
   verdict_applied?: boolean
+  /**
+   * 终审五神（键：yongshen/xishen/jishen/choushen/pingshen）。
+   * **只含判得出来的类别**；计算版为空对象，前端不显示空标签。
+   */
+  gods?: Record<string, string>
   pillars: Pillar[]
   wuxing: WuxingItem[]
   dayun: DayunItem[]
@@ -326,6 +331,8 @@ export interface KlineDayunBand {
   startAge: number
   endAge: number
   shishenGan: string
+  /** 日干在该步大运地支上的十二长生（长生/沐浴/冠带…），画在年份轴下方的长生行 */
+  changsheng: string
 }
 
 export interface KlineFavor {
@@ -340,6 +347,13 @@ export interface KlineFavor {
   ailment: string
   /** 病神的一句话依据，前端直接显示、不自行解释命理口径 */
   ailmentNote: string
+  /** 是否已应用 LLM 终审：true=终审版（显示五神），false=计算版（显示最喜/最忌） */
+  verdictApplied?: boolean
+  /**
+   * 终审五神（键：yongshen/xishen/jishen/choushen/pingshen）。
+   * **只含判得出来的类别**：没给就整个键缺失，前端不显示空标签。
+   */
+  gods?: Record<string, string>
 }
 
 export interface KlineMeta {

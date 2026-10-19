@@ -44,13 +44,38 @@
             <text class="ov-value">{{ favor.specialPattern || '正格' }}</text>
           </view>
           <view class="ov-cell">
-            <text class="ov-label">最喜 / 最忌</text>
-            <text class="ov-value">{{ favor.mostFavored }} / {{ favor.mostOpposed }}</text>
+            <text class="ov-label">{{ verdictGods.yongshen ? '用神' : '最喜 / 最忌' }}</text>
+            <!-- 终审版：用神（多值时逐字按五行上色） -->
+            <text v-if="verdictGods.yongshen" class="ov-value">
+              <text
+                v-for="(w, i) in yongElements"
+                :key="'y' + w + i"
+                :style="{ color: wuxingColor(w) }"
+              >{{ (i ? '、' : '') + w }}</text>
+            </text>
+            <!-- 计算版回退：最喜 / 最忌 同样按五行上色 -->
+            <text v-else class="ov-value">
+              <text :style="{ color: wuxingColor(favor.mostFavored) }">{{ favor.mostFavored || '—' }}</text>
+              <text class="ov-slash"> / </text>
+              <text :style="{ color: wuxingColor(favor.mostOpposed) }">{{ favor.mostOpposed || '—' }}</text>
+            </text>
+          </view>
+        </view>
+        <!-- 终审五神：用神已在上面那格做头条，这里补其余四类；判不出来的类别整键缺席、不显示 -->
+        <view v-if="verdictGods.yongshen" class="god-row">
+          <view v-for="g in tailGods" :key="g.key" class="god-chip">
+            <text class="god-name">{{ g.name }}</text>
+            <text
+              v-for="(w, i) in g.elements"
+              :key="g.key + w + i"
+              class="god-val"
+              :style="{ color: wuxingColor(w) }"
+            >{{ (i ? '、' : '') + w }}</text>
           </view>
         </view>
         <text v-if="meta.dimensionNote" class="ov-note">{{ meta.dimensionNote }}</text>
-        <!-- 病药说明：解释「最喜/最忌」为何这样定。无病则整行不出现 -->
-        <text v-if="favor.ailmentNote" class="ov-note ov-ailment">{{ favor.ailmentNote }}</text>
+        <!-- 病药说明解释的是引擎版「最喜/最忌」为何这样定；终审版改看五神，故只在计算版显示 -->
+        <text v-if="!verdictGods.yongshen && favor.ailmentNote" class="ov-note ov-ailment">{{ favor.ailmentNote }}</text>
         <view class="ov-stats">
           <text class="ov-stat">覆盖 {{ meta.startYear }}–{{ meta.endYear }}（{{ meta.yearCount }} 年 · 虚岁 {{ candles[0].age }}–{{ candles[candles.length - 1].age }}）</text>
           <text v-if="peak && trough" class="ov-stat">最高 {{ peak.year }} 年 {{ peak.close }} 分 · 最低 {{ trough.year }} 年 {{ trough.close }} 分</text>
@@ -106,6 +131,13 @@
                     class="grid-line"
                     :style="{ top: yPct(t) + '%' }"
                   ></view>
+                  <!-- 年分割线：每个标注年份的起点边界一条，年份数字就居中在这条线上 -->
+                  <view
+                    v-for="d in renderDecades"
+                    :key="'d' + d.year"
+                    class="decade-line"
+                    :style="{ left: d.left }"
+                  ></view>
                   <!-- 大运换柱（首段左沿即画布起点，不画） -->
                   <view
                     v-for="(b, bi) in renderBands"
@@ -143,8 +175,18 @@
                     :key="'y' + c.year"
                     v-show="c.showYear"
                     :class="['axis-year', c.isFirstYear && 'axis-year-start']"
-                    :style="{ left: c.left, width: c.slot }"
+                    :style="{ left: c.yearLabelLeft, width: c.yearLabelWidth }"
                   >{{ c.year }}</text>
+                </view>
+
+                <!-- 十二长生轴：与年份轴平行，按每一步大运的中轴显示（日干在该运地支上的长生） -->
+                <view class="cs-row">
+                  <text
+                    v-for="b in renderBands"
+                    :key="'cs' + b.index"
+                    class="cs-cell"
+                    :style="{ left: b.csLeft, width: b.csWidth }"
+                  >{{ b.changsheng }}</text>
                 </view>
               </view>
             </scroll-view>
@@ -504,6 +546,7 @@
 import { computed, reactive, ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import { useTheme } from '@/composables/useTheme'
+import { splitWuxing, wuxingColor } from '@/utils/wuxingColor'
 import type { KlineAnnotation, KlineResonance } from '@/api'
 import {
   getKline, getKlineAnnotation, getKlineEventStats, getKlineResonance, listKlineEvents,
@@ -529,6 +572,11 @@ const HI = 100
 const SLOT = 18
 // 画布右沿留白：最后一根蜡烛显示完毕即止，不留多余空白。
 const TAIL_RPX = 0
+// 年份标签的盒子宽度（rpx）：要装得下 4 位数（24rpx 字号约 48rpx），
+// 且靠它自己的一半抵消，标签中心才能正好压在年分割线上。
+const YEAR_LABEL_W = 76
+// 十二长生标签的盒子宽度（rpx）：两个汉字（21rpx 字号约 42rpx）居中于大运中轴。
+const CS_LABEL_W = 90
 // 图表可视宽度（rpx）= 屏宽 − 页面左右内边距(24×2) − 卡片内边距(24×2) − 卡片边框(1×2) − 纵轴列(78)。
 // 这几个数都写在 <style> 里，改样式必须同步这里。
 // 曾按「两侧共 56rpx」估成 616，比真值大 42rpx：clamp 出的最大滚动位置永远差 42rpx 到终点，
@@ -550,9 +598,9 @@ const scrollLeftPx = ref(0)
 
 const birthTime = ref('')
 const gender = ref('')
-// 覆盖 10 步大运（后端按整段大运收尾）：按岁数截断会停在半个大运上，
-// 末段那格窄到画不下干支，最右边那个大运的标签就被裁掉了。
-const MAX_DAYUN = 10
+// 覆盖 12 步大运（后端按整段大运收尾，且 MAX_DAYUN_LIMIT 就是 12）：
+// 按岁数截断会停在半个大运上，末段那格窄到画不下干支，最右边那个大运的标签就被裁掉了。
+const MAX_DAYUN = 12
 let chartOpts: { sect: number; yunSect: number; longitude?: number; maxDayun: number } =
   { sect: 2, yunSect: 1, maxDayun: MAX_DAYUN }
 
@@ -560,6 +608,7 @@ const candles = computed<KlineCandle[]>(() => data.value?.candles || [])
 const favor = computed(() => data.value?.favor || {
   dayMaster: '', dayMasterWuxing: '', strength: '', specialPattern: '',
   favor: {}, mostFavored: '', mostOpposed: '', ailment: '', ailmentNote: '',
+  verdictApplied: false, gods: {},
 })
 const meta = computed(() => data.value?.meta || {
   startYear: null, endYear: null, yearCount: 0, maxAge: 0,
@@ -568,6 +617,28 @@ const meta = computed(() => data.value?.meta || {
   kScore: 0, weightDayun: 0, weightLiunian: 0, weightLiuyue: 0, note: '',
 })
 const dimensions = computed<KlineDimensionOption[]>(() => meta.value.availableDimensions || [])
+
+// 终审五神（用/喜/忌/仇/平）：只有终审版才有，且只含 LLM 判得出来的类别。
+// 用神缺位（裁决读不到/未终审）就整体回退引擎的「最喜/最忌」，不显示半套。
+const GOD_META = [
+  { key: 'yongshen', name: '用神' },
+  { key: 'xishen', name: '喜神' },
+  { key: 'jishen', name: '忌神' },
+  { key: 'choushen', name: '仇神' },
+  { key: 'pingshen', name: '平神' },
+] as const
+const verdictGods = computed<Record<string, string>>(() => {
+  const gods = favor.value.gods || {}
+  return gods.yongshen ? gods : {}
+})
+/** 用神的五行（多值时拆开，逐字按五行上色） */
+const yongElements = computed(() => splitWuxing(verdictGods.value.yongshen || ''))
+/** 用神之外的其余几类（用神在概览格里做头条，这里不重复） */
+const tailGods = computed(() =>
+  GOD_META.slice(1)
+    .filter((g) => verdictGods.value[g.key])
+    .map((g) => ({ ...g, elements: splitWuxing(verdictGods.value[g.key]) })),
+)
 const maxIndex = computed(() => Math.max(candles.value.length - 1, 0))
 const canvasWidthRpx = computed(() => candles.value.length * SLOT + TAIL_RPX)
 
@@ -590,22 +661,26 @@ const sign = (v: number) => (v > 0 ? '+' : '')
 const renderCandles = computed(() => {
   const list = candles.value
   const first = list[0]?.year ?? 0
-  const slotPct = list.length ? 100 / list.length : 0
   return list.map((c, i) => {
     const up = Math.max(c.open, c.close)
     const down = Math.min(c.open, c.close)
     const top = yPct(up)
     const bottom = yPct(down)
     const color = c.isUp ? upColor.value : downColor.value
+    // 十年一标：标签中心压在「该年起点」的分割线上（left 减半个盒宽抵消）
+    const showYear = (c.year - first) % 10 === 0
+    const boundary = i * SLOT
     return {
       i,
       year: c.year,
       // 每年都标会糊成一片，十年一标
-      showYear: (c.year - first) % 10 === 0,
-      // 首年居中的话左半会溢出画布、被滚动容器裁掉，故首个标签改左对齐
+      showYear,
+      // 首年那条边界就是画布左沿，居中会让左半截被滚动容器裁掉，故首个标签改左对齐
       isFirstYear: i === 0,
-      left: i * SLOT + 'rpx',
+      left: boundary + 'rpx',
       slot: SLOT + 'rpx',
+      yearLabelLeft: (i === 0 ? 0 : boundary - YEAR_LABEL_W / 2) + 'rpx',
+      yearLabelWidth: YEAR_LABEL_W + 'rpx',
       // 实体至少留 1.2% 高度，否则"开收相等"的平年会在图里消失
       bodyTop: top + '%',
       bodyH: Math.max(bottom - top, 1.2) + '%',
@@ -617,6 +692,13 @@ const renderCandles = computed(() => {
     }
   })
 })
+
+/** 年分割线（只画有标签的那些边界；首年是画布左沿，不需要线） */
+const renderDecades = computed(() =>
+  renderCandles.value
+    .filter((c) => c.showYear && !c.isFirstYear)
+    .map((c) => ({ year: c.year, left: c.left })),
+)
 
 const renderBands = computed(() => {
   const list = candles.value
@@ -630,7 +712,20 @@ const renderBands = computed(() => {
       return { ...b, firstYear: s, n: e - s + 1 }
     })
     .filter((b) => b.n > 0)
-    .map((b) => ({ ...b, left: (b.firstYear - first) * SLOT + 'rpx', width: b.n * SLOT + 'rpx' }))
+    .map((b) => {
+      const leftRpx = (b.firstYear - first) * SLOT
+      const widthRpx = b.n * SLOT
+      // 十二长生按这段大运的中轴居中；末段被截短时收窄盒子、贴左放，
+      // 否则标签会溢到相邻大运上，读起来像是那一步的长生
+      const csW = Math.min(CS_LABEL_W, widthRpx)
+      return {
+        ...b,
+        left: leftRpx + 'rpx',
+        width: widthRpx + 'rpx',
+        csLeft: leftRpx + Math.max(0, (widthRpx - csW) / 2) + 'rpx',
+        csWidth: csW + 'rpx',
+      }
+    })
 })
 
 const sel = computed<KlineCandle>(() => candles.value[selIndex.value] || ({} as KlineCandle))
@@ -1361,6 +1456,7 @@ $chart-band-row: 34rpx;   /* 大运干支标签行 */
    再往上（720rpx=360px）卡片就占掉大半屏，纵轴反而要来回扫。 */
 $chart-plot: 580rpx;      /* 绘图区 */
 $chart-axis-row: 34rpx;   /* 年份轴 */
+$chart-cs-row: 30rpx;     /* 十二长生行（与年份轴平行，按大运中轴逐段） */
 
 .page-root {
   display: flex;
@@ -1451,11 +1547,28 @@ $chart-axis-row: 34rpx;   /* 年份轴 */
 .ov-cell { width: 50%; padding: 8rpx 0; display: flex; align-items: baseline; }
 .ov-label { font-size: 28rpx; color: $color-ink-light; margin-right: 12rpx; font-weight: 500; }
 .ov-value { font-size: 32rpx; color: $color-ink; font-weight: 600; }
+/* 最喜 / 最忌 之间的斜杠：中性色，别跟着五行变色 */
+.ov-slash { color: $color-ink-lightest; font-weight: 400; }
 .ov-note { display: block; margin-top: 14rpx; font-size: 27rpx; color: $color-ink-light; line-height: 1.6; }
 /* 病药说明是「最喜/最忌」的依据，比维度说明更需要被读到，故用正文色 */
 .ov-ailment { color: $color-ink; line-height: 1.7; font-weight: 500; }
 .ov-stats { margin-top: 14rpx; padding-top: 14rpx; border-top: 1rpx solid $color-border-light; }
 .ov-stat { display: block; font-size: 26rpx; color: $color-ink-light; line-height: 1.8; }
+
+/* 终审五神：用神在概览格里做头条，其余四类在这里逐条标注（没判出来的类别不出现） */
+.god-row { display: flex; flex-wrap: wrap; align-items: center; margin-top: 10rpx; }
+.god-chip {
+  display: flex;
+  align-items: baseline;
+  margin: 0 14rpx 8rpx 0;
+  padding: 4rpx 14rpx;
+  border-radius: 8rpx;
+  background: rgba(184, 72, 60, 0.07);
+  border: 1rpx solid $color-border-light;
+}
+.god-name { font-size: 24rpx; color: $color-ink-light; margin-right: 8rpx; }
+/* 颜色由 :style 按五行下发（见 utils/wuxingColor.ts），这里只管字号/字重 */
+.god-val { font-size: 27rpx; font-weight: 700; }
 
 .chart-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 18rpx; }
 .switch-hint { font-size: 25rpx; color: $color-ink-light; }
@@ -1487,7 +1600,7 @@ $chart-axis-row: 34rpx;   /* 年份轴 */
    外框给死宽度 + overflow:hidden，内容就只出现在真正的视口里；
    min-width:0 不能省 —— flex 子项默认 min-width:auto（= 内容最小宽），画布那 1300+rpx 会把这层顶开。 */
 .chart-clip { flex: 1; min-width: 0; overflow: hidden; }
-.chart-scroll { width: 100%; height: $chart-band-row + $chart-plot + $chart-axis-row; }
+.chart-scroll { width: 100%; height: $chart-band-row + $chart-plot + $chart-axis-row + $chart-cs-row; }
 .chart-canvas { position: relative; }
 
 .band-row { height: $chart-band-row; position: relative; }
@@ -1520,6 +1633,15 @@ $chart-axis-row: 34rpx;   /* 年份轴 */
   bottom: 0;
   width: 1rpx;
   border-left: 1rpx dashed $color-border;
+}
+/* 年分割线：比大运换柱更淡（大运是纲，年份只是刻度），
+   年份数字就居中压在它上面，读作"这条线起是哪一年" */
+.decade-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1rpx;
+  background: $color-border-light;
 }
 .candle { position: absolute; top: 0; height: 100%; }
 .wick {
@@ -1557,7 +1679,21 @@ $chart-axis-row: 34rpx;   /* 年份轴 */
   text-align: center;
   font-weight: 500;
 }
+/* 首年标签贴着画布左沿，居中会让左半截被滚动容器裁掉 */
 .axis-year-start { text-align: left; }
+
+/* 十二长生行：与年份轴同宽同滚动，每段大运的中轴一个标签 */
+.cs-row { height: $chart-cs-row; position: relative; }
+.cs-cell {
+  position: absolute;
+  top: 2rpx;
+  font-size: 21rpx;
+  line-height: 26rpx;
+  color: $color-ink-lighter;
+  text-align: center;
+  overflow: hidden;
+  white-space: nowrap;
+}
 
 .slider-row { margin-top: 20rpx; }
 .year-slider { margin: 0 8rpx; }

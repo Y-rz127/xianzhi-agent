@@ -131,21 +131,27 @@
             </view>
           </view>
           <view v-if="chart.analysis?.strength" class="basic-row">
-            <text class="basic-info basic-info-main">日主 {{ chart.analysis.day_master }}{{ chart.analysis.strength }}（置信度 {{ chart.analysis.confidence || '-' }}）</text>
+            <text class="basic-info basic-info-main">日主 {{ chart.analysis.day_master }}{{ chart.analysis.strength }}</text>
           </view>
           <view v-if="chart.analysis?.adjustment" class="basic-row"><text class="basic-info">{{ chart.analysis.adjustment }}</text></view>
         </view>
 
-        <!-- 起运信息 -->
-        <view class="section" v-if="activeTab === 'paipan' && (startYunText || xipan?.qiyun)">
-          <view class="qiyun-row">
-            <view class="qiyun-left">
-              <text class="qiyun-tag">起运</text>
-              <text class="qiyun-after">{{ xipan?.qiyun?.after || startYunText?.after || '出生后起运' }}</text>
-            </view>
-            <view class="qiyun-meta">
-              <text v-if="xipan?.qiyun" class="qiyun-sub">交运 {{ xipan.qiyun.startDate }} · {{ xipan.qiyun.jieqi }}后{{ xipan.qiyun.daysAfterJieqi }}天</text>
-              <text v-else-if="startYunText" class="qiyun-sub">交运 {{ startYunText.date }} · {{ startYunText.dir }}</text>
+        <!-- 喜忌参考 + 月令旺衰/人元司令。
+             原「起运 / 出生后… / 交运…」一行已按需求移除（起运信息仍在「专业细盘」顶部展示），
+             腾出的位置改放终审五神：用神/喜神/忌神/仇神/平神，判不出来的类别不显示。 -->
+        <view class="section" v-if="activeTab === 'paipan' && (godItems.length || xipan)">
+          <view v-if="godItems.length" class="god-block">
+            <text class="god-title display-font">喜忌参考</text>
+            <view class="god-row">
+              <view v-for="g in godItems" :key="g.key" class="god-chip">
+                <text class="god-name">{{ g.name }}</text>
+                <text
+                  v-for="(w, i) in g.elements"
+                  :key="w + i"
+                  class="god-val"
+                  :style="{ color: wuxingColor(w) }"
+                >{{ (i ? '、' : '') + w }}</text>
+              </view>
             </view>
           </view>
           <!-- 月令旺衰 + 人元司令 -->
@@ -153,7 +159,13 @@
             <view class="xp-state-block">
               <text class="xp-state-title">月令旺衰</text>
               <view class="xp-state-items">
-                <text v-for="w in xipan.wuxingState" :key="w.name" class="xp-state-item" :class="'xs-' + xsStateKey(w.state)">{{ w.name }}{{ w.state }}</text>
+                <!-- 颜色按**五行**上（与五神同一套色）；旺/相/休/囚/死看字，不再用状态配色 -->
+                <text
+                  v-for="w in xipan.wuxingState"
+                  :key="w.name"
+                  class="xp-state-item"
+                  :style="wuxingTintStyle(w.name)"
+                >{{ w.name }}{{ w.state }}</text>
               </view>
             </view>
             <view v-if="xipan.siling && xipan.siling.stem" class="xp-state-block">
@@ -562,7 +574,7 @@ import { onLoad } from '@dcloudio/uni-app'
 import { useTheme } from '@/composables/useTheme'
 import { getChart, getRelations, generateFullReport, downloadReport, downloadFullReportPdf, isSameDayun, collapseBySelection, type ChartData, type Pillar, type WuxingItem, type DayunItem, type ShenshaItem, type LiuNianItem, type XiPanData, type XiPanLiuYue, type XiPanRelationGroup, type XiPanRelations } from '@/api'
 import MarkdownRender from '@/components/MarkdownRender/MarkdownRender.vue'
-
+import { splitWuxing, wuxingColor, wuxingTintStyle } from '@/utils/wuxingColor'
 const { themeClass, isDark } = useTheme()
 
 type TabKey = 'paipan' | 'xipan' | 'notes'
@@ -622,6 +634,25 @@ const wuxing = computed<WuxingItem[]>(() => chart.value?.wuxing || [])
 const dayun = computed<DayunItem[]>(() => chart.value?.dayun || [])
 const warnings = computed<string[]>(() => chart.value?.warnings || [])
 const xipan = computed<XiPanData | null>(() => chart.value?.xipan || null)
+
+// 终审五神（用/喜/忌/仇/平）：后端只回判得出来的类别，计算版为空对象 → 整块不出现。
+// 展示位置在「基本信息」下方（原起运那一行），起运信息改看「专业细盘」顶部。
+const GOD_META = [
+  { key: 'yongshen', name: '用神' },
+  { key: 'xishen', name: '喜神' },
+  { key: 'jishen', name: '忌神' },
+  { key: 'choushen', name: '仇神' },
+  { key: 'pingshen', name: '平神' },
+] as const
+/** 五神取值按五行上色（色值与页面里干支字色同一套，见 utils/wuxingColor.ts） */
+const godItems = computed(() => {
+  const gods = chart.value?.gods || {}
+  return GOD_META.filter((g) => gods[g.key]).map((g) => ({
+    key: g.key,
+    name: g.name,
+    elements: splitWuxing(gods[g.key]),
+  }))
+})
 const maxWuxing = computed(() => Math.max(...wuxing.value.map((w) => w.count), 1))
 
 // 童限段（起运前）在大运列表里的显示值：后端把它直接填成这个字面量（app/domain/xipan.py 的
@@ -918,16 +949,8 @@ const liuyueCols = computed(() => liuyueOfYear.value.map((m) => {
   }
 }))
 
-// === 基本排盘：起运 + 大运/流年表 ===
-const startYunText = computed(() => {
-  const xp = xipan.value
-  if (xp?.qiyun) {
-    return { after: xp.qiyun.after, dir: xp.qiyun.direction, date: xp.qiyun.startDate }
-  }
-  const sy = chart.value?.startYun
-  if (sy?.startDate) return { after: '', dir: sy.direction || '', date: sy.startDate }
-  return null
-})
+// === 基本排盘：大运/流年表 ===
+// （原「起运」一行已按需求从基本排盘移除，起运信息见「专业细盘」顶部；故此处不再派生起运文案）
 
 // === 岁运分析 / 原局分析（后端 relations 引擎，六栏口径对齐专业排盘软件） ===
 // 数据不再固定为"今天"那一组：跟随用户点选的大运/流年/流月回调后端现算（见 refreshRelations）
@@ -1007,12 +1030,6 @@ const monthShenshaRows = computed(() => {
     }))
   return collapseBySelection(rows, rows.filter((m) => m.isSelected), showAllMonthShensha.value, !!selectedLiuyueGz.value)
 })
-
-// 五行旺相休囚死的取色 class：用 ASCII 数字避免 WXSS 对中文 class 做 `\XXXX` 转义导致编译失败
-const XS_STATE_KEY: Record<string, number> = { 旺: 0, 相: 1, 休: 2, 囚: 3, 死: 4 }
-function xsStateKey(state: string): number {
-  return XS_STATE_KEY[state] ?? 0
-}
 
 // === 神煞 ===
 function classifyShensha(item: ShenshaItem): string {
@@ -1465,11 +1482,30 @@ onLoad((options: any) => {
 .basic-row { margin-top: 10rpx; }
 .basic-info { font-size: 30rpx; color: $color-ink-light; line-height: 1.6; }
 .basic-info-main { font-size: 32rpx; color: $color-ink; font-weight: 600; }
-/* 起运信息（放大版） */
-.qiyun-row { margin-top: 4rpx; }
-.qiyun-tag { font-size: 26rpx; color: $color-vermilion; font-weight: 600; letter-spacing: 2rpx; }
-.qiyun-after { font-size: 32rpx; color: $color-ink; font-weight: 600; line-height: 1.4; }
-.qiyun-sub { font-size: 26rpx; color: $color-ink-light; line-height: 1.6; }
+/* 喜忌参考（终审五神）：原「起运」位置改放这里，判不出来的类别不出现。
+   标题走书法字体并放大，与「基本信息」等正文字号拉开层级 */
+.god-block { margin-top: 4rpx; }
+.god-title {
+  display: block;
+  font-size: 34rpx;
+  font-weight: 700;
+  color: $color-ink;
+  letter-spacing: 6rpx;
+  line-height: 1.4;
+}
+.god-row { display: flex; flex-wrap: wrap; align-items: center; margin-top: 8rpx; }
+.god-chip {
+  display: flex;
+  align-items: baseline;
+  margin: 0 14rpx 8rpx 0;
+  padding: 4rpx 14rpx;
+  border-radius: 8rpx;
+  background: rgba(184, 72, 60, 0.07);
+  border: 1rpx solid $color-border-light;
+}
+.god-name { font-size: 24rpx; color: $color-ink-light; margin-right: 8rpx; }
+/* 颜色由 :style 按五行下发（见 utils/wuxingColor.ts），这里只管字号/字重 */
+.god-val { font-size: 28rpx; font-weight: 700; }
 .section-title {
   display: block;
   font-size: 30rpx;
@@ -1706,12 +1742,8 @@ onLoad((options: any) => {
 .xp-state-block { flex: 1; min-width: 0; background: $color-bg-card; border: 1rpx solid $color-border; border-radius: 12rpx; padding: 16rpx 18rpx; box-sizing: border-box; }
 .xp-state-title { display: block; font-size: 24rpx; color: $color-ink-light; letter-spacing: 4rpx; margin-bottom: 14rpx; }
 .xp-state-items { display: flex; flex-wrap: wrap; gap: 10rpx; }
+/* 底色/描边/字色由 wuxingTintStyle(五行) 内联下发（utils/wuxingColor.ts），此处只留骨架 */
 .xp-state-item { font-size: 26rpx; padding: 4rpx 16rpx; border-radius: 8rpx; border: 1rpx solid $color-border; color: $color-ink; }
-.xs-0 { color: $nx-cat-red; border-color: rgba(197,48,48,0.35); }
-.xs-1 { color: $nx-cat-amber; border-color: rgba(183,121,31,0.35); }
-.xs-2 { color: $nx-cat-blue; border-color: rgba(43,108,176,0.35); }
-.xs-3 { color: $nx-cat-purple; border-color: rgba(107,70,193,0.35); }
-.xs-4 { color: $nx-cat-slate; border-color: rgba(113,128,150,0.35); }
 .xp-siling { font-size: 30rpx; color: $color-vermilion; font-weight: 700; }
 .xp-siling-detail { display: block; font-size: 22rpx; color: $color-ink-light; margin-top: 10rpx; line-height: 1.6; }
 
