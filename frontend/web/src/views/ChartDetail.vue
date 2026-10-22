@@ -467,8 +467,12 @@
     <!-- 神煞寓意浮层 -->
     <div v-if="activeShensha" class="ps-popover" @click="activeShensha = null">
       <div class="ps-popover-card" @click.stop>
-        <div class="ps-popover-title" :class="'ps-' + activeShensha._cat">{{ activeShensha.name }}</div>
-        <div class="ps-popover-desc">{{ activeShensha.description }}</div>
+        <div class="ps-popover-title" :class="'ps-' + activeShensha._cat">{{ shenshaModalTitle }}</div>
+        <div v-if="shenshaModalInfo" class="ps-popover-nature">
+          <span class="ps-nature" :class="'ps-nature-' + (NATURE_KEY[shenshaModalInfo.nature] || 'mid')">{{ shenshaModalInfo.nature }}</span>
+        </div>
+        <div class="ps-popover-desc">{{ shenshaModalText }}</div>
+        <div v-if="shenshaModalNote" class="ps-popover-note">盘面注解：{{ shenshaModalNote }}</div>
         <button class="ps-popover-close" @click="activeShensha = null" aria-label="关闭">关闭</button>
       </div>
     </div>
@@ -513,6 +517,7 @@ import { useRoute, useRouter } from "vue-router"
 import type { Pillar, WuxingItem, DayunItem, ShenshaItem, LiuNianItem, ChartAnalysis, ChartData, XiPanData, XiPanLiuYue, XiPanRelationGroup } from "../api/index.ts"
 import { getChart, getRelations, downloadReport, generateFullReport, downloadFullReportPDF, isSameDayun, collapseBySelection, type XiPanRelations } from "../api/index.ts"
 import MarkdownRender from "../components/MarkdownRender.vue"
+import { getShenshaInfo } from "@shared/utils/shenshaInfo"
 
 type TabKey = 'pillars' | 'wuxing' | 'dayun' | 'liunian' | 'xipan' | 'report'
 
@@ -699,6 +704,18 @@ const toggleShensha = (s: TaggedShensha) => {
   activeShensha.value = activeShensha.value === s ? null : s
 }
 
+// 吉凶属性 → ASCII 样式键（避免中文 class）
+const NATURE_KEY: Record<string, string> = { 吉: 'good', 凶: 'bad', 中: 'mid' }
+// 详释走 shared 字典（与知识库 07 号文档同口径），缺项回落后端短说明
+const shenshaModalInfo = computed(() => (activeShensha.value ? getShenshaInfo(activeShensha.value.name) : null))
+const shenshaModalTitle = computed(() => {
+  const s = activeShensha.value
+  if (!s) return ''
+  return shenshaModalInfo.value?.alias ? `${s.name}（${shenshaModalInfo.value.alias}）` : s.name
+})
+const shenshaModalText = computed(() => shenshaModalInfo.value?.text || activeShensha.value?.description || '')
+const shenshaModalNote = computed(() => (shenshaModalInfo.value ? activeShensha.value?.description : ''))
+
 function classifyShensha(item: ShenshaItem): string {
   const text = `${item.name} ${item.description}`
   if (/桃花|红鸾|天喜|沐浴|咸池|红艳|情缘|感情|姻缘|婚/.test(text)) return 'love'
@@ -849,7 +866,8 @@ const toggleDetailShensha = (name: string, desc: string) => {
     activeDetailShenshaDesc.value = ''
   } else {
     activeDetailShenshaName.value = name
-    activeDetailShenshaDesc.value = desc
+    // 与弹层同源：优先 shared 详释，缺项回落后端短说明
+    activeDetailShenshaDesc.value = getShenshaInfo(name)?.text || desc
   }
 }
 const openDetail = (d: DayunItem | LiuNianItem) => {
@@ -1143,6 +1161,13 @@ onMounted(async () => {
 @keyframes slideUp { from { opacity: 0; transform: translateY(20px) scale(0.96); } to { opacity: 1; transform: translateY(0) scale(1); } }
 .ps-popover-title { font-size: 16px; font-weight: 600; margin-bottom: 12px; letter-spacing: 2px; text-align: center; }
 .ps-popover-desc { font-size: 13px; color: var(--text-dim); line-height: 1.8; margin-bottom: 16px; text-align: center; }
+.ps-popover-nature { text-align: center; margin-bottom: 10px; }
+.ps-nature { font-size: 11px; padding: 2px 14px; border-radius: 999px; letter-spacing: 3px; }
+.ps-nature-good { color: #4ade80; background: rgba(74,222,128,0.12); }
+.ps-nature-bad { color: #f87171; background: rgba(248,113,113,0.12); }
+.ps-nature-mid { color: #94a3b8; background: rgba(148,163,184,0.12); }
+.ps-popover-note { font-size: 11px; color: var(--text-dim); opacity: 0.75; line-height: 1.7;
+  border-top: 1px dashed var(--border); padding-top: 10px; margin-bottom: 16px; text-align: center; }
 .ps-popover-close { display: block; margin: 0 auto; padding: 7px 28px; background: rgba(255,255,255,0.06);
   border: 1px solid var(--border); border-radius: 6px; color: var(--text-dim); font-size: 12px; cursor: pointer; transition: all 0.2s; }
 .ps-popover-close:hover { border-color: var(--accent); color: var(--accent); }

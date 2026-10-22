@@ -561,7 +561,11 @@
           <text class="shensha-close" @tap="closeShenshaModal">✕</text>
         </view>
         <view class="shensha-body">
-          <text class="shensha-text">{{ shenshaModal.description }}</text>
+          <view v-if="shenshaModal.nature" class="ss-row-inline">
+            <text :class="['ss-nature', 'ss-nature-' + (NATURE_KEY[shenshaModal.nature] || 'mid')]">{{ shenshaModal.nature }}</text>
+          </view>
+          <text class="shensha-text">{{ shenshaModal.text }}</text>
+          <text v-if="shenshaModal.note" class="shensha-note">盘面注解：{{ shenshaModal.note }}</text>
         </view>
       </view>
     </view>
@@ -574,6 +578,7 @@ import { onLoad } from '@dcloudio/uni-app'
 import { useTheme } from '@/composables/useTheme'
 import { getChart, getRelations, generateFullReport, downloadReport, downloadFullReportPdf, isSameDayun, collapseBySelection, type ChartData, type Pillar, type WuxingItem, type DayunItem, type ShenshaItem, type LiuNianItem, type XiPanData, type XiPanLiuYue, type XiPanRelationGroup, type XiPanRelations } from '@/api'
 import MarkdownRender from '@/components/MarkdownRender/MarkdownRender.vue'
+import { getShenshaInfo } from '@shared/utils/shenshaInfo'
 import { splitWuxing, wuxingColor, wuxingTintStyle } from '@/utils/wuxingColor'
 const { themeClass, isDark } = useTheme()
 
@@ -1081,9 +1086,21 @@ const snapShenshaMap = computed(() => {
   return map
 })
 
-const shenshaModal = ref<{ name: string; description: string } | null>(null)
+// 吉凶属性 → ASCII 样式键（中文 class 在小程序编译链路上不可靠）
+const NATURE_KEY: Record<string, string> = { 吉: 'good', 凶: 'bad', 中: 'mid' }
+
+const shenshaModal = ref<{ name: string; nature?: string; text: string; note?: string } | null>(null)
 function showShenshaDesc(s: ShenshaItem) {
-  shenshaModal.value = { name: s.name, description: s.description }
+  // 详释走 shared 字典（与知识库 07 号文档同口径），缺项回落后端短说明
+  const info = getShenshaInfo(s.name)
+  shenshaModal.value = info
+    ? {
+        name: info.alias ? `${s.name}（${info.alias}）` : s.name,
+        nature: info.nature,
+        text: info.text,
+        note: s.description,
+      }
+    : { name: s.name, text: s.description }
 }
 function closeShenshaModal() {
   shenshaModal.value = null
@@ -1170,7 +1187,8 @@ const toggleShenshaDesc = (name: string, desc: string) => {
     activeShenshaDesc.value = ''
   } else {
     activeShenshaName.value = name
-    activeShenshaDesc.value = desc
+    // 与弹层同源：优先 shared 详释，缺项回落后端短说明
+    activeShenshaDesc.value = getShenshaInfo(name)?.text || desc
   }
 }
 const detailSubtitle = computed(() => {
@@ -1855,4 +1873,11 @@ onLoad((options: any) => {
 .shensha-close { font-size: 36rpx; color: $color-ink-light; padding: 0 8rpx; }
 .shensha-body { padding: 24rpx 32rpx 32rpx; overflow-y: auto; }
 .shensha-text { display: block; font-size: 27rpx; color: $color-ink; line-height: 1.85; white-space: pre-wrap; word-break: break-all; }
+/* 吉凶徽章 + 盘面注解行 */
+.ss-row-inline { display: flex; justify-content: center; margin-bottom: 16rpx; }
+.ss-nature { font-size: 22rpx; padding: 4rpx 22rpx; border-radius: 999rpx; letter-spacing: 4rpx; }
+.ss-nature-吉, .ss-nature-good { color: $nx-cat-green; background: rgba(56, 161, 105, 0.12); }
+.ss-nature-凶, .ss-nature-bad { color: $nx-cat-red; background: rgba(197, 48, 48, 0.12); }
+.ss-nature-中, .ss-nature-mid { color: $color-ink-light; background: $color-paper-warm; }
+.shensha-note { display: block; margin-top: 20rpx; padding-top: 16rpx; border-top: 1rpx dashed $color-border; font-size: 23rpx; color: $color-ink-light; line-height: 1.7; }
 </style>
