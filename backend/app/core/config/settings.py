@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import Optional
 
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -22,6 +22,11 @@ def _find_backend_root() -> Path:
 
 BACKEND_ROOT = _find_backend_root()
 
+# 语音识别（ASR）默认模型：.env 里 ASR_MODEL 留空时回落到它——
+# pydantic-settings 不会把空串当"未设置"，空串会直接覆盖 default，
+# 请求体里就会带 model=""，上游直接报参数错。
+_DEFAULT_ASR_MODEL = "qwen-audio-3.0-asr-flash"
+
 
 
 class Settings(BaseSettings):
@@ -38,7 +43,7 @@ class Settings(BaseSettings):
     )
     dashscope_api_key: str = Field(default="", alias="DASHSCOPE_API_KEY")
     dashscope_model: str = Field(default="qwen3.8-flash", alias="DASHSCOPE_MODEL")
-    asr_model: str = Field(default="qwen-audio-3.0-asr-flash", alias="ASR_MODEL")
+    asr_model: str = Field(default=_DEFAULT_ASR_MODEL, alias="ASR_MODEL")
     # 意图拆解/Reviewer 审核模型（轻量独立实例，留空则复用主模型）
     decompose_model: str = Field(default="", alias="DECOMPOSE_MODEL")
     reviewer_model: str = Field(default="", alias="REVIEWER_MODEL")
@@ -194,6 +199,12 @@ class Settings(BaseSettings):
     # 微信小程序登录
     wechat_appid: str = Field(default="", alias="WECHAT_APPID")
     wechat_secret: str = Field(default="", alias="WECHAT_SECRET")
+
+    @field_validator("asr_model", mode="after")
+    @classmethod
+    def _asr_model_fallback(cls, v: str) -> str:
+        """ASR_MODEL 为空/空白时回落默认模型名。"""
+        return (v or "").strip() or _DEFAULT_ASR_MODEL
 
     @model_validator(mode="after")
     def _anchor_paths_to_backend_root(self):
