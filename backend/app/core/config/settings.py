@@ -25,7 +25,9 @@ BACKEND_ROOT = _find_backend_root()
 # 语音识别（ASR）默认模型：.env 里 ASR_MODEL 留空时回落到它——
 # pydantic-settings 不会把空串当"未设置"，空串会直接覆盖 default，
 # 请求体里就会带 model=""，上游直接报参数错。
-_DEFAULT_ASR_MODEL = "qwen-audio-3.0-asr-flash"
+# 选 3.1 而非 3.0：实测同一段音频，3.0 会把英文识别成小写 "hello world"，
+# 3.1 正常给出 "Hello World"；两者接口形态完全一致（可直接替换模型名）。
+_DEFAULT_ASR_MODEL = "qwen-audio-3.1-asr-flash"
 
 
 

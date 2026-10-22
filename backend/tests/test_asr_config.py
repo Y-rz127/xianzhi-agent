@@ -22,10 +22,10 @@ def test_asr_model_blank_falls_back_to_default(monkeypatch):
     from app.core.config.settings import Settings
 
     monkeypatch.setenv("ASR_MODEL", "")
-    assert Settings().asr_model == "qwen-audio-3.0-asr-flash"
+    assert Settings().asr_model == "qwen-audio-3.1-asr-flash"
 
     monkeypatch.setenv("ASR_MODEL", "   ")
-    assert Settings().asr_model == "qwen-audio-3.0-asr-flash"
+    assert Settings().asr_model == "qwen-audio-3.1-asr-flash"
 
 
 def test_asr_api_uses_configured_model(monkeypatch):
