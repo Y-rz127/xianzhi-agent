@@ -35,6 +35,10 @@ export const EP = {
   INFER_DATES: '/ai/xianzhi/bazi/infer-dates',
   CACHE_STATS: '/ai/xianzhi/cache_stats',
   HEALTH: '/ai/health',
+  /** 语音识别（ASR）：录音 → 文本（DashScope 多模态转写） */
+  ASR_TRANSCRIBE: '/ai/asr/transcribe',
+  /** 语音合成（TTS）：文本 → 音频（返回本站音频地址） */
+  TTS_SYNTHESIZE: '/ai/tts/synthesize',
   CASES: '/ai/xianzhi/cases',
   SESSIONS: '/ai/xianzhi/sessions',
   SESSIONS_MINE: '/ai/xianzhi/sessions/mine',
@@ -108,4 +112,9 @@ export function profileBody(p: Partial<BaziProfile>): Record<string, any> {
     yun_sect: p.yunSect ?? 1,
     chart_data: p.chartData,
   }
+}
+
+/** TTS 合成结果的播放地址（相对 /api 前缀）：/ai/tts/audio/{id} */
+export function ttsAudioPath(id: string): string {
+  return `/ai/tts/audio/${id}`
 }

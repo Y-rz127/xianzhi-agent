@@ -9,10 +9,10 @@ export type {
 } from "@shared/api"
 export {
   EP, parseDayun, parsePillars, parseShensha, parseWuxing,
-  isSameDayun, collapseBySelection,
+  isSameDayun, collapseBySelection, ttsAudioPath,
 } from "@shared/api"
 import type { AnswerFeedbackPayload, BaziCandidate, BaziProfile, ChartCase, ChartData, ChatOptions, ChatSession, FavoriteCase, SessionBirthInfo, SessionMessage, TarotCard, XiPanRelations } from "@shared/api"
-import { EP } from "@shared/api"
+import { EP, ttsAudioPath } from "@shared/api"
 
 const API_BASE = import.meta.env.VITE_API_BASE
   || (import.meta.env.DEV ? "http://localhost:8123/api" : "/api")
@@ -41,8 +41,7 @@ async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<R
 export { apiFetch }
 
 export async function transcribeAudio(audio: string, format = "webm"): Promise<{ text: string; model: string }> {
-  // 注意路径带 /ai：后端主路由 prefix="/ai"（/api/ai/...），漏了会 404
-  const response = await apiFetch(`${API_BASE}/ai/asr/transcribe`, {
+  const response = await apiFetch(`${API_BASE}${EP.ASR_TRANSCRIBE}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ audio, format }),
@@ -64,7 +63,7 @@ export interface SpeechResult {
 }
 
 export async function synthesizeSpeech(text: string, voice?: string): Promise<SpeechResult> {
-  const response = await apiFetch(`${API_BASE}/ai/tts/synthesize`, {
+  const response = await apiFetch(`${API_BASE}${EP.TTS_SYNTHESIZE}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ text, voice }),
@@ -76,7 +75,7 @@ export async function synthesizeSpeech(text: string, voice?: string): Promise<Sp
 
 /** 合成结果的播放地址（本站 /api/ai/tts/audio/{id}） */
 export function speechAudioUrl(id: string): string {
-  return `${API_BASE}/ai/tts/audio/${id}`
+  return `${API_BASE}${ttsAudioPath(id)}`
 }
 
 function withApiKey(url: string): string {

@@ -29,7 +29,7 @@ export type {
 export type { SessionBirthInfo as BirthInfo } from '@shared/api'
 export {
   parseDayun, parsePillars, parseShensha, parseWuxing,
-  isSameDayun, collapseBySelection,
+  isSameDayun, collapseBySelection, ttsAudioPath,
 } from '@shared/api'
 import type {
   AnswerFeedbackPayload, BaziProfile, ChartCase, ChartData, ChatSession,
@@ -42,7 +42,7 @@ import type {
   SessionMessage, TarotCard, XzUser, XiPanRelations,
 } from '@shared/api'
 import type { SessionBirthInfo } from '@shared/api'
-import { EP, profileBody } from '@shared/api'
+import { EP, profileBody, ttsAudioPath } from '@shared/api'
 
 function getApiBase(): string {
   return getConfig().apiBase
@@ -112,7 +112,7 @@ function post<T = any>(url: string, data?: any): Promise<T> {
 }
 
 export const transcribeAudio = (audio: string, format = 'mp3') =>
-  post<{ text: string; model: string }>('/ai/asr/transcribe', { audio, format })
+  post<{ text: string; model: string }>(EP.ASR_TRANSCRIBE, { audio, format })
 
 /** 语音合成结果：url 为本站地址（上游音频 URL 有时效且是 http，小程序不能直接放） */
 export interface SpeechResult {
@@ -126,10 +126,10 @@ export interface SpeechResult {
 }
 
 export const synthesizeSpeech = (text: string, voice?: string) =>
-  post<SpeechResult>('/ai/tts/synthesize', { text, voice })
+  post<SpeechResult>(EP.TTS_SYNTHESIZE, { text, voice })
 
 /** 合成结果的播放地址（本站 /api/ai/tts/audio/{id}） */
-export const speechAudioUrl = (id: string) => `${getApiBase()}/ai/tts/audio/${id}`
+export const speechAudioUrl = (id: string) => `${getApiBase()}${ttsAudioPath(id)}`
 
 export interface LiuYaoResult { method: string; createdAt: string; lines: Array<{ index: number; value: number; yang: boolean; moving: boolean }>; movingLines: number[]; summary: string; original: { name: string; upper: { name: string; symbol: string }; lower: { name: string; symbol: string } }; changed: { name: string; upper: { name: string; symbol: string }; lower: { name: string; symbol: string } } | null }
 export const castLiuYao = (method: 'coins' | 'numbers' | 'time', numbers?: number[]) => post<LiuYaoResult>('/ai/liuyao/cast', { method, numbers })
