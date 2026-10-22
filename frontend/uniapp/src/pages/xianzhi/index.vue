@@ -114,6 +114,10 @@
               :class="['feedback-chip', feedbackState[msgFeedbackKey(msg, i)] === 'down' && 'active-down']"
               @tap="openFeedbackModal(msg, i, 'down')"
             >✗</text>
+            <text
+              :class="['feedback-chip', speakingKey === String(i) && 'speaking']"
+              @tap="toggleSpeak(msg, i)"
+            >{{ speakingKey === String(i) ? '■' : '♪' }}</text>
             <text v-if="feedbackState[msgFeedbackKey(msg, i)] === 'saved'" class="feedback-saved">已记录</text>
           </view>
         </view>
@@ -321,6 +325,7 @@ import {
   getSessionBirthInfo,
   submitAnswerFeedback,
   transcribeAudio,
+  synthesizeSpeech, speechAudioUrl,
   type ChartData, type ChatSession,
 } from '@/api'
 import { getLocalDateString } from '@/utils/datetimePicker'
@@ -959,6 +964,62 @@ function questionBefore(index: number): string {
 }
 
 /** 打开反馈弹窗 */
+// ===== 朗读（TTS）=====
+const speakingKey = ref('')
+let audioCtx: UniApp.InnerAudioContext | null = null
+
+/** Markdown 回答洗成可朗读纯文本：去代码块/标记/链接，保留断句 */
+const plainForSpeech = (raw: string): string => raw
+  .replace(/```[\s\S]*?```/g, ' ')
+  .replace(/`([^`]*)`/g, '$1')
+  .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')
+  .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+  .replace(/^[#>*\-\+\s]{1,}/gm, '')
+  .replace(/\*\*|__|~~/g, '')
+  .replace(/\|/g, ' ')
+  .replace(/[ \t]{2,}/g, ' ')
+  .trim()
+
+const stopSpeaking = () => {
+  if (audioCtx) {
+    try { audioCtx.stop(); audioCtx.destroy() } catch { /* 已销毁 */ }
+    audioCtx = null
+  }
+  speakingKey.value = ''
+}
+
+const toggleSpeak = async (msg: any, idx: number) => {
+  const key = String(idx)
+  if (speakingKey.value === key) { stopSpeaking(); return }
+  stopSpeaking()
+  const text = plainForSpeech(msg.content || '')
+  if (!text) return
+  speakingKey.value = key
+  try {
+    const res = await synthesizeSpeech(text.slice(0, 4000))
+    const url = speechAudioUrl(res.id)
+    const tempFilePath = await new Promise<string>((resolve, reject) => {
+      uni.downloadFile({
+        url,
+        success: (r) => (r.statusCode === 200 ? resolve(r.tempFilePath) : reject(new Error('音频下载失败'))),
+        fail: () => reject(new Error('音频下载失败')),
+      })
+    })
+    const ctx = uni.createInnerAudioContext()
+    audioCtx = ctx
+    ctx.src = tempFilePath
+    ctx.onEnded(() => { speakingKey.value = ''; audioCtx = null })
+    ctx.onError(() => {
+      speakingKey.value = ''
+      audioCtx = null
+      uni.showToast({ title: '音频播放失败', icon: 'none' })
+    })
+    ctx.play()
+  } catch (e: any) {
+    speakingKey.value = ''
+    uni.showToast({ title: e?.message || '朗读失败', icon: 'none' })
+  }
+}
 function openFeedbackModal(msg: Message, index: number, rating: 'up' | 'down') {
   feedbackModalMsg.value = msg
   feedbackModalIndex.value = index
@@ -1841,6 +1902,7 @@ messages.value.push({
     background: #4caf50;
     border-color: #4caf50;
   }
+.feedback-chip.speaking { color: $nx-cat-green; background: rgba(56, 161, 105, 0.12); border-color: rgba(56, 161, 105, 0.35); }
   &.active-down {
     color: #fff;
     background: #f44336;

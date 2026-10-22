@@ -46,6 +46,10 @@ class Settings(BaseSettings):
     dashscope_api_key: str = Field(default="", alias="DASHSCOPE_API_KEY")
     dashscope_model: str = Field(default="qwen3.8-flash", alias="DASHSCOPE_MODEL")
     asr_model: str = Field(default=_DEFAULT_ASR_MODEL, alias="ASR_MODEL")
+    # 语音合成（TTS）：与 ASR 是两套端点，模型/音色分开配
+    tts_model: str = Field(default="qwen-audio-3.1-tts-flash", alias="TTS_MODEL")
+    tts_voice: str = Field(default="longanhuan_v3.1", alias="TTS_VOICE")
+    tts_timeout: float = Field(default=90.0, alias="TTS_TIMEOUT")
     # 意图拆解/Reviewer 审核模型（轻量独立实例，留空则复用主模型）
     decompose_model: str = Field(default="", alias="DECOMPOSE_MODEL")
     reviewer_model: str = Field(default="", alias="REVIEWER_MODEL")

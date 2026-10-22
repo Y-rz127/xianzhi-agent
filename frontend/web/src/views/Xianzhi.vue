@@ -121,27 +121,26 @@
                 <button
                   class="feedback-chip"
                   :class="{ active: feedbackState[messageFeedbackKey(msg, messages.length - visibleMessages.length + i)] === 'up' }"
-                  @click="sendAnswerFeedback(msg, messages.length - visibleMessages.length + i, 'up')"
+                  @click="openFeedbackModal(msg, messages.length - visibleMessages.length + i, 'up')"
                   aria-label="这条回答有帮助"
                 >有帮助</button>
                 <button
                   class="feedback-chip"
                   :class="{ active: feedbackState[messageFeedbackKey(msg, messages.length - visibleMessages.length + i)] === 'down' }"
-                  @click="sendAnswerFeedback(msg, messages.length - visibleMessages.length + i, 'down')"
+                  @click="openFeedbackModal(msg, messages.length - visibleMessages.length + i, 'down')"
                   aria-label="这条回答不太准"
                 >不太准</button>
-                <select
-                  v-model="feedbackReasons[messageFeedbackKey(msg, messages.length - visibleMessages.length + i)]"
-                  class="feedback-reason"
-                  aria-label="选择反馈原因"
-                >
-                  <option value="">原因</option>
-                  <option v-for="reason in feedbackReasonOptions" :key="reason" :value="reason">{{ reason }}</option>
-                </select>
+                <button
+                  class="feedback-chip"
+                  :class="{ speaking: speakingKey === String(messages.length - visibleMessages.length + i) }"
+                  @click="toggleSpeak(msg, messages.length - visibleMessages.length + i)"
+                  :aria-label="speakingKey === String(messages.length - visibleMessages.length + i) ? '停止朗读' : '朗读这条回答'"
+                >{{ speakingKey === String(messages.length - visibleMessages.length + i) ? '停止' : '朗读' }}</button>
                 <span v-if="feedbackState[messageFeedbackKey(msg, messages.length - visibleMessages.length + i)] === 'saved'" class="feedback-saved">已记录</span>
               </div>
             </div>
           </div>
+
         </template>
 
         <div v-if="loading" class="msg assistant loading-msg">
@@ -247,12 +246,44 @@
       </div>
     </Teleport>
   </div>
+    <!-- 反馈原因弹窗：与小程序同构——点👍/👎 弹窗写原因，不再用下拉框 -->
+    <div v-if="showFeedbackModal" class="case-modal-overlay" @click.self="closeFeedbackModal">
+      <div class="case-modal" role="dialog" aria-modal="true" aria-labelledby="feedback-modal-title">
+        <div class="case-modal-header">
+          <div id="feedback-modal-title" class="case-modal-title">{{ feedbackModalRating === 'up' ? '感谢反馈' : '请告诉我们原因' }}</div>
+          <button class="modal-close" @click="closeFeedbackModal" aria-label="关闭">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+        <div class="case-modal-body">
+          <div class="form-row">
+            <label for="feedback-reason-input">原因</label>
+            <textarea
+              id="feedback-reason-input"
+              class="feedback-reason"
+              v-model="feedbackModalReason"
+              :placeholder="feedbackModalRating === 'up' ? '可选：补充说明…' : '请具体描述问题，帮助我们改进…'"
+              rows="4"
+              maxlength="500"
+            ></textarea>
+            <div class="feedback-reason-hint">
+              <span>{{ feedbackModalRating === "up" ? "点赞本身已经很有帮助，补充说明可选" : "越具体越好：哪一段结论不对、期待什么角度" }}</span>
+              <span class="feedback-reason-count">{{ feedbackModalReason.length }}/500</span>
+            </div>
+          </div>
+        </div>
+        <div class="case-modal-footer">
+          <button class="btn" @click="closeFeedbackModal">取消</button>
+          <button class="btn btn-primary" @click="submitFeedback">提交</button>
+        </div>
+      </div>
+    </div>
 </template>
 
 <script setup lang="ts">
 defineOptions({ name: 'Xianzhi' })
 import { ref, nextTick, computed, onMounted, onActivated, onUnmounted, watch } from "vue"
-import { chatWithXianzhi, downloadReport, parsePillars, parseWuxing, parseDayun, parseShensha, fetchSessions, deleteSession as deleteSessionApi, getSessionMessages, getSessionBirthInfo, fetchChartCases, createChartCase, deleteChartCase, getChart, submitAnswerFeedback, transcribeAudio, type ChatSession, type SessionMessage, type ChartCase, type ChartData, type SSECallbacks } from "../api/index.ts"
+import { chatWithXianzhi, downloadReport, parsePillars, parseWuxing, parseDayun, parseShensha, fetchSessions, deleteSession as deleteSessionApi, getSessionMessages, getSessionBirthInfo, fetchChartCases, createChartCase, deleteChartCase, getChart, submitAnswerFeedback, transcribeAudio, synthesizeSpeech, speechAudioUrl, type ChatSession, type SessionMessage, type ChartCase, type ChartData, type SSECallbacks } from "../api/index.ts"
 import { matchCityByName } from "../utils/region-data.ts"
 import BaziCard from "../components/BaziCard.vue"
 import WuxingChart from "../components/WuxingChart.vue"
@@ -297,7 +328,40 @@ const yunSect = ref(1)
 const showScrollTop = ref(false)
 const feedbackState = ref<Record<string, "up" | "down" | "saved">>({})
 const feedbackReasons = ref<Record<string, string>>({})
-const feedbackReasonOptions = ["分析具体", "结论符合", "事实有误", "太笼统", "风格不喜欢"]
+
+// 反馈原因弹窗（与小程序同构）
+const showFeedbackModal = ref(false)
+const feedbackModalMsg = ref<SessionMessage | null>(null)
+const feedbackModalIndex = ref(-1)
+const feedbackModalRating = ref<"up" | "down">("up")
+const feedbackModalReason = ref("")
+
+const openFeedbackModal = (msg: SessionMessage, index: number, rating: "up" | "down") => {
+  feedbackModalMsg.value = msg
+  feedbackModalIndex.value = index
+  feedbackModalRating.value = rating
+  feedbackModalReason.value = feedbackReasons.value[messageFeedbackKey(msg, index)] || ""
+  showFeedbackModal.value = true
+}
+
+const closeFeedbackModal = () => {
+  showFeedbackModal.value = false
+  feedbackModalMsg.value = null
+  feedbackModalIndex.value = -1
+  feedbackModalReason.value = ""
+}
+
+const submitFeedback = async () => {
+  const msg = feedbackModalMsg.value
+  const index = feedbackModalIndex.value
+  const rating = feedbackModalRating.value
+  if (!msg || index < 0) return
+  const key = messageFeedbackKey(msg, index)
+  const reason = feedbackModalReason.value.trim() || (rating === "up" ? "有帮助" : "不太准")
+  feedbackReasons.value[key] = reason
+  closeFeedbackModal()
+  await sendAnswerFeedback(msg, index, rating, reason)
+}
 const pageSize = 30
 const visibleCount = ref(pageSize)
 const hasMoreHistory = computed(() => visibleCount.value < messages.value.length)
@@ -431,7 +495,56 @@ function questionBefore(index: number): string {
   return ""
 }
 
-async function sendAnswerFeedback(msg: SessionMessage, index: number, rating: "up" | "down") {
+// ===== 朗读（TTS）=====
+const speakingKey = ref("")
+let currentAudio: HTMLAudioElement | null = null
+
+/** Markdown 回答洗成可朗读纯文本：去代码块/标记/链接，保留断句 */
+const plainForSpeech = (raw: string): string => raw
+  .replace(/```[\s\S]*?```/g, " ")
+  .replace(/`([^`]*)`/g, "$1")
+  .replace(/!\[[^\]]*\]\([^)]*\)/g, " ")
+  .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+  .replace(/^[#>*\-\+\s]{1,}/gm, "")
+  .replace(/\*\*|__|~~/g, "")
+  .replace(/\|/g, " ")
+  .replace(/[ \t]{2,}/g, " ")
+  .trim()
+
+const stopSpeaking = () => {
+  if (currentAudio) {
+    currentAudio.pause()
+    try { currentAudio.currentTime = 0 } catch { /* 尚未加载完 */ }
+    currentAudio = null
+  }
+  speakingKey.value = ""
+}
+
+const toggleSpeak = async (msg: SessionMessage, idx: number) => {
+  const key = String(idx)
+  if (speakingKey.value === key) { stopSpeaking(); return }
+  stopSpeaking()
+  const text = plainForSpeech(msg.content || "")
+  if (!text) return
+  speakingKey.value = key
+  try {
+    const res = await synthesizeSpeech(text.slice(0, 4000))
+    const audio = new Audio(speechAudioUrl(res.id))
+    currentAudio = audio
+    audio.onended = () => { speakingKey.value = ""; currentAudio = null }
+    audio.onerror = () => {
+      speakingKey.value = ""
+      currentAudio = null
+      window.alert("音频播放失败，请重试")
+    }
+    await audio.play()
+  } catch (e: any) {
+    speakingKey.value = ""
+    currentAudio = null
+    window.alert(e?.message || "朗读失败，请稍后重试")
+  }
+}
+async function sendAnswerFeedback(msg: SessionMessage, index: number, rating: "up" | "down", reason?: string) {
   const key = messageFeedbackKey(msg, index)
   feedbackState.value[key] = rating
   try {
@@ -440,7 +553,7 @@ async function sendAnswerFeedback(msg: SessionMessage, index: number, rating: "u
       question: questionBefore(index),
       answer: msg.content,
       rating,
-      reason: feedbackReasons.value[key] || (rating === "up" ? "有帮助" : "不太准"),
+      reason: reason || feedbackReasons.value[key] || (rating === "up" ? "有帮助" : "不太准"),
       chart_snapshot: chartData.value ? { chartData: chartData.value, birthInfo: lastBirthInfo.value } : {},
     })
     feedbackState.value[key] = "saved"
@@ -981,8 +1094,20 @@ onUnmounted(() => {
   transition: all 0.2s; }
 .feedback-chip:hover,
 .feedback-chip.active { color: var(--accent-light); border-color: rgba(212,175,55,0.35); background: rgba(212,175,55,0.1); }
-.feedback-reason { height: 28px; padding: 0 8px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1);
-  background: rgba(15,21,32,0.95); color: var(--text-muted); font-size: 12px; outline: none; }
+.feedback-reason {
+  display: block; width: 100%; min-height: 104px; padding: 10px 12px;
+  background: rgba(255,255,255,0.03); border: 1px solid var(--border); border-radius: 8px;
+  color: var(--text); font-size: 13px; line-height: 1.7; font-family: inherit;
+  outline: none; resize: vertical; transition: border-color 0.2s, background 0.2s;
+}
+.feedback-reason::placeholder { color: var(--text-dim); opacity: 0.75; }
+.feedback-reason:hover { border-color: rgba(212,175,55,0.35); }
+.feedback-reason:focus { border-color: var(--accent); background: rgba(212,175,55,0.05); }
+.feedback-reason-hint { display: flex; justify-content: space-between; align-items: center; gap: 12px;
+  margin-top: 8px; color: var(--text-dim); font-size: 11px; line-height: 1.5; }
+.feedback-reason-count { flex: none; font-variant-numeric: tabular-nums; }
+.feedback-reason:focus { border-color: var(--accent); }
+.feedback-chip.speaking { color: var(--accent-light); border-color: rgba(212,175,55,0.5); background: rgba(212,175,55,0.18); }
 .feedback-saved { color: var(--text-muted); font-size: 12px; }
 
 .input-area { margin-top: 12px; }

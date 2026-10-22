@@ -41,7 +41,8 @@ async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<R
 export { apiFetch }
 
 export async function transcribeAudio(audio: string, format = "webm"): Promise<{ text: string; model: string }> {
-  const response = await apiFetch(`${API_BASE}/asr/transcribe`, {
+  // 注意路径带 /ai：后端主路由 prefix="/ai"（/api/ai/...），漏了会 404
+  const response = await apiFetch(`${API_BASE}/ai/asr/transcribe`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ audio, format }),
@@ -49,6 +50,33 @@ export async function transcribeAudio(audio: string, format = "webm"): Promise<{
   const data = await response.json()
   if (!response.ok) throw new Error(data.detail || data.message || "语音识别失败")
   return data
+}
+
+/** 语音合成结果：url 是本站地址（上游音频 URL 有时效且是 http，小程序不能用） */
+export interface SpeechResult {
+  id: string
+  url: string
+  mime: string
+  size: number
+  chars: number
+  model: string
+  voice: string
+}
+
+export async function synthesizeSpeech(text: string, voice?: string): Promise<SpeechResult> {
+  const response = await apiFetch(`${API_BASE}/ai/tts/synthesize`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text, voice }),
+  })
+  const data = await response.json()
+  if (!response.ok) throw new Error(data.detail || data.message || "语音合成失败")
+  return data
+}
+
+/** 合成结果的播放地址（本站 /api/ai/tts/audio/{id}） */
+export function speechAudioUrl(id: string): string {
+  return `${API_BASE}/ai/tts/audio/${id}`
 }
 
 function withApiKey(url: string): string {

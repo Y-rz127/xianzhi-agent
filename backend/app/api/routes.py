@@ -17,6 +17,7 @@ from app.api.me import router as me_router
 from app.api.observability import router as observability_router
 from app.api.profiles import router as profiles_router
 from app.api.rag import mgmt_router as rag_mgmt_router
+from app.api.tts import router as tts_router
 from app.api.xianzhi import router as xianzhi_router
 from app.sub_app.hehun.routes import router as hehun_router
 from app.sub_app.huangli.routes import router as huangli_router
@@ -27,6 +28,7 @@ from app.sub_app.ziwei.routes import router as ziwei_router
 router = APIRouter(prefix="/ai", tags=["AI"])
 router.include_router(auth_router)
 router.include_router(asr_router)
+router.include_router(tts_router)
 router.include_router(cases_router, prefix="/xianzhi")
 router.include_router(xianzhi_router)
 router.include_router(tarot_router)
