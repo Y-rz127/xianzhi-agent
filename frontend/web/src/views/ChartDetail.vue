@@ -13,6 +13,12 @@
     </div>
 
     <template v-else>
+      <!-- 终审提示：载荷里嵌着终审结论，先出计算版/旧版、后台补判落库后点一下即换新 -->
+      <div v-if="!chart.verdict_applied" class="verdict-hint" role="status" @click="refreshChart">
+        <span class="verdict-hint-dot">●</span>
+        <span>终审版生成中 · 点击刷新</span>
+      </div>
+
       <nav class="tab-bar" role="tablist" aria-label="命盘分节">
         <button
           v-for="tab in tabs"
@@ -1027,6 +1033,20 @@ onMounted(async () => {
     loading.value = false
   }
 })
+
+/** 重拉命盘载荷：后台补判落库后点提示条即可换成终审版（与小程序下拉刷新同义） */
+const refreshChart = async () => {
+  if (!birthTime.value || !gender.value || loading.value) return
+  const sect = Number(route.query.sect || 2) || 2
+  const yunSect = Number(route.query.yun_sect || 1) || 1
+  const longitude = Number(route.query.longitude || 0) || undefined
+  try {
+    chart.value = await getChart(birthTime.value, gender.value, sect, yunSect, longitude)
+    showReportNotice(chart.value?.verdict_applied ? "已更新为终审版" : "终审版还在生成，稍后再刷新")
+  } catch {
+    showReportNotice("刷新失败，请稍后再试")
+  }
+}
 </script>
 
 <style scoped>
@@ -1040,6 +1060,12 @@ onMounted(async () => {
   padding: 10px 18px; border: 1px solid var(--border); border-radius: 8px;
   background: rgba(12,18,32,0.96); color: var(--text); box-shadow: 0 8px 24px rgba(0,0,0,0.3);
   font-size: 13px; white-space: nowrap; }
+/* 终审提示条（计算版/旧版先出，后台补判后点击刷新） */
+.verdict-hint { display: flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 8px 14px; background: rgba(212,175,55,0.08); border-bottom: 1px solid var(--border);
+  font-size: 12px; color: var(--text-dim); cursor: pointer; user-select: none; }
+.verdict-hint:hover { color: var(--text); }
+.verdict-hint-dot { color: #f87171; font-size: 8px; }
 .page-header {
   display: flex;
   align-items: center;
