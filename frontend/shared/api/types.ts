@@ -260,6 +260,11 @@ export interface ChartData {
   /** 该载荷是否已应用 LLM 终审：false=计算版（后台补判中，下拉刷新可拿到终审版） */
   verdict_applied?: boolean
   /**
+   * 应用的是**旧版本**终审（版本已 bump、新版仍在后台判）。
+   * 用于提示「旧版终审 · 新版生成中」，避免刷新时误报"已是最新"。
+   */
+  verdict_stale?: boolean
+  /**
    * 终审五神（键：yongshen/xishen/jishen/choushen/pingshen）。
    * **只含判得出来的类别**；计算版为空对象，前端不显示空标签。
    */

@@ -13,10 +13,10 @@
     <view v-else-if="!chart" class="page-state">缺少出生信息，无法排盘。请从先知对话、档案或命例库进入。</view>
 
     <template v-else>
-      <!-- 终审提示：载荷里嵌着终审结论，先出计算版、后台补判落库后下拉即为终审版 -->
-      <view v-if="!chart?.verdict_applied" class="verdict-hint">
+      <!-- 终审提示：计算版＝正在生成；旧版顶替＝新版生成中。后台落库后下拉即换新 -->
+      <view v-if="chart?.verdict_stale || !chart?.verdict_applied" class="verdict-hint">
         <text class="verdict-hint-dot">●</text>
-        <text class="verdict-hint-text">终审版生成中 · 下拉刷新查看</text>
+        <text class="verdict-hint-text">{{ chart?.verdict_stale ? '旧版终审 · 新版生成中，下拉刷新查看' : '终审版生成中 · 下拉刷新查看' }}</text>
       </view>
 
       <!-- tab 栏 -->
@@ -1322,7 +1322,12 @@ async function loadChart(notify = false) {
     relationsKey.value = currentRelationsKey()
     if (notify) {
       uni.showToast({
-        title: data.verdict_applied ? '已更新为终审版' : '终审版还在生成，稍后再下拉',
+        // 旧版终审也算 applied，必须单独判 stale —— 否则会误报"已是最新"
+        title: data.verdict_applied
+          ? data.verdict_stale
+            ? '仍是旧版终审，新版还在生成'
+            : '已是最新终审版'
+          : '终审版还在生成，稍后再下拉',
         icon: 'none',
         duration: 2200,
       })

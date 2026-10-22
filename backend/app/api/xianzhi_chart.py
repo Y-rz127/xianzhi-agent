@@ -139,7 +139,7 @@ def _build_chart_only(
 
 def _format_chart_payload(chart) -> dict:
     """chart → API 载荷（结构化 + 四段文本）。终审应用后段：文本与 wuxing 同源。"""
-    from app.agent.verdict import verdict_applied, verdict_five_gods
+    from app.agent.verdict import verdict_applied, verdict_five_gods, verdict_is_stale
     from app.domain.chart_builder import chart_to_api_dict
     from app.domain.chart_format import (
         format_analysis_text,
@@ -158,6 +158,9 @@ def _format_chart_payload(chart) -> dict:
             # 供前端提示"终审版生成中，下拉刷新"：载荷里嵌着终审结论，
             # 前端必须能分辨手上这份是计算版还是终审版
             "verdict_applied": verdict_applied(chart),
+            # 旧版终审顶替（版本已 bump、新版仍在后台判）：前端据此提示"旧版"，
+            # 不能再报"已是最新终审版"（2026-10-22 用户实测到该误报）
+            "verdict_stale": verdict_is_stale(chart),
             # 终审五神（用/喜/忌/仇/平）：命盘详情页在"喜忌用神"处逐条显示，
             # 只含判得出来的类别（缺项整键缺席，前端不显示空标签）；计算版为空对象
             "gods": verdict_five_gods(chart),

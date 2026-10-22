@@ -521,3 +521,24 @@ def test_first_chart_without_any_verdict_returns_computed(monkeypatch):
     assert out is chart
     assert V.verdict_applied(out) is False
     assert len(scheduled) == 1, "必须派后台补判，否则永远没有终审版"
+
+
+def test_chart_payload_carries_stale_flag(monkeypatch):
+    """载荷要带 verdict_stale：前端据它区分「旧版顶替」与「已是最新」。
+
+    2026-10-22 现场：旧版盘 verdict_applied=True，下拉刷新却提示"已是最新终审版"。
+    """
+    from app.agent import verdict as V
+    from app.api.xianzhi_chart import _format_chart_payload
+
+    chart = build_bazi_chart(*ANCHOR)
+    monkeypatch.setattr(V, "_hash_of", lambda c: "hash-flag")
+    monkeypatch.setattr(V, "_get_cached_verdict", lambda chash: None)
+    monkeypatch.setattr(V, "_get_stale_verdict", lambda chash: _verdict_for())
+
+    fresh = V.apply_verdict(chart, _verdict_for())
+    stale = V.apply_verdict(chart, _verdict_for(), stale=True)
+
+    assert _format_chart_payload(fresh)["verdict_stale"] is False
+    assert _format_chart_payload(stale)["verdict_stale"] is True
+    assert _format_chart_payload(stale)["verdict_applied"] is True

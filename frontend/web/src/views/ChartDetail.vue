@@ -13,10 +13,10 @@
     </div>
 
     <template v-else>
-      <!-- 终审提示：载荷里嵌着终审结论，先出计算版/旧版、后台补判落库后点一下即换新 -->
-      <div v-if="!chart.verdict_applied" class="verdict-hint" role="status" @click="refreshChart">
+      <!-- 终审提示：计算版＝正在生成；旧版顶替＝新版生成中。后台落库后点一下即换新 -->
+      <div v-if="chart.verdict_stale || !chart.verdict_applied" class="verdict-hint" role="status" @click="refreshChart">
         <span class="verdict-hint-dot">●</span>
-        <span>终审版生成中 · 点击刷新</span>
+        <span>{{ chart.verdict_stale ? '旧版终审 · 新版生成中，点击刷新' : '终审版生成中 · 点击刷新' }}</span>
       </div>
 
       <nav class="tab-bar" role="tablist" aria-label="命盘分节">
@@ -1042,7 +1042,14 @@ const refreshChart = async () => {
   const longitude = Number(route.query.longitude || 0) || undefined
   try {
     chart.value = await getChart(birthTime.value, gender.value, sect, yunSect, longitude)
-    showReportNotice(chart.value?.verdict_applied ? "已更新为终审版" : "终审版还在生成，稍后再刷新")
+    // 旧版终审也算 applied，必须单独判 stale —— 否则会误报"已是最新"
+    showReportNotice(
+      chart.value?.verdict_applied
+        ? chart.value?.verdict_stale
+          ? "仍是旧版终审，新版还在生成"
+          : "已是最新终审版"
+        : "终审版还在生成，稍后再刷新"
+    )
   } catch {
     showReportNotice("刷新失败，请稍后再试")
   }
