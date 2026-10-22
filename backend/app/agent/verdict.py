@@ -393,27 +393,86 @@ def _get_cached_verdict(chash: str) -> dict[str, Any] | None:
     return row[0] if isinstance(row[0], dict) else json.loads(row[0])
 
 
+def _get_stale_verdict(chash: str) -> dict[str, Any] | None:
+    """取**任意版本**最近一次 ok 裁决（版本升级后的降级展示用）。
+
+    为什么需要它：`_get_cached_verdict` 按 (engine, prompt) 精确匹配，版本一 bump
+    全线 miss。此时若仍走"同步判一次"，用户进对话/进详情页就要白等 LLM 跑完
+    （最多 _VERDICT_TIMEOUT=180s）——命盘按钮甚至要等排盘返回才出现。
+    正确做法是**旧版结论先顶上**（标注旧版），后台同时重判当前版本。
+    """
+    from app.db.pool import get_pool
+
+    with get_pool().connection() as conn:
+        row = conn.execute(
+            """
+            SELECT verdict FROM chart_verdicts
+            WHERE chart_hash = %s AND status = 'ok'
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            (chash,),
+        ).fetchone()
+    if row is None:
+        return None
+    return row[0] if isinstance(row[0], dict) else json.loads(row[0])
+
+
+def _apply_stale(chart: BaziChart, chash: str = "") -> BaziChart | None:
+    """有旧版裁决就应用并返回新 chart；没有/读失败返回 None（调用方回退计算版）。"""
+    chash = chash or _hash_of(chart)
+    if not chash:
+        return None
+    try:
+        stale = _get_stale_verdict(chash)
+    except Exception as e:
+        log.warning("[verdict] 旧版裁决读取失败，按无缓存处理: {}", _err_text(e))
+        return None
+    if stale is None:
+        return None
+    return apply_verdict(
+        chart, stale, (stale or {}).get("relation_to_engine", "confirm"), stale=True
+    )
+
+
 def verdict_applied(chart: BaziChart) -> bool:
     """该 chart 是否已应用 LLM 终审（apply_verdict 会追加一条 "LLM终审[...]" 注记）。
 
     接口层缓存的 payload 里嵌着终审结论，靠这个判断决定缓存命名空间；前端也用它
-    决定要不要提示"终审版生成中，下拉刷新"。
+    决定要不要提示"终审版生成中，下拉刷新"。旧版终审也算已应用（结论同样来自 LLM），
+    是否过期另看 `verdict_is_stale`。
     """
-    return any(str(n).startswith("LLM终审[") for n in chart.wuxing.notes)
+    return any(
+        str(n).startswith(("LLM终审[", "LLM终审·旧版[")) for n in chart.wuxing.notes
+    )
 
 
-def apply_verdict(chart: BaziChart, verdict: dict[str, Any], relation: str = "override") -> BaziChart:
+def verdict_is_stale(chart: BaziChart) -> bool:
+    """该 chart 应用的是**旧版本**终审（版本已 bump、当前版本仍在后台重判）。
+
+    用途：接口层缓存命名空间 —— 旧版载荷不能进 "v"，否则新裁决落库后
+    cache key 不变、详情页会永远吐旧结论。
+    """
+    return any(str(n).startswith("LLM终审·旧版[") for n in chart.wuxing.notes)
+
+
+def apply_verdict(
+    chart: BaziChart, verdict: dict[str, Any], relation: str = "override", stale: bool = False
+) -> BaziChart:
     """把终审裁决写回 chart.wuxing（不可变替换，原 chart 不动）。
 
     表示法沿用引擎约定：成格时 strength 装格名（如"从杀格"）、special_pattern
     装类别；正格时 strength 装五档。力学数值（counts/score/strength_detail）
     保留计算版不动 —— 终审覆盖的是**结论标签**，不是力学基础。
+
+    stale=True 表示这是旧版本裁决的临时顶替（注记会写明"旧版"），后台会重判。
     """
     w = chart.wuxing
     pattern = "" if verdict["special_pattern"] == "无" else verdict["special_pattern"]
     strength = verdict["special_label"] if pattern else verdict["strength"]
     hint = f"日主{verdict['strength']}，最喜{verdict['useful_god']}，最忌{verdict['avoid_god']}（LLM 终审）。"
-    notes = [*w.notes, f"LLM终审[{PROMPT_VERSION}]：{relation}——{verdict['reason'][:80]}"]
+    prefix = "LLM终审·旧版" if stale else "LLM终审"
+    notes = [*w.notes, f"{prefix}[{PROMPT_VERSION}]：{relation}——{verdict['reason'][:80]}"]
     return replace(
         chart,
         wuxing=replace(w, strength=strength, special_pattern=pattern, useful_hint=hint, notes=notes),
@@ -461,6 +520,9 @@ def verdict_five_gods(chart: BaziChart) -> dict[str, str]:
         return {}
     try:
         cached = _get_cached_verdict(chash)
+        if not cached and verdict_is_stale(chart):
+            # 旧版终审正在顶替展示：五神也从旧版裁决取，否则页面会"有结论没喜忌"
+            cached = _get_stale_verdict(chash)
     except Exception as e:
         log.warning("[verdict] 五神回读失败（前端回退计算版喜忌）: {}", _err_text(e))
         return {}
@@ -469,11 +531,17 @@ def verdict_five_gods(chart: BaziChart) -> dict[str, str]:
     return five_gods_from_verdict(cached)
 
 
-async def chart_with_verdict(chart: BaziChart, model: Any = None) -> BaziChart:
+async def chart_with_verdict(
+    chart: BaziChart, model: Any = None, *, allow_stale: bool = True
+) -> BaziChart:
     """终审应用主入口（async 路径：/chart、/kline、聊天挂载）。
 
-    缓存命中直接应用；未命中调 LLM 裁决落库后应用；
+    同版本缓存命中直接应用；版本已 bump 但有旧版裁决 → **先应用旧版并派后台重判**
+    （用户不必等 LLM，旧结论先顶上）；连旧版都没有 → 同步判一次；
     关闭/失败/超时/invalid 一律原样返回计算版 chart（引擎兜底）。
+
+    allow_stale=False 只给后台重判线程用：否则后台线程会拿到旧版直接返回，
+    永远不会产生新版本的裁决（死循环式空转）。
     """
     if not _verdict_enabled():
         return chart
@@ -490,6 +558,14 @@ async def chart_with_verdict(chart: BaziChart, model: Any = None) -> BaziChart:
         verdict = await asyncio.to_thread(_get_cached_verdict, chash)
     except Exception as e:
         log.warning("[verdict] 缓存读取失败，走 LLM 裁决: {}", _err_text(e))
+
+    # 版本升级后的降级展示：旧版先顶上，后台静默重判，不让用户白等
+    if verdict is None and allow_stale:
+        stale_chart = await asyncio.to_thread(_apply_stale, chart, chash)
+        if stale_chart is not None:
+            log.info("[verdict] {} 当前版本无裁决，先应用旧版终审并后台重判", chart.birth.solar)
+            _submit_background_verdict(chart, model, chash)
+            return stale_chart
 
     if verdict is None:
         try:
@@ -546,16 +622,20 @@ def verdict_in_flight(chash: str) -> bool:
 
 
 def verdict_cache_namespace(chash: str) -> str:
-    """进程内 payload 缓存的命名空间：已有 ok 裁决为 "v"，否则 "p"。
+    """进程内 payload 缓存的命名空间：v=同版本裁决 / s=只有旧版 / p=无裁决。
 
     接口层缓存的 payload 里嵌着终审结论，key 不带这个状态就会出现"先按计算版缓存过、
-    此后补判落库了也永远吐旧 payload"——命盘详情页会一直停在计算版。DB 读不到时按
-    计算版处理（宁可白算一次，也不要把没终审的载荷当终审版供出去）。
+    此后补判落库了也永远吐旧 payload"——命盘详情页会一直停在计算版。
+    **旧版终审必须单独占 "s"**：若把它当 "v"，新裁决落库后 key 不变，页面会永远
+    吐旧结论（版本升级后"下拉刷新也刷不出新的"）。DB 读不到时按计算版处理
+    （宁可白算一次，也不要把没终审的载荷当终审版供出去）。
     """
     if not chash:
         return "p"
     try:
-        return "v" if _get_cached_verdict(chash) is not None else "p"
+        if _get_cached_verdict(chash) is not None:
+            return "v"
+        return "s" if _get_stale_verdict(chash) is not None else "p"
     except Exception as e:
         log.warning("[verdict] 缓存命名空间判定失败，按计算版处理: {}", _err_text(e))
         return "p"
@@ -566,18 +646,23 @@ async def chart_with_verdict_for_api(chart: BaziChart, model: Any = None) -> Baz
 
     重复判没有意义：后台那次跑完会落库，下次请求命中缓存自然就是终审版；这里再判
     一次只会让用户多等（最多 _VERDICT_TIMEOUT 秒）并重复烧 token。
+    但"跳过"不等于给计算版——有旧版裁决就先顶上，旧结论也比没有强。
     """
-    if _verdict_enabled() and verdict_in_flight(_hash_of(chart)):
-        log.info("[verdict] {} 已有后台补判在跑，本次请求直接用计算版", chart.birth.solar)
-        return chart
+    if _verdict_enabled():
+        chash = _hash_of(chart)
+        if verdict_in_flight(chash):
+            log.info("[verdict] {} 已有后台补判在跑，本次请求直接用旧版/计算版", chart.birth.solar)
+            stale_chart = await asyncio.to_thread(_apply_stale, chart, chash)
+            return stale_chart if stale_chart is not None else chart
     return await chart_with_verdict(chart, model)
 
 
 def chart_with_verdict_sync(chart: BaziChart, model: Any = None) -> BaziChart:
     """终审应用的同步包装（工具线程 / 挂盘路径）。
 
-    两条路径行为一致：**命中缓存毫秒级应用；未命中原样返回计算版**，同时派一个
-    后台线程补判落库，下一轮挂到同一张盘就命中缓存。绝不为了终审阻塞主链路。
+    三条路径一致地**不阻塞**：同版本缓存命中直接应用；只有旧版裁决时先应用旧版
+    （标注"旧版"）并派后台重判；连旧版都没有则返回计算版并派后台。绝不为了终审
+    阻塞主链路。
 
     为什么不留"阻塞等终审"的选项：2026-10-11 实测，挂盘为了等终审白卡满
     _VERDICT_TIMEOUT（150 秒）× 2 次，把整轮从半分钟拖成 4 分钟；而且超时后拿到的
@@ -603,8 +688,10 @@ def chart_with_verdict_sync(chart: BaziChart, model: Any = None) -> BaziChart:
         if cached is not None:
             return apply_verdict(chart, cached, (cached or {}).get("relation_to_engine", "confirm"))
 
+    # 版本升级：旧版裁决先顶上（标注旧版），后台同步重判当前版本
+    stale_chart = _apply_stale(chart, chash)
     _submit_background_verdict(chart, model, chash)
-    return chart
+    return stale_chart if stale_chart is not None else chart
 
 
 def _submit_background_verdict(chart: BaziChart, model: Any, chash: str) -> None:
@@ -624,9 +711,12 @@ def _background_verdict(chart: BaziChart, model: Any, chash: str = "") -> None:
     这里**不再套自己的 wait_for**：chart_with_verdict 内部已经有 150 秒预算兜底，
     外面再叠一层同长的等待只会先到期、取消内层，把真实原因（超时/排队/上游报错）
     一起吞掉——2026-10-11 那 4 条只有冒号的日志就是这么来的。
+
+    `allow_stale=False` 是关键：后台线程若也走"旧版先顶上"分支，就会立刻返回旧版、
+    永远不产生新版本裁决——版本升级后旧结论将一直顶替下去。
     """
     try:
-        asyncio.run(chart_with_verdict(chart, model))
+        asyncio.run(chart_with_verdict(chart, model, allow_stale=False))
     except Exception as e:
         log.warning(
             "[verdict] 后台补判失败（{} {}）: {}",

@@ -109,6 +109,7 @@ def test_sync_wrapper_returns_computed_and_schedules_background(monkeypatch):
     chart = build_bazi_chart(*ANCHOR)
     monkeypatch.setattr(V, "_verdict_enabled", lambda: True)
     monkeypatch.setattr(V, "_get_cached_verdict", lambda chash: None)
+    monkeypatch.setattr(V, "_get_stale_verdict", lambda chash: None)
     scheduled: list[str] = []
     monkeypatch.setattr(V, "_submit_background_verdict", lambda c, m, h: scheduled.append(h))
 
@@ -142,6 +143,7 @@ def test_sync_wrapper_survives_cache_read_error(monkeypatch):
     chart = build_bazi_chart(*ANCHOR)
     monkeypatch.setattr(V, "_verdict_enabled", lambda: True)
     monkeypatch.setattr(V, "_get_cached_verdict", lambda chash: (_ for _ in ()).throw(RuntimeError("db down")))
+    monkeypatch.setattr(V, "_get_stale_verdict", lambda chash: None)
     scheduled: list[str] = []
     monkeypatch.setattr(V, "_submit_background_verdict", lambda c, m, h: scheduled.append(h))
 
@@ -245,6 +247,7 @@ def test_api_entry_skips_verdict_while_background_running(monkeypatch):
     called = []
     monkeypatch.setattr(V, "chart_with_verdict", _fake_async(called, chart))
     monkeypatch.setattr(V, "verdict_in_flight", lambda chash: True)
+    monkeypatch.setattr(V, "_get_stale_verdict", lambda chash: None)
 
     out = asyncio.run(V.chart_with_verdict_for_api(chart))
 
@@ -383,3 +386,94 @@ def test_verdict_five_gods_survives_db_failure(monkeypatch):
     monkeypatch.setattr(V, "_get_cached_verdict", lambda chash: (_ for _ in ()).throw(RuntimeError("db down")))
 
     assert V.verdict_five_gods(chart) == {}
+
+
+# ---------------- 旧版终审顶替（版本升级不阻塞用户） ----------------
+#
+# 现场（2026-10-22）：版本一 bump，chat_verdicts 同版本全 miss，/chart 同步判 LLM；
+# 聊天页命盘按钮 v-if=chartData 要等排盘返回，于是按钮凭空消失直到终审跑完。
+# 口径：旧版结论先顶上（标注"旧版"），后台静默重判当前版本，下拉刷新即得新版。
+
+
+def test_stale_verdict_applied_without_blocking(monkeypatch):
+    """同版本 miss、旧版有裁决 → 立刻返回旧版结论 + 派后台重判，不调 LLM。"""
+    from app.agent import verdict as V
+
+    chart = build_bazi_chart(*ANCHOR)
+    monkeypatch.setattr(V, "_verdict_enabled", lambda: True)
+    monkeypatch.setattr(V, "_get_cached_verdict", lambda chash: None)
+    monkeypatch.setattr(V, "_get_stale_verdict", lambda chash: _verdict_for())
+    scheduled: list[str] = []
+    monkeypatch.setattr(V, "_submit_background_verdict", lambda c, m, h: scheduled.append(h))
+
+    async def _boom(*a, **k):
+        raise AssertionError("旧版可顶替时不应同步调 LLM")
+
+    monkeypatch.setattr(V, "run_shadow_verdict", _boom)
+
+    out = asyncio.run(V.chart_with_verdict(chart))
+
+    assert out.wuxing.strength == "偏弱"
+    assert V.verdict_is_stale(out) is True, "必须是旧版标记，否则缓存会当成同版本终审"
+    assert V.verdict_applied(out) is True
+    assert len(scheduled) == 1
+
+
+def test_background_verdict_does_not_short_circuit_on_stale(monkeypatch):
+    """后台线程必须 allow_stale=False：否则一直返回旧版，新裁决永远不产生。"""
+    from app.agent import verdict as V
+
+    chart = build_bazi_chart(*ANCHOR)
+    captured: dict = {}
+
+    async def _fake(c, model=None, *, allow_stale=True):
+        captured["allow_stale"] = allow_stale
+        return c
+
+    monkeypatch.setattr(V, "chart_with_verdict", _fake)
+
+    V._background_verdict(chart, None, "hash-bg")
+
+    assert captured["allow_stale"] is False
+
+
+def test_cache_namespace_marks_stale_as_s(monkeypatch):
+    """只有旧版裁决时命名空间是 s：既区别于 v（新裁决落库后要能失效），也区别于 p。"""
+    from app.agent import verdict as V
+
+    monkeypatch.setattr(V, "_get_cached_verdict", lambda chash: None)
+    monkeypatch.setattr(V, "_get_stale_verdict", lambda chash: _verdict_for())
+    assert V.verdict_cache_namespace("h-s") == "s"
+
+
+def test_sync_wrapper_applies_stale_and_schedules_background(monkeypatch):
+    """挂盘路径同理：旧版先应用，后台补判照派。"""
+    from app.agent import verdict as V
+
+    chart = build_bazi_chart(*ANCHOR)
+    monkeypatch.setattr(V, "_verdict_enabled", lambda: True)
+    monkeypatch.setattr(V, "_get_cached_verdict", lambda chash: None)
+    monkeypatch.setattr(V, "_get_stale_verdict", lambda chash: _verdict_for())
+    scheduled: list[str] = []
+    monkeypatch.setattr(V, "_submit_background_verdict", lambda c, m, h: scheduled.append(h))
+
+    out = V.chart_with_verdict_sync(chart)
+
+    assert out is not chart
+    assert out.wuxing.strength == "偏弱"
+    assert V.verdict_is_stale(out) is True
+    assert len(scheduled) == 1
+
+
+def test_verdict_five_gods_falls_back_to_stale(monkeypatch):
+    """旧版顶替时五神也要给：否则页面有结论、喜忌却是空的。"""
+    from app.agent import verdict as V
+
+    chart = V.apply_verdict(build_bazi_chart(*ANCHOR), _verdict_for(xishen=["木"]), stale=True)
+    monkeypatch.setattr(V, "_hash_of", lambda c: "hash-stale")
+    monkeypatch.setattr(V, "_get_cached_verdict", lambda chash: None)
+    monkeypatch.setattr(V, "_get_stale_verdict", lambda chash: _verdict_for(xishen=["木"]))
+
+    gods = V.verdict_five_gods(chart)
+
+    assert gods["yongshen"] == "火" and gods["xishen"] == "木"

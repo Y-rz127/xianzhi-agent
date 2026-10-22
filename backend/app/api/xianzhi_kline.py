@@ -228,6 +228,7 @@ async def get_kline(
         chart_with_verdict_for_api,
         verdict_applied,
         verdict_cache_namespace,
+        verdict_is_stale,
     )
     from app.db.chart_store import chart_hash_of
     from app.tools.cache import bazi_cache
@@ -276,7 +277,11 @@ async def get_kline(
             chart=chart,
         )
         # 按实际生效状态落缓存（本次若应用了终审则进 v 命名空间，下次自查命中）
-        applied = "v" if verdict_applied(chart) else "p"
+        # v=同版本终审 / s=旧版终审顶替 / p=计算版（s 独立命名空间，见 /chart 同注释）
+        if verdict_is_stale(chart):
+            applied = "s"
+        else:
+            applied = "v" if verdict_applied(chart) else "p"
         bazi_cache.set(
             birth_time,
             gender,

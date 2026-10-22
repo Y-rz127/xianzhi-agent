@@ -26,7 +26,9 @@
         <view class="header-left">
           <text class="icon-btn" @tap="openHistoryDrawer">☰</text>
           <text class="header-title display-font">先知</text>
-          <text v-if="chartData" class="icon-btn bazi-btn" @tap="openChartDetail">☯</text>
+          <!-- 命盘按钮只看"有没有生辰"，不等排盘接口返回：终审版本升级时 /chart
+               要跑重判，旧实现 v-if=chartData 会让按钮凭空消失几分钟 -->
+          <text v-if="hasBirth" class="icon-btn bazi-btn" @tap="openChartDetail">☯</text>
         </view>
       </view>
       <!-- 出生信息入口：透明底下拉箭头，骑在标题栏与聊天区的交界线上。
@@ -1054,12 +1056,14 @@ function onInputFocus() {
 }
 
 function openChartDetail() {
-  const bi = lastBirthInfo.value
-  if (!bi?.time || !bi.gender) {
+  // 与按钮显示条件同源：表单手填与对话/后端提取的生辰都算，别只认 lastBirthInfo
+  const time = effectiveBirthTime.value
+  const g = effectiveGender.value
+  if (!time || !g) {
     uni.showToast({ title: '请先提供出生时间和性别', icon: 'none' })
     return
   }
-  const q = `birth_time=${encodeURIComponent(bi.time)}&gender=${encodeURIComponent(bi.gender)}&sect=2&yun_sect=1`
+  const q = `birth_time=${encodeURIComponent(time)}&gender=${encodeURIComponent(g)}&sect=2&yun_sect=1`
   const lon = birthLongitude.value || undefined
   uni.navigateTo({ url: `/pages/chart-detail/index?${q}${lon ? `&longitude=${lon}` : ''}` })
 }

@@ -192,6 +192,7 @@ async def get_chart(
         chart_with_verdict_for_api,
         verdict_applied,
         verdict_cache_namespace,
+        verdict_is_stale,
     )
     from app.db.chart_store import chart_hash_of
     from app.tools.cache import bazi_cache
@@ -218,8 +219,13 @@ async def get_chart(
         # 终审：已有后台补判在跑就跳过 —— 不让用户再等一轮，也不重复烧 token
         chart = await chart_with_verdict_for_api(chart)
         payload = await asyncio.to_thread(_format_chart_payload, chart)
-        # 按**实际生效状态**落缓存：本次若成功应用了终审，直接进 v 命名空间
-        applied = "v" if verdict_applied(chart) else "p"
+        # 按**实际生效状态**落缓存：v=同版本终审 / s=旧版终审顶替 / p=计算版。
+        # s 必须单独占一个命名空间 —— 若把旧版当 v，新裁决落库后 key 不变，
+        # 详情页下拉刷新也永远吐旧载荷（版本升级场景）。
+        if verdict_is_stale(chart):
+            applied = "s"
+        else:
+            applied = "v" if verdict_applied(chart) else "p"
         bazi_cache.set(
             birth_time,
             gender,
