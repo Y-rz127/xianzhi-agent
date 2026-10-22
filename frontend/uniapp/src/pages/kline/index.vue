@@ -785,6 +785,17 @@ function selectIndex(i: number) {
   centerOn(i)
 }
 
+/**
+ * 入口默认选中年份：当前年（仅当命盘覆盖范围含当前年）→ 命中该年的蜡烛下标；
+ * 命盘跨度覆盖不到当前年时回退首年。切维度不走这里（保留用户所选年份）。
+ */
+function defaultKlineIndex(list: KlineCandle[]): number {
+  if (!list.length) return 0
+  const nowYear = new Date().getFullYear()
+  const nowIdx = list.findIndex((c) => c.year === nowYear)
+  return nowIdx >= 0 ? nowIdx : 0
+}
+
 function jumpToBand(b: { firstYear: number; index: number }) {
   const idx = candles.value.findIndex((c) => c.year === b.firstYear)
   if (idx >= 0) selectIndex(idx)
@@ -796,13 +807,14 @@ function switchDimension(key: KlineDimension) {
   load()
 }
 
-function load() {
+function load(entry = false) {
   if (!birthTime.value || !gender.value) {
     loading.value = false
     return
   }
-  // 切维度时同一条时间轴，保留选中年份，避免每次都跳回起点
-  const keepYear = candles.value[selIndex.value]?.year
+  // 切维度时同一条时间轴，保留选中年份，避免每次都跳回起点；
+  // 入口加载（onLoad，含 H5 复用页面实例换盘）不保留——按当前年定位。
+  const keepYear = entry ? null : candles.value[selIndex.value]?.year
   error.value = ''
   if (data.value) switching.value = true
   else loading.value = true
@@ -811,8 +823,8 @@ function load() {
     .then((res) => {
       data.value = res
       // loading 期间模板不渲染 chart-flex，靠数据先落地再定位，避免宽度为 0 时算错滚动位置
-      const idx = keepYear ? res.candles.findIndex((c) => c.year === keepYear) : 0
-      selIndex.value = idx >= 0 ? idx : 0
+      const idx = keepYear ? res.candles.findIndex((c) => c.year === keepYear) : -1
+      selIndex.value = idx >= 0 ? idx : (entry ? defaultKlineIndex(res.candles) : 0)
       centerOn(selIndex.value)
       // 事件表与维度无关，一张盘只拉一次
       if (!evLoaded) {
@@ -1440,7 +1452,7 @@ onLoad((options: any) => {
   // 换盘＝每个维度的解读全部作废：uni 在 H5 下可能复用页面实例，
   // 槽里会留着**上一张盘**的解读 —— 那比「窜维度」更糟（窜的是别人的命盘）。
   Object.keys(annoSlots).forEach((k) => delete annoSlots[k])
-  load()
+  load(true)
 })
 </script>
 
