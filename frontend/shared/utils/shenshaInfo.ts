@@ -9,7 +9,7 @@
  * 新增神煞时：引擎名册 + 此字典一起补。
  */
 
-export type ShenshaNature = '吉' | '凶' | '中'
+export type ShenshaNature = '吉' | '凶' | '平'
 
 export interface ShenshaInfo {
   /** 别名，渲染进标题 */
@@ -93,7 +93,7 @@ export const SHENSHA_INFO: Record<string, ShenshaInfo> = {
     text: '养命之源，主身体健康、勤劳致富、衣禄丰足。性刚直、有专长；逢冲为「破禄」，落空亡为「财库落空」。',
   },
   驿马: {
-    nature: '中',
+    nature: '平',
     text: '主迁动变化：出差、旅行、搬迁、换工作。为喜则动中得利、升迁有望；为忌则奔波劳碌。逢冲则动象更显。',
   },
   天厨贵人: {
@@ -110,7 +110,7 @@ export const SHENSHA_INFO: Record<string, ShenshaInfo> = {
   },
   桃花: {
     alias: '咸池',
-    nature: '中',
+    nature: '平',
     text: '主魅力人缘、异性缘与艺术天赋。年月为内桃花主夫妻恩爱，日时为外桃花易感情多扰；喜与正官正印同柱，忌见水泛滥。',
   },
   红鸾: {
@@ -126,7 +126,7 @@ export const SHENSHA_INFO: Record<string, ShenshaInfo> = {
     text: '造化之源，主聪明好学、喜文史哲与宗教玄学。做事有始有终；得生旺又有贵格相扶则福寿双全。',
   },
   华盖: {
-    nature: '中',
+    nature: '平',
     text: '艺术宗教之星，主才华超凡、思想独特，宜玄学、艺术、哲学。性情孤高喜独处；逢印旺则文章显达，落空亡则易入宗教。',
   },
   十灵日: {
@@ -134,11 +134,11 @@ export const SHENSHA_INFO: Record<string, ShenshaInfo> = {
     text: '日柱专属，主灵感直觉超常、聪明有才。对玄学、心理、文艺敏感，古语云「男带十灵好文章」。',
   },
   天转日: {
-    nature: '中',
+    nature: '平',
     text: '干支纳音俱专旺于四时，主时来运转、否极泰来。力量极强，过旺无制反招损，需命局平衡方能驾驭。',
   },
   地转日: {
-    nature: '中',
+    nature: '平',
     text: '与天转同源，主转运改命、柳暗花明的重大转机。旺极防过犹不及，把握机遇但忌激进。',
   },
   将星: {
@@ -146,11 +146,11 @@ export const SHENSHA_INFO: Record<string, ShenshaInfo> = {
     text: '主权威与领导力，有大将之风，易在团队中担当核心。文武皆宜，得吉神相助权位更重。',
   },
   魁罡: {
-    nature: '中',
+    nature: '平',
     text: '聪明果断、性严有威，身旺则显贵发福。刚强好胜、易折；忌财官刑冲，婚姻感情宜多包容。',
   },
   金神: {
-    nature: '中',
+    nature: '平',
     text: '刚锐之气，主刚烈果决、有改革魄力，危难能当重任。入火乡则威权显赫，过刚易折。',
   },
   羊刃: {
@@ -188,7 +188,7 @@ export const SHENSHA_INFO: Record<string, ShenshaInfo> = {
     text: '耗散之星，主诸事不顺、易破财惹是非。岁运逢之动荡不安；逢合可解其凶。',
   },
   空亡: {
-    nature: '中',
+    nature: '平',
     text: '落空无实，吉事减力、凶事亦减。逢冲合刑则不为空；吉神空而喜见合，凶神空而忌见合。',
   },
   天罗: {
@@ -232,7 +232,7 @@ export const SHENSHA_INFO: Record<string, ShenshaInfo> = {
     text: '容貌有魅力，但感情易惹纠纷、有损名誉；女命防产厄。感情宜慎重。',
   },
   八专日: {
-    nature: '中',
+    nature: '平',
     text: '专业专精、意志坚定，聪明专注但易固执己见。多听他人意见为宜。',
   },
   童子煞: {

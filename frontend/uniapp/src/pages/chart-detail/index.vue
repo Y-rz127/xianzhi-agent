@@ -557,13 +557,13 @@
     <view v-if="shenshaModal" class="shensha-mask" @tap="closeShenshaModal">
       <view class="shensha-card" @tap.stop>
         <view class="shensha-header">
-          <text class="shensha-title display-font">{{ shenshaModal.name }}</text>
+          <view class="shensha-title-wrap">
+            <text class="shensha-title display-font">{{ shenshaModal.name }}</text>
+            <text v-if="shenshaModal.nature" :class="['ss-nature', 'ss-nature-' + (NATURE_KEY[shenshaModal.nature] || 'mid')]">{{ shenshaModal.nature }}</text>
+          </view>
           <text class="shensha-close" @tap="closeShenshaModal">✕</text>
         </view>
         <view class="shensha-body">
-          <view v-if="shenshaModal.nature" class="ss-row-inline">
-            <text :class="['ss-nature', 'ss-nature-' + (NATURE_KEY[shenshaModal.nature] || 'mid')]">{{ shenshaModal.nature }}</text>
-          </view>
           <text class="shensha-text">{{ shenshaModal.text }}</text>
         </view>
       </view>
@@ -1086,7 +1086,7 @@ const snapShenshaMap = computed(() => {
 })
 
 // 吉凶属性 → ASCII 样式键（中文 class 在小程序编译链路上不可靠）
-const NATURE_KEY: Record<string, string> = { 吉: 'good', 凶: 'bad', 中: 'mid' }
+const NATURE_KEY: Record<string, string> = { 吉: 'good', 凶: 'bad', 平: 'mid' }
 
 const shenshaModal = ref<{ name: string; nature?: string; text: string } | null>(null)
 function showShenshaDesc(s: ShenshaItem) {
@@ -1866,14 +1866,15 @@ onLoad((options: any) => {
 /* 神煞寓意浮层：结构对齐十神浮层，配色走 $color-* 变量随 .t-dark 换肤 */
 .shensha-mask { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.55); display: flex; align-items: center; justify-content: center; z-index: 1000; }
 .shensha-card { width: 78%; max-width: 620rpx; max-height: 78%; background: $color-paper; border-radius: 20rpx; box-shadow: 0 12rpx 40rpx rgba(0, 0, 0, 0.25); display: flex; flex-direction: column; overflow: hidden; }
-.shensha-header { display: flex; align-items: center; justify-content: space-between; padding: 28rpx 32rpx 16rpx; border-bottom: 1rpx solid rgba(184, 134, 11, 0.15); }
-.shensha-title { font-size: 40rpx; font-weight: 600; color: $color-ink; flex: 1; text-align: center; }
-.shensha-close { font-size: 36rpx; color: $color-ink-light; padding: 0 8rpx; }
+.shensha-header { position: relative; display: flex; align-items: center; justify-content: center; padding: 28rpx 32rpx 16rpx; border-bottom: 1rpx solid rgba(184, 134, 11, 0.15); }
+/* 名称与吉凶徽章同一行居中，关闭按钮绝对定位不参与居中计算 */
+.shensha-title-wrap { display: flex; align-items: center; justify-content: center; }
+.shensha-title { font-size: 40rpx; font-weight: 600; color: $color-ink; }
+.shensha-close { position: absolute; right: 24rpx; top: 50%; transform: translateY(-50%); font-size: 36rpx; color: $color-ink-light; padding: 0 8rpx; }
 .shensha-body { padding: 24rpx 32rpx 32rpx; overflow-y: auto; }
 .shensha-text { display: block; font-size: 27rpx; color: $color-ink; line-height: 1.85; white-space: pre-wrap; word-break: break-all; }
-/* 吉凶徽章 */
-.ss-row-inline { display: flex; justify-content: center; margin-bottom: 16rpx; }
-.ss-nature { font-size: 22rpx; padding: 4rpx 22rpx; border-radius: 999rpx; letter-spacing: 4rpx; }
+/* 吉凶徽章：跟在名称右侧 */
+.ss-nature { margin-left: 14rpx; font-size: 22rpx; padding: 2rpx 18rpx; border-radius: 999rpx; letter-spacing: 4rpx; }
 /* 吉凶徽章只用 ASCII 类名（WXSS 编译器不接受中文选择器），映射见 NATURE_KEY */
 .ss-nature-good { color: $nx-cat-green; background: rgba(56, 161, 105, 0.12); }
 .ss-nature-bad { color: $nx-cat-red; background: rgba(197, 48, 48, 0.12); }
