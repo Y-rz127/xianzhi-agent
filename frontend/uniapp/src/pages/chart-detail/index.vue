@@ -565,7 +565,6 @@
             <text :class="['ss-nature', 'ss-nature-' + (NATURE_KEY[shenshaModal.nature] || 'mid')]">{{ shenshaModal.nature }}</text>
           </view>
           <text class="shensha-text">{{ shenshaModal.text }}</text>
-          <text v-if="shenshaModal.note" class="shensha-note">盘面注解：{{ shenshaModal.note }}</text>
         </view>
       </view>
     </view>
@@ -1089,7 +1088,7 @@ const snapShenshaMap = computed(() => {
 // 吉凶属性 → ASCII 样式键（中文 class 在小程序编译链路上不可靠）
 const NATURE_KEY: Record<string, string> = { 吉: 'good', 凶: 'bad', 中: 'mid' }
 
-const shenshaModal = ref<{ name: string; nature?: string; text: string; note?: string } | null>(null)
+const shenshaModal = ref<{ name: string; nature?: string; text: string } | null>(null)
 function showShenshaDesc(s: ShenshaItem) {
   // 详释走 shared 字典（与知识库 07 号文档同口径），缺项回落后端短说明
   const info = getShenshaInfo(s.name)
@@ -1098,7 +1097,6 @@ function showShenshaDesc(s: ShenshaItem) {
         name: info.alias ? `${s.name}（${info.alias}）` : s.name,
         nature: info.nature,
         text: info.text,
-        note: s.description,
       }
     : { name: s.name, text: s.description }
 }
@@ -1873,11 +1871,11 @@ onLoad((options: any) => {
 .shensha-close { font-size: 36rpx; color: $color-ink-light; padding: 0 8rpx; }
 .shensha-body { padding: 24rpx 32rpx 32rpx; overflow-y: auto; }
 .shensha-text { display: block; font-size: 27rpx; color: $color-ink; line-height: 1.85; white-space: pre-wrap; word-break: break-all; }
-/* 吉凶徽章 + 盘面注解行 */
+/* 吉凶徽章 */
 .ss-row-inline { display: flex; justify-content: center; margin-bottom: 16rpx; }
 .ss-nature { font-size: 22rpx; padding: 4rpx 22rpx; border-radius: 999rpx; letter-spacing: 4rpx; }
-.ss-nature-吉, .ss-nature-good { color: $nx-cat-green; background: rgba(56, 161, 105, 0.12); }
-.ss-nature-凶, .ss-nature-bad { color: $nx-cat-red; background: rgba(197, 48, 48, 0.12); }
-.ss-nature-中, .ss-nature-mid { color: $color-ink-light; background: $color-paper-warm; }
-.shensha-note { display: block; margin-top: 20rpx; padding-top: 16rpx; border-top: 1rpx dashed $color-border; font-size: 23rpx; color: $color-ink-light; line-height: 1.7; }
+/* 吉凶徽章只用 ASCII 类名（WXSS 编译器不接受中文选择器），映射见 NATURE_KEY */
+.ss-nature-good { color: $nx-cat-green; background: rgba(56, 161, 105, 0.12); }
+.ss-nature-bad { color: $nx-cat-red; background: rgba(197, 48, 48, 0.12); }
+.ss-nature-mid { color: $color-ink-light; background: $color-paper-warm; }
 </style>

@@ -472,7 +472,6 @@
           <span class="ps-nature" :class="'ps-nature-' + (NATURE_KEY[shenshaModalInfo.nature] || 'mid')">{{ shenshaModalInfo.nature }}</span>
         </div>
         <div class="ps-popover-desc">{{ shenshaModalText }}</div>
-        <div v-if="shenshaModalNote" class="ps-popover-note">盘面注解：{{ shenshaModalNote }}</div>
         <button class="ps-popover-close" @click="activeShensha = null" aria-label="关闭">关闭</button>
       </div>
     </div>
@@ -714,7 +713,6 @@ const shenshaModalTitle = computed(() => {
   return shenshaModalInfo.value?.alias ? `${s.name}（${shenshaModalInfo.value.alias}）` : s.name
 })
 const shenshaModalText = computed(() => shenshaModalInfo.value?.text || activeShensha.value?.description || '')
-const shenshaModalNote = computed(() => (shenshaModalInfo.value ? activeShensha.value?.description : ''))
 
 function classifyShensha(item: ShenshaItem): string {
   const text = `${item.name} ${item.description}`
@@ -1166,8 +1164,6 @@ onMounted(async () => {
 .ps-nature-good { color: #4ade80; background: rgba(74,222,128,0.12); }
 .ps-nature-bad { color: #f87171; background: rgba(248,113,113,0.12); }
 .ps-nature-mid { color: #94a3b8; background: rgba(148,163,184,0.12); }
-.ps-popover-note { font-size: 11px; color: var(--text-dim); opacity: 0.75; line-height: 1.7;
-  border-top: 1px dashed var(--border); padding-top: 10px; margin-bottom: 16px; text-align: center; }
 .ps-popover-close { display: block; margin: 0 auto; padding: 7px 28px; background: rgba(255,255,255,0.06);
   border: 1px solid var(--border); border-radius: 6px; color: var(--text-dim); font-size: 12px; cursor: pointer; transition: all 0.2s; }
 .ps-popover-close:hover { border-color: var(--accent); color: var(--accent); }
