@@ -495,6 +495,13 @@ class ReviewerWorker:
         # 2) 古籍真实性校验：书名核验 + （该书确在检索片段中时）引文句级复核
         if knowledge and "未检索到相关知识" not in knowledge and "闲聊场景" not in knowledge:
             cited_books = {m.group(1) for m in re.finditer(r"《([^》]{1,12})》", knowledge)}
+            # 知识库 chunk 前缀是 [文档标题｜一级标题｜二级标题]（app/rag/knowledge.py），
+            # 文档标题**不带书名号**；只认《》会把「《盲派实用口诀》」判成未检索到而误报杜撰
+            # （2026-10-22 现场：引文就在片段里，白跑一轮修复）。
+            cited_books |= {
+                m.group(1).strip()
+                for m in re.finditer(r"^\[([^\[\]｜]{1,30})[｜\]]", knowledge, re.M)
+            }
             norm_knowledge = self._normalize_quote(knowledge)
             for m in self.ANCIENT_CITATION_RE.finditer(answer):
                 book = m.group("book")

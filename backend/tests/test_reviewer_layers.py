@@ -165,6 +165,39 @@ def test_ancient_citation_whitelist_book_not_retrieved_stays_lenient():
 
 
 # ============================================================
+# R7 知识库 chunk 前缀不带书名号 → "杜撰古籍"误报（2026-10-22 现场）
+# ============================================================
+
+_KNOWLEDGE_TITLE_PREFIX = (
+    "【命理规则检索】\n"
+    "[盲派实用口诀｜古籍07：盲派实用口诀【修订完整版】｜六、性格速断口诀]\n"
+    "### 1.日干断性格\n> 甲木刚直，乙木柔顺；\n> 壬水聪明，癸水温柔。"
+)
+
+
+def test_ancient_citation_book_from_chunk_title_prefix_passes():
+    """书名只出现在 chunk 前缀 `[标题｜…]` 里（不带书名号）时，不得误报杜撰。
+
+    2026-10-22 现场：回答引「《盲派实用口诀》原文：壬水聪明，癸水温柔。」，
+    引文就在检索片段里，却因 cited_books 只认《》而判"未在检索结果中出现"，
+    白跑一轮修复（722 字原稿→701 字，"修复"只是删掉真实引文）。
+    """
+    issues = _ancient_issues(
+        "「《盲派实用口诀》原文：壬水聪明，癸水温柔。」你偏壬水聪明、灵活、反应快。",
+        _KNOWLEDGE_TITLE_PREFIX,
+    )
+    assert not any("杜撰" in i or "古籍" in i for i in issues), issues
+
+
+def test_ancient_citation_title_prefix_book_fabricated_quote_still_caught():
+    """前缀书名被识别后，句级复核仍生效：引号原句不在片段里照样判伪造。"""
+    issues = _ancient_issues(
+        "《盲派实用口诀》原文：“壬水富贵，天生将相。”此论正合你盘。", _KNOWLEDGE_TITLE_PREFIX
+    )
+    assert any("疑似杜撰原文" in i for i in issues), issues
+
+
+# ============================================================
 # L1/L3 JSON 解析与调用封装
 # ============================================================
 
