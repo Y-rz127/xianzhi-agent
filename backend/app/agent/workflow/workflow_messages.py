@@ -339,6 +339,20 @@ def compact_history(history: list[BaseMessage], summary: str = "") -> str:
     return "\n\n".join(parts) if parts else "（无）"
 
 
+def _global_extreme(chart: BaziChart, strongest: bool) -> str:
+    """全局口径（含日干本气）的最旺/最弱五行，与命盘页五行柱状图同口径。
+
+    影响口径 `wuxing.strongest/weakest` 不含日干本气，直接写进正文会出现
+    "报告 4.21 / 图表 5.21" 的对不上（2026-10-22 用户实测）。
+    """
+    counts = chart.wuxing.global_counts or {}
+    if not counts:
+        return "-"
+    pick = max if strongest else min
+    name = pick(counts, key=counts.get)
+    return f"{name}({counts[name]})"
+
+
 def _gan_relations_line(chart: BaziChart) -> str:
     """天干关系：干合、干冲、干克、三奇（仅统计四柱天干内的关系）。"""
     visible_gans = [p.gan for p in chart.pillars if p.gan]
@@ -478,8 +492,9 @@ def fact_block(chart: BaziChart, intent: QuestionIntent) -> str:
             _shensha_by_pillar_line(chart),
             f"日主: {chart.wuxing.day_master}({chart.wuxing.day_master_wuxing}); 强弱: {chart.wuxing.strength}; 分数: {chart.wuxing.strength_score}",
             f"特殊格局: {chart.wuxing.special_pattern or '无'}",
-            f"五行权重(对日干影响,日干不计): {chart.wuxing.counts}; 最旺: {chart.wuxing.strongest}; 最弱: {chart.wuxing.weakest}",
-            f"五行分布(全局,含日干本气): {chart.wuxing.global_counts}",
+            f"五行权重(对日干影响,日干不计,仅用于判强弱): {chart.wuxing.counts}",
+            f"五行分布(全局,含日干本气,正文引用此口径): {chart.wuxing.global_counts}; "
+            f"最旺: {_global_extreme(chart, True)}; 最弱: {_global_extreme(chart, False)}",
             f"用神提示: {chart.wuxing.useful_hint}",
             f"十神结构: {chart.analysis.ten_gods}; 透干: {chart.analysis.exposed_stems or '-'}; 通根: {chart.analysis.rooted_stems or '-'}",
             f"天干关系: {_gan_relations_line(chart)}",

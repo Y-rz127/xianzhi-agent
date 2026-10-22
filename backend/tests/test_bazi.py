@@ -895,3 +895,20 @@ def test_tiande_he_gan_target_fires_when_month_zhi_is_other_branches():
     assert any(s["pillar"] == "月柱" for s in tdh), (
         f"寅月→天德合=壬，应在月柱命中；实际: {[s['pillar'] for s in tdh]}"
     )
+
+
+def test_analysis_text_cites_global_wuxing_for_display():
+    """最旺/最弱必须给**全局口径**数值：命盘页柱状图用 global_counts，
+    正文若引用影响口径（日干不计）会出现"报告 4.21 / 命盘页 5.21"（2026-10-22 实测）。
+    """
+    from app.domain.chart_builder import build_bazi_chart
+    from app.domain.chart_format import format_analysis_text
+
+    # 辛金日主：金 影响口径 4.21 / 全局 5.21（差日干本气 1.0）
+    chart = build_bazi_chart("2000-08-31 10:00", "女")
+    text = format_analysis_text(chart)
+    assert "【最旺/最弱·全局口径（与命盘页一致）】 金(5.21) / 火(0.63)" in text
+    assert "对日干影响" in text and "不要写进正文" in text
+
+    # 最旺/最弱若改回影响口径（strongest/weakest + counts），这条断言会失败
+    assert f"金({chart.wuxing.counts['金']})" not in text

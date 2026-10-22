@@ -64,13 +64,19 @@ def format_chart_text(chart: BaziChart) -> str:
 def format_analysis_text(chart: BaziChart, question: str = "整体运势") -> str:
     """格式化五行十神分析文本（四柱/日主强弱/用神/十神/藏干/结构判断）。"""
     wx = chart.wuxing
+    # 最旺/最弱按**全局**口径给：命盘页的五行柱状图用 global_counts，
+    # 正文若引用影响口径（日干不计）就会出现"报告 4.21 / 图表 5.21"的对不上
+    # （2026-10-22 用户实测）。影响口径仍然保留，只用于判强弱。
+    g_strong = max(wx.global_counts, key=wx.global_counts.get)
+    g_weak = min(wx.global_counts, key=wx.global_counts.get)
     lines = [
         f"【四柱】 {' '.join(p.ganzhi for p in chart.pillars)}",
         f"【日主】 {wx.day_master}({wx.day_master_wuxing})",
-        f"【五行权重·对日干影响（日干不计）】 {wx.counts}",
         f"【五行分布·全局（含日干本气）】 {wx.global_counts}",
+        f"【五行权重·对日干影响（日干不计）】 {wx.counts}",
         f"【显性五行】 {wx.visible_counts}",
-        f"【最旺/最弱】 {wx.strongest}({wx.counts[wx.strongest]}) / {wx.weakest}({wx.counts[wx.weakest]})",
+        f"【最旺/最弱·全局口径（与命盘页一致）】 {g_strong}({wx.global_counts[g_strong]}) / {g_weak}({wx.global_counts[g_weak]})",
+        "（正文引用五行数值时一律用「全局」口径；「对日干影响」只用于你判断强弱，不要写进正文）",
         f"【日主强弱】 {wx.strength} (score={wx.strength_score})",
         f"【特殊格局】 {wx.special_pattern or '无（普通正格/未达极端候选）'}",
         f"【用神提示】 {wx.useful_hint}",
