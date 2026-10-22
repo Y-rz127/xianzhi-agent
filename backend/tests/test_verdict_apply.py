@@ -477,3 +477,20 @@ def test_verdict_five_gods_falls_back_to_stale(monkeypatch):
     gods = V.verdict_five_gods(chart)
 
     assert gods["yongshen"] == "火" and gods["xishen"] == "木"
+
+
+def test_stale_verdict_with_broken_schema_falls_back(monkeypatch):
+    """旧版裁决字段不全（更早版本的旧行）→ 回退计算版，绝不让接口 500。"""
+    from app.agent import verdict as V
+
+    chart = build_bazi_chart(*ANCHOR)
+    monkeypatch.setattr(V, "_verdict_enabled", lambda: True)
+    monkeypatch.setattr(V, "_get_cached_verdict", lambda chash: None)
+    monkeypatch.setattr(V, "_get_stale_verdict", lambda chash: {"strength": "偏弱"})
+    scheduled: list[str] = []
+    monkeypatch.setattr(V, "_submit_background_verdict", lambda c, m, h: scheduled.append(h))
+
+    out = V.chart_with_verdict_sync(chart)
+
+    assert out is chart
+    assert len(scheduled) == 1, "仍然要派后台重判"

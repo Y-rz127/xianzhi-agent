@@ -419,7 +419,11 @@ def _get_stale_verdict(chash: str) -> dict[str, Any] | None:
 
 
 def _apply_stale(chart: BaziChart, chash: str = "") -> BaziChart | None:
-    """有旧版裁决就应用并返回新 chart；没有/读失败返回 None（调用方回退计算版）。"""
+    """有旧版裁决就应用并返回新 chart；没有/读失败/结构不兼容返回 None。
+
+    旧行可能来自更早的版本、字段口径不同——应用失败绝不能让 /chart 500，
+    一律降级为计算版（后台照常重判当前版本）。
+    """
     chash = chash or _hash_of(chart)
     if not chash:
         return None
@@ -430,9 +434,13 @@ def _apply_stale(chart: BaziChart, chash: str = "") -> BaziChart | None:
         return None
     if stale is None:
         return None
-    return apply_verdict(
-        chart, stale, (stale or {}).get("relation_to_engine", "confirm"), stale=True
-    )
+    try:
+        return apply_verdict(
+            chart, stale, stale.get("relation_to_engine", "confirm"), stale=True
+        )
+    except Exception as e:
+        log.warning("[verdict] 旧版裁决结构不兼容，回退计算版: {}", _err_text(e))
+        return None
 
 
 def verdict_applied(chart: BaziChart) -> bool:
