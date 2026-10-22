@@ -68,3 +68,6 @@ frontend/shared/**/*.js.map
 
 # 本地向量模型
 models/*
+
+# vite 打包 config 临时文件（build 时生成，删了会重新生成，不该进仓库）
+vite.config.js.timestamp-*.mjs
