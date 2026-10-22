@@ -544,12 +544,12 @@ async def chart_with_verdict(
 ) -> BaziChart:
     """终审应用主入口（async 路径：/chart、/kline、聊天挂载）。
 
-    同版本缓存命中直接应用；版本已 bump 但有旧版裁决 → **先应用旧版并派后台重判**
-    （用户不必等 LLM，旧结论先顶上）；连旧版都没有 → 同步判一次；
-    关闭/失败/超时/invalid 一律原样返回计算版 chart（引擎兜底）。
+    **前台一律不阻塞**：同版本缓存命中直接应用；只有旧版裁决 → 先应用旧版并派后台
+    重判；连旧版都没有（首次排盘）→ 先给计算版并派后台补判。用户随时能进详情页，
+    下拉刷新即得终审结论。
 
-    allow_stale=False 只给后台重判线程用：否则后台线程会拿到旧版直接返回，
-    永远不会产生新版本的裁决（死循环式空转）。
+    allow_stale=False 只给后台重判线程用：那里才真正同步调 LLM 并落库；
+    若后台也走"先顶上"分支，就永远不会产生新版本裁决（死循环式空转）。
     """
     if not _verdict_enabled():
         return chart
@@ -567,14 +567,20 @@ async def chart_with_verdict(
     except Exception as e:
         log.warning("[verdict] 缓存读取失败，走 LLM 裁决: {}", _err_text(e))
 
-    # 版本升级后的降级展示：旧版先顶上，后台静默重判，不让用户白等
     if verdict is None and allow_stale:
         stale_chart = await asyncio.to_thread(_apply_stale, chart, chash)
         if stale_chart is not None:
             log.info("[verdict] {} 当前版本无裁决，先应用旧版终审并后台重判", chart.birth.solar)
             _submit_background_verdict(chart, model, chash)
             return stale_chart
+        # 首次排盘：也不等 LLM。详情页先显示计算版（前端有"终审版生成中"提示），
+        # 后台判完落库，下次请求/下拉刷新即是终审版。
+        log.info("[verdict] {} 首次排盘无任何裁决，先给计算版并后台补判", chart.birth.solar)
+        _submit_background_verdict(chart, model, chash)
+        return chart
 
+    # 只有后台重判线程（allow_stale=False）会走到这里：真正同步调 LLM 并落库。
+    # 前台请求在上面两个分支已经返回，永远不会为了终审让用户等 180 秒。
     if verdict is None:
         try:
             if model is None:

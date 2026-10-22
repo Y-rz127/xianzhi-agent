@@ -494,3 +494,30 @@ def test_stale_verdict_with_broken_schema_falls_back(monkeypatch):
 
     assert out is chart
     assert len(scheduled) == 1, "仍然要派后台重判"
+
+
+def test_first_chart_without_any_verdict_returns_computed(monkeypatch):
+    """首次排盘（同版本与旧版都没有）也不等 LLM：先给计算版，后台补判。
+
+    用户口径：前台永不阻塞；详情页首次看到计算版结论、有"终审版生成中"提示，
+    下拉刷新即得终审。
+    """
+    from app.agent import verdict as V
+
+    chart = build_bazi_chart(*ANCHOR)
+    monkeypatch.setattr(V, "_verdict_enabled", lambda: True)
+    monkeypatch.setattr(V, "_get_cached_verdict", lambda chash: None)
+    monkeypatch.setattr(V, "_get_stale_verdict", lambda chash: None)
+    scheduled: list[str] = []
+    monkeypatch.setattr(V, "_submit_background_verdict", lambda c, m, h: scheduled.append(h))
+
+    async def _boom(*a, **k):
+        raise AssertionError("前台不应同步调 LLM")
+
+    monkeypatch.setattr(V, "run_shadow_verdict", _boom)
+
+    out = asyncio.run(V.chart_with_verdict(chart))
+
+    assert out is chart
+    assert V.verdict_applied(out) is False
+    assert len(scheduled) == 1, "必须派后台补判，否则永远没有终审版"

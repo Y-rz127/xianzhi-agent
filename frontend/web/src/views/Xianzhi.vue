@@ -561,7 +561,17 @@ const syncSessionBirthInfo = async () => {
 }
 
 const openChartDetail = async () => {
-  const bi = await syncSessionBirthInfo()
+  // 不等排盘：按钮只负责跳详情，详情页自己拉盘。终审版本升级时 /chart 要重判，
+  // 旧实现 await syncSessionBirthInfo() 会把点击卡住（首访甚至卡满 LLM 预算）。
+  let bi = lastBirthInfo.value
+  if (!bi?.time || !bi.gender) {
+    const raw = await getSessionBirthInfo(conversationId.value)
+    if (raw.time && raw.gender) {
+      bi = { time: zhiHourToHHMM(raw.time), gender: raw.gender }
+      lastBirthInfo.value = bi
+      fetchChartData(bi.time, bi.gender) // 后台补齐会话快照，不阻塞跳转
+    }
+  }
   if (!bi?.time || !bi.gender) {
     showToast("还没有识别到完整出生时间，请先提供年月日时和性别")
     return
