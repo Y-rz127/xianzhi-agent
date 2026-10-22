@@ -12,7 +12,11 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.tools.bazi import bazi_analysis, bazi_chart, bazi_dayun
-from app.tools.report_prompts import REPORT_PROMPT_TEMPLATE, REPORT_SYSTEM_PROMPT
+from app.tools.report_prompts import (
+    REPORT_PROMPT_TEMPLATE,
+    REPORT_PROMPT_VERSION,
+    REPORT_SYSTEM_PROMPT,
+)
 
 SECTIONS = {
     "overview": "命盘总览",
@@ -39,7 +43,8 @@ _REPORT_LLM_TIMEOUT = 300.0
 
 
 def _report_cache_key(birth_time: str, gender: str, sections: list[str]) -> str:
-    raw = f"{birth_time}|{gender}|{','.join(sorted(sections))}"
+    # 带口径版本：提示词/数值口径一改，旧缓存自然失效（否则用户重新生成还是旧报告）
+    raw = f"{REPORT_PROMPT_VERSION}|{birth_time}|{gender}|{','.join(sorted(sections))}"
     return hashlib.md5(raw.encode()).hexdigest()
 
 

@@ -8,6 +8,13 @@ app.agent.prompts 从这个单一事实源 re-export，并在本报告 system �
 
 from __future__ import annotations
 
+# 报告口径版本：**改了提示词或正文引用的数值口径就必须 bump**。
+# 它同时进两处，缺一不可：
+#   ① report_generator._report_cache_key（进程内缓存）
+#   ② /report/tasks 的 params（report_tasks.find_same_task 按 params 全等复用，
+#      旧任务没有这个键 → 不会命中，用户重新生成才会拿到新口径的报告）
+REPORT_PROMPT_VERSION = "r2"
+
 COMPLIANCE_REDLINES = """【合规红线 · 硬性，违反即作废】
 - 不指导赌博、投机、荐股、"必赢"类话术；
 - 不提供堕胎择时；

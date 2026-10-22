@@ -16,6 +16,17 @@ _REPORT_TASK_SUBMIT_LIMIT = 3
 _REPORT_TASK_SUBMIT_WINDOW = 600
 
 
+def _build_task_params(birth_time: str, gender: str, sections: str) -> dict:
+    """任务参数（含口径版本）。
+
+    ver 参与 params 全等比较：口径版本一 bump，旧任务不再被幂等复用，
+    用户重新生成才会得到新口径的报告（旧任务自带旧正文）。
+    """
+    from app.tools.report_prompts import REPORT_PROMPT_VERSION
+
+    return {"birth_time": birth_time, "gender": gender, "sections": sections, "ver": REPORT_PROMPT_VERSION}
+
+
 @router.post("/report/tasks")
 async def submit_report_task(payload: dict, request: Request):
     """提交报告生成任务，返回 task_id；生成在后台队列执行，轮询 GET /report/tasks/{id} 取状态。
@@ -42,7 +53,7 @@ async def submit_report_task(payload: dict, request: Request):
     if verdict is False:
         raise HTTPException(status_code=429, detail="提交过于频繁，请稍后再试")
 
-    params = {"birth_time": birth_time, "gender": gender, "sections": (payload.get("sections") or "").strip()}
+    params = _build_task_params(birth_time, gender, (payload.get("sections") or "").strip())
     # 幂等复用：同参数任务未过期直接返回旧 task_id（防止重复烧 LLM/CPU）
     existing = await asyncio.to_thread(report_tasks.find_same_task, kind, params)
     if existing:
