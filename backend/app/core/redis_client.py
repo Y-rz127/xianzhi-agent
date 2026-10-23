@@ -105,6 +105,11 @@ _RELEASE_LOCK_LUA = """
 if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) end
 return 0
 """
+# 租约续期：仍持有才续，锁已被抢走（TTL 过期）时返回 0，调用方停止续租
+_EXTEND_LOCK_LUA = """
+if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('PEXPIRE', KEYS[1], ARGV[2]) end
+return 0
+"""
 
 
 async def acquire_lock(key: str, token: str, ttl_ms: int):
@@ -116,6 +121,18 @@ async def acquire_lock(key: str, token: str, ttl_ms: int):
         return bool(await r.eval(_ACQUIRE_LOCK_LUA, 1, key, token, ttl_ms))
     except Exception:
         log.warning("Redis 锁获取异常，降级为进程内锁")
+        return None
+
+
+async def extend_lock(key: str, token: str, ttl_ms: int):
+    """锁租约续期。True=续期成功，False=已不再持有，None=Redis 不可用。"""
+    r = await get_redis()
+    if r is None:
+        return None
+    try:
+        return bool(await r.eval(_EXTEND_LOCK_LUA, 1, key, token, ttl_ms))
+    except Exception:
+        log.warning("Redis 锁续期异常，停止续租")
         return None
 
 

@@ -39,9 +39,10 @@ from app.core.logger import log
 # 会话 Agent 池容量上限（超出后 LRU 淘汰最久未使用实例）
 _MAX_AGENTS = 100
 
-# 分布式锁 TTL：覆盖最坏持有场景（LLM 排队 120s + 生成 180s + 审核/修复多轮）；
-# 进程崩溃无法走到释放时靠 TTL 兜底自动解锁
-_REDIS_LOCK_TTL_MS = 900_000
+# 分布式锁租约：短 TTL + 持有期间自动续租。
+# 旧做法是拿 900s 长 TTL 一次罩住最坏持有场景，代价是进程崩溃后锁要等 15 分钟
+# 才自动释放，同会话立即重试会一直排队。改为默认 60s 租约、每 1/3 周期续一次，
+# 崩溃恢复窗口从 15 分钟缩到 1 分钟；正常长回合由续租维持，不受 TTL 限制。
 _REDIS_LOCK_KEY_PREFIX = "lock:session:"
 # 他人持锁时的轮询间隔（与原 asyncio.Lock 的等待语义一致）
 _LOCK_WAIT_INTERVAL = 0.5
@@ -51,9 +52,14 @@ class SessionLock:
     """会话级互斥锁：进程内锁快路径 + Redis 分布式锁跨副本互斥。"""
 
     def __init__(self, conversation_id: str, local: asyncio.Lock) -> None:
+        from app.core.config import settings
+
         self._key = f"{_REDIS_LOCK_KEY_PREFIX}{conversation_id}"
         self._local = local
         self._token = ""
+        self._ttl_ms = max(10, settings.session_lock_ttl_seconds) * 1000
+        self._renew_interval = self._ttl_ms / 3000.0  # 秒：每 1/3 租约续一次
+        self._renew_task: asyncio.Task | None = None
 
     async def __aenter__(self) -> "SessionLock":
         await self._local.acquire()
@@ -80,6 +86,7 @@ class SessionLock:
 
     async def __aexit__(self, *exc_info) -> None:
         try:
+            await self._stop_renew()
             if self._token:
                 from app.core.redis_client import release_lock
 
@@ -93,14 +100,43 @@ class SessionLock:
 
         while True:
             token = secrets.token_hex(16)
-            got = await acquire_lock(self._key, token, _REDIS_LOCK_TTL_MS)
+            got = await acquire_lock(self._key, token, self._ttl_ms)
             if got is None:
                 # Redis 不可用：仅本地锁兜底
                 return
             if got:
                 self._token = token
+                self._renew_task = asyncio.create_task(self._renew_lease())
                 return
             await asyncio.sleep(_LOCK_WAIT_INTERVAL)
+
+    async def _renew_lease(self) -> None:
+        """持有期间定期续租；续租失败说明锁已丢失，停止续租避免误以为仍互斥。"""
+        from app.core.redis_client import extend_lock
+
+        while True:
+            await asyncio.sleep(self._renew_interval)
+            token = self._token
+            if not token:
+                return
+            ok = await extend_lock(self._key, token, self._ttl_ms)
+            if ok is None:
+                log.warning("[lock] Redis 不可用，停止续租 key={}", self._key)
+                return
+            if not ok:
+                log.warning("[lock] 锁已过期被他人接管，停止续租 key={}", self._key)
+                return
+
+    async def _stop_renew(self) -> None:
+        task = self._renew_task
+        self._renew_task = None
+        if task is None:
+            return
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
 
 
 @dataclass
@@ -157,6 +193,24 @@ class AppContext:
                 log.info("会话 Agent 池 LRU 淘汰: {} (pool_size={})", evicted_cid, len(self._agents))
             log.info("会话 Agent 创建: {} (pool_size={})", cid, len(self._agents))
             return agent, SessionLock(cid, agent.lock)
+
+    def has_agent(self, conversation_id: str) -> bool:
+        cid = conversation_id if conversation_id and conversation_id.strip() else "xianzhi-default"
+        with self._pool_lock:
+            return cid in self._agents
+
+    def evict_xianzhi(self, conversation_id: str):
+        """从会话池移除并清空会话级内存（删除会话时调用）。"""
+        cid = conversation_id if conversation_id and conversation_id.strip() else "xianzhi-default"
+        with self._pool_lock:
+            agent = self._agents.pop(cid, None)
+        if agent is not None:
+            try:
+                agent.clear_session_state()
+            except Exception as e:
+                log.warning("清理会话 Agent 内存失败 {}: {}", cid, e)
+            log.info("会话 Agent 已清除: {} (pool_size={})", cid, len(self._agents))
+        return agent
 
     def agent_pool_stats(self) -> dict:
         """会话池状态（监控/调试接口用）。"""

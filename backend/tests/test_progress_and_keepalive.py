@@ -203,3 +203,68 @@ def test_session_lock_locked_matches_asyncio_lock():
         assert lock.locked() is False
 
     asyncio.run(main())
+
+
+def _patch_redis_lock(monkeypatch, *, extend_result=True):
+    """把 Redis 锁相关函数替换为内存桩，返回调用计数。"""
+    import app.core.redis_client as redis_client
+
+    calls = {"acquire": 0, "extend": 0, "release": 0}
+
+    async def fake_acquire(key, token, ttl_ms):
+        calls["acquire"] += 1
+        return True
+
+    async def fake_extend(key, token, ttl_ms):
+        calls["extend"] += 1
+        return extend_result
+
+    async def fake_release(key, token):
+        calls["release"] += 1
+
+    monkeypatch.setattr(redis_client, "acquire_lock", fake_acquire)
+    monkeypatch.setattr(redis_client, "extend_lock", fake_extend)
+    monkeypatch.setattr(redis_client, "release_lock", fake_release)
+    return calls
+
+
+def test_session_lock_renews_lease_while_held(monkeypatch):
+    """持有期间自动续租，释放时停止续租并释放 Redis 锁。"""
+    from app.agent.context import SessionLock
+
+    calls = _patch_redis_lock(monkeypatch)
+
+    async def main():
+        lock = SessionLock("conv-renew-test", asyncio.Lock())
+        lock._ttl_ms = 30_000
+        lock._renew_interval = 0.01  # 测试提速：真实为 TTL/3
+        async with lock:
+            await asyncio.sleep(0.05)
+            assert calls["extend"] >= 2
+            assert lock._renew_task is not None
+        assert calls["release"] == 1
+        assert lock._renew_task is None
+        # 退出后不再续租（续租任务已取消）
+        extended = calls["extend"]
+        await asyncio.sleep(0.05)
+        assert calls["extend"] == extended
+
+    asyncio.run(main())
+
+
+def test_session_lock_stops_renew_when_lease_lost(monkeypatch):
+    """续租失败说明锁已被他人接管，应立即停止续租（不再重复打 Redis）。"""
+    from app.agent.context import SessionLock
+
+    calls = _patch_redis_lock(monkeypatch, extend_result=False)
+
+    async def main():
+        lock = SessionLock("conv-lost-test", asyncio.Lock())
+        lock._ttl_ms = 30_000
+        lock._renew_interval = 0.01
+        async with lock:
+            await asyncio.sleep(0.08)
+        assert calls["extend"] == 1
+        assert calls["release"] == 1
+
+    asyncio.run(main())

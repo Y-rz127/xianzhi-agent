@@ -13,16 +13,21 @@ import httpx
 import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from langchain_openai import ChatOpenAI
 
+from app.agent.checkpoint import close_checkpointer, init_checkpointer
 from app.agent.context import AppContext, set_app_context
+from app.api.health import readiness
 from app.api.routes import router
 from app.core.config import ensure_dirs, settings
 from app.core.llm_failover import FailoverModel
 from app.core.llm_health import SubModelSpec, probe_sub_models
-from app.core.llm_throttle import ThrottledModel
+from app.core.llm_params import temperature_for
+from app.core.llm_throttle import ThrottledModel, llm_tag
 from app.core.logger import log
-from app.core.observability import init_observability, record_request
+from app.core.observability import init_observability, record_error, record_request
+from app.core.request_context import RequestIdMiddleware, get_request_id
 from app.core.security import ApiKeyAuthMiddleware, RateLimitMiddleware
 from app.core.thinking_router import ThinkingRouter
 from app.memory import create_chat_memory
@@ -63,11 +68,12 @@ def _make_model(
     答案照常输出，审核层其实从未运行（2026-09-19 现场）。
     配置写错时由启动探活 `app/core/llm_health.py::probe_sub_models` 自动纠正并提示。
     """
+    resolved_model = model_name or settings.dashscope_model
     return ChatOpenAI(
-        model=model_name or settings.dashscope_model,
+        model=resolved_model,
         base_url=settings.dashscope_url,
         api_key=settings.dashscope_api_key,
-        temperature=temperature,
+        temperature=temperature_for(resolved_model, temperature),
         timeout=timeout,
         max_retries=settings.llm_max_retries,
         # 思考型模型思考期无 chunk 流出，默认 120s 会误判"内容静默"（2026-10-06 实测
@@ -82,6 +88,7 @@ def _make_model(
 async def lifespan(app: FastAPI):
     # 后台初始化 task 需强引用（asyncio 只持弱引用，防被 GC 中断）
     _bg_init_tasks: list[asyncio.Task] = []
+    retention_stop = asyncio.Event()
     ensure_dirs()
 
     # 专用线程池替换 asyncio 默认池（默认仅 min(32, cpu+4) 个线程）：
@@ -123,7 +130,7 @@ async def lifespan(app: FastAPI):
         model=settings.dashscope_model,
         base_url=settings.dashscope_url,
         api_key=settings.dashscope_api_key,
-        temperature=settings.llm_temperature,
+        temperature=temperature_for(settings.dashscope_model, settings.llm_temperature),
         timeout=settings.llm_timeout,
         max_retries=settings.llm_max_retries,
         # 思考期无 chunk 流出的长静默预算，同 _make_model 内的说明
@@ -194,6 +201,8 @@ async def lifespan(app: FastAPI):
 
     # 记忆（数据库不可达时降级，不阻断端口监听）
     memory = create_chat_memory()
+    # LangGraph 断点恢复：checkpointer 初始化失败时无断点运行，不阻断启动
+    init_checkpointer()
 
     local_tools = bazi_tools + search_tools + terminate_tools + rag_tools + huangli_tools + ziwei_tools
     tarot_app = TarotApp()  # 不注入模型：divine_stream 按请求取子应用解读模型（见 TarotApp docstring）
@@ -267,10 +276,13 @@ async def lifespan(app: FastAPI):
 
     # 重/可失败的初始化放后台执行，避免阻塞端口监听导致存活探针失败
     async def _bg_init():
-        try:
-            await asyncio.to_thread(get_knowledge_base().init)
-        except Exception as e:
-            log.warning("RAG 知识库初始化失败（可稍后重试）: {}", e)
+        if settings.rag_init_enabled:
+            try:
+                await asyncio.to_thread(get_knowledge_base().init)
+            except Exception as e:
+                log.warning("RAG 知识库初始化失败（可稍后重试）: {}", e)
+        else:
+            log.info("RAG 启动初始化已关闭（RAG_INIT_ENABLED=false）")
         try:
             log.info("正在启动 MCP 服务...")
             await mcp_manager.start()
@@ -323,9 +335,59 @@ async def lifespan(app: FastAPI):
 
     _bg_init_tasks.append(asyncio.create_task(_bg_probe_sub_models()))
 
+    async def _bg_probe_chain():
+        if not settings.llm_chain_probe_enabled:
+            return
+        try:
+            with llm_tag("probe"):
+                results = await asyncio.to_thread(chat_model.probe_chain)
+        except Exception as e:
+            log.warning("[chain-probe] 降级链探活整体失败: {}", e)
+            return
+        for item in results:
+            if item.get("ok"):
+                log.info("[chain-probe] {} 可用", item.get("model"))
+            else:
+                log.warning("[chain-probe] {} 不可用: {}", item.get("model"), item.get("error"))
+                record_error("llm_chain_probe_failed")
+
+    _bg_init_tasks.append(asyncio.create_task(_bg_probe_chain()))
+
+    async def _bg_retention_cleanup():
+        """用户数据保留期清理：启动先跑一次，之后每 24h 一次。"""
+        from app.agent.checkpoint import purge_stale_checkpoints
+        from app.db.retention import purge_expired_safely
+
+        while not retention_stop.is_set():
+            if settings.message_retention_days > 0:
+                stats = await asyncio.to_thread(
+                    purge_expired_safely, settings.message_retention_days
+                )
+                if any(stats.values()):
+                    log.info("[retention] 清理过期数据: {}", stats)
+            if settings.checkpoint_retention_hours > 0:
+                removed = await asyncio.to_thread(
+                    purge_stale_checkpoints, settings.checkpoint_retention_hours
+                )
+                if removed:
+                    log.info("[retention] 清理残留 checkpoint thread: {}", removed)
+            try:
+                await asyncio.wait_for(retention_stop.wait(), timeout=86400)
+            except asyncio.TimeoutError:
+                pass
+
+    retention_task = asyncio.create_task(_bg_retention_cleanup())
+    _bg_init_tasks.append(retention_task)
+
     log.info("先知智能体启动完成 | 端口 {} | 本地工具 {} 个", settings.app_port, len(local_tools))
 
     yield
+
+    retention_stop.set()
+    try:
+        await asyncio.wait_for(retention_task, timeout=2)
+    except Exception:
+        retention_task.cancel()
 
     # 清理 AppContext 注册（避免关停后旧实例被访问）
     try:
@@ -341,6 +403,8 @@ async def lifespan(app: FastAPI):
     except Exception:
         for w in report_workers:
             w.cancel()
+
+    close_checkpointer()
 
     # 关闭 PostgreSQL 连接池（db / memory / RAG 指纹共用同一模块级池，关一次即可）
     try:
@@ -421,7 +485,8 @@ async def metrics_middleware(request: Request, call_next):
     if (
         raw_path.startswith("/assets/")
         or raw_path.startswith("/static/")
-        or raw_path in ("/health", "/api/health", "/api/ai/health")
+        or raw_path.startswith("/api/health")
+        or raw_path.startswith("/api/ai/health")
     ):
         return await call_next(request)
 
@@ -447,8 +512,19 @@ async def metrics_middleware(request: Request, call_next):
                 "{" + name_by_value[seg] + "}" if seg in name_by_value else seg
                 for seg in raw_path.split("/")
             )
-    record_request(request.method, path, response.status_code, time.perf_counter() - start)
+    record_request(
+        request.method,
+        path,
+        response.status_code,
+        time.perf_counter() - start,
+        request_id=get_request_id(),
+    )
     return response
+
+
+# 请求 ID 中间件必须最后添加（add_middleware 插到栈顶），
+# 这样限流/鉴权/业务日志都能带上 rid；SSE 的流式 body 也在其上下文内。
+app.add_middleware(RequestIdMiddleware)
 
 
 app.include_router(router, prefix="/api")
@@ -464,6 +540,19 @@ async def health():
         "workflow_backend": AppContext.workflow_backend(),
         "agent_pool": ctx.agent_pool_stats() if ctx else {"pool_size": 0, "max_agents": 0},
     }
+
+
+@app.get("/api/health/live", tags=["Health"])
+async def health_live():
+    """liveness：只证明进程还活着，不查任何依赖，永远 200。"""
+    return {"status": "ok"}
+
+
+@app.get("/api/health/ready", tags=["Health"])
+async def health_ready():
+    """readiness：PG / Redis / RAG 任一关键依赖不可用返回 503，供网关摘流量。"""
+    result = await readiness()
+    return JSONResponse(status_code=200 if result["ok"] else 503, content=result)
 
 
 if __name__ == "__main__":

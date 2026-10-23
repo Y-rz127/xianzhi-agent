@@ -7,12 +7,14 @@ langgraph 为硬依赖（requirements.txt）：导入失败会在 XianzhiWorkflo
 
 from __future__ import annotations
 
+import time
 from functools import partial
 from typing import TypedDict
 
 from langchain_core.messages import BaseMessage
 
 from app.agent.workflow.fact_check import SHENSHA_NAMES, SHISHEN_NAMES
+from app.agent.workflow.workflow_budget import budget_enough, budget_remaining
 from app.agent.workflow.workflow_messages import (
     build_sui_section,
     compact_facts,
@@ -25,8 +27,15 @@ from app.agent.workflow.workflow_models import (
 )
 from app.agent.workflow.workflow_support import classify_question
 from app.agent.workflow.workflow_workers import WORKERS
+from app.core.config import settings
 from app.core.logger import log
 from app.core.observability import record_error
+
+# 确定性事实错误在修复后仍未消除时使用
+FACT_CHECK_FAILED_TEXT = (
+    "这次回答没有通过事实复核，我先不给你结论，以免把错误信息带偏你。"
+    "可以把问题问得更具体，或稍后重试。"
+)
 
 
 class XianzhiGraphState(TypedDict, total=False):
@@ -42,6 +51,7 @@ class XianzhiGraphState(TypedDict, total=False):
     raw_answer: str
     final_answer: str
     issues: list[str]
+    issues_hard: bool  # 当前 issues 是否来自正则层的确定性硬错误
 
 
 def _dropped_real_facts(before: str, after: str, facts_text: str) -> list[str]:
@@ -113,8 +123,15 @@ def _generate_node(workflow, state: XianzhiGraphState) -> XianzhiGraphState:
         state.get("worker"),
         state.get("summary", ""),
     )
-    raw = workflow._invoke(messages)
-    log.info("[Worker] {} 生成回答 {}字", getattr(worker, "label", "?"), len(raw))
+    start = time.monotonic()
+    raw = workflow._invoke(messages, timeout_cap=settings.workflow_generate_timeout)
+    log.info(
+        "[Worker] {} 生成回答 {}字 耗时{:.1f}s 剩余预算{:.1f}s",
+        getattr(worker, "label", "?"),
+        len(raw),
+        time.monotonic() - start,
+        budget_remaining() or 0,
+    )
     return {"raw_answer": raw}
 
 
@@ -133,6 +150,13 @@ def _check_node(workflow, state: XianzhiGraphState) -> XianzhiGraphState:
     log.info("[Reviewer] 开始审核 {} Worker 产出 ({}字)...", getattr(worker, "label", "?"), len(raw))
     second_chart = getattr(intent, "second_chart", None)
     facts_text = compact_facts(state["chart_context"].chart, intent)
+    can_review = budget_enough(5.0)
+    if not can_review and not is_chitchat:
+        log.warning(
+            "[Reviewer] 剩余预算 {:.1f}s 不足，跳过 LLM 深审（仅跑正则）", budget_remaining() or 0
+        )
+        record_error("workflow_review_skipped_budget")
+    start = time.monotonic()
     review = workflow._reviewer.review(
         raw,
         state["chart_context"].chart,
@@ -141,28 +165,52 @@ def _check_node(workflow, state: XianzhiGraphState) -> XianzhiGraphState:
         second_chart.chart if second_chart else None,
         user_prompt=state["user_prompt"],
         ctx=state["chart_context"],
-        skip_llm=is_chitchat,
+        skip_llm=is_chitchat or not can_review,
         needs_chart=needs_chart,
         sui_text=build_sui_section(state["chart_context"].chart, intent),
         facts_text=facts_text,
     )
+    log.info(
+        "[Reviewer] 审核完成 source={} 耗时{:.1f}s 剩余预算{:.1f}s",
+        review.source,
+        time.monotonic() - start,
+        budget_remaining() or 0,
+    )
+    # 审核没真正完成（异常/超时/非 JSON/预算跳过）：统一降级下发并记指标；
+    # 只有正则层确定性硬错误才阻断（见 repair 节点）
+    if review.degraded and review.source == "reviewer_unavailable":
+        record_error("reviewer_unavailable_delivered")
+        log.warning("[Reviewer] 复核不可用，按统一策略下发已生成回答")
+    if review.degraded and review.source == "budget_skipped":
+        record_error("reviewer_budget_skipped_delivered")
+        log.warning("[Reviewer] 预算耗尽跳过复核，按 P1-07 策略下发已生成回答")
+
     if review.ok:
         log.info(
             "[Reviewer] {} Worker 产出通过审核 ✓ (source={})",
             getattr(worker, "label", "?"),
             review.source,
         )
-    else:
-        log.warning(
-            "[Reviewer] {} Worker 产出未通过审核 ✗ (source={})",
-            getattr(worker, "label", "?"),
-            review.source,
-        )
-        for i, issue in enumerate(review.issues, 1):
-            log.warning("[Reviewer]   issue[{}]: {}", i, issue)
-        # 落被审原稿：此前只记字数，误判无法复盘（前端只显示修复稿，原稿会永久丢失）
+        return {"issues": [], "issues_hard": False, "final_answer": raw}
+
+    log.warning(
+        "[Reviewer] {} Worker 产出未通过审核 ✗ (source={})",
+        getattr(worker, "label", "?"),
+        review.source,
+    )
+    for i, issue in enumerate(review.issues, 1):
+        log.warning("[Reviewer]   issue[{}]: {}", i, issue)
+    # 落被审原稿：仅内容日志开启时输出正文（默认只记字数，避免用户回答落盘）
+    if settings.log_llm_content:
         log.warning("[Reviewer] 被审原稿 ({}字):\n{}", len(raw), raw)
-    return {"issues": review.issues, "final_answer": raw if review.ok else ""}
+    else:
+        log.warning("[Reviewer] 被审原稿 {}字（LOG_LLM_CONTENT=false，正文不落日志）", len(raw))
+    return {
+        "issues": review.issues,
+        # 正则层（干支/十神/神煞/引文/合规）是确定性硬错误；LLM 层问题允许修复后带软提示下发
+        "issues_hard": review.source == "regex",
+        "final_answer": "",
+    }
 
 
 def _repair_node(workflow, state: XianzhiGraphState) -> XianzhiGraphState:
@@ -177,6 +225,19 @@ def _repair_node(workflow, state: XianzhiGraphState) -> XianzhiGraphState:
     if is_chitchat:
         log.info("[Reflextion] 闲聊场景，跳过修复节点，直接返回原答案")
         return {"final_answer": state.get("raw_answer", ""), "issues": []}
+    if not budget_enough(10.0):
+        if state.get("issues_hard"):
+            record_error("answer_blocked_unresolved_facts")
+            log.warning(
+                "[Reflextion] 剩余预算 {:.1f}s 不足，且未解决问题为确定性硬错误，阻断下发",
+                budget_remaining() or 0,
+            )
+            return {"final_answer": FACT_CHECK_FAILED_TEXT, "issues": []}
+        log.warning(
+            "[Reflextion] 剩余预算 {:.1f}s 不足，跳过修复，返回已生成回答", budget_remaining() or 0
+        )
+        record_error("workflow_repair_skipped_budget")
+        return {"final_answer": state.get("raw_answer", ""), "issues": state.get("issues", [])}
 
     worker = state.get("worker")
     workflow._emit_progress("正在修订断语…")
@@ -191,14 +252,20 @@ def _repair_node(workflow, state: XianzhiGraphState) -> XianzhiGraphState:
         state.get("knowledge", ""),
         state.get("worker"),
     )
-    repaired = workflow._invoke(messages)
+    start = time.monotonic()
+    repaired = workflow._invoke(messages, timeout_cap=settings.workflow_repair_timeout)
     log.info(
-        "[Reflextion] {} Worker 修复完成 ({}字)，二次审核中...",
+        "[Reflextion] {} Worker 修复完成 ({}字) 耗时{:.1f}s 剩余预算{:.1f}s，二次审核中...",
         getattr(worker, "label", "?"),
         len(repaired),
+        time.monotonic() - start,
+        budget_remaining() or 0,
     )
-    # 与 check_node 的「被审原稿」配对，便于复盘误判与改动效果
-    log.info("[Reflextion] 修复稿 ({}字):\n{}", len(repaired), repaired)
+    # 与 check_node 的「被审原稿」配对，便于复盘误判与改动效果（默认只记字数）
+    if settings.log_llm_content:
+        log.info("[Reflextion] 修复稿 ({}字):\n{}", len(repaired), repaired)
+    else:
+        log.info("[Reflextion] 修复稿 {}字（LOG_LLM_CONTENT=false，正文不落日志）", len(repaired))
     second_chart = getattr(intent, "second_chart", None)
     facts_text = compact_facts(state["chart_context"].chart, intent)
     # 修复稿 vs 原稿：记录"原稿提到、修复稿丢掉、且排盘事实确实存在"的十神/神煞。
@@ -222,43 +289,27 @@ def _repair_node(workflow, state: XianzhiGraphState) -> XianzhiGraphState:
         needs_chart,
         facts_text,
     )
-    if not regex_issues:
-        # regex 通过 ≠ 修复稿没问题：再跑一次 LLM 深审复核。
-        # 旧版此处"regex 过即定稿"，修复稿从未被 LLM 看过，改写质量问题无人发现。
-        llm_ok = workflow._reviewer.review_llm_only(
-            repaired,
-            state["chart_context"].chart,
-            state.get("knowledge", ""),
-            user_prompt=state["user_prompt"],
-            ctx=state["chart_context"],
-            second_chart=second_chart.chart if second_chart else None,
-            sui_text=build_sui_section(state["chart_context"].chart, intent),
-        )
-        if llm_ok.ok:
-            log.info(
-                "[Reflextion] {} Worker 修复后 regex + LLM 双通过 ✓ (source={})",
-                getattr(worker, "label", "?"),
-                llm_ok.source,
-            )
-            return {"final_answer": repaired, "issues": []}
-        # LLM 判不通过但图是单轮修复（无二次修复循环）：仍按 repaired 定稿，问题仅记日志 + 指标
+    if regex_issues:
+        # 确定性硬错误在修复后仍未消除：不下发，避免已知错误答案到达用户
+        record_error("answer_blocked_unresolved_facts")
         log.warning(
-            "[Reflextion] {} 修复后 regex 通过但 LLM 深审发现问题（{} 条）→ 单轮修复不重试，按 repaired 定稿",
+            "[Reflextion] {} Worker 修复稿仍存在 {} 条确定性事实错误，阻断下发",
             getattr(worker, "label", "?"),
-            len(llm_ok.issues),
+            len(regex_issues),
         )
-        for i, issue in enumerate(llm_ok.issues, 1):
-            log.warning("[Reflextion]   LLM 残留issue[{}]: {}", i, issue)
-        record_error("reviewer_repair_llm_rejected")
-        return {"final_answer": repaired, "issues": llm_ok.issues}
-    # regex 仍发现问题 → 才跑 LLM 深审。
-    # 注意：旧版这里调 `review()`，而 `review()` 会先跑一遍 regex 并在命中时立刻短路返回，
-    # 所以 LLM 实际从未被调用（日志却写"触发 LLM 深审"，误导排查）。现改为 review_llm_only()。
-    log.info(
-        "[Reflextion] {} Worker 修复后 regex 发现 {} 条问题，跑 LLM 深审复核",
-        getattr(worker, "label", "?"),
-        len(regex_issues),
-    )
+        for i, issue in enumerate(regex_issues, 1):
+            log.warning("[Reflextion]   hard issue[{}]: {}", i, issue)
+        return {"final_answer": FACT_CHECK_FAILED_TEXT, "issues": []}
+    if not budget_enough(5.0):
+        log.warning(
+            "[Reflextion] 剩余预算 {:.1f}s 不足，跳过修复后 LLM 复核，按修复稿定稿",
+            budget_remaining() or 0,
+        )
+        record_error("workflow_review_skipped_budget")
+        record_error("reviewer_budget_skipped_delivered")
+        return {"final_answer": repaired, "issues": []}
+    # regex 通过 ≠ 修复稿没问题：再跑一次 LLM 深审复核。
+    # 旧版此处"regex 过即定稿"，修复稿从未被 LLM 看过，改写质量问题无人发现。
     repaired_review = workflow._reviewer.review_llm_only(
         repaired,
         state["chart_context"].chart,
@@ -268,33 +319,30 @@ def _repair_node(workflow, state: XianzhiGraphState) -> XianzhiGraphState:
         second_chart=second_chart.chart if second_chart else None,
         sui_text=build_sui_section(state["chart_context"].chart, intent),
     )
-    if repaired_review.ok and repaired_review.source == "llm":
-        # LLM 深审认为修复稿没问题 → 残留 issue 大概率是正则误报：仍按 repaired 定稿，
-        # 但把"疑似误报"落日志 + 指标，避免正则误报长期静默（用户可见内容不受影响）
-        log.warning(
-            "[Reflextion] {} 修复稿 regex 仍报 {} 条问题，但 LLM 深审判通过 → regex 疑似误报，按 repaired 定稿",
-            getattr(worker, "label", "?"),
-            len(regex_issues),
-        )
-        for i, issue in enumerate(regex_issues, 1):
-            log.warning("[Reflextion]   regex 残留issue[{}]: {}", i, issue)
-        record_error("reviewer_regex_likely_false_positive")
+    if repaired_review.degraded and repaired_review.source == "reviewer_unavailable":
+        record_error("reviewer_unavailable_delivered")
+        log.warning("[Reflextion] 修复后复核不可用，按统一策略下发修复稿")
+        return {"final_answer": repaired, "issues": []}
+    if repaired_review.degraded and repaired_review.source == "budget_skipped":
+        record_error("reviewer_budget_skipped_delivered")
+        log.warning("[Reflextion] 修复后预算耗尽跳过复核，按 P1-07 策略下发修复稿")
         return {"final_answer": repaired, "issues": []}
     if repaired_review.ok:
         log.info(
-            "[Reflextion] {} Worker 修复后 LLM 深审未生效（source={}），残留 issue 仅记日志",
+            "[Reflextion] {} Worker 修复后 regex + LLM 双通过 ✓ (source={})",
             getattr(worker, "label", "?"),
             repaired_review.source,
         )
-        return {"final_answer": repaired, "issues": regex_issues}
-    # 修复后仍未通过：issues 仅写日志，不再硬拼到用户可见回复中（之前的「口径校验：...」调试信息会泄露给用户，已移除）
+        return {"final_answer": repaired, "issues": []}
+    # LLM 层软问题：按修复稿下发（Reviewer 误报不应让用户完全拿不到回答），问题仅记录
+    record_error("answer_delivered_with_soft_issues")
     log.warning(
-        "[Reflextion] {} Worker 修复后仍未通过 ✗，降级返回 repaired (残留 {} 条 issue 仅记日志)",
+        "[Reflextion] {} Worker 修复后仍有 {} 条软问题，按修复稿定稿",
         getattr(worker, "label", "?"),
         len(repaired_review.issues),
     )
     for i, issue in enumerate(repaired_review.issues, 1):
-        log.warning("[Reflextion]   残留issue[{}]: {}", i, issue)
+        log.warning("[Reflextion]   soft issue[{}]: {}", i, issue)
     return {"final_answer": repaired, "issues": repaired_review.issues}
 
 
@@ -303,8 +351,11 @@ def _route_after_check(state: XianzhiGraphState) -> str:
     return "repair" if state.get("issues") else "end"
 
 
-def create_xianzhi_graph(workflow):
-    """构建编译后的 LangGraph 编排图；langgraph 未安装时直接抛 ImportError（硬依赖）。"""
+def create_xianzhi_graph(workflow, checkpointer=None):
+    """构建编译后的 LangGraph 编排图；langgraph 未安装时直接抛 ImportError（硬依赖）。
+
+    checkpointer 非空时，每个节点完成后落 checkpoint；同一 thread_id 重试可续跑。
+    """
     from langgraph.graph import END, StateGraph
 
     graph = StateGraph(XianzhiGraphState)
@@ -321,4 +372,4 @@ def create_xianzhi_graph(workflow):
     graph.add_edge("generate", "check")
     graph.add_conditional_edges("check", _route_after_check, {"repair": "repair", "end": END})
     graph.add_edge("repair", END)
-    return graph.compile()
+    return graph.compile(checkpointer=checkpointer)

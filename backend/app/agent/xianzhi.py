@@ -7,6 +7,8 @@
 from __future__ import annotations
 
 import asyncio
+import time
+import uuid
 from typing import Callable, Optional
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
@@ -20,6 +22,7 @@ from app.agent.birth_parse import (  # 解耦：生辰解析职责独立成模�
     record_bazi_display_order,
     resolve_bazi_selection,
 )
+from app.agent.checkpoint import delete_checkpoint_thread
 from app.agent.core.base_agent import AgentState, BaseAgent
 from app.agent.core.tool_call_agent import ToolCallAgent
 from app.agent.prompts import (
@@ -30,6 +33,7 @@ from app.agent.prompts import (
 )
 from app.agent.verdict import chart_with_verdict_sync
 from app.agent.workflow.orchestrator import XianzhiWorkflow
+from app.agent.workflow.workflow_budget import TurnBudgetExceeded, turn_budget
 from app.agent.workflow.workflow_models import WorkflowChartContext
 from app.agent.workflow.workflow_support import (
     build_chart_context,
@@ -39,6 +43,8 @@ from app.agent.workflow.workflow_support import (
 from app.core.config import settings
 from app.core.llm_throttle import LLMBusyError, llm_tag
 from app.core.logger import log
+from app.core.observability import record_error
+from app.core.privacy import safe_birth_time, safe_id, safe_text
 from app.core.thinking_router import use_thinking
 from app.domain.chart_builder import normalize_gender_text
 from app.domain.chart_format import find_birth_dates_from_pillars
@@ -48,6 +54,9 @@ from app.tools.bazi import _normalize_birth_time
 from app.tools.dsml import has_text_tool_calls, strip_text_tool_calls
 from app.tools.mcp_client import mcp_manager
 from app.tools.text_clean import clean_think_tags, dedupe_content, strip_user_input_boundary
+
+_TURN_TIMEOUT_FLAG = "__turn_timeout__"
+_TURN_TIMEOUT_TEXT = "本轮推演时间较长，已到达时限。可以把问题问得更具体，或稍后重试。"
 
 
 class Xianzhi(ToolCallAgent):
@@ -83,6 +92,10 @@ class Xianzhi(ToolCallAgent):
         self._workflow_context: WorkflowChartContext | None = None
         self._last_birth_info: Optional[dict] = None
         self._last_user_text: str = ""
+        # 本轮幂等 ID（client_msg_id）：同一 ID 重试时用于命中 checkpoint 续跑
+        self._turn_id: str = ""
+        # 本轮开始时间：ReAct/闲聊按整轮预算在步骤之间检查（工作流用 workflow_budget 上下文）
+        self._turn_started_at: float = time.monotonic()
         self._sect = 2
         self._yun_sect = 1
         self._bazi_pending: Optional[dict] = None  # 八字待确认候选: {"pillars","gender","candidates"}
@@ -103,6 +116,10 @@ class Xianzhi(ToolCallAgent):
         # MCP 工具签名缓存：None=尚未绑定；仅签名变化时才重新 bind_tools（见 think）
         self._mcp_tool_signature: Optional[tuple] = None
         self._lock = asyncio.Lock()
+
+    def set_turn_id(self, turn_id: str) -> None:
+        """设置本轮 client_msg_id；同一 ID 重试时工作流会从 checkpoint 续跑。"""
+        self._turn_id = (turn_id or "").strip()
 
     def set_chart_notifier(self, fn: Optional[Callable[[dict], None]]) -> None:
         """注册「命盘已挂载」回调（API 层每轮调用；传 None 注销）。
@@ -159,7 +176,29 @@ class Xianzhi(ToolCallAgent):
             self._workflow_context = None
             self._last_birth_info = None
             self._bazi_pending = None
+            # 会话归属随会话切换重置，避免把上一个会话的 user_id 带到新会话
+            self._user_id = ""
+            self._birth_persisted_key = None
         self._conversation_id = new_id
+
+    def clear_session_state(self):
+        """彻底清空会话级内存（删除会话时调用，不能只清 message_list）。
+
+        reset() 有意保留命盘上下文供同会话后续轮次使用；删除会话必须连
+        chart_context/_last_birth_info/_workflow_context/_bazi_pending 一起清掉，
+        否则 birth-info 仍会从内存读回旧生辰。
+        """
+        self.chart_context = ""
+        self._workflow_context = None
+        self._last_birth_info = None
+        self._bazi_pending = None
+        self._birth_persisted_key = None
+        self._user_id = ""
+        self._chart_notified_key = None
+        self._last_user_text = ""
+        self._birth_signal = False
+        self._turn_id = ""
+        self.reset()
 
     def reset(self):
         """重置 Agent 运行状态（父类 run_stream 会调用，需补齐）。
@@ -183,6 +222,7 @@ class Xianzhi(ToolCallAgent):
         self._sect = 2
         self._yun_sect = 1
         self._history_len = 0
+        self._turn_started_at = time.monotonic()
         # 每轮重置「已通知」标记：同一张盘在新的一轮仍要再通知一次
         # （客户端可能刚重建页面/换端接入，拿不到通知就靠 birth-info 接口兜底）
         self._chart_notified_key = None
@@ -235,7 +275,13 @@ class Xianzhi(ToolCallAgent):
                 "longitude": longitude,
                 "user_id": self._user_id,
             }
-            log.info("已挂载命盘上下文: {} {} user={} longitude={}", birth_time, gender, user_id, longitude)
+            log.info(
+                "已挂载命盘上下文: {} {} user={} longitude={}",
+                safe_birth_time(birth_time),
+                gender,
+                safe_id(user_id),
+                longitude,
+            )
             # 挂上盘就立刻通知前端（不等回答流完，避免 socket 断开时通知一起丢）
             self._fire_chart_notifier()
         except Exception as e:
@@ -293,7 +339,7 @@ class Xianzhi(ToolCallAgent):
         # 模糊生辰检测：精确正则没抓到但用户确实在提供生辰信息
         if detect_birth_signal(text):
             self._birth_signal = True
-            log.info("[xianzhi] 检测到疑似生辰信号，不走闲聊短路: {}", (text or "")[:80])
+            log.info("[xianzhi] 检测到疑似生辰信号，不走闲聊短路: {}", safe_text(text, 80))
         return False
 
     def _build_messages(self):
@@ -341,6 +387,17 @@ class Xianzhi(ToolCallAgent):
         工具集按签名缓存：仅当 MCP 工具集合变化时才重新 bind_tools，
         避免每个 ReAct 步骤都重建工具列表与绑定。
         """
+        elapsed = time.monotonic() - self._turn_started_at
+        if elapsed > settings.chat_turn_budget:
+            record_error("chat_turn_timeout")
+            log.warning(
+                "[xianzhi] ReAct 轮次超时（{:.0f}s / {:.0f}s），终止本轮",
+                elapsed,
+                settings.chat_turn_budget,
+            )
+            self._last_error = _TURN_TIMEOUT_FLAG
+            self.state = AgentState.ERROR
+            return False
         if mcp_manager.available:
             mcp_tools = mcp_manager.get_tools()
             signature = tuple(t.name for t in mcp_tools)
@@ -372,7 +429,11 @@ class Xianzhi(ToolCallAgent):
                     bt = args.get("birth_time")
                     gd = args.get("gender")
                     if bt and gd:
-                        log.info("[xianzhi] 从工具调用提取出生信息: {} {}", bt, gd)
+                        log.info(
+                            "[xianzhi] 从工具调用提取出生信息: {} {}",
+                            safe_birth_time(bt),
+                            gd,
+                        )
                         # 工具调用不含出生地，从用户原始输入补充提取（用于真太阳时校正）
                         bp = extract_birth_place(self._last_user_text) if self._last_user_text else None
                         self.set_chart_context(bt, gd, self._sect, self._yun_sect, birth_place=bp or "")
@@ -441,6 +502,8 @@ class Xianzhi(ToolCallAgent):
         _filter_steps（同步路径）与 arun_stream（异步路径）共用，
         统一"final → 错误兜底 → 无文本"三段式收尾口径（含 _dedupe_content 去重）。
         """
+        if self._last_error == _TURN_TIMEOUT_FLAG:
+            return _TURN_TIMEOUT_TEXT
         final = (self.final_answer or "").strip()
         # 最后一道防线：ReAct 已就地还原文本工具调用，但 workflow / 闲聊路径的模型
         # 输出同样可能带协议标记（降级链首位 deepseek-v4.1-flash 会在 content 里
@@ -498,9 +561,17 @@ class Xianzhi(ToolCallAgent):
         if not self._workflow_context:
             raise RuntimeError("workflow context is not mounted")
         history = list(history_snapshot) if history_snapshot is not None else list(self.message_list)
-        # workflow 标签覆盖整条链路（拆分/分类→生成→审核→修复），成本归因不落 unknown
-        with llm_tag("workflow"):
-            return self._workflow.answer(user_prompt, self._workflow_context, history, summary)
+        turn_id = self._turn_id or uuid.uuid4().hex[:16]
+        thread_id = f"{self._conversation_id}:{turn_id}"
+        # workflow 标签覆盖整条链路（拆分/分类→生成→审核→修复），成本归因不落 unknown；
+        # turn_budget 给整轮一个 deadline，各阶段 LLM 调用共享剩余时间
+        with llm_tag("workflow"), turn_budget(settings.chat_turn_budget):
+            answer = self._workflow.answer(
+                user_prompt, self._workflow_context, history, summary, turn_id=thread_id
+            )
+        # 本轮已成功完成，删除 checkpoint；异常路径不删，留待同 turn_id 重试续跑
+        delete_checkpoint_thread(thread_id)
+        return answer
 
     def _execute_workflow(self, user_prompt: str, history_snapshot, summary: str) -> str:
         """执行一轮 workflow 并更新 agent 状态，返回回答文本（同步/异步路径共用）。"""
@@ -521,6 +592,10 @@ class Xianzhi(ToolCallAgent):
             history_snapshot = list(self.message_list)
             summary = self._get_session_summary()
             yield self._execute_workflow(user_prompt, history_snapshot, summary)
+        except TurnBudgetExceeded as e:
+            record_error("workflow_turn_timeout")
+            log.warning("[xianzhi] workflow 轮次超时: {}", e)
+            yield _TURN_TIMEOUT_TEXT
         except LLMBusyError as e:
             log.info("[xianzhi] LLM 繁忙或熔断: {}", e)
             yield "当前咨询人数较多，请稍后再试。"
@@ -543,6 +618,10 @@ class Xianzhi(ToolCallAgent):
             summary = await asyncio.to_thread(self._get_session_summary)
             answer = await asyncio.to_thread(self._execute_workflow, user_prompt, history_snapshot, summary)
             yield answer
+        except TurnBudgetExceeded as e:
+            record_error("workflow_turn_timeout")
+            log.warning("[xianzhi] workflow 轮次超时: {}", e)
+            yield _TURN_TIMEOUT_TEXT
         except LLMBusyError as e:
             log.info("[xianzhi] LLM 繁忙或熔断: {}", e)
             yield "当前咨询人数较多，请稍后再试。"
@@ -596,8 +675,16 @@ class Xianzhi(ToolCallAgent):
                         content=(f"【最近对话】\n{history_ctx}\n\n【用户说】\n{user_prompt}\n\n请正面回应，简短直接。")
                     ),
                 ]
+                remaining = settings.chat_turn_budget - (time.monotonic() - self._turn_started_at)
+                if remaining < 5:
+                    record_error("chat_turn_timeout")
+                    self._last_error = _TURN_TIMEOUT_FLAG
+                    self.state = AgentState.ERROR
+                    return _TURN_TIMEOUT_TEXT
                 with llm_tag("chitchat"):
-                    response = self.chat_model.invoke(messages)
+                    response = self.chat_model.bind(
+                        timeout=min(settings.llm_timeout, remaining)
+                    ).invoke(messages)
                 content = (getattr(response, "content", "") or "").strip()
                 content = clean_think_tags(content)
                 # 闲聊路径同样可能被模型回显 "--- USER INPUT BEGIN/END ---" 边界标记，
@@ -744,7 +831,7 @@ class Xianzhi(ToolCallAgent):
                 )
             ]
             if filtered:
-                self._memory.add(self._conversation_id, filtered)
+                self._memory.add(self._conversation_id, filtered, user_id=self._user_id)
         # 每 6 轮对话（一问一答=1轮，约12条消息）触发摘要（异步线程，不阻塞主流程）
         from app.memory.summarizer import maybe_summarize
 
@@ -778,6 +865,7 @@ class Xianzhi(ToolCallAgent):
             log.warning("[xianzhi] cleanup 持久化出生信息失败: {}", e)
         # 命盘上下文持久化到会话：不清空，下一轮同会话仍可用
         # 仅在切换会话（set_conversation_id）时才主动清空
+        self._turn_id = ""
         super().cleanup()
 
 

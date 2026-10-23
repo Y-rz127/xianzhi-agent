@@ -66,8 +66,9 @@ Xianzhi.run_stream / arun_stream（xianzhi.py）
 
 边：`classify→chart→retrieve→generate→check` 为普通边；
 `check` 挂条件路由 `route_after_check`（`issues 非空 → repair`，否则 `END`）；`repair→END`。
-当前 `graph.compile()` **未配置 checkpointer**（断点续跑/人工中断属 LangGraph 框架原生能力，
-代码暂未启用，为全自动流水线）。
+`graph.compile()` 已接入 **Postgres checkpointer**（`app/agent/checkpoint.py`）：thread_id 为
+`conversation_id:client_msg_id`，异常中断后同一 ID 重试从最后完成节点续跑，成功即删除该 thread；
+`CHECKPOINTER_ENABLED=false` 或 PG 不可用时自动退回无断点模式。人工中断（Human-in-the-Loop）暂未启用。
 
 ### 三种角色
 
@@ -449,8 +450,8 @@ LLM 只做解读，不得自行推算干支（`WORKFLOW_FACT_REDLINE` 与 Review
   图内 `generate`/`repair` 的 LLM 调用自动读取
 
 当前为单层 Graph（6 节点）。`create_xianzhi_graph()` 返回编译后的图，
-结构上可作为一个节点嵌入更大的 Supervisor Graph（子图嵌套为 LangGraph 原生能力，
-代码暂未使用）；checkpointer 与 Human-in-the-Loop 亦为框架原生支持，暂未启用。
+结构上可作为一个节点嵌套进更大的 Supervisor Graph（子图嵌套为 LangGraph 原生能力，
+代码暂未使用）；checkpointer 已启用，Human-in-the-Loop 暂未启用。
 
 ## 文件结构
 

@@ -58,3 +58,42 @@ def close_pool() -> None:
                 log.warning("关闭 PG 连接池失败: {}", e)
             finally:
                 pg_pool = None
+
+
+# LangGraph checkpointer 专用池：psycopg 需要 dict_row 行工厂；
+# 不能复用业务池（业务代码大量按 tuple 取值，改全局 row_factory 会破坏现有查询）。
+checkpoint_pool = None
+checkpoint_pool_lock = threading.Lock()
+
+
+def get_checkpoint_pool():
+    """懒创建 checkpointer 专用连接池（dict_row + autocommit）。"""
+    global checkpoint_pool
+    with checkpoint_pool_lock:
+        if checkpoint_pool is None:
+            from psycopg.rows import dict_row
+            from psycopg_pool import ConnectionPool
+
+            checkpoint_pool = ConnectionPool(
+                settings.pg_dsn(),
+                min_size=1,
+                max_size=2,
+                timeout=settings.pg_pool_timeout,
+                kwargs={"autocommit": True, "row_factory": dict_row},
+                check=check_connection,
+                max_lifetime=1800,
+                open=True,
+            )
+        return checkpoint_pool
+
+
+def close_checkpoint_pool() -> None:
+    global checkpoint_pool
+    with checkpoint_pool_lock:
+        pool = checkpoint_pool
+        checkpoint_pool = None
+    if pool is not None:
+        try:
+            pool.close()
+        except Exception as e:
+            log.warning("关闭 checkpointer 连接池失败: {}", e)
