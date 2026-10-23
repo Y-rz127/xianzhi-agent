@@ -7,6 +7,8 @@ langchain-core>=1.0.0,<2.0.0
 langchain-openai>=1.0.0,<2.0.0
 langchain-community>=0.4.0,<0.5.0
 langgraph>=1.0.0,<2.0.0
+# 断点恢复：LangGraph Postgres checkpointer（每轮状态落库，进程重启后可续跑）
+langgraph-checkpoint-postgres>=3.2.0,<4.0.0
 
 # Web 框架
 fastapi>=0.115.0,<1.0.0

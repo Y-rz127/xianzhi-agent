@@ -68,6 +68,10 @@ class Settings(BaseSettings):
     # kimi-k3 等模型不接受 temperature 参数，显式设置会被 400 拒绝；
     # 使用 qwen 等支持采样温度的模型时可设 LLM_TEMPERATURE=0.7
     llm_temperature: Optional[float] = Field(default=None, alias="LLM_TEMPERATURE")
+    # 不接受 temperature 参数的模型前缀（逗号分隔），代码会自动省略该参数
+    llm_no_temperature_models: str = Field(default="kimi-k3", alias="LLM_NO_TEMPERATURE_MODELS")
+    # 启动后探测降级链每个模型是否可用（后台执行，不阻塞端口监听）
+    llm_chain_probe_enabled: bool = Field(default=True, alias="LLM_CHAIN_PROBE_ENABLED")
     llm_enable_thinking: bool = Field(default=False, alias="LLM_ENABLE_THINKING")
     llm_timeout: float = Field(default=60.0, alias="LLM_TIMEOUT")
     llm_max_retries: int = Field(default=2, alias="LLM_MAX_RETRIES")
@@ -95,12 +99,18 @@ class Settings(BaseSettings):
     llm_price_map: str = Field(default="", alias="LLM_PRICE_MAP")
 
     # 服务
+    # 默认 production（安全默认）：未显式设 APP_ENV=dev 时按生产处理，LangSmith 强制关闭
+    app_env: str = Field(default="production", alias="APP_ENV")
     app_port: int = Field(default=8123, alias="APP_PORT")
     debug: bool = Field(default=False, alias="DEBUG")
     # 代码热重载（仅本地开发）：改 .py 保存即重启，强制单进程，勿用于生产
     reload: bool = Field(default=False, alias="RELOAD")
-    # API 鉴权：逗号分隔的 API Key 列表，为空表示关闭鉴权（本地开发默认）
+    # API 鉴权：逗号分隔的 API Key 列表，供机器/CLI 使用；管理后台浏览器改用短时令牌
     api_keys: str = Field(default="", alias="API_KEYS")
+    # 管理员短时令牌签名密钥（多副本必须一致）；缺失时回退 API_KEYS
+    admin_session_secret: str = Field(default="", alias="ADMIN_SESSION_SECRET")
+    # 管理员令牌有效期（秒），默认 2 小时
+    admin_token_ttl_seconds: int = Field(default=7200, alias="ADMIN_TOKEN_TTL_SECONDS")
     # 限流：单 IP 每分钟最大请求数（0=不限流）
     # 默认 300：开发机上所有客户端共用 127.0.0.1 一个桶，60 太紧（一次切会话+排盘就能打满，
     # 表现为 /metrics 与 WS 握手连片 429）；生产经 RATE_LIMIT_PER_MINUTE 覆盖。
@@ -120,7 +130,18 @@ class Settings(BaseSettings):
 
     # Agent
     agent_max_steps: int = Field(default=8, alias="AGENT_MAX_STEPS")
-    # 工作流 LLM 超时（秒）：生成/修复产出长文本（含思维链），60s 默认不够
+    # LangGraph Postgres checkpointer（断点恢复）：PG 不可用时自动降级为无断点
+    checkpoint_enabled: bool = Field(default=True, alias="CHECKPOINTER_ENABLED")
+    # 会话 Redis 锁租约（秒）：持有期间按 1/3 周期自动续租，进程崩溃后最多这么久解锁
+    session_lock_ttl_seconds: int = Field(default=60, alias="SESSION_LOCK_TTL_SECONDS")
+    # 单轮对话总时限（秒）：工作流/ReAct/闲聊共用，防止多阶段超时叠加
+    chat_turn_budget: float = Field(default=180.0, alias="CHAT_TURN_BUDGET")
+    # 工作流各阶段上限（秒）；实际调用再取 min(阶段上限, 剩余预算)
+    workflow_decompose_timeout: float = Field(default=15.0, alias="WORKFLOW_DECOMPOSE_TIMEOUT")
+    workflow_generate_timeout: float = Field(default=100.0, alias="WORKFLOW_GENERATE_TIMEOUT")
+    workflow_review_timeout: float = Field(default=60.0, alias="WORKFLOW_REVIEW_TIMEOUT")
+    workflow_repair_timeout: float = Field(default=50.0, alias="WORKFLOW_REPAIR_TIMEOUT")
+    # 无预算场景（脚本/测试直接调用）的兜底单次 LLM 超时
     workflow_llm_timeout: float = Field(default=180.0, alias="WORKFLOW_LLM_TIMEOUT")
 
     # 并发与连接池
@@ -136,6 +157,16 @@ class Settings(BaseSettings):
 
     # 搜索 API
     search_api_key: str = Field(default="", alias="SEARCH_API_KEY")
+    # 网页抓取工具：默认关闭；开启后仅允许公网 HTTP/HTTPS，禁止私网/metadata
+    web_scrape_enabled: bool = Field(default=False, alias="WEB_SCRAPE_ENABLED")
+    # 可选域名白名单（逗号分隔）；留空=任意公网域名
+    web_scrape_allowed_hosts: str = Field(default="", alias="WEB_SCRAPE_ALLOWED_HOSTS")
+    # 付费接口日配额（0=不限；登录用户按账号，游客按 IP + paid_quota_guest_daily）
+    paid_quota_report_daily: int = Field(default=10, alias="PAID_QUOTA_REPORT_DAILY")
+    paid_quota_asr_daily: int = Field(default=100, alias="PAID_QUOTA_ASR_DAILY")
+    paid_quota_tts_daily: int = Field(default=50, alias="PAID_QUOTA_TTS_DAILY")
+    paid_quota_interpret_daily: int = Field(default=50, alias="PAID_QUOTA_INTERPRET_DAILY")
+    paid_quota_guest_daily: int = Field(default=30, alias="PAID_QUOTA_GUEST_DAILY")
 
     # 运行时数据根目录（绝对路径；memory/vector_db/命例回退 JSON 均落在此目录下）
     data_dir: Path = Field(default=BACKEND_ROOT / "data", alias="DATA_DIR")
@@ -149,6 +180,8 @@ class Settings(BaseSettings):
 
     # MCP 服务
     amap_maps_api_key: str = Field(default="", alias="AMAP_MAPS_API_KEY")
+    # 固定 MCP npm 包版本，避免运行时 npx -y 拉取任意最新版本（供应链风险）
+    amap_mcp_version: str = Field(default="0.0.8", alias="AMAP_MCP_VERSION")
     pexels_api_key: str = Field(default="", alias="PEXELS_API_KEY")
 
     # RAG 知识库
@@ -191,16 +224,26 @@ class Settings(BaseSettings):
     embedding_local_fallback: bool = Field(default=True, alias="EMBEDDING_LOCAL_FALLBACK")
     # 检索结果缓存 TTL（秒），0=不缓存；避免多轮对话重复调用 embedding
     rag_search_cache_ttl: int = Field(default=60, alias="RAG_SEARCH_CACHE_TTL")
+    # 是否在启动时构建/加载 RAG 索引（CI/集成测试可关闭，避免真实 embedding 调用）
+    rag_init_enabled: bool = Field(default=True, alias="RAG_INIT_ENABLED")
     # Embedding 批量参数：单次请求最大条数与总字符上限。
     # DashScope 部分文本嵌入模型（如 qwen 系 flash）在长输入/大批量下会"挂死不返回"而非报错，
     # 收敛到安全的条数与总字符数可避免这类模型把全量重建拖到超时（详见 embeddings.py）。
     embedding_batch_size: int = Field(default=10, alias="EMBEDDING_BATCH_SIZE")
     embedding_max_chars_per_batch: int = Field(default=6000, alias="EMBEDDING_MAX_CHARS_PER_BATCH")
 
-    # LangSmith 可观测性
+    # LangSmith 可观测性（生产环境强制禁用，避免生辰/问答原文出境）
     langsmith_api_key: str = Field(default="", alias="LANGSMITH_API_KEY")
     langsmith_project: str = Field(default="xianzhi-agent", alias="LANGSMITH_PROJECT")
     langsmith_tracing: bool = Field(default=False, alias="LANGSMITH_TRACING")
+
+    # 隐私与数据治理
+    # 默认不把用户原文/回答写进日志（仅 DEBUG 排查时手动打开）
+    log_llm_content: bool = Field(default=False, alias="LOG_LLM_CONTENT")
+    # 用户消息/命盘数据保留天数（0=不自动清理；生产建议 90）
+    message_retention_days: int = Field(default=90, alias="MESSAGE_RETENTION_DAYS")
+    # 异常中断残留的 checkpoint 清理时长（小时；0=不清理）
+    checkpoint_retention_hours: int = Field(default=24, alias="CHECKPOINT_RETENTION_HOURS")
 
     # 微信小程序登录
     wechat_appid: str = Field(default="", alias="WECHAT_APPID")

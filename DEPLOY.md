@@ -70,7 +70,7 @@ CloudBase 云托管支持两种方式：
 |--------|-----------|
 | 监听端口 | 平台注入 `PORT`（默认 80），`main.py` 已优先读取，无需改代码 |
 | 健康检查路径 | `/api/health`（代码已提供） |
-| 环境变量 | 见 `.env.example` 全部项；重点：`POSTGRES_CONNECTION_STRING`、`DASHSCOPE_API_KEY`、`VECTOR_STORE_TYPE=postgres`、`MEMORY_STORE_TYPE=postgres`、`CORS_ORIGINS`、`REDIS_URL`、`TRUST_PROXY_HEADERS=true`、`LLM_MAX_CONCURRENCY` |
+| 环境变量 | 见 `.env.example` 全部项；重点：`POSTGRES_CONNECTION_STRING`、`DASHSCOPE_API_KEY`、`VECTOR_STORE_TYPE=postgres`、`MEMORY_STORE_TYPE=postgres`、`CORS_ORIGINS`、`REDIS_URL`、`TRUST_PROXY_HEADERS=true`、`LLM_MAX_CONCURRENCY`、`ADMIN_SESSION_SECRET`（管理后台令牌签名密钥，多副本必须一致） |
 | 内存 / 超时 | 建议内存 ≥ 1GB、请求超时 ≥ 60s（LLM 调用较慢） |
 
 > 改动点：`main.py` 的 `uvicorn` 启动已改为优先读 `PORT`；`Dockerfile` 的 `EXPOSE 80`；
