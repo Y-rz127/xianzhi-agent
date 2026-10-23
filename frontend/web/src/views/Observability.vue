@@ -11,7 +11,7 @@
         </div>
         <div>
           <h2 class="text-glow-soft">监测台</h2>
-          <div class="header-info">API 指标监控 · 每 5 秒自动刷新</div>
+          <div class="header-info">API 指标监控 · 每 15 秒自动刷新</div>
         </div>
       </div>
       <div class="header-right">
@@ -530,7 +530,7 @@ async function savePrice() {
 onMounted(() => {
   loadMetrics()
   loadChain()
-  timer = setInterval(loadMetrics, 7000)    // 每 7 秒刷新一次
+  timer = setInterval(loadMetrics, 15000)    // 每 15 秒刷新一次
 })
 
 onUnmounted(() => {

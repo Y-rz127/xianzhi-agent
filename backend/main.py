@@ -417,16 +417,36 @@ async def security_headers_middleware(request, call_next):
 @app.middleware("http")
 async def metrics_middleware(request: Request, call_next):
     """记录 API 请求指标，跳过静态资源与健康检查路径。"""
-    path = request.url.path
+    raw_path = request.url.path
     if (
-        path.startswith("/assets/")
-        or path.startswith("/static/")
-        or path in ("/health", "/api/health", "/api/ai/health")
+        raw_path.startswith("/assets/")
+        or raw_path.startswith("/static/")
+        or raw_path in ("/health", "/api/health", "/api/ai/health")
     ):
         return await call_next(request)
 
     start = time.perf_counter()
     response = await call_next(request)
+    # 指标 key 用路由模板而非原始 URL：带路径参数的路由（sessions/{id} 等 27 处）
+    # 若按原始 path 记账，每个不同 id 都会在 _metrics["endpoints"] 常驻一个 key，
+    # 只增不减，用户量上来后缓慢涨内存且拖慢 get_metrics 全量遍历。
+    # 做法：路由匹配后 scope 带 path_params，把原始 path 中等于参数值的段替换为 {参数名}，
+    # 保留完整前缀（route.path 只是相对路径，会丢 /api/ai/xianzhi 等前缀，不上）；
+    # 参数值含 "/"（:path 转换器）时逐段替换失效，退回 route.path 保底有界；
+    # 未匹配到路由（404）统一归并 "(unmatched)"，原始路径仍可从 recent_errors 观测。
+    route = request.scope.get("route")
+    if route is None:
+        path = "(unmatched)"
+    else:
+        path_params = request.scope.get("path_params") or {}
+        if any("/" in str(v) for v in path_params.values()):
+            path = route.path
+        else:
+            name_by_value = {str(v): name for name, v in path_params.items()}
+            path = "/".join(
+                "{" + name_by_value[seg] + "}" if seg in name_by_value else seg
+                for seg in raw_path.split("/")
+            )
     record_request(request.method, path, response.status_code, time.perf_counter() - start)
     return response
 
