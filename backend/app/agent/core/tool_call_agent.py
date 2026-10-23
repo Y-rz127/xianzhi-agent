@@ -7,6 +7,8 @@ from app.agent.core.base_agent import AgentState
 from app.agent.core.react_agent import ReActAgent
 from app.core.llm_throttle import llm_tag
 from app.core.logger import log
+from app.core.privacy import safe_text
+from app.core.prompt_safety import guard_tool_output
 from app.tools.dsml import has_text_tool_calls, parse_text_tool_calls
 from app.tools.text_clean import clean_think_tags, strip_user_input_boundary
 
@@ -81,7 +83,7 @@ class ToolCallAgent(ReActAgent):
             self.final_answer = cleaned or ("" if tool_calls else raw_content)
             log.info("{} Step {}: 选择了 {} 个工具", self.name, self._current_step, len(tool_calls))
             for tc in tool_calls:
-                log.info("  工具: {}, 参数: {}", tc.get("name"), tc.get("args"))
+                log.info("  工具: {}, 参数: {}", tc.get("name"), safe_text(str(tc.get("args")), 120))
             self.message_list.append(ai_msg)
             return len(tool_calls) > 0
         except Exception as e:
@@ -109,6 +111,8 @@ class ToolCallAgent(ReActAgent):
                 else:
                     tool_args = self._align_args(tool, tool_args)
                     content = str(tool.invoke(tool_args))
+                    # 联网/抓取/MCP/知识库等非确定性输出按资料隔离，防止间接提示注入
+                    content = guard_tool_output(tool_name, content)
                     if tool_name == "do_terminate":
                         terminated = True
             except Exception as e:

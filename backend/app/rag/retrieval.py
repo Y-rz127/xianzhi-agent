@@ -12,6 +12,7 @@ import concurrent.futures
 import threading
 
 from app.core.logger import log
+from app.core.privacy import safe_text
 from app.domain.domain_keywords import DOMAIN_KEYWORDS, detect_domain
 from app.rag.vector_store import get_knowledge_base
 
@@ -283,7 +284,7 @@ def retrieve_for_context(
             raw[i] = fut.result()
         except Exception as e:  # 单条失败不影响其它 query
             if verbose:
-                log.warning("[检索] query={} 检索异常: {}", queries[i], e)
+                log.warning("[检索] query={} 检索异常: {}", safe_text(queries[i], 40), e)
             raw[i] = []
 
     docs = []
@@ -293,7 +294,7 @@ def retrieve_for_context(
         results = raw.get(idx - 1, [])
         if not results:
             if verbose:
-                log.info("[检索] [{}/{}] query={} 无匹配", idx, len(queries), q)
+                log.info("[检索] [{}/{}] query={} 无匹配", idx, len(queries), safe_text(q, 40))
             continue
         # 只取 top-1 最相关 chunk；与已选结果重复则丢弃该 query
         # （次优候选往往相关性下降，强行选用会引入噪音知识）
@@ -302,7 +303,12 @@ def retrieve_for_context(
         if key in seen:
             dedup_count += 1
             if verbose:
-                log.info("[检索] [{}/{}] query={} top-1与已选结果重复，跳过", idx, len(queries), q)
+                log.info(
+                    "[检索] [{}/{}] query={} top-1与已选结果重复，跳过",
+                    idx,
+                    len(queries),
+                    safe_text(q, 40),
+                )
             continue
         seen.add(key)
         # 单 chunk 截断兜底
@@ -313,7 +319,13 @@ def retrieve_for_context(
         docs.append((q, doc))
         if verbose:
             preview = doc.page_content.replace("\n", " ")[:200]
-            log.info("[检索] [{}/{}] query={} 命中={}字", idx, len(queries), q, len(doc.page_content))
+            log.info(
+                "[检索] [{}/{}] query={} 命中={}字",
+                idx,
+                len(queries),
+                safe_text(q, 40),
+                len(doc.page_content),
+            )
             log.info("[检索] [{}/{}] 内容预览: {}", idx, len(queries), preview)
         if len(docs) >= max_docs:
             break

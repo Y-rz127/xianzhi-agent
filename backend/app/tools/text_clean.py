@@ -20,6 +20,9 @@ _USER_INPUT_BOUNDARY_RE = re.compile(
     r"---\s*USER\s+INPUT\s+BEGIN\s*---[\s\S]*?---\s*USER\s+INPUT\s+END\s*---"
 )
 
+# 检索资料隔离标记：模型可能把标记原样复述给用户，只剥标记、保留正文
+_DATA_MARKER_RE = re.compile(r"<<<\s*/?\s*DATA_(?:BEGIN|END)[^>]*>>>", re.IGNORECASE)
+
 
 def clean_think_tags(content: str) -> str:
     """移除 LLM 输出中的 thinking 推理过程标签（含未闭合的流式中断场景）。"""
@@ -54,6 +57,7 @@ def strip_user_input_boundary(content: str) -> str:
     if not content:
         return content
     cleaned = _USER_INPUT_BOUNDARY_RE.sub("", content)
+    cleaned = _DATA_MARKER_RE.sub("", cleaned)
     # 清理剥离后可能残留的多余空行
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
     return cleaned

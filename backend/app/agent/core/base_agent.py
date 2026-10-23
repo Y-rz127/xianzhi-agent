@@ -10,6 +10,7 @@ from enum import Enum
 from langchain_core.messages import HumanMessage
 
 from app.core.logger import log
+from app.core.privacy import safe_text
 
 
 class AgentState(str, Enum):
@@ -104,10 +105,10 @@ class BaseAgent(ABC):
             try:
                 for status, text in self._run_steps(user_prompt):
                     if status == "result":
-                        log.info("Step {}: {}", self.current_step, text)
+                        log.info("Step {}: {}", self.current_step, safe_text(text, 80))
                         q.put(text)
                     elif status == "error":
-                        log.info("执行错误: {}", text)
+                        log.info("执行错误: {}", safe_text(text, 80))
                         q.put("__ERROR__:" + text)
                     elif status == "max_steps":
                         q.put("__MAX_STEPS__")
@@ -140,10 +141,10 @@ class BaseAgent(ABC):
             try:
                 for status, text in self._run_steps(user_prompt):
                     if status == "result":
-                        log.info("Step {}: {}", self.current_step, text)
+                        log.info("Step {}: {}", self.current_step, safe_text(text, 80))
                         loop.call_soon_threadsafe(q.put_nowait, text)
                     elif status == "error":
-                        log.info("执行错误: {}", text)
+                        log.info("执行错误: {}", safe_text(text, 80))
                         loop.call_soon_threadsafe(q.put_nowait, "__ERROR__:" + text)
                     elif status == "max_steps":
                         loop.call_soon_threadsafe(q.put_nowait, "__MAX_STEPS__")

@@ -7,7 +7,9 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import shutil
+import tempfile
 import traceback
 from typing import Any
 
@@ -16,6 +18,58 @@ from pydantic import BaseModel, Field
 
 from app.core.config import settings
 from app.core.logger import log
+
+# MCP 子进程只继承运行 Node 所需的环境变量；绝不把模型/数据库/管理密钥传进去
+_MCP_ENV_ALLOWLIST = {
+    "PATH",
+    "PATHEXT",
+    "SYSTEMROOT",
+    "SYSTEMDRIVE",
+    "WINDIR",
+    "COMSPEC",
+    "HOME",
+    "USERPROFILE",
+    "APPDATA",
+    "LOCALAPPDATA",
+    "TEMP",
+    "TMP",
+    "TMPDIR",
+    "LANG",
+    "LC_ALL",
+    "PROGRAMFILES",
+    "PROGRAMFILES(X86)",
+    "PROGRAMDATA",
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "NO_PROXY",
+    "ALL_PROXY",
+    "NPM_CONFIG_REGISTRY",
+    "npm_config_registry",
+}
+_DEFAULT_AMAP_MCP_VERSION = "0.0.8"
+
+
+def _pinned_amap_package() -> str:
+    """固定 MCP 包版本，避免 npx 每次拉取最新版。"""
+    version = (settings.amap_mcp_version or "").strip() or _DEFAULT_AMAP_MCP_VERSION
+    if not re.fullmatch(r"\d+\.\d+\.\d+(?:[-.][0-9A-Za-z]+)*", version):
+        version = _DEFAULT_AMAP_MCP_VERSION
+    return f"@amap/amap-maps-mcp-server@{version}"
+
+
+def _mcp_child_env(nodejs_dir: str | None = None) -> dict[str, str]:
+    """构造最小环境变量集合，只保留 Node 运行所需项与 AMap Key。"""
+    child_env = {
+        key: value for key, value in os.environ.items() if key.upper() in _MCP_ENV_ALLOWLIST
+    }
+    child_env["AMAP_MAPS_API_KEY"] = settings.amap_maps_api_key
+    child_env["npm_config_cache"] = os.path.join(tempfile.gettempdir(), "xianzhi-mcp-npm-cache")
+    if nodejs_dir:
+        path_key = next((k for k in child_env if k.upper() == "PATH"), "PATH")
+        current_path = child_env.get(path_key, "")
+        if nodejs_dir not in current_path:
+            child_env[path_key] = nodejs_dir + os.pathsep + current_path
+    return child_env
 
 
 class _MCPToolSchema(BaseModel):
@@ -127,17 +181,12 @@ class MCPManager:
             log.warning("未找到 npx，跳过 MCP（请确认已安装 Node.js 并重启终端）")
             return
 
-        # 继承当前环境变量，追加 API Key
-        child_env = {**os.environ, "AMAP_MAPS_API_KEY": settings.amap_maps_api_key}
-        # 确保 Node.js 目录在子进程 PATH 中（npx 运行时需要找到 node.exe）
-        if nodejs_dir:
-            current_path = child_env.get("PATH", child_env.get("Path", ""))
-            if nodejs_dir not in current_path:
-                child_env["PATH"] = nodejs_dir + os.pathsep + current_path
-
+        package = _pinned_amap_package()
+        child_env = _mcp_child_env(nodejs_dir)
+        log.info("MCP 包版本已固定: {}", package)
         server_params = StdioServerParameters(
             command=npx_cmd,
-            args=["-y", "@amap/amap-maps-mcp-server"],
+            args=["-y", package],
             env=child_env,
         )
 
@@ -166,11 +215,11 @@ class MCPManager:
                 self._ready.set()
 
         self._task = asyncio.create_task(_run())
-        # 等待就绪或失败，最多 30 秒（避免启动长时间阻塞）
+        # 等待就绪或失败，最多 60 秒：固定版本首次启动需要 npx 下载包，30s 在冷缓存下不够
         try:
-            await asyncio.wait_for(self._ready.wait(), timeout=30)
+            await asyncio.wait_for(self._ready.wait(), timeout=60)
         except asyncio.TimeoutError:
-            log.warning("MCP 启动超时（30s），跳过")
+            log.warning("MCP 启动超时（60s），跳过")
 
     async def stop(self) -> None:
         self._stop.set()
