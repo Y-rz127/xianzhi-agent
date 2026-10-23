@@ -429,8 +429,12 @@ const viewCase = (c: ChartCase) => {
   })
 }
 
-const handleExport = () => {
-  exportChartCasesJSON()
+const handleExport = async () => {
+  try {
+    await exportChartCasesJSON()
+  } catch (err: any) {
+    showToast(err?.message || "导出失败", "error")
+  }
 }
 
 const triggerImport = () => {

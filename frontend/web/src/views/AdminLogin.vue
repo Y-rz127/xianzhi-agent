@@ -60,7 +60,7 @@ async function handleLogin() {
 
   try {
     const result = await adminLogin(username.value, password.value)
-    setAdminLoggedIn()
+    setAdminLoggedIn(result.token, result.expires_in)
     const redirect = (router.currentRoute.value.query.redirect as string) || "/user-admin"
     router.push(redirect)
   } catch (e: any) {

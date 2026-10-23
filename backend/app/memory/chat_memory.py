@@ -52,8 +52,11 @@ class FileBasedChatMemory:
             log.warning("读取记忆失败 {}: {}", conversation_id, e)
             return []
 
-    def add(self, conversation_id, messages):
-        """追加消息到会话（读-改-写整体持锁，避免并发覆盖丢消息）。"""
+    def add(self, conversation_id, messages, user_id=""):
+        """追加消息到会话（读-改-写整体持锁，避免并发覆盖丢消息）。
+
+        文件存储不持久化会话归属，user_id 仅为与 PG 实现保持同一调用签名。
+        """
         with self._lock_for(conversation_id):
             existing = self.get(conversation_id)
             existing.extend(messages)

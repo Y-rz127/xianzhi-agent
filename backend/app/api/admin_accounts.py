@@ -10,6 +10,7 @@ import uuid
 
 from fastapi import APIRouter, HTTPException, Request
 
+from app.core.admin_token import create_admin_token
 from app.core.config import settings
 
 router = APIRouter(prefix="/admin/accounts", tags=["Admin Accounts"])
@@ -123,10 +124,13 @@ async def admin_login(req: Request) -> dict:
             if needs_migration:
                 acc["password_hash"] = _hash_admin_password(password)
                 _save_accounts(accounts)
+            token, expires_in = create_admin_token(acc)
             return {
                 "id": acc["id"],
                 "username": acc["username"],
                 "nickname": acc.get("nickname", ""),
+                "token": token,
+                "expires_in": expires_in,
             }
     raise HTTPException(status_code=401, detail="用户名或密码错误")
 

@@ -161,14 +161,17 @@ class PostgresChatMemory:
                 continue  # 单条脏消息跳过，不影响其余历史
         return list(reversed(msgs))
 
-    def add(self, conversation_id: str, messages: List[BaseMessage]):
-        """写入消息并持久化会话元数据（UUID 映射、模块、user_id）。"""
+    def add(self, conversation_id: str, messages: List[BaseMessage], user_id: str = ""):
+        """写入消息并持久化会话元数据（UUID 映射、模块、user_id）。
+
+        user_id 必须由服务端从 token 解析后传入，**不得从 conversation_id 推导**；
+        写入时保留已有的非空归属，避免游客/旧客户端把已绑定会话的 owner 抹掉。
+        """
         try:
             session_uuid = self._to_uuid(conversation_id)
             _session_uuid_map[session_uuid] = conversation_id
             module = _extract_module(conversation_id)
             with _get_pool().connection() as conn:
-                user_id = _extract_user_id(conversation_id)
                 conn.execute(
                     """
                     INSERT INTO session_metadata (session_id, conversation_id, module, user_id)
@@ -176,10 +179,10 @@ class PostgresChatMemory:
                     ON CONFLICT (session_id) DO UPDATE
                     SET conversation_id = EXCLUDED.conversation_id,
                         module = EXCLUDED.module,
-                        user_id = EXCLUDED.user_id,
+                        user_id = COALESCE(NULLIF(session_metadata.user_id, ''), EXCLUDED.user_id),
                         updated_at = CURRENT_TIMESTAMP
                 """,
-                    (session_uuid, conversation_id, module, user_id),
+                    (session_uuid, conversation_id, module, user_id or ""),
                 )
                 history = self._history(conversation_id, conn)
                 for m in messages:
@@ -287,8 +290,9 @@ def _strip_user_input_boundary(content: str) -> str:
 def _extract_module(conversation_id: str) -> str:
     """从 conversation_id 提取模块前缀。
 
-    格式约定：'web-xianzhi-<ts>' → 'web-xianzhi'；'mp-xianzhi__<userId>__<rand>' → 'mp-xianzhi'；
-    'default' / 无连字符 → ''。双下划线分隔 user_id，避免与模块名里的连字符冲突。
+    新格式：'web-xianzhi-<uuid>' / 'mp-xianzhi-<uuid>' → 对应模块名；
+    旧格式 'mp-xianzhi__<userId>__<rand>' 仍可识别模块，但 user_id 不再从 ID 解析
+    （会话归属一律由 token 校验后写入）。无连字符或 'default' → ''。
     """
     if not conversation_id:
         return ""
@@ -300,14 +304,6 @@ def _extract_module(conversation_id: str) -> str:
     if len(parts) >= 2 and not parts[1].isdigit():
         return f"{first}-{parts[1]}"
     return first
-
-
-def _extract_user_id(conversation_id: str) -> str:
-    """从 conversation_id 提取 user_id（格式 `module__<userId>__<rand>`），旧格式/游客返回空串。"""
-    parts = conversation_id.split("__")
-    if len(parts) >= 2 and parts[1]:
-        return parts[1]
-    return ""
 
 
 class PostgresMemoryStore:
@@ -419,10 +415,10 @@ class PostgresMemoryStore:
             return []
 
     def get_session_owner(self, session_id: str) -> str:
-        """获取会话归属用户 ID（session_metadata.user_id），游客/旧格式会话返回空串。
+        """获取会话归属用户 ID（session_metadata.user_id），游客/未绑定会话返回空串。
 
         供 API 层做会话越权校验：user_id 非空的会话仅限本人 token 访问。
-        查询失败时返回空串放行，避免 DB 抖动直接打断正常用户。
+        查询失败时向上抛出（安全路径 fail-closed），由 API 层返回 503。
         """
         try:
             with _get_pool().connection() as conn:
@@ -433,7 +429,54 @@ class PostgresMemoryStore:
             return (row[0] or "") if row else ""
         except Exception as e:
             log.warning("查询会话归属失败 {} : {}", session_id, e)
-            return ""
+            _record_error("memory.get_session_owner")
+            raise
+
+    def session_exists(self, conversation_id: str) -> bool:
+        """会话是否仍有元数据（删除后为 False；用于阻止跨副本内存残留被读回）。"""
+        try:
+            with _get_pool().connection() as conn:
+                row = conn.execute(
+                    "SELECT 1 FROM session_metadata WHERE conversation_id = %s LIMIT 1",
+                    (conversation_id,),
+                ).fetchone()
+            return row is not None
+        except Exception as e:
+            log.warning("查询会话是否存在失败 {} : {}", conversation_id, e)
+            _record_error("memory.session_exists")
+            raise
+
+    def ensure_session_owner(self, conversation_id: str, user_id: str = "") -> bool:
+        """绑定/校验会话归属：返回 False 表示该会话已被他人占用。
+
+        首次访问时写入 owner；已有 owner 时只允许同一 user_id 访问，
+        游客（user_id 为空）不得进入已绑定会话。SQL 使用原子 upsert + RETURNING，
+        避免并发首次访问时两个用户都认为自己是 owner。
+        DB 异常向上抛出，由 API 层返回 503（安全路径 fail-closed）。
+        """
+        _ensure_schema()
+        session_uuid = PostgresChatMemory._to_uuid(conversation_id)
+        module = _extract_module(conversation_id)
+        try:
+            with _get_pool().connection() as conn:
+                row = conn.execute(
+                    """
+                    INSERT INTO session_metadata (session_id, conversation_id, module, user_id)
+                    VALUES (%s, %s, %s, %s)
+                    ON CONFLICT (session_id) DO UPDATE
+                    SET conversation_id = EXCLUDED.conversation_id,
+                        module = EXCLUDED.module,
+                        user_id = COALESCE(NULLIF(session_metadata.user_id, ''), EXCLUDED.user_id),
+                        updated_at = CURRENT_TIMESTAMP
+                    RETURNING user_id
+                    """,
+                    (session_uuid, conversation_id, module, user_id or ""),
+                ).fetchone()
+        except Exception:
+            _record_error("memory.ensure_session_owner")
+            raise
+        owner = (row[0] or "") if row else ""
+        return not owner or owner == (user_id or "")
 
     def delete_session(self, session_id: str):
         """删除指定会话的所有消息，并清理其摘要记忆元数据。"""
@@ -624,6 +667,14 @@ def get_session_info(prefix: str = "", user_id: str = None) -> list:
 
 def get_session_owner(session_id: str) -> str:
     return _store.get_session_owner(session_id)
+
+
+def session_exists(conversation_id: str) -> bool:
+    return _store.session_exists(conversation_id)
+
+
+def ensure_session_owner(conversation_id: str, user_id: str = "") -> bool:
+    return _store.ensure_session_owner(conversation_id, user_id)
 
 
 def delete_session(session_id: str):

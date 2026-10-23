@@ -4,15 +4,20 @@ from __future__ import annotations
 
 import json
 
-from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.agent.context import get_sub_app_model
 from app.agent.prompts import ZIWEI_SYSTEM_PROMPT
+from app.core.config import settings
+from app.core.http.client_ip import client_ip_from_request, client_ip_from_websocket
 from app.core.http.errors import client_error
 from app.core.llm_throttle import llm_tag
 from app.core.logger import log
+from app.core.quota import enforce_quota
 from app.core.text_extract import normalize_ws_payload_text
+from app.db.principals import InvalidPrincipal
+from app.sub_app._auth import optional_principal, principal_from_websocket
 from app.sub_app.ziwei import ziwei_app
 
 router = APIRouter(prefix="/ziwei", tags=["ZiWei"])
@@ -41,6 +46,23 @@ async def ws_ziwei_interpret(websocket: WebSocket):
 
         if not date or not gender:
             await websocket.send_json({"type": "error", "detail": "需提供出生日期与性别"})
+            await websocket.close()
+            return
+
+        try:
+            principal = await principal_from_websocket(websocket)
+            await enforce_quota(
+                "interpret",
+                principal,
+                client_ip_from_websocket(websocket),
+                settings.paid_quota_interpret_daily,
+            )
+        except InvalidPrincipal:
+            await websocket.send_json({"type": "error", "detail": "登录已失效，请重新登录"})
+            await websocket.close()
+            return
+        except HTTPException as e:
+            await websocket.send_json({"type": "error", "detail": str(e.detail)})
             await websocket.close()
             return
 
@@ -97,7 +119,11 @@ async def ziwei_chart(date: str, time_index: int, gender: str, calendar: str = "
 
 
 @router.post("/interpret")
-async def ziwei_interpret(body: dict):
+async def ziwei_interpret(
+    body: dict,
+    request: Request,
+    principal: dict | None = Depends(optional_principal),
+):
     """AI 简批：后端按参数重排盘（不信任前端传盘），拼结构化命盘摘要入 prompt。"""
     date = str(body.get("date") or "").strip()
     gender = str(body.get("gender") or "").strip()
@@ -117,6 +143,9 @@ async def ziwei_interpret(body: dict):
         "请为以下紫微斗数命盘做整体简批，并重点讲命宫、财帛、官禄三宫：\n\n"
         f"{summary}\n\n"
         "请严格按系统提示的结构：格局基调 → 命/财/官三宫逐宫 → 三方四正综合 → 一条建议。"
+    )
+    await enforce_quota(
+        "interpret", principal, client_ip_from_request(request), settings.paid_quota_interpret_daily
     )
     try:
         with llm_tag("ziwei"):

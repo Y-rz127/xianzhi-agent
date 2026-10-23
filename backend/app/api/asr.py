@@ -5,10 +5,13 @@ import base64
 import binascii
 
 import httpx
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 
+from app.api.deps import get_optional_paid_principal
 from app.core.config import settings
+from app.core.http.client_ip import client_ip_from_request
 from app.core.logger import log
+from app.core.quota import enforce_quota
 
 router = APIRouter(prefix="/asr", tags=["ASR"])
 _MAX_DATA_URI_CHARS = 10 * 1024 * 1024 * 4 // 3
@@ -50,7 +53,11 @@ def _head_bytes(b64: str) -> bytes:
 
 
 @router.post("/transcribe")
-async def transcribe(body: dict):
+async def transcribe(
+    body: dict,
+    request: Request,
+    principal: dict | None = Depends(get_optional_paid_principal),
+):
     audio = body.get("audio")
     if not isinstance(audio, str) or not audio.startswith("data:audio/"):
         raise HTTPException(status_code=400, detail="请上传有效的音频数据")
@@ -59,6 +66,7 @@ async def transcribe(body: dict):
     if not settings.dashscope_api_key:
         raise HTTPException(status_code=503, detail="语音识别服务尚未配置")
 
+    await enforce_quota("asr", principal, client_ip_from_request(request), settings.paid_quota_asr_daily)
     b64 = audio.split(",", 1)[1] if "," in audio else ""
     head = _head_bytes(b64)
     sniffed, sniffed_rate = _sniff(head)

@@ -7,9 +7,42 @@
 
 from __future__ import annotations
 
+import re
+
 from fastapi import HTTPException
 
 from app.core.config import settings
+
+# 会话 ID：字母/数字/下划线/连字符，16~128 位；前端使用随机会话 ID 作为游客能力凭证
+_CONVERSATION_ID_RE = re.compile(r"^[A-Za-z0-9_-]{16,128}$")
+# 客户端消息 ID：前端每次发送生成一次，用于服务端防重放（8~64 位）
+_CLIENT_MSG_ID_RE = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
+# 旧版可预测 ID：web-xianzhi-<毫秒时间戳> / mp-xianzhi__<uid>__<毫秒时间戳>
+_LEGACY_TIMESTAMP_ID_RE = re.compile(
+    r"^(?:web-xianzhi-\d{10,}|mp-xianzhi__[A-Za-z0-9_-]+__\d{10,})$"
+)
+
+
+def validate_conversation_id(conversation_id: str) -> str:
+    """校验会话 ID；旧时间戳格式不再接受，返回规范化后的 ID。"""
+    cid = (conversation_id or "").strip()
+    if not cid:
+        raise HTTPException(status_code=400, detail="conversation_id 不能为空")
+    if _LEGACY_TIMESTAMP_ID_RE.match(cid):
+        raise HTTPException(status_code=400, detail="旧版会话 ID 已停用，请新建会话")
+    if not _CONVERSATION_ID_RE.match(cid):
+        raise HTTPException(status_code=400, detail="conversation_id 格式不合法")
+    return cid
+
+
+def validate_client_msg_id(client_msg_id: str | None) -> str:
+    """校验客户端消息 ID；未传返回空串（兼容旧客户端，不做防重放）。"""
+    mid = (client_msg_id or "").strip()
+    if not mid:
+        return ""
+    if not _CLIENT_MSG_ID_RE.match(mid):
+        raise HTTPException(status_code=400, detail="client_msg_id 格式不合法")
+    return mid
 
 
 def client_error(e: Exception) -> str:

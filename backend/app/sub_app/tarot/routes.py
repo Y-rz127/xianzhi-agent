@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 
 from app.agent.context import get_app_context
+from app.core.config import settings
+from app.core.http.client_ip import client_ip_from_websocket
 from app.core.http.errors import client_error, is_message_too_long, message_too_long_text
 from app.core.logger import log
+from app.core.quota import enforce_quota
+from app.db.principals import InvalidPrincipal
+from app.sub_app._auth import principal_from_websocket
 from app.sub_app.tarot.tarot_app import SPREADS
 
 router = APIRouter(prefix="/tarot", tags=["Tarot"])
@@ -135,6 +140,22 @@ async def ws_tarot_divine(websocket: WebSocket):
                     continue
                 if not cards:
                     if not await _ws_error("解读需要 cards 字段"):
+                        break
+                    continue
+                try:
+                    principal = await principal_from_websocket(websocket)
+                    await enforce_quota(
+                        "interpret",
+                        principal,
+                        client_ip_from_websocket(websocket),
+                        settings.paid_quota_interpret_daily,
+                    )
+                except InvalidPrincipal:
+                    if not await _ws_error("登录已失效，请重新登录"):
+                        break
+                    continue
+                except HTTPException as e:
+                    if not await _ws_error(str(e.detail)):
                         break
                     continue
                 client_alive = True

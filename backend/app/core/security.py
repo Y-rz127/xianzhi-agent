@@ -17,24 +17,29 @@ from urllib.parse import parse_qs
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from app.core.admin_token import extract_bearer, verify_admin_token
 from app.core.config import settings
 
-# 豁免路径：健康检查、文档、静态资源不限流不鉴权
-# 可观测性只读接口也豁免：Observability 页 5 秒一轮询 /metrics，本机所有客户端共用
-# 127.0.0.1 一个桶，轮询叠加正常流量极易打满配额，连 WS 握手都会被误伤。
-# 注意：RateLimitMiddleware 在外层、ApiKeyAuthMiddleware 在内层，豁免限流不绕过鉴权。
-_EXEMPT_PREFIXES = (
+# 鉴权豁免：健康检查、文档、静态资源、登录页。
+# 注意：metrics/observability 不在此列——它们需要管理员鉴权，只是免限流。
+_AUTH_EXEMPT_PREFIXES = (
+    "/api/health",
     "/api/ai/health",
     "/health",
     "/docs",
     "/redoc",
     "/openapi.json",
     "/api/ai/admin/accounts/login",
-    "/api/ai/metrics",
-    "/api/ai/observability/",
     "/assets/",
     "/static/",
     "/favicon",
+)
+
+# 限流豁免：Observability 页 5 秒一轮询 /metrics，本机所有客户端共用
+# 127.0.0.1 一个桶，轮询叠加正常流量极易打满配额，连 WS 握手都会被误伤。
+_RATE_EXEMPT_PREFIXES = _AUTH_EXEMPT_PREFIXES + (
+    "/api/ai/metrics",
+    "/api/ai/observability/",
 )
 
 # 管理后台路径（需 API Key 鉴权；普通用户接口不受影响）
@@ -50,21 +55,33 @@ _ADMIN_PREFIXES = (
 )
 
 
-def _is_exempt(path: str) -> bool:
-    return any(path.startswith(p) for p in _EXEMPT_PREFIXES)
+def _is_auth_exempt(path: str) -> bool:
+    return any(path.startswith(p) for p in _AUTH_EXEMPT_PREFIXES)
+
+
+def _is_rate_exempt(path: str) -> bool:
+    return any(path.startswith(p) for p in _RATE_EXEMPT_PREFIXES)
 
 
 def _is_admin_path(path: str) -> bool:
     return any(path.startswith(p) for p in _ADMIN_PREFIXES)
 
 
+def _request_headers(scope: Scope) -> dict[str, str]:
+    return {k.decode("latin-1").lower(): v.decode("latin-1") for k, v in scope.get("headers", [])}
+
+
 def _extract_api_key(scope: Scope) -> str:
-    headers = {k.decode("latin-1").lower(): v.decode("latin-1") for k, v in scope.get("headers", [])}
+    headers = _request_headers(scope)
     provided = headers.get("x-api-key", "")
     if not provided:
         qs = parse_qs(scope.get("query_string", b"").decode("latin-1"))
         provided = (qs.get("api_key") or [""])[0]
     return provided
+
+
+def _extract_admin_token(scope: Scope) -> str:
+    return extract_bearer(_request_headers(scope).get("authorization", ""))
 
 
 def _client_ip(scope: Scope) -> str:
@@ -81,7 +98,11 @@ def _client_ip(scope: Scope) -> str:
 
 
 class ApiKeyAuthMiddleware:
-    """API Key 鉴权（HTTP + WebSocket 纯 ASGI 中间件）。"""
+    """管理路径鉴权（HTTP + WebSocket 纯 ASGI 中间件）。
+
+    管理员浏览器使用 Authorization: Bearer <短时令牌>；
+    未携带 Authorization 时回退 API Key（机器/CLI）。
+    """
 
     def __init__(self, app: ASGIApp):
         self.app = app
@@ -96,17 +117,25 @@ class ApiKeyAuthMiddleware:
             await self.app(scope, receive, send)
             return
         path = scope.get("path", "")
+        auth_enabled = bool(self._api_keys) or bool(settings.admin_session_secret.strip())
         # 关闭鉴权或非管理路径时不校验
-        if not self._api_keys or _is_exempt(path) or not _is_admin_path(path):
+        if not auth_enabled or _is_auth_exempt(path) or not _is_admin_path(path):
             await self.app(scope, receive, send)
             return
-        if _extract_api_key(scope) in self._api_keys:
+
+        token = _extract_admin_token(scope)
+        if token:
+            if verify_admin_token(token) is not None:
+                await self.app(scope, receive, send)
+                return
+        elif _extract_api_key(scope) in self._api_keys:
             await self.app(scope, receive, send)
             return
+
         if scope["type"] == "websocket":
             await send({"type": "websocket.close", "code": 4401, "reason": "Unauthorized"})
             return
-        await JSONResponse({"detail": "无效或缺失的 API Key"}, status_code=401)(scope, receive, send)
+        await JSONResponse({"detail": "无效或缺失的管理员凭证"}, status_code=401)(scope, receive, send)
 
 
 class RateLimitMiddleware:
@@ -146,7 +175,7 @@ class RateLimitMiddleware:
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send):
         limit = settings.rate_limit_per_minute
-        if scope["type"] not in ("http", "websocket") or limit <= 0 or _is_exempt(scope.get("path", "")):
+        if scope["type"] not in ("http", "websocket") or limit <= 0 or _is_rate_exempt(scope.get("path", "")):
             await self.app(scope, receive, send)
             return
         ip = _client_ip(scope)

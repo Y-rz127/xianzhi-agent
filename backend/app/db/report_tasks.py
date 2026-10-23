@@ -16,12 +16,17 @@ _STATUS_RUNNING = "running"
 _STATUS_PENDING = "pending"
 
 
-def create_task(kind: str, params: dict) -> str:
-    """新建 pending 任务，返回任务 ID。"""
+def _params_json(params: dict) -> str:
+    """参数序列化：sort_keys 让同一组参数总是得到同一 JSON 文本（JSONB 比较本来也忽略键序）。"""
+    return json.dumps(params, ensure_ascii=False, sort_keys=True)
+
+
+def create_task(kind: str, params: dict, user_id: str = "") -> str:
+    """新建 pending 任务（绑定提交用户），返回任务 ID。"""
     with get_pool().connection() as conn:
         row = conn.execute(
-            """INSERT INTO report_tasks (kind, params) VALUES (%s, %s) RETURNING id""",
-            (kind, json.dumps(params, ensure_ascii=False)),
+            """INSERT INTO report_tasks (kind, params, user_id) VALUES (%s, %s::jsonb, %s) RETURNING id""",
+            (kind, _params_json(params), user_id or ""),
         ).fetchone()
         return str(row[0])
 
@@ -29,7 +34,7 @@ def create_task(kind: str, params: dict) -> str:
 def get_task(task_id: str) -> dict | None:
     with get_pool().connection() as conn:
         row = conn.execute(
-            """SELECT id, kind, params, status, payload, error, created_at, updated_at
+            """SELECT id, kind, params, status, payload, error, created_at, updated_at, user_id
                FROM report_tasks WHERE id = %s""",
             (task_id,),
         ).fetchone()
@@ -38,18 +43,57 @@ def get_task(task_id: str) -> dict | None:
         return _row_to_dict(row)
 
 
-def find_same_task(kind: str, params: dict, within_hours: int = 1) -> str | None:
-    """查找同参数任务：pending/running 直接复用；done 且未过期（1 小时内）也复用。"""
+def find_same_task(kind: str, params: dict, user_id: str = "", within_hours: int = 1) -> str | None:
+    """查找同一用户的同参数任务：pending/running 直接复用；done 且未过期（1 小时内）也复用。"""
     with get_pool().connection() as conn:
         row = conn.execute(
             """SELECT id FROM report_tasks
-               WHERE kind = %s AND params = %s
+               WHERE kind = %s AND params = %s::jsonb AND user_id = %s
                  AND (status IN ('pending', 'running')
                       OR (status = 'done' AND updated_at > now() - interval '%s hours'))
                ORDER BY created_at DESC LIMIT 1""",
-            (kind, json.dumps(params, ensure_ascii=False), within_hours),
+            (kind, _params_json(params), user_id or "", within_hours),
         ).fetchone()
         return str(row[0]) if row else None
+
+
+def get_or_create_task(
+    kind: str, params: dict, user_id: str = "", within_hours: int = 1
+) -> tuple[str, str, bool]:
+    """原子查重并建任务，返回 (task_id, status, created)。
+
+    为什么需要：先 find 再 create 是典型的 check-then-act 竞态——两个并发提交都查不到，
+    结果生成两份报告、烧两倍 LLM。这里用事务级 advisory lock 把同键提交串行化；
+    连接池是 autocommit，必须显式 `conn.transaction()` 包住锁与查询，否则锁语句
+    提交后立即释放，等于没锁。
+    """
+    params_json = _params_json(params)
+    lock_key = f"{kind}\x1f{params_json}\x1f{user_id or ''}"
+    with get_pool().connection() as conn:
+        with conn.transaction():
+            conn.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (lock_key,))
+            row = conn.execute(
+                """SELECT id, status FROM report_tasks
+                   WHERE kind = %s AND params = %s::jsonb AND user_id = %s
+                     AND (status IN ('pending', 'running')
+                          OR (status = 'done' AND updated_at > now() - interval '%s hours'))
+                   ORDER BY created_at DESC LIMIT 1""",
+                (kind, params_json, user_id or "", within_hours),
+            ).fetchone()
+            if row:
+                return str(row[0]), str(row[1]), False
+            row = conn.execute(
+                """INSERT INTO report_tasks (kind, params, user_id)
+                   VALUES (%s, %s::jsonb, %s) RETURNING id, status""",
+                (kind, params_json, user_id or ""),
+            ).fetchone()
+            return str(row[0]), str(row[1]), True
+
+
+def delete_task(task_id: str) -> None:
+    """删除尚未入队的 pending 任务（配额拒绝时回滚，避免留下孤儿任务）。"""
+    with get_pool().connection() as conn:
+        conn.execute("DELETE FROM report_tasks WHERE id = %s AND status = 'pending'", (task_id,))
 
 
 def mark_running(task_id: str) -> bool:
@@ -118,4 +162,5 @@ def _row_to_dict(row: Any) -> dict:
         "error": row[5],
         "created_at": row[6],
         "updated_at": row[7],
+        "user_id": row[8] or "",
     }

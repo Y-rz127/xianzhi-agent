@@ -5,12 +5,17 @@ from __future__ import annotations
 import asyncio
 import json
 
-from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
 
 from app.agent.context import get_sub_app_model
+from app.core.config import settings
+from app.core.http.client_ip import client_ip_from_request, client_ip_from_websocket
 from app.core.http.errors import client_error
 from app.core.logger import log
+from app.core.quota import enforce_quota
 from app.core.text_extract import normalize_ws_payload_text
+from app.db.principals import InvalidPrincipal
+from app.sub_app._auth import optional_principal, principal_from_websocket
 from app.sub_app.hehun.hehun_app import analyze, analyze_stream as hehun_analyze_stream
 
 router = APIRouter(prefix="/xianzhi", tags=["Tools"])
@@ -35,6 +40,23 @@ async def ws_hehun_analyze(websocket: WebSocket):
 
         if not birth_time_a or not gender_a or not birth_time_b or not gender_b:
             await websocket.send_json({"type": "error", "detail": "需提供双方完整的出生信息"})
+            await websocket.close()
+            return
+
+        try:
+            principal = await principal_from_websocket(websocket)
+            await enforce_quota(
+                "interpret",
+                principal,
+                client_ip_from_websocket(websocket),
+                settings.paid_quota_interpret_daily,
+            )
+        except InvalidPrincipal:
+            await websocket.send_json({"type": "error", "detail": "登录已失效，请重新登录"})
+            await websocket.close()
+            return
+        except HTTPException as e:
+            await websocket.send_json({"type": "error", "detail": str(e.detail)})
             await websocket.close()
             return
 
@@ -75,11 +97,16 @@ async def hehun(
     gender_a: str,
     birth_time_b: str,
     gender_b: str,
+    request: Request,
     sect: int = 2,
     longitude_a: float | None = None,
     longitude_b: float | None = None,
+    principal: dict | None = Depends(optional_principal),
 ):
     """合婚分析：先调规则工具拿基础数据，再调 LLM 做综合解读。"""
+    await enforce_quota(
+        "interpret", principal, client_ip_from_request(request), settings.paid_quota_interpret_daily
+    )
     try:
         # 排盘与 LLM 调用均为同步阻塞计算，放线程池避免卡住事件循环
         try:

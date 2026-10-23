@@ -4,10 +4,16 @@ from __future__ import annotations
 import asyncio
 import hashlib
 
+import pytest
+from fastapi import HTTPException
 from starlette.requests import Request
 
 from app.api import admin_accounts
 from app.api.admin_accounts import _hash_admin_password, _verify_admin_password
+from app.api.deps import require_admin
+from app.core.admin_token import create_admin_token, verify_admin_token
+
+pytestmark = pytest.mark.security
 
 
 def _json_request(payload: bytes) -> Request:
@@ -62,6 +68,8 @@ def test_login_migrates_legacy_hash(monkeypatch, tmp_path) -> None:
 
     assert result["id"] == "legacy"
     assert admin_accounts._load_accounts()[0]["password_hash"].startswith("pbkdf2_sha256$")
+    payload = verify_admin_token(result["token"])
+    assert payload is not None and payload["sub"] == "legacy"
 
 
 def test_malformed_hash_fails_closed() -> None:
@@ -70,3 +78,29 @@ def test_malformed_hash_fails_closed() -> None:
     assert _verify_admin_password(
         "password", "pbkdf2_sha256$1000001$00$00"
     ) == (False, False)
+
+
+def test_admin_token_round_trip_and_rejects_tamper_and_expiry() -> None:
+    token, ttl = create_admin_token({"id": "acc_1", "username": "admin"}, ttl_seconds=60)
+    payload = verify_admin_token(token)
+    assert ttl == 60
+    assert payload is not None and payload["sub"] == "acc_1"
+
+    # 改签名中段而不是末位：base64url 末位有非规范填充位，改末位可能解码出同一字节
+    payload_part, sig = token.rsplit(".", 1)
+    middle = len(sig) // 2
+    tampered_sig = sig[:middle] + ("a" if sig[middle] != "a" else "b") + sig[middle + 1:]
+    assert verify_admin_token(f"{payload_part}.{tampered_sig}") is None
+
+    expired, _ = create_admin_token({"id": "acc_1", "username": "admin"}, ttl_seconds=-1)
+    assert verify_admin_token(expired) is None
+
+
+def test_require_admin_accepts_bearer_token_and_rejects_invalid_token() -> None:
+    token, _ = create_admin_token({"id": "acc_1", "username": "admin"}, ttl_seconds=60)
+    payload = require_admin(authorization=f"Bearer {token}", api_key=None, x_api_key=None)
+    assert payload is not None and payload["sub"] == "acc_1"
+
+    with pytest.raises(HTTPException) as exc:
+        require_admin(authorization="Bearer invalid", api_key=None, x_api_key=None)
+    assert exc.value.status_code == 401

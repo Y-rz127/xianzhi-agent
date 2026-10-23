@@ -15,8 +15,13 @@ import time
 
 import httpx
 import pytest
+from starlette.requests import Request
 
 from app.api import tts as T
+
+
+def _request() -> Request:
+    return Request({"type": "http", "method": "POST", "path": "/", "headers": [], "client": ("127.0.0.1", 12345)})
 
 
 class _Resp:
@@ -87,7 +92,7 @@ def test_synthesize_posts_expected_body(fake_client, monkeypatch, tmp_path):
     monkeypatch.setattr(T.settings, "tts_model", "qwen-audio-3.1-tts-flash", raising=False)
     monkeypatch.setattr(T.settings, "tts_voice", "longanhuan_v3.1", raising=False)
 
-    out = asyncio.run(T.synthesize({"text": "你好，先知"}))
+    out = asyncio.run(T.synthesize({"text": "你好，先知"}, _request(), None))
     url, body = fake_client.posts[0]
     assert body["model"] == "qwen-audio-3.1-tts-flash"
     assert body["input"]["text"] == "你好，先知"
@@ -106,11 +111,11 @@ def test_synthesize_rejects_empty_and_too_long(fake_client, monkeypatch, tmp_pat
     from fastapi import HTTPException
 
     with pytest.raises(HTTPException) as e1:
-        asyncio.run(T.synthesize({"text": "   "}))
+        asyncio.run(T.synthesize({"text": "   "}, _request(), None))
     assert e1.value.status_code == 400
 
     with pytest.raises(HTTPException) as e2:
-        asyncio.run(T.synthesize({"text": "字" * (T._MAX_CHARS + 1)}))
+        asyncio.run(T.synthesize({"text": "字" * (T._MAX_CHARS + 1)}, _request(), None))
     assert e2.value.status_code == 400
 
 
@@ -122,7 +127,7 @@ def test_synthesize_maps_model_not_enabled_error(fake_client, monkeypatch, tmp_p
     fake_client.post_resp = _Resp(400, {"message": "url error, please check url！"})
 
     with pytest.raises(HTTPException) as e:
-        asyncio.run(T.synthesize({"text": "测试"}))
+        asyncio.run(T.synthesize({"text": "测试"}, _request(), None))
     assert e.value.status_code == 502
     assert "未开通" in e.value.detail or "端点" in e.value.detail
 

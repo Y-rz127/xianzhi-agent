@@ -4,14 +4,19 @@ from __future__ import annotations
 
 import json
 
-from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.agent.context import get_sub_app_model
 from app.agent.prompts import LIUYAO_SYSTEM_PROMPT
+from app.core.config import settings
+from app.core.http.client_ip import client_ip_from_request, client_ip_from_websocket
 from app.core.llm_throttle import llm_tag
 from app.core.logger import log
+from app.core.quota import enforce_quota
 from app.core.text_extract import normalize_ws_payload_text
+from app.db.principals import InvalidPrincipal
+from app.sub_app._auth import optional_principal, principal_from_websocket
 from app.sub_app.liuyao.liuyao_app import cast, interpret_stream as liuyao_interpret_stream
 
 router = APIRouter(prefix="/liuyao", tags=["LiuYao"])
@@ -30,6 +35,23 @@ async def ws_liuyao_interpret(websocket: WebSocket):
         result = body.get("result")
         if not question or not isinstance(result, dict):
             await websocket.send_json({"type": "error", "detail": "请填写问题并先完成起卦"})
+            await websocket.close()
+            return
+
+        try:
+            principal = await principal_from_websocket(websocket)
+            await enforce_quota(
+                "interpret",
+                principal,
+                client_ip_from_websocket(websocket),
+                settings.paid_quota_interpret_daily,
+            )
+        except InvalidPrincipal:
+            await websocket.send_json({"type": "error", "detail": "登录已失效，请重新登录"})
+            await websocket.close()
+            return
+        except HTTPException as e:
+            await websocket.send_json({"type": "error", "detail": str(e.detail)})
             await websocket.close()
             return
 
@@ -80,7 +102,11 @@ def _hexagram_text(hexagram: dict | None) -> str:
 
 
 @router.post("/interpret")
-async def interpret_liuyao(body: dict):
+async def interpret_liuyao(
+    body: dict,
+    request: Request,
+    principal: dict | None = Depends(optional_principal),
+):
     """解读六爻结果"""
     question = str(body.get("question") or "").strip()
     result = body.get("result")
@@ -107,6 +133,9 @@ async def interpret_liuyao(body: dict):
         f"动爻：{moving_text}\n\n"
         f"请按照系统提示中的结构解读：卦象主题 → 动爻解读 → 本变卦演变 → 具体建议。\n"
         f"解读要落到占问者的具体问题上。"
+    )
+    await enforce_quota(
+        "interpret", principal, client_ip_from_request(request), settings.paid_quota_interpret_daily
     )
     try:
         with llm_tag("liuyao"):

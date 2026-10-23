@@ -13,13 +13,15 @@ export {
 } from "@shared/api"
 import type { AnswerFeedbackPayload, BaziCandidate, BaziProfile, ChartCase, ChartData, ChatOptions, ChatSession, FavoriteCase, SessionBirthInfo, SessionMessage, TarotCard, XiPanRelations } from "@shared/api"
 import { EP, ttsAudioPath } from "@shared/api"
+import { clearAdminAuth, getAdminToken } from "../utils/adminAuth"
 
 const API_BASE = import.meta.env.VITE_API_BASE
   || (import.meta.env.DEV ? "http://localhost:8123/api" : "/api")
-// 管理端 API Key：优先读 VITE_API_KEY（.env.local，已 gitignore，需与后端 API_KEYS 对齐）。
-// 注意：前端可见的 Key 只能防君子不能防小人；转公开站点时应改为后端代理转发，见 docs/architecture_review.md。
-// 兜底值仅供本地开发（后端 API_KEYS 为空时鉴权关闭，不影响使用）。
-const API_KEY = import.meta.env.VITE_API_KEY || "xianzhi-yrz-admin"
+
+function userTokenQuery(): string {
+  const token = localStorage.getItem("XZ_TOKEN") || ""
+  return token ? `?token=${encodeURIComponent(token)}` : ""
+}
 
 function friendlyNetworkError(error: unknown): Error {
   if (error instanceof TypeError && /failed to fetch|networkerror|load failed/i.test(error.message)) {
@@ -29,19 +31,88 @@ function friendlyNetworkError(error: unknown): Error {
 }
 
 async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-  const headers = new Headers(init?.headers)
-  headers.set("X-API-Key", API_KEY)
   try {
-    return await fetch(input, { ...init, headers })
+    return await fetch(input, init)
   } catch (error) {
     throw friendlyNetworkError(error)
   }
 }
 
+/** 管理端请求：使用登录后签发的短时令牌，不再在浏览器保存/发送 API Key。 */
+async function adminFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  const token = getAdminToken()
+  if (!token) {
+    redirectToAdminLogin()
+    throw new Error("管理员登录已失效，请重新登录")
+  }
+  const headers = new Headers(init?.headers)
+  headers.set("Authorization", `Bearer ${token}`)
+  let response: Response
+  try {
+    response = await fetch(input, { ...init, headers })
+  } catch (error) {
+    throw friendlyNetworkError(error)
+  }
+  if (response.status === 401) {
+    clearAdminAuth()
+    redirectToAdminLogin()
+    throw new Error("管理员登录已失效，请重新登录")
+  }
+  return response
+}
+
+function redirectToAdminLogin(): void {
+  if (window.location.pathname === "/admin-login") return
+  const redirect = encodeURIComponent(window.location.pathname + window.location.search)
+  window.location.href = `/admin-login?redirect=${redirect}`
+}
+
+async function adminDownload(url: string, filename: string): Promise<void> {
+  const res = await adminFetch(url)
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: `下载失败 ${res.status}` }))
+    throw new Error(err.detail || `下载失败 ${res.status}`)
+  }
+  saveBlob(await res.blob(), filename)
+}
+
+/** 付费接口请求：Web 管理端优先管理员令牌，其次用户 token；游客走 IP 配额。 */
+export async function paidFetch(input: string, init?: RequestInit): Promise<Response> {
+  const adminToken = getAdminToken()
+  if (adminToken) {
+    const headers = new Headers(init?.headers)
+    headers.set("Authorization", `Bearer ${adminToken}`)
+    let response: Response
+    try {
+      response = await fetch(input, { ...init, headers })
+    } catch (error) {
+      throw friendlyNetworkError(error)
+    }
+    if (response.status === 401) {
+      clearAdminAuth()
+      redirectToAdminLogin()
+      throw new Error("管理员登录已失效，请重新登录")
+    }
+    return response
+  }
+  const userToken = localStorage.getItem("XZ_TOKEN") || ""
+  if (userToken) {
+    const sep = input.includes("?") ? "&" : "?"
+    return apiFetch(`${input}${sep}token=${encodeURIComponent(userToken)}`, init)
+  }
+  return apiFetch(input, init)
+}
+
+function paidWsUrl(url: string): string {
+  const token = getAdminToken() || localStorage.getItem("XZ_TOKEN") || ""
+  if (!token) return url
+  return `${url}${url.includes("?") ? "&" : "?"}token=${encodeURIComponent(token)}`
+}
+
 export { apiFetch }
 
 export async function transcribeAudio(audio: string, format = "webm"): Promise<{ text: string; model: string }> {
-  const response = await apiFetch(`${API_BASE}${EP.ASR_TRANSCRIBE}`, {
+  const response = await paidFetch(`${API_BASE}${EP.ASR_TRANSCRIBE}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ audio, format }),
@@ -63,7 +134,7 @@ export interface SpeechResult {
 }
 
 export async function synthesizeSpeech(text: string, voice?: string): Promise<SpeechResult> {
-  const response = await apiFetch(`${API_BASE}${EP.TTS_SYNTHESIZE}`, {
+  const response = await paidFetch(`${API_BASE}${EP.TTS_SYNTHESIZE}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ text, voice }),
@@ -76,11 +147,6 @@ export async function synthesizeSpeech(text: string, voice?: string): Promise<Sp
 /** 合成结果的播放地址（本站 /api/ai/tts/audio/{id}） */
 export function speechAudioUrl(id: string): string {
   return `${API_BASE}${ttsAudioPath(id)}`
-}
-
-function withApiKey(url: string): string {
-  const sep = url.includes("?") ? "&" : "?"
-  return `${url}${sep}api_key=${encodeURIComponent(API_KEY)}`
 }
 
 export interface SSECallbacks {
@@ -97,7 +163,7 @@ export function connectSSE(path: string, params: Record<string, string | undefin
     .filter((k) => params[k] !== undefined && params[k] !== "")
     .map((k) => `${encodeURIComponent(k)}=${encodeURIComponent(params[k] as string)}`)
     .join("&")
-  const url = withApiKey(`${API_BASE}${path}?${qs}`)
+  const url = `${API_BASE}${path}?${qs}`
   const es = new EventSource(url)
   es.onmessage = (e) => {
     if (e.data === "[DONE]") { cb.onDone?.(); es.close() }
@@ -128,11 +194,13 @@ export const chatWithXianzhi = (message: string, conversationId: string, cb: SSE
   connectSSE("/ai/xianzhi/chat", {
     message,
     conversation_id: conversationId,
+    token: localStorage.getItem("XZ_TOKEN") || undefined,
     birth_time: opts?.birth_time,
     gender: opts?.gender,
     birth_place: opts?.birth_place,
     sect: opts?.sect !== undefined ? String(opts.sect) : undefined,
     yun_sect: opts?.yun_sect !== undefined ? String(opts.yun_sect) : undefined,
+    client_msg_id: opts?.client_msg_id,
   }, cb)
 
 export interface ReportTaskStatus {
@@ -147,7 +215,7 @@ const TASK_POLL_INTERVAL = 2000
 const TASK_POLL_TIMEOUT = 15 * 60 * 1000
 
 async function runReportTask(kind: string, body: Record<string, string>): Promise<ReportTaskStatus> {
-  const res = await apiFetch(`${API_BASE}/ai/xianzhi/report/tasks`, {
+  const res = await paidFetch(`${API_BASE}/ai/xianzhi/report/tasks`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ kind, ...body }),
@@ -160,7 +228,7 @@ async function runReportTask(kind: string, body: Record<string, string>): Promis
   const deadline = Date.now() + TASK_POLL_TIMEOUT
   for (; ;) {
     await new Promise((resolve) => setTimeout(resolve, TASK_POLL_INTERVAL))
-    const sres = await apiFetch(`${API_BASE}/ai/xianzhi/report/tasks/${task_id}`)
+    const sres = await paidFetch(`${API_BASE}/ai/xianzhi/report/tasks/${task_id}`)
     if (!sres.ok) throw new Error(`任务状态查询失败 ${sres.status}`)
     const status: ReportTaskStatus = await sres.json()
     if (status.status === "done") return status
@@ -190,7 +258,7 @@ export async function generateFullReport(birthTime: string, gender: string, sect
 export async function downloadReport(birthTime: string, gender: string): Promise<void> {
   try {
     const t = await runReportTask("basic_report", { birth_time: birthTime, gender })
-    const res = await apiFetch(`${API_BASE}/ai/xianzhi/report/tasks/${t.task_id}/result`)
+    const res = await paidFetch(`${API_BASE}/ai/xianzhi/report/tasks/${t.task_id}/result`)
     if (!res.ok) throw new Error(`下载失败 ${res.status}`)
     saveBlob(await res.blob(), `排盘报告_${birthTime.replace(/[ :]/g, "_")}.pdf`)
   } catch (e) {
@@ -205,7 +273,7 @@ export async function downloadFullReportPDF(birthTime: string, gender: string, s
       gender,
       sections: sections && sections.length ? sections.join(",") : "",
     })
-    const res = await apiFetch(`${API_BASE}/ai/xianzhi/report/tasks/${t.task_id}/result`)
+    const res = await paidFetch(`${API_BASE}/ai/xianzhi/report/tasks/${t.task_id}/result`)
     if (!res.ok) throw new Error(`下载失败 ${res.status}`)
     saveBlob(await res.blob(), `完整命理报告_${birthTime.replace(/[ :]/g, "_")}.pdf`)
   } catch (e) {
@@ -279,7 +347,7 @@ export async function createChartCase(payload: Partial<ChartCase> & Record<strin
   if (payload.bio) body.bio = payload.bio
   if (payload.analysis) body.analysis = payload.analysis
   if (payload.keypoints) body.keypoints = payload.keypoints
-  const res = await apiFetch(`${API_BASE}/ai/xianzhi/cases`, {
+  const res = await adminFetch(`${API_BASE}/ai/xianzhi/cases`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -301,7 +369,7 @@ export async function updateChartCase(id: string, payload: Partial<ChartCase> & 
   if (payload.bio !== undefined) body.bio = payload.bio
   if (payload.analysis !== undefined) body.analysis = payload.analysis
   if (payload.keypoints !== undefined) body.keypoints = payload.keypoints
-  const res = await apiFetch(`${API_BASE}/ai/xianzhi/cases/${id}`, {
+  const res = await adminFetch(`${API_BASE}/ai/xianzhi/cases/${id}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -313,22 +381,21 @@ export async function updateChartCase(id: string, payload: Partial<ChartCase> & 
 }
 
 export async function deleteChartCase(id: string): Promise<void> {
-  const res = await apiFetch(`${API_BASE}/ai/xianzhi/cases/${id}`, { method: "DELETE" })
+  const res = await adminFetch(`${API_BASE}/ai/xianzhi/cases/${id}`, { method: "DELETE" })
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: `删除失败 ${res.status}` }))
     throw new Error(err.detail || `删除失败 ${res.status}`)
   }
 }
 
-export function exportChartCasesJSON(): void {
-  const url = `${API_BASE}/ai/xianzhi/cases/export/json`
-  window.open(url, "_blank")
+export async function exportChartCasesJSON(): Promise<void> {
+  await adminDownload(`${API_BASE}/ai/xianzhi/cases/export/json`, "xianzhi_cases.json")
 }
 
 export async function importChartCasesJSON(file: File): Promise<{ inserted: number; skipped: number }> {
   const text = await file.text()
   const data = JSON.parse(text)
-  const res = await apiFetch(`${API_BASE}/ai/xianzhi/cases/import/json`, {
+  const res = await adminFetch(`${API_BASE}/ai/xianzhi/cases/import/json`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ cases: data.cases || [] }),
@@ -342,7 +409,7 @@ export async function importChartCasesJSON(file: File): Promise<{ inserted: numb
 
 export async function fetchSessions(type: "xianzhi"): Promise<ChatSession[]> {
   try {
-    const res = await apiFetch(`${API_BASE}${EP.SESSIONS}`)
+    const res = await adminFetch(`${API_BASE}${EP.SESSIONS}`)
     if (!res.ok) throw new Error("Not found")
     return res.json()
   } catch { return [] }
@@ -351,7 +418,7 @@ export async function fetchSessions(type: "xianzhi"): Promise<ChatSession[]> {
 export async function deleteSession(type: "xianzhi", id: string): Promise<void> {
   if (!id) return
   try {
-    await apiFetch(`${API_BASE}${EP.SESSIONS}/${id}`, { method: "DELETE" })
+    await apiFetch(`${API_BASE}${EP.SESSIONS}/${id}${userTokenQuery()}`, { method: "DELETE" })
   } catch { }
 }
 
@@ -398,13 +465,13 @@ export interface MetricsData {
 }
 
 export async function fetchMetrics(): Promise<MetricsData> {
-  const res = await apiFetch(`${API_BASE}/ai/metrics`)
+  const res = await adminFetch(`${API_BASE}/ai/metrics`)
   if (!res.ok) throw new Error("获取指标失败")
   return await res.json()
 }
 
 export async function getRagStatus(): Promise<RagStatus> {
-  const res = await apiFetch(`${API_BASE}/ai/rag/status`)
+  const res = await adminFetch(`${API_BASE}/ai/rag/status`)
   if (!res.ok) throw new Error("获取 RAG 状态失败")
   return await res.json()
 }
@@ -412,13 +479,13 @@ export async function getRagStatus(): Promise<RagStatus> {
 export interface LlmChainStatus { models: string[]; candidates: string[]; default_candidates?: string[] }
 
 export async function getLlmChain(): Promise<LlmChainStatus> {
-  const res = await apiFetch(`${API_BASE}/ai/admin/llm/chain`)
-  if (!res.ok) throw new Error("获取降级链失败")
+  const res = await adminFetch(`${API_BASE}/ai/admin/llm/chain`)
+  if (!res.ok) throw new Error("获取模型链失败")
   return await res.json()
 }
 
 export async function updateLlmChain(models: string[]): Promise<LlmChainStatus> {
-  const res = await apiFetch(`${API_BASE}/ai/admin/llm/chain`, {
+  const res = await adminFetch(`${API_BASE}/ai/admin/llm/chain`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ models }),
@@ -434,7 +501,7 @@ export interface LlmCandidatesStatus { candidates: string[] }
 
 /** 更新候选模型清单（增/删都是整表替换；空数组=回退内置默认候选） */
 export async function updateLlmCandidates(models: string[]): Promise<LlmCandidatesStatus> {
-  const res = await apiFetch(`${API_BASE}/ai/admin/llm/candidates`, {
+  const res = await adminFetch(`${API_BASE}/ai/admin/llm/candidates`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ models }),
@@ -451,13 +518,13 @@ export type LlmPriceMap = Record<string, { input: number; output: number }>
 export interface LlmPriceStatus { prices: LlmPriceMap; candidates: string[]; default_candidates?: string[] }
 
 export async function getLlmPrice(): Promise<LlmPriceStatus> {
-  const res = await apiFetch(`${API_BASE}/ai/admin/llm/price`)
+  const res = await adminFetch(`${API_BASE}/ai/admin/llm/price`)
   if (!res.ok) throw new Error("获取单价表失败")
   return await res.json()
 }
 
 export async function updateLlmPrice(prices: LlmPriceMap): Promise<LlmPriceStatus> {
-  const res = await apiFetch(`${API_BASE}/ai/admin/llm/price`, {
+  const res = await adminFetch(`${API_BASE}/ai/admin/llm/price`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ prices }),
@@ -470,7 +537,7 @@ export async function updateLlmPrice(prices: LlmPriceMap): Promise<LlmPriceStatu
 }
 
 export async function listRagDocs(): Promise<RagDoc[]> {
-  const res = await apiFetch(`${API_BASE}/ai/rag/docs`)
+  const res = await adminFetch(`${API_BASE}/ai/rag/docs`)
   if (!res.ok) throw new Error("获取文档列表失败")
   const data = await res.json()
   return data.files || []
@@ -479,7 +546,7 @@ export async function listRagDocs(): Promise<RagDoc[]> {
 export async function uploadRagDoc(file: File): Promise<{ filename: string; size: number }> {
   const form = new FormData()
   form.append("file", file)
-  const res = await apiFetch(`${API_BASE}/ai/rag/docs/upload`, { method: "POST", body: form })
+  const res = await adminFetch(`${API_BASE}/ai/rag/docs/upload`, { method: "POST", body: form })
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: `上传失败 ${res.status}` }))
     throw new Error(err.detail || `上传失败 ${res.status}`)
@@ -488,7 +555,7 @@ export async function uploadRagDoc(file: File): Promise<{ filename: string; size
 }
 
 export async function deleteRagDoc(filename: string): Promise<void> {
-  const res = await apiFetch(`${API_BASE}/ai/rag/docs/${encodeURIComponent(filename)}`, { method: "DELETE" })
+  const res = await adminFetch(`${API_BASE}/ai/rag/docs/${encodeURIComponent(filename)}`, { method: "DELETE" })
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: `删除失败 ${res.status}` }))
     throw new Error(err.detail || `删除失败 ${res.status}`)
@@ -496,7 +563,7 @@ export async function deleteRagDoc(filename: string): Promise<void> {
 }
 
 export async function rebuildRagIndex(): Promise<{ ready: boolean }> {
-  const res = await apiFetch(`${API_BASE}/ai/rag/docs/rebuild`, { method: "POST" })
+  const res = await adminFetch(`${API_BASE}/ai/rag/docs/rebuild`, { method: "POST" })
   if (!res.ok) throw new Error("重建向量库失败")
   return await res.json()
 }
@@ -504,7 +571,7 @@ export async function rebuildRagIndex(): Promise<{ ready: boolean }> {
 export async function getSessionMessages(type: "xianzhi", id: string): Promise<SessionMessage[]> {
   if (!id) return []
   try {
-    const res = await apiFetch(`${API_BASE}/ai/xianzhi/sessions/${id}/messages`)
+    const res = await apiFetch(`${API_BASE}/ai/xianzhi/sessions/${id}/messages${userTokenQuery()}`)
     if (!res.ok) return []
     const data = await res.json()
     return data.map((m: { role?: string; content?: unknown; time?: string }) => ({
@@ -519,7 +586,7 @@ export async function getSessionMessages(type: "xianzhi", id: string): Promise<S
 export async function getSessionBirthInfo(id: string): Promise<SessionBirthInfo> {
   if (!id) return { time: null, gender: null }
   try {
-    const res = await apiFetch(`${API_BASE}/ai/xianzhi/sessions/${id}/birth-info`)
+    const res = await apiFetch(`${API_BASE}/ai/xianzhi/sessions/${id}/birth-info${userTokenQuery()}`)
     if (!res.ok) return { time: null, gender: null }
     return await res.json()
   } catch { return { time: null, gender: null } }
@@ -551,8 +618,7 @@ export function drawTarotCardsWS(
   cb: { onCards?: (cards: TarotDrawnCard[]) => void; onError?: (err: string) => void }
 ): WebSocket {
   const wsBase = API_BASE.replace(/^http/, "ws")
-  const url = withApiKey(`${wsBase}/ai/tarot/ws`)
-  const ws = new WebSocket(url)
+  const ws = new WebSocket(paidWsUrl(`${wsBase}/ai/tarot/ws`))
 
   ws.onopen = () => {
     ws.send(JSON.stringify({ action: "draw", spread }))
@@ -576,8 +642,7 @@ export function interpretTarotWS(
   cb: TarotInterpretCallbacks
 ): WebSocket {
   const wsBase = API_BASE.replace(/^http/, "ws")
-  const url = withApiKey(`${wsBase}/ai/tarot/ws`)
-  const ws = new WebSocket(url)
+  const ws = new WebSocket(paidWsUrl(`${wsBase}/ai/tarot/ws`))
 
   ws.onopen = () => {
     ws.send(JSON.stringify({
@@ -613,7 +678,7 @@ export async function castLiuYao(method: "coins" | "numbers" | "time", numbers?:
   return res.json()
 }
 export async function interpretLiuYao(question: string, result: LiuYaoResult): Promise<string> {
-  const res = await apiFetch(`${API_BASE}/ai/liuyao/interpret`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ question, result }) })
+  const res = await paidFetch(`${API_BASE}/ai/liuyao/interpret`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ question, result }) })
   const data = await res.json()
   if (!res.ok) throw new Error(data.detail || "解读失败")
   return data.interpretation
@@ -703,7 +768,7 @@ export async function getZiWeiChart(p: ZiWeiCastParams): Promise<ZiWeiChart> {
   return res.json()
 }
 export async function interpretZiWei(p: ZiWeiCastParams & { focus?: string }): Promise<string> {
-  const res = await apiFetch(`${API_BASE}/ai/ziwei/interpret`, {
+  const res = await paidFetch(`${API_BASE}/ai/ziwei/interpret`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -737,13 +802,13 @@ export interface AdminUserDetail {
 
 export async function listAdminUsers(limit = 200, offset = 0): Promise<{ total: number; users: AdminUser[] }> {
   const params = new URLSearchParams({ limit: String(limit), offset: String(offset) })
-  const res = await apiFetch(`${API_BASE}/ai/admin/users?${params.toString()}`)
+  const res = await adminFetch(`${API_BASE}/ai/admin/users?${params.toString()}`)
   if (!res.ok) throw new Error("获取用户列表失败")
   return await res.json()
 }
 
 export async function getAdminUser(user_id: string): Promise<AdminUserDetail> {
-  const res = await apiFetch(`${API_BASE}/ai/admin/users/${encodeURIComponent(user_id)}`)
+  const res = await adminFetch(`${API_BASE}/ai/admin/users/${encodeURIComponent(user_id)}`)
   if (!res.ok) throw new Error("获取用户详情失败")
   return await res.json()
 }
@@ -810,24 +875,30 @@ export async function submitAnswerFeedback(payload: AnswerFeedbackPayload): Prom
 export async function fetchAnswerFeedbacks(limit = 200, rating?: "up" | "down"): Promise<AnswerFeedbackItem[]> {
   const params = new URLSearchParams({ limit: String(limit) })
   if (rating) params.set("rating", rating)
-  const res = await apiFetch(`${API_BASE}/ai/feedback/answers?${params.toString()}`)
+  const res = await adminFetch(`${API_BASE}/ai/feedback/answers?${params.toString()}`)
   if (!res.ok) throw new Error("获取回答反馈失败")
   const data = await res.json()
   return data.items || []
 }
 
-export function answerFeedbackSftExportUrl(rating: "up" | "down" = "up", limit = 1000): string {
+export async function exportAnswerFeedbackSft(rating: "up" | "down" = "up", limit = 1000): Promise<void> {
   const params = new URLSearchParams({ rating, limit: String(limit) })
-  return withApiKey(`${API_BASE}/ai/feedback/answers/export/sft?${params.toString()}`)
+  await adminDownload(
+    `${API_BASE}/ai/feedback/answers/export/sft?${params.toString()}`,
+    `xianzhi_sft_${rating}.jsonl`,
+  )
 }
 
-export function answerFeedbackDpoExportUrl(limit = 500): string {
+export async function exportAnswerFeedbackDpo(limit = 500): Promise<void> {
   const params = new URLSearchParams({ limit: String(limit) })
-  return withApiKey(`${API_BASE}/ai/feedback/answers/export/dpo?${params.toString()}`)
+  await adminDownload(
+    `${API_BASE}/ai/feedback/answers/export/dpo?${params.toString()}`,
+    "xianzhi_dpo.jsonl",
+  )
 }
 
 export async function deleteAnswerFeedback(fid: string): Promise<{ ok: boolean }> {
-  const res = await apiFetch(`${API_BASE}/ai/feedback/answers/${fid}`, {
+  const res = await adminFetch(`${API_BASE}/ai/feedback/answers/${fid}`, {
     method: "DELETE",
   })
   if (!res.ok) {
@@ -838,7 +909,7 @@ export async function deleteAnswerFeedback(fid: string): Promise<{ ok: boolean }
 }
 
 export async function reviewAnswerFeedback(fid: string): Promise<{ ok: boolean }> {
-  const res = await apiFetch(`${API_BASE}/ai/feedback/answers/${fid}/review`, {
+  const res = await adminFetch(`${API_BASE}/ai/feedback/answers/${fid}/review`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ reviewer: "admin" }),
@@ -848,7 +919,7 @@ export async function reviewAnswerFeedback(fid: string): Promise<{ ok: boolean }
 }
 
 export async function promoteAnswerToCase(fid: string): Promise<{ case_id: string; file_path: string }> {
-  const res = await apiFetch(`${API_BASE}/ai/feedback/answers/${fid}/promote`, {
+  const res = await adminFetch(`${API_BASE}/ai/feedback/answers/${fid}/promote`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ reviewer: "admin" }),
@@ -861,7 +932,7 @@ export async function promoteAnswerToCase(fid: string): Promise<{ case_id: strin
 }
 
 export async function unpromoteAnswerToCase(fid: string): Promise<{ ok: boolean }> {
-  const res = await apiFetch(`${API_BASE}/ai/feedback/answers/${fid}/promote`, {
+  const res = await adminFetch(`${API_BASE}/ai/feedback/answers/${fid}/promote`, {
     method: "DELETE",
   })
   if (!res.ok) {
@@ -873,7 +944,7 @@ export async function unpromoteAnswerToCase(fid: string): Promise<{ ok: boolean 
 
 /** 管理员获取反馈列表 */
 export async function fetchFeedbacks(limit = 200): Promise<FeedbackItem[]> {
-  const res = await apiFetch(`${API_BASE}/ai/feedback?limit=${limit}`)
+  const res = await adminFetch(`${API_BASE}/ai/feedback?limit=${limit}`)
   if (!res.ok) throw new Error("获取反馈列表失败")
   const data = await res.json()
   return data.items || []
@@ -900,7 +971,7 @@ export interface AdminAccount {
 
 /** 获取管理员账号列表 */
 export async function listAdminAccounts(): Promise<AdminAccount[]> {
-  const res = await apiFetch(`${API_BASE}/ai/admin/accounts`)
+  const res = await adminFetch(`${API_BASE}/ai/admin/accounts`)
   if (!res.ok) throw new Error("获取管理员账号列表失败")
   const data = await res.json()
   return data.accounts || []
@@ -908,7 +979,7 @@ export async function listAdminAccounts(): Promise<AdminAccount[]> {
 
 /** 创建管理员账号 */
 export async function createAdminAccount(data: { username: string; password: string; nickname?: string }): Promise<AdminAccount> {
-  const res = await apiFetch(`${API_BASE}/ai/admin/accounts`, {
+  const res = await adminFetch(`${API_BASE}/ai/admin/accounts`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
@@ -922,7 +993,7 @@ export async function createAdminAccount(data: { username: string; password: str
 
 /** 更新管理员账号 */
 export async function updateAdminAccount(account_id: string, data: { nickname?: string; password?: string; enabled?: boolean }): Promise<AdminAccount> {
-  const res = await apiFetch(`${API_BASE}/ai/admin/accounts/${encodeURIComponent(account_id)}`, {
+  const res = await adminFetch(`${API_BASE}/ai/admin/accounts/${encodeURIComponent(account_id)}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
@@ -936,7 +1007,7 @@ export async function updateAdminAccount(account_id: string, data: { nickname?: 
 
 /** 删除管理员账号 */
 export async function deleteAdminAccount(account_id: string): Promise<void> {
-  const res = await apiFetch(`${API_BASE}/ai/admin/accounts/${encodeURIComponent(account_id)}`, {
+  const res = await adminFetch(`${API_BASE}/ai/admin/accounts/${encodeURIComponent(account_id)}`, {
     method: "DELETE",
   })
   if (!res.ok) {
@@ -945,8 +1016,16 @@ export async function deleteAdminAccount(account_id: string): Promise<void> {
   }
 }
 
-/** 管理员登录 */
-export async function adminLogin(username: string, password: string): Promise<{ id: string; username: string; nickname: string }> {
+export interface AdminLoginResult {
+  id: string
+  username: string
+  nickname: string
+  token: string
+  expires_in: number
+}
+
+/** 管理员登录：返回短时令牌，前端只保存令牌，不再保存 API Key。 */
+export async function adminLogin(username: string, password: string): Promise<AdminLoginResult> {
   const res = await apiFetch(`${API_BASE}/ai/admin/accounts/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

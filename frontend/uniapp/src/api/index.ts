@@ -647,7 +647,7 @@ function downloadTaskResultUrl(url: string): void {
 
 function downloadReportTaskPdf(kind: string, params: Record<string, any>): void {
   runReportTask<ReportTaskStatus>(kind, params)
-    .then((t) => downloadTaskResultUrl(`${getConfig().apiBase}/ai/xianzhi/report/tasks/${t.task_id}/result`))
+    .then((t) => downloadTaskResultUrl(withToken(`${getConfig().apiBase}/ai/xianzhi/report/tasks/${t.task_id}/result`)))
     .catch((e: any) => uni.showToast({ title: e?.message || '报告生成失败', icon: 'none' }))
 }
 

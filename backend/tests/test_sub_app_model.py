@@ -19,10 +19,15 @@ from types import SimpleNamespace
 
 import pytest
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
+from starlette.requests import Request
 
 from app.agent.context import AppContext, get_sub_app_model, set_app_context, sub_app_model_of
 from app.sub_app import _base as sub_app_base
 from app.sub_app.tarot.tarot_app import TarotApp
+
+
+def _request() -> Request:
+    return Request({"type": "http", "method": "POST", "path": "/", "headers": [], "client": ("127.0.0.1", 12345)})
 
 
 class _FakeModel:
@@ -117,7 +122,9 @@ def test_sub_app_model_of_works_with_injected_or_stub_context():
 def test_ziwei_interpret_uses_sub_app_model(ctx_pair):
     from app.sub_app.ziwei import routes as ziwei_routes
 
-    out = asyncio.run(ziwei_routes.ziwei_interpret({"date": "1990-05-20", "time_index": 4, "gender": "男"}))
+    out = asyncio.run(
+        ziwei_routes.ziwei_interpret({"date": "1990-05-20", "time_index": 4, "gender": "男"}, _request(), None)
+    )
 
     assert out["text"] == "来自子应用模型"
     assert ctx_pair.sub.invocations == 1
@@ -128,7 +135,9 @@ def test_liuyao_interpret_uses_sub_app_model(ctx_pair):
     from app.sub_app.liuyao import routes as liuyao_routes
 
     result = asyncio.run(liuyao_routes.cast_liuyao({"method": "numbers", "numbers": [7, 8]}))
-    out = asyncio.run(liuyao_routes.interpret_liuyao({"question": "这次面试如何？", "result": result}))
+    out = asyncio.run(
+        liuyao_routes.interpret_liuyao({"question": "这次面试如何？", "result": result}, _request(), None)
+    )
 
     assert out["interpretation"] == "来自子应用模型"
     assert ctx_pair.sub.invocations == 1

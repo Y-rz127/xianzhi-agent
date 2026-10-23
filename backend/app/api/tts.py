@@ -22,11 +22,14 @@ import uuid
 from pathlib import Path
 
 import httpx
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse
 
+from app.api.deps import get_optional_paid_principal
 from app.core.config import settings
+from app.core.http.client_ip import client_ip_from_request
 from app.core.logger import log
+from app.core.quota import enforce_quota
 
 router = APIRouter(prefix="/tts", tags=["TTS"])
 
@@ -119,7 +122,11 @@ async def _fetch_audio(text: str, voice: str) -> bytes:
 
 
 @router.post("/synthesize")
-async def synthesize(body: dict):
+async def synthesize(
+    body: dict,
+    request: Request,
+    principal: dict | None = Depends(get_optional_paid_principal),
+):
     """文本 → 音频。返回本站音频地址（前端直接播放，不必处理上游过期 URL）。"""
     text = str(body.get("text") or "").strip()
     if not text:
@@ -130,6 +137,7 @@ async def synthesize(body: dict):
         )
     if not settings.dashscope_api_key:
         raise HTTPException(status_code=503, detail="语音合成服务尚未配置")
+    await enforce_quota("tts", principal, client_ip_from_request(request), settings.paid_quota_tts_daily)
     voice = str(body.get("voice") or settings.tts_voice).strip() or settings.tts_voice
 
     _cleanup_expired()

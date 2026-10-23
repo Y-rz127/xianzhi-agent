@@ -125,7 +125,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue"
-import { answerFeedbackSftExportUrl, answerFeedbackDpoExportUrl, fetchAnswerFeedbacks, deleteAnswerFeedback, reviewAnswerFeedback, promoteAnswerToCase, unpromoteAnswerToCase, type AnswerFeedbackItem } from "@/api"
+import { exportAnswerFeedbackSft, exportAnswerFeedbackDpo, fetchAnswerFeedbacks, deleteAnswerFeedback, reviewAnswerFeedback, promoteAnswerToCase, unpromoteAnswerToCase, type AnswerFeedbackItem } from "@/api"
 
 const items = ref<AnswerFeedbackItem[]>([])
 const loading = ref(false)
@@ -171,12 +171,20 @@ async function loadData() {
   }
 }
 
-function exportSft() {
-  window.open(answerFeedbackSftExportUrl("up", 1000), "_blank")
+async function exportSft() {
+  try {
+    await exportAnswerFeedbackSft("up", 1000)
+  } catch (e: any) {
+    showToast(`导出失败: ${e.message || e}`, "error")
+  }
 }
 
-function exportDpo() {
-  window.open(answerFeedbackDpoExportUrl(500), "_blank")
+async function exportDpo() {
+  try {
+    await exportAnswerFeedbackDpo(500)
+  } catch (e: any) {
+    showToast(`导出失败: ${e.message || e}`, "error")
+  }
 }
 
 function openDelete(item: AnswerFeedbackItem) {

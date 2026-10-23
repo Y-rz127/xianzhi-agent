@@ -128,7 +128,7 @@
 import { ref, computed, watch } from "vue"
 import MarkdownRender from "../components/MarkdownRender.vue"
 import BaziCard from "../components/BaziCard.vue"
-import { getChart, apiFetch, type ChartData } from "../api/index.ts"
+import { getChart, paidFetch, type ChartData } from "../api/index.ts"
 import { regionData } from "../utils/region-data.ts"
 
 const API_BASE = import.meta.env.DEV ? "http://localhost:8123/api" : "/api"
@@ -252,7 +252,7 @@ const analyze = async () => {
     })
     if (male.value.longitude !== null) params.set("longitude_a", String(male.value.longitude))
     if (female.value.longitude !== null) params.set("longitude_b", String(female.value.longitude))
-    const res = await apiFetch(`${API_BASE}/ai/xianzhi/hehun?${params}`)
+    const res = await paidFetch(`${API_BASE}/ai/xianzhi/hehun?${params}`)
     const data = await res.json()
     if (data.error) result.value = "分析失败：" + data.error
     else result.value = data.result || data.content || JSON.stringify(data)
