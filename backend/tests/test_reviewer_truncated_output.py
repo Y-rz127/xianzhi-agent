@@ -8,7 +8,8 @@
 修法：
 - `_salvage_verdict()` 从残缺输出里抠 `"pass": true/false` 与 issues 字符串
   （兼容最后一条被截断、没有闭合引号的 issue）；
-- 抠到结论就按结论走（source="llm_salvaged"），抠不到才沿用"降级为通过 + 记指标"；
+- 抠到结论就按结论走（source="llm_salvaged"），抠不到标记为 reviewer_unavailable
+  （degraded=True，不再当"通过"），由上层按场景阻断或降级；
 - 判不通过但 issues 全被截断时，给修复器一条可执行的通用问题，不静默放行。
 """
 
@@ -143,12 +144,13 @@ def test_truncated_pass_true_still_approves(monkeypatch):
     assert result.source == "llm_salvaged"
 
 
-def test_unparseable_without_pass_field_still_fails_open(monkeypatch):
-    """保持既有兜底：连结论都拿不到时按通过处理，并记指标（宁可不误杀）。"""
+def test_unparseable_without_pass_field_marks_reviewer_unavailable(monkeypatch):
+    """连结论都拿不到：标记审核未完成，不能伪装成通过。"""
     result = _review(monkeypatch, "我觉得这段回答还行，就不输出 JSON 了")
 
     assert result.ok is True
-    assert result.source == "regex_fallback"
+    assert result.source == "reviewer_unavailable"
+    assert result.degraded is True
 
 
 def test_valid_json_path_unchanged(monkeypatch):

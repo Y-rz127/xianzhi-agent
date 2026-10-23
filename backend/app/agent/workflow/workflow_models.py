@@ -72,10 +72,15 @@ class WorkflowChartContext:
 
 @dataclass(frozen=True)
 class FactCheckResult:
-    """事实校验结果：ok 表示通过全部校验，issues 为发现的问题列表。"""
+    """事实校验结果：ok 表示通过全部校验，issues 为发现的问题列表。
+
+    degraded=True 表示**审核没有真正完成**（异常/超时/非 JSON/预算跳过），
+    不能当作"已通过"使用；调用方需按场景决定阻断还是降级下发。
+    """
     ok: bool
     issues: list[str] = field(default_factory=list)
-    source: str = ""  # "regex" | "llm" | "both" | "llm_salvaged" | "regex_fallback"
+    source: str = ""  # "regex" | "llm" | "llm_salvaged" | "budget_skipped" | "reviewer_unavailable"
+    degraded: bool = False
 
 
 @dataclass(frozen=True)

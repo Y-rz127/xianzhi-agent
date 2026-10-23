@@ -12,12 +12,17 @@
 - L5 `review()` 正则短路：调用方以为触发 LLM 深审，实际未调用
 """
 
+import time
+from types import SimpleNamespace
+
 from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langchain_core.messages import AIMessage
 
+from app.agent import xianzhi_langgraph as graph
 from app.agent.workflow.orchestrator import XianzhiWorkflow
+from app.agent.workflow.workflow_budget import turn_budget
 from app.agent.workflow.workflow_messages import _compute_shensha, compact_facts
-from app.agent.workflow.workflow_models import QuestionIntent
+from app.agent.workflow.workflow_models import FactCheckResult, QuestionIntent
 from app.agent.workflow.workflow_support import _parse_json
 from app.agent.workflow.workflow_workers import ReviewerWorker, _coerce_pass
 from app.domain.chart_builder import (
@@ -286,7 +291,7 @@ def test_review_llm_only_is_safe_without_model():
 
 
 # ============================================================
-# L5 端到端：修复稿 regex 仍报问题 → 真的跑 LLM 深审并计入指标
+# L5 端到端：硬错误阻断 / 软问题下发
 # ============================================================
 
 class _ScriptedModel:
@@ -336,38 +341,260 @@ def _run_agent(model, question="我性格怎么样？"):
         return agent.run(question)
 
 
-def test_repair_second_check_reaches_llm_and_records_metric():
-    """修复稿仍被 regex 打回时：LLM 深审必须真的被调用（旧版 review() 被正则短路，LLM 从未调用），
-    LLM 判通过则按修复稿定稿并记 reviewer_regex_likely_false_positive。
-    """
+def test_repair_unresolved_hard_error_is_blocked():
+    """修复稿仍有确定性硬错误（神煞柱位）→ 不下发，且不再跑无意义的 LLM 深审。"""
+    from app.agent.xianzhi_langgraph import FACT_CHECK_FAILED_TEXT
+
     model = _ScriptedModel(
         worker_answer="你日柱带华盖，爱琢磨，平时喜欢安静。",  # 华盖属时柱 → regex 命中
     )
-    before = _metrics_snapshot("reviewer_regex_likely_false_positive")
+    before = _metrics_snapshot("answer_blocked_unresolved_facts")
 
     answer = _run_agent(model)
 
-    assert model.review_calls == 1, "修复后的二次判定必须真的调用 LLM 深审"
-    assert "华盖" in answer
-    assert _metrics_snapshot("reviewer_regex_likely_false_positive") == before + 1, (
-        "regex 疑似误报必须计入 /metrics internal_errors"
-    )
+    assert model.review_calls == 0, "硬错误已在正则层确认，无需再跑 LLM 深审"
+    assert answer == FACT_CHECK_FAILED_TEXT
+    assert _metrics_snapshot("answer_blocked_unresolved_facts") == before + 1
 
 
-def test_repair_output_is_llm_verified_even_when_regex_passes():
-    """修复稿 regex 通过也要过 LLM 深审（旧版"regex 过即定稿"，修复稿从未被 LLM 看过）。"""
+def test_repair_output_soft_issue_is_delivered():
+    """修复稿 regex 通过、LLM 仅报软问题 → 按修复稿下发并记录指标。"""
     model = _ScriptedModel(
         worker_answer="你日柱带华盖，爱琢磨。",              # regex 命中 → 触发修复
         repair_answer="你时柱华盖，爱琢磨，平时喜欢安静。",   # 修好了 → regex 通过
         verdicts=['{"pass": false, "issues": ["修复稿丢失了流年信息"]}'],
     )
-    before = _metrics_snapshot("reviewer_repair_llm_rejected")
+    before = _metrics_snapshot("answer_delivered_with_soft_issues")
 
     answer = _run_agent(model)
 
     assert model.review_calls == 1, "regex 通过后仍必须调用 LLM 复核修复稿"
-    assert "时柱华盖" in answer, "单轮修复不重试，仍按修复稿定稿"
-    assert _metrics_snapshot("reviewer_repair_llm_rejected") == before + 1
+    assert "时柱华盖" in answer, "软问题不应阻断用户回答"
+    assert _metrics_snapshot("answer_delivered_with_soft_issues") == before + 1
+
+
+# ============================================================
+# P1-08 审核不可用 / 硬错误阻断 / 软问题下发
+# ============================================================
+
+class _ReviewStub:
+    def __init__(self, result):
+        self.result = result
+
+    def review(self, *args, **kwargs):
+        return self.result
+
+
+class _CheckWorkflow:
+    def __init__(self, result):
+        self._reviewer = _ReviewStub(result)
+
+    def _emit_progress(self, text):
+        pass
+
+    def check_facts(self, *args, **kwargs):
+        return FactCheckResult(ok=True)
+
+
+def _check_state(needs_chart: bool):
+    return {
+        "user_prompt": "q",
+        "chart_context": SimpleNamespace(chart=CHART),
+        "intent": QuestionIntent(domain="personality", label="性格心性", needs_chart=needs_chart),
+        "raw_answer": "原始回答",
+        "knowledge": "",
+        "worker": SimpleNamespace(label="性格心性"),
+    }
+
+
+def test_llm_review_exception_marks_degraded():
+    class _Boom:
+        def bind(self, **kwargs):
+            return self
+
+        def invoke(self, messages):
+            raise RuntimeError("reviewer down")
+
+    result = ReviewerWorker(chat_model=_Boom())._llm_review("答案", CHART, "知识", "问题", None, None)
+
+    assert result.ok is True
+    assert result.degraded is True
+    assert result.source == "reviewer_unavailable"
+
+
+def test_llm_review_non_json_marks_degraded():
+    model = FakeListChatModel(responses=["完全不是 JSON"])
+    result = ReviewerWorker(chat_model=model)._llm_review("答案", CHART, "知识", "问题", None, None)
+
+    assert result.ok is True
+    assert result.degraded is True
+    assert result.source == "reviewer_unavailable"
+
+
+def test_check_node_delivers_chart_when_reviewer_unavailable():
+    """审核不可用统一降级下发：命盘分析也不阻断，避免用户等满预算后无回答。"""
+    before = _metrics_snapshot("reviewer_unavailable_delivered")
+    workflow = _CheckWorkflow(
+        FactCheckResult(ok=True, source="reviewer_unavailable", degraded=True)
+    )
+
+    out = graph._check_node(workflow, _check_state(needs_chart=True))
+
+    assert out["final_answer"] == "原始回答"
+    assert out["issues"] == []
+    assert _metrics_snapshot("reviewer_unavailable_delivered") == before + 1
+
+
+def test_check_node_delivers_theory_when_reviewer_unavailable():
+    before = _metrics_snapshot("reviewer_unavailable_delivered")
+    workflow = _CheckWorkflow(
+        FactCheckResult(ok=True, source="reviewer_unavailable", degraded=True)
+    )
+
+    out = graph._check_node(workflow, _check_state(needs_chart=False))
+
+    assert out["final_answer"] == "原始回答"
+    assert _metrics_snapshot("reviewer_unavailable_delivered") == before + 1
+
+
+def test_check_node_delivers_on_budget_skip():
+    before = _metrics_snapshot("reviewer_budget_skipped_delivered")
+    workflow = _CheckWorkflow(FactCheckResult(ok=True, source="budget_skipped", degraded=True))
+
+    out = graph._check_node(workflow, _check_state(needs_chart=True))
+
+    assert out["final_answer"] == "原始回答"
+    assert _metrics_snapshot("reviewer_budget_skipped_delivered") == before + 1
+
+
+class _RepairReviewer:
+    def __init__(self, regex_issues, llm_result):
+        self.regex_issues = regex_issues
+        self.llm_result = llm_result
+        self.llm_calls = 0
+
+    def _regex_review(self, *args, **kwargs):
+        return list(self.regex_issues)
+
+    def review_llm_only(self, *args, **kwargs):
+        self.llm_calls += 1
+        return self.llm_result
+
+
+class _RepairWorkflow:
+    def __init__(self, reviewer):
+        self._reviewer = reviewer
+
+    def _emit_progress(self, text):
+        pass
+
+    def _build_repair_messages(self, *args, **kwargs):
+        return []
+
+    def _invoke(self, messages, timeout_cap=None):
+        return "修复稿"
+
+    def check_facts(self, *args, **kwargs):
+        return FactCheckResult(ok=True)
+
+
+def _repair_state(needs_chart: bool, issues_hard: bool = False):
+    return {
+        "user_prompt": "q",
+        "chart_context": SimpleNamespace(chart=CHART),
+        "intent": QuestionIntent(domain="personality", label="性格心性", needs_chart=needs_chart),
+        "raw_answer": "原始回答",
+        "issues": ["问题"],
+        "issues_hard": issues_hard,
+        "knowledge": "",
+        "worker": SimpleNamespace(label="性格心性"),
+    }
+
+
+def _run_repair(reviewer, needs_chart=True, issues_hard=False):
+    with turn_budget(180):
+        return graph._repair_node(
+            _RepairWorkflow(reviewer), _repair_state(needs_chart, issues_hard)
+        )
+
+
+def test_repair_blocks_when_hard_issues_remain():
+    before = _metrics_snapshot("answer_blocked_unresolved_facts")
+    reviewer = _RepairReviewer(
+        ["「华盖」属于时柱，回答却关联到日柱"],
+        FactCheckResult(ok=True, source="llm"),
+    )
+
+    out = _run_repair(reviewer)
+
+    assert out["final_answer"] == graph.FACT_CHECK_FAILED_TEXT
+    assert reviewer.llm_calls == 0, "硬错误已确认，无需再跑 LLM"
+    assert _metrics_snapshot("answer_blocked_unresolved_facts") == before + 1
+
+
+def test_repair_delivers_chart_when_second_review_unavailable():
+    before = _metrics_snapshot("reviewer_unavailable_delivered")
+    reviewer = _RepairReviewer(
+        [],
+        FactCheckResult(ok=True, source="reviewer_unavailable", degraded=True),
+    )
+
+    out = _run_repair(reviewer, needs_chart=True)
+
+    assert out["final_answer"] == "修复稿"
+    assert _metrics_snapshot("reviewer_unavailable_delivered") == before + 1
+
+
+def test_repair_delivers_theory_when_second_review_unavailable():
+    before = _metrics_snapshot("reviewer_unavailable_delivered")
+    reviewer = _RepairReviewer(
+        [],
+        FactCheckResult(ok=True, source="reviewer_unavailable", degraded=True),
+    )
+
+    out = _run_repair(reviewer, needs_chart=False)
+
+    assert out["final_answer"] == "修复稿"
+    assert _metrics_snapshot("reviewer_unavailable_delivered") == before + 1
+
+
+def test_repair_budget_skip_blocks_hard_issues():
+    before = _metrics_snapshot("answer_blocked_unresolved_facts")
+    reviewer = _RepairReviewer([], FactCheckResult(ok=True, source="llm"))
+
+    with turn_budget(0.01):
+        time.sleep(0.02)
+        out = graph._repair_node(
+            _RepairWorkflow(reviewer), _repair_state(needs_chart=True, issues_hard=True)
+        )
+
+    assert out["final_answer"] == graph.FACT_CHECK_FAILED_TEXT
+    assert _metrics_snapshot("answer_blocked_unresolved_facts") == before + 1
+
+
+def test_repair_budget_skip_delivers_soft_issues():
+    reviewer = _RepairReviewer([], FactCheckResult(ok=True, source="llm"))
+
+    with turn_budget(0.01):
+        time.sleep(0.02)
+        out = graph._repair_node(
+            _RepairWorkflow(reviewer), _repair_state(needs_chart=True, issues_hard=False)
+        )
+
+    assert out["final_answer"] == "原始回答"
+
+
+def test_repair_delivers_soft_issues_with_metric():
+    before = _metrics_snapshot("answer_delivered_with_soft_issues")
+    reviewer = _RepairReviewer(
+        [],
+        FactCheckResult(ok=False, issues=["表达略显生硬"], source="llm"),
+    )
+
+    out = _run_repair(reviewer)
+
+    assert out["final_answer"] == "修复稿"
+    assert _metrics_snapshot("answer_delivered_with_soft_issues") == before + 1
 
 
 def test_dropped_real_facts_helper_flags_only_real_ones():

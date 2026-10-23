@@ -107,6 +107,49 @@ def test_rate_limit_still_retryable():
     assert _retryable(RateLimitError("Error code: 429 - rate limit reached")) is True
 
 
+KIMI_PARAM_400 = (
+    "Error code: 400 - {'error': {'message': \"<400> InternalError.Algo.InvalidParameter: "
+    "Parameter 'temperature'=0.7 is not supported for kimi-k3 model.\", "
+    "'type': 'invalid_request_error', 'code': 'invalid_parameter_error'}}"
+)
+
+
+def test_model_specific_param_error_is_retryable():
+    """模型级参数不兼容（kimi-k3 的 temperature）必须跳过该模型，而不是断链。"""
+    assert _retryable(BadRequestError(KIMI_PARAM_400)) is True
+    assert _retryable(BadRequestError("Error code: 400 - invalid messages format")) is False
+
+
+def test_failover_switches_on_model_param_error(monkeypatch):
+    fm, primary, backup = _failover(BadRequestError(KIMI_PARAM_400))
+    monkeypatch.setattr(fo, "get_active_chain", lambda: [settings.dashscope_model, "backup-model"])
+
+    assert fm.invoke("hi") == "ok:backup-model"
+    assert primary.calls == 1
+    assert backup.calls == 1
+
+
+def test_temperature_for_omits_kimi_and_keeps_qwen(monkeypatch):
+    from app.core.llm_params import temperature_for
+
+    monkeypatch.setattr(settings, "llm_no_temperature_models", "kimi-k3", raising=False)
+    assert temperature_for("kimi-k3", 0.7) is None
+    assert temperature_for("qwen3.8-27b", 0.7) == 0.7
+
+
+def test_probe_chain_reports_each_model(monkeypatch):
+    primary = _FakeModel("m-a")
+    backup = _FakeModel("m-b", BadRequestError(KIMI_PARAM_400))
+    fm = FailoverModel(primary, lambda name: backup if name == "m-b" else primary)
+    monkeypatch.setattr(fo, "get_active_chain", lambda: ["m-a", "m-b"])
+
+    results = fm.probe_chain()
+
+    assert [r["model"] for r in results] == ["m-a", "m-b"]
+    assert results[0]["ok"] is True
+    assert results[1]["ok"] is False
+
+
 # ---------------- 3. 行为：额度 403 时切到下一模型 ----------------
 def test_failover_switches_model_on_quota_403(monkeypatch):
     fm, primary, backup = _failover(PermissionDeniedError(DASHSCOPE_403))

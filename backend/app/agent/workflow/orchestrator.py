@@ -19,12 +19,16 @@ from typing import Callable
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 
+from app.agent.checkpoint import get_checkpointer
 from app.agent.prompts import (
     domain_sysprompt,
 )
 
 # 消息装配 / 事实校验职责已抽离至 workflow_messages（解耦单一职责模块）
 from app.agent.workflow.fact_check import check_facts
+
+# ---- R9 拆分：子模块符号重导出（既有 import 不变） ----
+from app.agent.workflow.workflow_budget import TurnBudgetExceeded, budget_timeout
 from app.agent.workflow.workflow_messages import (  # noqa: F401
     build_messages,
     build_repair_messages,
@@ -34,8 +38,6 @@ from app.agent.workflow.workflow_messages import (  # noqa: F401
     get_chart_facts_text,
     invoke,
 )
-
-# ---- R9 拆分：子模块符号重导出（既有 import 不变） ----
 from app.agent.workflow.workflow_models import (  # noqa: F401
     DOMAIN_LABELS,
     DomainWorker,
@@ -72,9 +74,11 @@ from app.agent.workflow.workflow_workers import (  # noqa: F401
     WORKERS,
     ReviewerWorker,
 )
+from app.core.config import settings
 from app.core.llm_health import is_thinking_restricted, report_once
 from app.core.logger import log
 from app.core.observability import record_error
+from app.core.privacy import safe_text
 from app.core.thinking_router import use_thinking
 
 # 检索策略（领域关键词/领域检索词/理论术语检索词/术语识别）统一由 app.rag.retrieval 提供，
@@ -99,21 +103,26 @@ class XianzhiWorkflow:
         chat_model: BaseChatModel,
         decompose_model: BaseChatModel | None = None,
         reviewer_model: BaseChatModel | None = None,
+        checkpointer=None,
     ):
         self.chat_model = chat_model
         self._decompose_model = decompose_model or chat_model
         self._reviewer = ReviewerWorker(reviewer_model or chat_model)
-        # 阶段进度回调（由 Agent 注入；长静默期给前端一点反馈，避免用户以为卡死而切页面）
+        self._checkpointer = checkpointer if checkpointer is not None else get_checkpointer()
+        # 阶段进度回调（由 Agent 注入；长静默期给前端一点反馈，避免用户以为卡死）
         self.on_progress: Callable[[str], None] | None = None
         # 编排后端唯一为 LangGraph：构建失败即快速失败（启动期暴露），
         # 不再保留内置流水线双后端，避免两套实现行为分叉
         try:
             from app.agent.xianzhi_langgraph import create_xianzhi_graph
 
-            self._graph = create_xianzhi_graph(self)
+            self._graph = create_xianzhi_graph(self, self._checkpointer)
         except Exception as e:
             raise RuntimeError("LangGraph 编排后端构建失败（唯一编排实现，不可降级）: {}".format(e)) from e
-        log.info("[workflow] LangGraph 编排已启用（唯一编排后端）")
+        log.info(
+            "[workflow] LangGraph 编排已启用（唯一编排后端，checkpointer={}）",
+            "on" if self._checkpointer is not None else "off",
+        )
 
     @property
     def backend(self) -> str:
@@ -161,7 +170,10 @@ class XianzhiWorkflow:
                 SystemMessage(content=self._DECOMPOSE_SYSTEM),
                 HumanMessage(content=self._decompose_user_block(user_prompt, history, summary)),
             ]
-            resp = self._decompose_model.invoke(messages)
+            # 预算内收紧拆解超时；无预算场景（脚本/测试）保持原模型超时
+            timeout = budget_timeout(settings.workflow_decompose_timeout, fallback=None)
+            model = self._decompose_model.bind(timeout=timeout) if timeout else self._decompose_model
+            resp = model.invoke(messages)
             raw = (getattr(resp, "content", "") or "").strip()
             raw = re.sub(r"^```(?:json)?\s*", "", raw)
             raw = re.sub(r"\s*```$", "", raw)
@@ -203,9 +215,13 @@ class XianzhiWorkflow:
                 domain,
                 needs_chart,
                 target_dayun,
-                list(queries),
+                safe_text(str(list(queries)), 160),
             )
             return intent
+        except TurnBudgetExceeded:
+            record_error("workflow_decompose_skipped_budget")
+            log.warning("[LLM拆解] 预算耗尽，fallback 到关键词分类")
+            return None
         except Exception as e:
             if is_thinking_restricted(e):
                 # 与 Reviewer 同类的**永久性配置错误**（见 app/core/llm_health.py）：
@@ -249,13 +265,35 @@ class XianzhiWorkflow:
         chart_context: WorkflowChartContext,
         history: list[BaseMessage] | None = None,
         summary: str = "",
+        turn_id: str = "",
     ) -> str:
         """端到端回答：问题拆解→（按需）补全盘→知识检索→拼装消息→调用 LLM→事实校验。
 
         闲聊（detect_domain 命中 chitchat）或明显题外话会短路，直接走分类不调 LLM 拆解，
         以节省 API 调用与时延。非闲聊路径会按需扩展命盘、检索知识库规则、组装 system/user
         消息并调用模型，最后用 check_facts 做事实一致性校验。
+
+        turn_id 非空且命中 checkpoint 时，跳过拆解/检索预热，直接从最后一个完成节点续跑。
         """
+        graph_config = None
+        if self._checkpointer is not None and turn_id:
+            graph_config = {"configurable": {"thread_id": turn_id}}
+            try:
+                snapshot = self._graph.get_state(graph_config)
+                checkpoint_id = snapshot.config.get("configurable", {}).get("checkpoint_id")
+            except Exception as e:
+                log.warning("[workflow] 读取 checkpoint 失败，按新轮执行: {}", e)
+                checkpoint_id = None
+            if checkpoint_id:
+                log.info(
+                    "[workflow] 命中 checkpoint 续跑 turn={} next={}",
+                    turn_id,
+                    tuple(snapshot.next),
+                )
+                with use_thinking(True):
+                    result = self._graph.invoke(None, graph_config)
+                return self._extract_final(result)
+
         # 闲聊短路：关键词命中 chitchat 时直接走分类，不调用 LLM 拆解（节省 API 调用+时间）
         # 例外：用户有「6岁那年」「30岁当时」等年龄指认 + 命理信号词时，强制走拆解路径，
         # 否则会被误判为 chitchat 短路、扩盘与岁运关系全部丢失。
@@ -329,8 +367,13 @@ class XianzhiWorkflow:
                     "history": history or [],
                     "intent": intent,
                     "summary": summary,
-                }
+                },
+                graph_config,
             )
+        return self._extract_final(result)
+
+    @staticmethod
+    def _extract_final(result: dict) -> str:
         final = (result.get("final_answer") or "").strip()
         if not final:
             # 图各节点均保证非空 final_answer（_invoke 对空产出有兜底文案），
@@ -369,8 +412,8 @@ class XianzhiWorkflow:
     def _build_repair_messages(self, raw_answer, checked, user_prompt, intent, ctx, knowledge, worker=None):
         return build_repair_messages(raw_answer, checked, user_prompt, intent, ctx, knowledge, worker)
 
-    def _invoke(self, messages):
-        return invoke(self.chat_model, messages)
+    def _invoke(self, messages, timeout_cap=None):
+        return invoke(self.chat_model, messages, timeout_cap)
 
     def check_facts(self, answer, chart, other_chart=None, needs_chart=True, facts_text=""):
         return check_facts(answer, chart, other_chart, needs_chart, facts_text)

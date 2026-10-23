@@ -146,9 +146,9 @@ def test_reviewer_config_error_gets_its_own_metric_and_reports_once():
     finally:
         log.remove(sink_id)
 
-    # 行为不变：仍然"降级为纯正则通过"（审核不阻断出答案），但必须可观测
-    assert first.ok and first.source == "regex_fallback"
-    assert second.ok and second.source == "regex_fallback"
+    # 审核未完成：不再伪装成"通过"，交给上层按场景阻断/降级
+    assert first.ok and first.source == "reviewer_unavailable" and first.degraded
+    assert second.ok and second.source == "reviewer_unavailable" and second.degraded
     assert model.calls == 2, "两次调用都应真的打到模型（不是被别处短路）"
 
     assert _metrics("reviewer_llm_config_error") == before_cfg + 2, "配置错误要有独立计数"

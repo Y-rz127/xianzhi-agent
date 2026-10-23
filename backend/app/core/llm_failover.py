@@ -14,6 +14,8 @@ import threading
 import time
 from typing import Any, Callable
 
+from langchain_core.messages import HumanMessage
+
 from app.core.config import settings
 from app.core.llm_delegate import DelegatingRunnable
 from app.core.llm_throttle import LLMBusyError
@@ -50,6 +52,16 @@ def _is_quota_exhausted(exc: Exception) -> bool:
     return any(hint in msg for hint in _QUOTA_HINTS)
 
 
+def _is_model_param_error(exc: Exception) -> bool:
+    """模型级参数不兼容（如 kimi-k3 不接受 temperature）：应换下一个模型，而不是整链失败。"""
+    msg = str(exc).lower()
+    return (
+        "invalid_parameter_error" in msg
+        or ("parameter" in msg and "not supported" in msg)
+        or ("not supported for" in msg and "model" in msg)
+    )
+
+
 def _retryable(exc: Exception) -> bool:
     """判断异常是否值得切换模型重试。"""
     name = f"{exc.__class__.__module__}.{exc.__class__.__name__}"
@@ -64,7 +76,10 @@ def _retryable(exc: Exception) -> bool:
         return True
     if "InternalServerError" in name:
         return True
-    if "BadRequestError" in name or "NotFoundError" in name:
+    if "BadRequestError" in name or "UnprocessableEntityError" in name or "NotFoundError" in name:
+        # 模型级参数不兼容（temperature 等）→ 跳过该模型继续降级
+        if _is_model_param_error(exc):
+            return True
         # 模型不存在/无权限属可降级错误；其余 400/404 是请求本身的问题，换模型也会一样失败
         msg = str(exc).lower()
         return "model" in msg and (
@@ -242,3 +257,15 @@ class FailoverModel(DelegatingRunnable):
                 )
                 last_error = exc
         raise ModelUnavailableError(f"降级链全部模型均不可用: {last_error}")
+
+    def probe_chain(self, max_tokens: int = 1) -> list[dict]:
+        """逐个探测链上模型（启动后台调用），返回每位的可用性，不因单个失败中断。"""
+        results: list[dict] = []
+        for name in get_active_chain():
+            try:
+                model = self._resolve_model(name)
+                model.invoke([HumanMessage(content="ping")], max_tokens=max_tokens)
+                results.append({"model": name, "ok": True})
+            except Exception as exc:
+                results.append({"model": name, "ok": False, "error": str(exc)[:300]})
+        return results

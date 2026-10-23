@@ -19,6 +19,8 @@ from app.agent.workflow.workflow_support import (
     _OTHER_BIRTH_RE2,
 )
 from app.core.logger import log
+from app.core.privacy import safe_text
+from app.core.prompt_safety import sanitize_untrusted
 from app.domain.chart_builder import build_bazi_chart
 from app.domain.yun_relations import effective_target_years
 from app.rag.retrieval import (
@@ -93,7 +95,11 @@ def retrieve_rules(
         # 都命中同样片段（与具体问题无关），只会挤占 query 名额并引入噪音；
         # 检索质量交给 LLM 拆解的自适应 query（theory 领域同理，见 build_theory_queries）
         queries = queries[:5]
-        log.info("[workflow检索] LLM拆解路径 queries={} (共{}条)", queries, len(queries))
+        log.info(
+            "[workflow检索] LLM拆解路径 queries={} (共{}条)",
+            safe_text(str(queries), 160),
+            len(queries),
+        )
     elif intent.domain == "theory":
         queries, log_meta = build_theory_queries(user_text)
         log.info("[workflow检索] 理论路径 meta={} 构造query数={}", log_meta, len(queries))
@@ -117,8 +123,10 @@ def retrieve_rules(
         return "（未检索到相关知识）"
     parts: list[str] = []
     for i, (_q, doc) in enumerate(hit_docs, 1):
+        source = doc.metadata.get("source", "未知")
+        # 检索片段按外部资料隔离：防止文档内容里的伪指令被当成系统指令执行
         parts.append(
-            "[片段{}] (来源:{}):\n{}".format(i, doc.metadata.get("source", "未知"), doc.page_content)
+            "[片段{}] (来源:{}):\n{}".format(i, source, sanitize_untrusted(doc.page_content, source=source))
         )
     return "\n\n".join(parts)
 

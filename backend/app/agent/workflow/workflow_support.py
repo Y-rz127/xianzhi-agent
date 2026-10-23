@@ -10,12 +10,14 @@ import re
 from typing import Any
 
 from app.agent.birth_parse import has_pillars as _has_pillars
+from app.agent.workflow.workflow_budget import TurnBudgetExceeded, budget_timeout
 from app.agent.workflow.workflow_models import (
     DOMAIN_LABELS,
     QuestionIntent,
     WorkflowChartContext,
 )
 from app.core.config import settings as _settings
+from app.core.observability import record_error
 from app.domain.chart_builder import build_bazi_chart
 from app.domain.chart_format import format_fact_context
 from app.domain.domain_keywords import DOMAIN_KEYWORDS
@@ -99,8 +101,17 @@ def invoke_review_with_meta(chat_model: Any, messages: list[Any]) -> tuple[str, 
     与 `workflow_messages.invoke` 一致地放宽超时并清理思考标签（旧版审核直接
     `chat_model.invoke`，既没有超时 bind 也不清理 think 块，思考模型的输出会让 JSON 解析失败），
     但不做"空产出兜底文案"——审核拿不到 JSON 时必须显式降级，而不是把兜底文案当审核结论解析。
+
+    整轮预算内实际超时取 min(审核阶段上限, 剩余预算)；无预算场景回退到 workflow_llm_timeout。
     """
-    response = chat_model.bind(timeout=_settings.workflow_llm_timeout).invoke(messages)
+    try:
+        timeout = budget_timeout(
+            _settings.workflow_review_timeout, fallback=_settings.workflow_llm_timeout
+        )
+    except TurnBudgetExceeded:
+        record_error("workflow_review_skipped_budget")
+        raise
+    response = chat_model.bind(timeout=timeout).invoke(messages)
     content = (getattr(response, "content", "") or "").strip()
     return clean_think_tags(content), finish_reason_of(response)
 

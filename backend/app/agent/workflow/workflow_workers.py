@@ -17,6 +17,7 @@ from app.agent.workflow.fact_check import (
     drop_contradicted_issues,
     normalize_citation,
 )
+from app.agent.workflow.workflow_budget import TurnBudgetExceeded
 from app.agent.workflow.workflow_models import DomainWorker, FactCheckResult
 from app.agent.workflow.workflow_support import _parse_json, invoke_review_with_meta
 from app.core.llm_health import is_thinking_restricted, report_once
@@ -596,12 +597,12 @@ class ReviewerWorker:
                         ]
                     return FactCheckResult(ok=passed, issues=issues, source="llm_salvaged")
                 log.warning(
-                    "[Reviewer] LLM 审核返回非 JSON 且捞不到结论（截断={}），降级为通过; raw(前800字):\n{}",
+                    "[Reviewer] LLM 审核返回非 JSON 且捞不到结论（截断={}），审核未完成（不视为通过）; raw(前800字):\n{}",
                     truncated,
                     raw[:800],
                 )
                 record_error("reviewer_llm_nonjson")
-                return FactCheckResult(ok=True, source="regex_fallback")
+                return FactCheckResult(ok=True, source="reviewer_unavailable", degraded=True)
             passed = _coerce_pass(data.get("pass", True))
             issues_raw = data.get("issues", [])
             issues = [str(i) for i in issues_raw if str(i).strip()] if isinstance(issues_raw, list) else []
@@ -635,6 +636,11 @@ class ReviewerWorker:
             if not passed:
                 log.info("[Reviewer] LLM 深审发现问题: {} 条 issue", len(issues))
             return FactCheckResult(ok=passed, issues=issues, source="llm")
+        except TurnBudgetExceeded as e:
+            # 整轮预算耗尽：按用户选择返回已生成回答，深审跳过并记指标
+            record_error("workflow_review_skipped_budget")
+            log.warning("[Reviewer] 预算耗尽，跳过 LLM 深审: {}", e)
+            return FactCheckResult(ok=True, source="budget_skipped", degraded=True)
         except Exception as e:
             if is_thinking_restricted(e):
                 # **永久性配置错误**：该模型只接受 enable_thinking=True，而本侧传了 False
@@ -649,7 +655,7 @@ class ReviewerWorker:
                     "  → 该模型只接受思考模式：把 REVIEWER_ENABLE_THINKING 设为 true，或换一个接受关思考的模型",
                     e,
                 )
-                return FactCheckResult(ok=True, source="regex_fallback")
-            log.warning("[Reviewer] LLM 审核失败，降级为纯正则通过: {}", e)
+                return FactCheckResult(ok=True, source="reviewer_unavailable", degraded=True)
+            log.warning("[Reviewer] LLM 审核失败，审核未完成（不视为通过）: {}", e)
             record_error("reviewer_llm_error")
-            return FactCheckResult(ok=True, source="regex_fallback")
+            return FactCheckResult(ok=True, source="reviewer_unavailable", degraded=True)
