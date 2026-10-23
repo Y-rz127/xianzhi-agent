@@ -870,4 +870,6 @@ export interface ChatOptions {
   birth_place?: string
   sect?: number
   yun_sect?: number
+  /** 每次发送生成一次，服务端据此防重放（重试不会重复跑一轮） */
+  client_msg_id?: string
 }

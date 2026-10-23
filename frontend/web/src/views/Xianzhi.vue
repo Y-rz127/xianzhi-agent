@@ -310,7 +310,22 @@ const lastBirthInfo = ref<BirthInfo | null>(null)
 const chartData = ref<ChartData | null>(null)
 const birthPlace = ref("")
 const birthLongitude = ref(0)
-const conversationId = ref("web-xianzhi-" + Date.now())
+// 会话 ID 是游客访问凭证：使用高熵随机值，不再用可枚举的毫秒时间戳
+function newConversationId(): string {
+  const c = (globalThis as any).crypto
+  const token = c && typeof c.randomUUID === "function"
+    ? c.randomUUID()
+    : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`
+  return `web-xianzhi-${token}`
+}
+const conversationId = ref(newConversationId())
+// 每次发送的消息 ID：网络重试/代理重放带同一个 ID 时，服务端直接复用上一轮结果
+function newClientMsgId(): string {
+  const c = (globalThis as any).crypto
+  return c && typeof c.randomUUID === "function"
+    ? c.randomUUID().replace(/-/g, "")
+    : `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 12)}`
+}
 const sidebarCollapsed = ref(true)
 const isMobile = ref(false)
 const appSidebarOpen = ref(false)
@@ -642,7 +657,7 @@ const formatContent = (text: string) => {
 
 const newSession = () => {
   saveDraft(conversationId.value, input.value)
-  conversationId.value = "web-xianzhi-" + Date.now()
+  conversationId.value = newConversationId()
   messages.value = []
   lastBirthInfo.value = null
   chartData.value = null
@@ -756,7 +771,12 @@ const confirmDeleteSession = async () => {
   try {
     await deleteSessionApi("xianzhi", id)
     cancelDeleteSession()
-    await loadSessions()
+    if (id === conversationId.value) {
+      // 删除当前会话后必须换新 ID，避免继续用已删除会话（其他副本可能还有旧内存 Agent）
+      newSession()
+    } else {
+      await loadSessions()
+    }
     showToast("会话已删除")
   } catch {
     showToast("删除会话失败，请稍后重试")
@@ -886,13 +906,16 @@ const send = async () => {
   messages.value.push(aiMsg)
   scrollToBottom()
 
-  const opts = lastBirthInfo.value ? {
-    birth_time: lastBirthInfo.value.time,
-    gender: lastBirthInfo.value.gender,
-    birth_place: birthPlace.value || undefined,
-    sect: sect.value,
-    yun_sect: yunSect.value,
-  } : undefined
+  const opts = {
+    client_msg_id: newClientMsgId(),
+    ...(lastBirthInfo.value ? {
+      birth_time: lastBirthInfo.value.time,
+      gender: lastBirthInfo.value.gender,
+      birth_place: birthPlace.value || undefined,
+      sect: sect.value,
+      yun_sect: yunSect.value,
+    } : {}),
+  }
 
   chatWithXianzhi(userMsg, conversationId.value, {
     onMessage: (data) => { aiMsg.content += data; scrollToBottom() },

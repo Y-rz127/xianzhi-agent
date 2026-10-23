@@ -29,6 +29,14 @@
  * ════════════════════════════════════════════════════════
  */
 import { resolveWsBase, getConfig } from '@/config'
+import { getToken } from '@/utils/storage'
+
+/** 付费解读 WS 通过 query 携带 token（浏览器/小程序 WS 不能自定义 Authorization 头）。 */
+function withTokenUrl(path: string): string {
+  const token = getToken()
+  if (!token) return path
+  return path + (path.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(token)
+}
 
 export interface ChatWSCallbacks {
   onMessage: (data: string) => void
@@ -206,12 +214,14 @@ export interface XianzhiChatOptions extends ChatWSCallbacks {
   sect?: number
   yunSect?: number
   token?: string
+  /** 每次发送生成一次，服务端据此防重放（重试不会重复跑一轮） */
+  clientMsgId?: string
 }
 
 export function chatWithXianzhiWS(message: string, opts: XianzhiChatOptions) {
   return connectChatWS(
     '/api/ai/xianzhi/ws',
-    { message, conversation_id: opts.conversationId, birth_time: opts.birthTime, gender: opts.gender, birth_place: opts.birthPlace, sect: opts.sect ?? 2, yun_sect: opts.yunSect ?? 1, token: opts.token || '' },
+    { message, conversation_id: opts.conversationId, birth_time: opts.birthTime, gender: opts.gender, birth_place: opts.birthPlace, sect: opts.sect ?? 2, yun_sect: opts.yunSect ?? 1, token: opts.token || '', client_msg_id: opts.clientMsgId || '' },
     opts
   )
 }
@@ -224,7 +234,7 @@ export function drawTarotCards(spread: 'daily' | 'three_card' | 'relationship' |
   try { wx.closeSocket() } catch { }
   currentTarotActive = false
   const myId = ++wsConnId
-  const url = resolveWsBase() + wsPath('/api/ai/tarot/ws')
+  const url = resolveWsBase() + withTokenUrl(wsPath('/api/ai/tarot/ws'))
 
   let receivedMessage = false, doneOrError = false, sent = false, opened = false
   let cancelConnectTimeout: () => void = () => {}
@@ -274,7 +284,7 @@ export function interpretTarotWS(opts: { spread: 'daily' | 'three_card' | 'relat
   try { wx.closeSocket() } catch { }
   currentTarotActive = false
   const myId = ++wsConnId
-  const url = resolveWsBase() + wsPath('/api/ai/tarot/ws')
+  const url = resolveWsBase() + withTokenUrl(wsPath('/api/ai/tarot/ws'))
 
   let receivedMessage = false, doneOrError = false, sent = false, opened = false
   let cancelConnectTimeout: () => void = () => {}
@@ -348,7 +358,7 @@ function startStreamWS(path: string, payload: Record<string, any>, cb: StreamCal
   try { wx.closeSocket() } catch { }
   currentStreamActive = false
   const myId = ++wsConnId
-  const url = resolveWsBase() + wsPath(path)
+  const url = resolveWsBase() + withTokenUrl(wsPath(path))
 
   let receivedMessage = false, doneOrError = false, sent = false, opened = false
   let cancelConnectTimeout: () => void = () => {}

@@ -38,6 +38,9 @@ def _run(monkeypatch, *, memory, stored, legacy):
     async def _noop_access(session_id, token):
         return None
 
+    async def _exists(session_id):
+        return True
+
     async def _stored(session_id):
         return stored
 
@@ -45,6 +48,7 @@ def _run(monkeypatch, *, memory, stored, legacy):
         return legacy
 
     monkeypatch.setattr(api_mod, "_check_session_access", _noop_access)
+    monkeypatch.setattr(api_mod.repo, "session_exists", _exists)
     monkeypatch.setattr(api_mod.repo, "get_session_birth_info", _stored)
     monkeypatch.setattr(api_mod.repo, "get_birth_info_from_session", _legacy)
     return asyncio.run(
@@ -71,6 +75,37 @@ def test_db_used_when_memory_empty(monkeypatch):
         legacy=None,
     )
     assert out == {"time": "2005-09-28 18:00", "gender": "男"}
+
+
+def test_deleted_session_ignores_stale_memory_and_evicts(monkeypatch):
+    """删除后其他副本的内存 Agent 可能仍有旧生辰；会话不存在时不得读回。"""
+    evicted: list[str] = []
+
+    class _Ctx(_FakeAppCtx):
+        def evict_xianzhi(self, session_id):
+            evicted.append(session_id)
+
+    async def _noop_access(session_id, token):
+        return None
+
+    async def _exists(session_id):
+        return False
+
+    async def _none(session_id):
+        return None
+
+    monkeypatch.setattr(api_mod, "_check_session_access", _noop_access)
+    monkeypatch.setattr(api_mod.repo, "session_exists", _exists)
+    monkeypatch.setattr(api_mod.repo, "get_session_birth_info", _none)
+    monkeypatch.setattr(api_mod.repo, "get_birth_info_from_session", _none)
+
+    out = asyncio.run(
+        api_mod.get_xianzhi_session_birth_info(
+            "s1", token=None, app_ctx=_Ctx(_agent_with("2005-09-28 18:00", "男"))
+        )
+    )
+    assert out == {"time": None, "gender": None}
+    assert evicted == ["s1"]
 
 
 def test_db_preferred_over_legacy_tool_calls(monkeypatch):

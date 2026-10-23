@@ -36,6 +36,24 @@ def _agent(monkeypatch) -> Xianzhi:
 
 
 # ---------------- ① 挂载即通知 ----------------
+def test_clear_session_state_removes_chart_and_pending(monkeypatch):
+    """删除会话必须清掉命盘/待确认八字/归属，不能只清消息列表。"""
+    agent = _agent(monkeypatch)
+    agent.set_chart_context("2004-06-22 08:00", MALE)
+    agent._bazi_pending = {"pillars": "甲申庚午壬申甲辰"}
+    agent._user_id = "user-1"
+    agent.message_list.append("placeholder")
+
+    agent.clear_session_state()
+
+    assert agent.chart_context == ""
+    assert agent._workflow_context is None
+    assert agent._last_birth_info is None
+    assert agent._bazi_pending is None
+    assert agent._user_id == ""
+    assert agent.message_list == []
+
+
 def test_notifier_fires_on_mount(monkeypatch):
     agent = _agent(monkeypatch)
     seen: list[dict] = []

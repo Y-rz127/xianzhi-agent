@@ -329,7 +329,7 @@ import {
   type ChartData, type ChatSession,
 } from '@/api'
 import { getLocalDateString } from '@/utils/datetimePicker'
-import { currentUserId, isLoggedIn, getToken, getUser, getBirthPlaceLocal, setBirthPlaceLocal, clearBirthPlaceLocal, getBirthInfoLocal, setBirthInfoLocal } from '@/utils/storage'
+import { isLoggedIn, getToken, getUser, getBirthPlaceLocal, setBirthPlaceLocal, clearBirthPlaceLocal, getBirthInfoLocal, setBirthInfoLocal } from '@/utils/storage'
 import { regionData, matchCityByName, type City } from '@/utils/region-data'
 
 const { themeClass } = useTheme()
@@ -594,12 +594,22 @@ const lastBirthInfo = ref<BirthInfo | null>(null)
 // 防止 watch 与显式 getChart 调用重复请求的标志
 let _skipNextChartWatch = false
 const chartData = ref<ChartData | null>(null)
-// 会话ID：编码 user_id（mp-xianzhi__<userId>__<ts>），实现多用户会话隔离
+// 会话ID 是游客访问凭证：使用高熵随机值，归属由服务端 token 绑定
 function genConversationId(): string {
-  const uid = currentUserId()
-  return `mp-xianzhi__${uid || 'guest'}__${Date.now()}`
+  const c = (globalThis as any).crypto
+  const token = c && typeof c.randomUUID === 'function'
+    ? c.randomUUID()
+    : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`
+  return `mp-xianzhi-${token}`
 }
 const conversationId = ref(genConversationId())
+// 每次发送的消息 ID：WS 重连/重复提交带同一个 ID 时，服务端直接复用上一轮结果
+function genClientMsgId(): string {
+  const c = (globalThis as any).crypto
+  return c && typeof c.randomUUID === 'function'
+    ? c.randomUUID().replace(/-/g, '')
+    : `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 12)}`
+}
 const draftStorageKey = (id: string) => `XZ_DRAFT_${id}`
 
 function loadDraft(sessionId: string): string {
@@ -1343,6 +1353,7 @@ function onSend() {
 
   chatWithXianzhiWS(text, {
     conversationId: conversationId.value,
+    clientMsgId: genClientMsgId(),
     birthTime: effectiveBirthTime.value || undefined,
     gender: effectiveGender.value,
     birthPlace: birthPlace.value || undefined,

@@ -26,6 +26,7 @@ from app.api import (
     xianzhi_report,
 )
 from app.api.deps import app_context_dependency, require_admin
+from app.core.logger import log
 
 chat_router = xianzhi_chat.router
 chart_router = xianzhi_chart.router
@@ -72,7 +73,11 @@ async def _check_session_access(session_id: str, token: str | None):
     - 有归属会话：token 无效或与归属用户不一致 → 403。
       （小程序端 get/del 请求自动携带 token query，正常用户不受影响）
     """
-    owner = await repo.get_session_owner(session_id)
+    try:
+        owner = await repo.get_session_owner(session_id)
+    except Exception:
+        log.exception("查询会话归属失败 session_id={}", session_id)
+        raise HTTPException(status_code=503, detail="会话服务暂不可用")
     if not owner:
         return
     user = await repo.get_by_token(token) if token else None
@@ -81,10 +86,22 @@ async def _check_session_access(session_id: str, token: str | None):
 
 
 @router.delete("/sessions/{session_id}")
-async def delete_xianzhi_session(session_id: str, token: str = Query(None)):
-    """删除先知会话（含消息记录）。有归属的会话需本人 token。"""
+async def delete_xianzhi_session(
+    session_id: str,
+    token: str = Query(None),
+    app_ctx: AppContext = Depends(app_context_dependency),
+):
+    """删除先知会话（含消息记录与内存 Agent）。有归属的会话需本人 token。"""
     await _check_session_access(session_id, token)
-    await repo.delete_session(session_id)
+    try:
+        _agent, lock = app_ctx.get_xianzhi(session_id)
+    except RuntimeError:
+        await repo.delete_session(session_id)
+        return {"status": "ok"}
+    # 与正在执行的轮次互斥：等它结束再删，避免删除后 cleanup 又把消息写回来
+    async with lock:
+        await repo.delete_session(session_id)
+        app_ctx.evict_xianzhi(session_id)
     return {"status": "ok"}
 
 
@@ -112,14 +129,25 @@ async def get_xianzhi_session_birth_info(
     """
     await _check_session_access(session_id, token)
     try:
-        agent, _ = app_ctx.get_xianzhi(session_id)
-        current = getattr(agent, "_last_birth_info", None) or {}
-        if current.get("time") and current.get("gender"):
-            return {"time": current["time"], "gender": current["gender"]}
+        exists = await repo.session_exists(session_id)
     except Exception:
-        pass
+        log.exception("查询会话是否存在失败 session_id={}", session_id)
+        raise HTTPException(status_code=503, detail="会话服务暂不可用")
+    # 只在会话仍存在时信任 Agent 内存；删除后其他副本的内存残留不得读回
+    if exists:
+        try:
+            agent, _ = app_ctx.get_xianzhi(session_id)
+            current = getattr(agent, "_last_birth_info", None) or {}
+            if current.get("time") and current.get("gender"):
+                return {"time": current["time"], "gender": current["gender"]}
+        except Exception:
+            pass
     stored = await repo.get_session_birth_info(session_id)
     if stored and stored.get("time") and stored.get("gender"):
         return {"time": stored["time"], "gender": stored["gender"]}
     info = await repo.get_birth_info_from_session(session_id)
-    return info or {"time": None, "gender": None}
+    if info:
+        return info
+    if not exists:
+        app_ctx.evict_xianzhi(session_id)
+    return {"time": None, "gender": None}
