@@ -113,8 +113,10 @@ def record_llm_call(model: str, tag: str, prompt_tokens: int, completion_tokens:
         entry["total_latency_ms"] += elapsed_ms
 
 
-def record_request(method: str, path: str, status: int, duration: float) -> None:
-    """记录一次 API 请求指标。"""
+def record_request(
+    method: str, path: str, status: int, duration: float, request_id: str = ""
+) -> None:
+    """记录一次 API 请求指标（request_id 便于从用户报障定位日志）。"""
     key = f"{method} {path}"
     latency_ms = duration * 1000
     with _metrics_lock:
@@ -132,6 +134,7 @@ def record_request(method: str, path: str, status: int, duration: float) -> None
         if status >= 400:
             _metrics["recent_errors"].append({
                 "timestamp": time.time(),
+                "request_id": request_id,
                 "method": method,
                 "path": path,
                 "status": status,
@@ -209,6 +212,14 @@ def get_metrics() -> dict[str, Any]:
 
 def init_observability() -> bool:
     """初始化 LangSmith 追踪。须在应用启动最早阶段调用，确保后续所有 LangChain 调用都被追踪。"""
+    # 生产强制关闭：trace 会携带用户生辰与问答原文，发往境外 LangSmith
+    if settings.langsmith_tracing and settings.app_env.strip().lower() in ("prod", "production"):
+        record_error("langsmith_disabled_in_production")
+        log.warning(
+            "APP_ENV={} 强制禁用 LangSmith 追踪（trace 含生辰/问答原文）",
+            settings.app_env,
+        )
+        return False
     if not settings.langsmith_tracing:
         log.info("LangSmith 追踪未启用（LANGSMITH_TRACING=false）")
         return False

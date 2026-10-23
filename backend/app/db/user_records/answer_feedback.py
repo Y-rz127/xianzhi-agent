@@ -9,6 +9,7 @@ import json
 import uuid
 
 from app.core.logger import log
+from app.core.privacy import safe_birth_time
 from app.db import user_records
 from app.db.chart_store import add_chart_case, delete_chart_case
 from app.db.schema import _safe_json
@@ -270,7 +271,7 @@ def _refill_features_by_rechart(chart: dict, feats: dict) -> None:
         feats["useful_god"] = feats["useful_god"] or bazi.wuxing.useful_hint or ""
         feats["combinations"] = feats["combinations"] or list(bazi.analysis.combinations or [])
         feats["clashes"] = feats["clashes"] or list(bazi.analysis.clashes or [])
-        log.info("转案例时重新排盘获取特征: {} {}", birth_time, gender)
+        log.info("转案例时重新排盘获取特征: {} {}", safe_birth_time(birth_time), gender)
     except Exception as e:
         log.warning("重新排盘获取特征失败: {}", e)
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 
 from app.agent.context import AppContext
-from app.api.deps import app_context_dependency
+from app.api.deps import app_context_dependency, require_admin
 from app.core.observability import get_metrics, get_status
 from app.rag.vector_store import get_knowledge_base
 
@@ -23,12 +23,12 @@ async def health(app_ctx: AppContext = Depends(app_context_dependency)):
 
 
 @router.get("/observability/status")
-async def observability_status():
-    """返回系统可观测性状态。"""
+async def observability_status(_admin: dict | None = Depends(require_admin)):
+    """返回系统可观测性状态（管理员）。"""
     return get_status()
 
 
 @router.get("/metrics")
-async def metrics():
-    """返回 API 请求指标快照。"""
+async def metrics(_admin: dict | None = Depends(require_admin)):
+    """返回 API 请求指标快照（管理员，含成本与错误信息）。"""
     return get_metrics()

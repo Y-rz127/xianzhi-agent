@@ -14,11 +14,13 @@
       <view class="section">
         <text class="h2">三、信息存储与安全</text>
         <text class="p">您的对话与命例数据存储于服务器，我们采取合理的技术措施保护信息安全，但不保证信息绝对安全。</text>
+        <text class="p">超过 90 天未活动的会话消息、生辰信息与命盘画像会被自动清理；您主动保存的命例与收藏不会被自动删除。</text>
       </view>
 
       <view class="section">
         <text class="h2">四、信息共享</text>
-        <text class="p">除法律法规要求或您另行同意外，我们不会向第三方共享您的个人信息。</text>
+        <text class="p">为生成命理解读，您的出生信息与对话内容会发送给第三方大语言模型服务（阿里云百炼 / DashScope）处理。该服务仅用于完成本次分析，我们不会向其出售数据，其数据处理规则以服务商隐私政策为准。</text>
+        <text class="p">生产环境不启用境外追踪服务；除法律法规要求或您另行同意外，我们不会向其他第三方共享您的个人信息。</text>
       </view>
 
       <view class="section">

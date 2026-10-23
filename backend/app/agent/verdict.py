@@ -31,6 +31,7 @@ from dataclasses import replace
 from typing import Any
 
 from app.core.logger import log
+from app.core.privacy import safe_birth_time
 from app.domain.analysis_calc import ENGINE_VERSION
 from app.domain.chart_builder import BaziChart
 from app.domain.fortune_score import detect_ailment, favor_vector
@@ -570,12 +571,18 @@ async def chart_with_verdict(
     if verdict is None and allow_stale:
         stale_chart = await asyncio.to_thread(_apply_stale, chart, chash)
         if stale_chart is not None:
-            log.info("[verdict] {} 当前版本无裁决，先应用旧版终审并后台重判", chart.birth.solar)
+            log.info(
+                "[verdict] {} 当前版本无裁决，先应用旧版终审并后台重判",
+                safe_birth_time(chart.birth.solar),
+            )
             _submit_background_verdict(chart, model, chash)
             return stale_chart
         # 首次排盘：也不等 LLM。详情页先显示计算版（前端有"终审版生成中"提示），
         # 后台判完落库，下次请求/下拉刷新即是终审版。
-        log.info("[verdict] {} 首次排盘无任何裁决，先给计算版并后台补判", chart.birth.solar)
+        log.info(
+            "[verdict] {} 首次排盘无任何裁决，先给计算版并后台补判",
+            safe_birth_time(chart.birth.solar),
+        )
         _submit_background_verdict(chart, model, chash)
         return chart
 
@@ -593,17 +600,24 @@ async def chart_with_verdict(
             if row["status"] == "ok":
                 verdict = row["verdict"]
             else:
-                log.warning("[verdict] {} 裁决 invalid，回退计算版", chart.birth.solar)
+                log.warning(
+                    "[verdict] {} 裁决 invalid，回退计算版",
+                    safe_birth_time(chart.birth.solar),
+                )
         except asyncio.TimeoutError:
             # 单独接住：TimeoutError 的 str() 是空串，混在通用分支里会打成
             # "LLM 裁决失败（）"这种查不出所以然的日志（2026-10-11）
             log.warning(
                 "[verdict] {} 裁决超时（{}s 预算），回退计算版",
-                chart.birth.solar,
+                safe_birth_time(chart.birth.solar),
                 int(_VERDICT_TIMEOUT),
             )
         except Exception as e:
-            log.warning("[verdict] {} LLM 裁决失败（{}），回退计算版", chart.birth.solar, _err_text(e))
+            log.warning(
+                "[verdict] {} LLM 裁决失败（{}），回退计算版",
+                safe_birth_time(chart.birth.solar),
+                _err_text(e),
+            )
 
     if verdict is None:
         return chart
