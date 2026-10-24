@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import threading
 import uuid as uuid_module
+from datetime import datetime, timezone
 from typing import List
 
 from langchain_core.messages import BaseMessage, messages_from_dict
@@ -94,6 +95,16 @@ def _ensure_schema():
                     CREATE INDEX IF NOT EXISTS idx_message_store_session_created
                     ON {} (session_id, created_at DESC)
                 """.format(settings.memory_table_name)
+                )
+                # 轮次状态：用户提问在**轮次开始时就落库**（标 running），收尾时改成 ended。
+                # 为什么要有它：完整一轮历史是 cleanup 里 `_persist_history` 一次性写的，
+                # 生成期间服务端什么都没有 —— 前端切到别的会话、或小程序被回收再打开，
+                # 这一问就凭空消失（页面重开后前端也补不回来）。提前写 + 显式状态可解。
+                # 失败/中止同样只标记 ended、不删行：用户仍能看到自己问过什么。
+                conn.execute(
+                    "ALTER TABLE {} ADD COLUMN IF NOT EXISTS turn_status TEXT".format(
+                        settings.memory_table_name
+                    )
                 )
                 log.info("PG 记忆表已就绪: {}", settings.memory_table_name)
             _schema_ready = True
@@ -180,20 +191,8 @@ class PostgresChatMemory:
         try:
             session_uuid = self._to_uuid(conversation_id)
             _session_uuid_map[session_uuid] = conversation_id
-            module = _extract_module(conversation_id)
             with _get_pool().connection() as conn:
-                conn.execute(
-                    """
-                    INSERT INTO session_metadata (session_id, conversation_id, module, user_id)
-                    VALUES (%s, %s, %s, %s)
-                    ON CONFLICT (session_id) DO UPDATE
-                    SET conversation_id = EXCLUDED.conversation_id,
-                        module = EXCLUDED.module,
-                        user_id = COALESCE(NULLIF(session_metadata.user_id, ''), EXCLUDED.user_id),
-                        updated_at = CURRENT_TIMESTAMP
-                """,
-                    (session_uuid, conversation_id, module, user_id or ""),
-                )
+                self._upsert_session_metadata(conn, session_uuid, conversation_id, user_id)
                 history = self._history(conversation_id, conn)
                 for m in messages:
                     history.add_message(m)
@@ -202,6 +201,101 @@ class PostgresChatMemory:
             log.error("写入PG记忆失败 {} : {}", conversation_id, e)
             _record_error("memory.add")
             raise
+
+    def _upsert_session_metadata(self, conn, session_uuid: str, conversation_id: str, user_id: str) -> None:
+        """建/更新会话元数据（UUID → conversation_id 映射、模块、归属）。
+
+        归属只保留已有非空值：游客/旧客户端不得把已绑定会话的 owner 抹掉。
+        """
+        conn.execute(
+            """
+            INSERT INTO session_metadata (session_id, conversation_id, module, user_id)
+            VALUES (%s, %s, %s, %s)
+            ON CONFLICT (session_id) DO UPDATE
+            SET conversation_id = EXCLUDED.conversation_id,
+                module = EXCLUDED.module,
+                user_id = COALESCE(NULLIF(session_metadata.user_id, ''), EXCLUDED.user_id),
+                updated_at = CURRENT_TIMESTAMP
+        """,
+            (
+                session_uuid,
+                conversation_id,
+                _extract_module(conversation_id),
+                user_id or "",
+            ),
+        )
+
+    def add_pending_question(self, conversation_id: str, message: BaseMessage) -> int | None:
+        """把用户提问**即时落库**并标为生成中，返回行 id（收尾时用 end_pending_question 收尾）。
+
+        为什么不等 cleanup：完整一轮（问+答）是 `_persist_history` 在 cleanup 里一次性
+        写的，生成期间服务端什么都没有。用户在这段时间切到别的会话、或小程序被系统
+        回收再打开，这一问就只能靠前端内存兜着 —— 页面一重建就没了。
+        写失败不影响回答：只告警并返回 None（调用方据此跳过收尾标记）。
+        """
+        try:
+            from langchain_core.messages import message_to_dict
+
+            data = message_to_dict(message)
+            text = data.get("data", {}).get("content")
+            session_uuid = self._to_uuid(conversation_id)
+            _session_uuid_map[session_uuid] = conversation_id
+            with _get_pool().connection() as conn:
+                self._upsert_session_metadata(conn, session_uuid, conversation_id, "")
+                # 上一次尝试崩在半路，会留下一条"生成中"的同一个提问：复用它（顺带刷新
+                # 时间戳，免得读取侧按超时判成 ended），避免崩溃重试把同一问存两遍
+                row = None
+                if isinstance(text, str):
+                    row = conn.execute(
+                        f"""
+                        UPDATE {self.table_name} SET created_at = NOW()
+                        WHERE id = (
+                            SELECT id FROM {self.table_name}
+                            WHERE session_id = %s AND turn_status = 'running'
+                              AND message -> 'data' ->> 'content' = %s
+                            ORDER BY id DESC LIMIT 1
+                        )
+                        RETURNING id
+                        """,
+                        (session_uuid, text),
+                    ).fetchone()
+                if row is None:
+                    row = conn.execute(
+                        f"INSERT INTO {self.table_name} (session_id, message, turn_status) "
+                        "VALUES (%s, %s, 'running') RETURNING id",
+                        (session_uuid, json.dumps(data)),
+                    ).fetchone()
+                if row is None:
+                    return None
+                # 其余"生成中"一律就地收尾（上一次崩溃留下的残问）：同一会话最多一条 running，
+                # 否则读取侧分不清哪一问真的还在生成
+                conn.execute(
+                    f"UPDATE {self.table_name} SET turn_status = 'ended' "
+                    "WHERE session_id = %s AND turn_status = 'running' AND id <> %s",
+                    (session_uuid, row[0]),
+                )
+            return int(row[0])
+        except Exception as e:
+            log.warning("提问即时落库失败（不影响本轮回答） {} : {}", conversation_id, e)
+            _record_error("memory.add_pending_question")
+            return None
+
+    def end_pending_question(self, message_id: int | None) -> bool:
+        """把"生成中"的提问标记为已结束（**不删行**）：成功、失败、中止都调。"""
+        if not message_id:
+            return False
+        try:
+            with _get_pool().connection() as conn:
+                conn.execute(
+                    f"UPDATE {self.table_name} SET turn_status = 'ended' "
+                    "WHERE id = %s AND turn_status = 'running'",
+                    (message_id,),
+                )
+            return True
+        except Exception as e:
+            log.warning("标记提问已结束失败 id={} : {}", message_id, e)
+            _record_error("memory.end_pending_question")
+            return False
 
     def clear(self, conversation_id: str):
         """清空该会话在 PG 中的全部消息。"""
@@ -314,6 +408,37 @@ def _extract_module(conversation_id: str) -> str:
     if len(parts) >= 2 and not parts[1].isdigit():
         return f"{first}-{parts[1]}"
     return first
+
+
+# 标着"生成中"的提问超过这么久的余量就当已结束：进程崩溃/被杀时没人来收尾，
+# 不能让前端永远以为还在生成（余量之外还有单轮预算 chat_turn_budget）
+PENDING_STALE_SLACK_SECONDS = 120
+
+
+def pending_status(turn_status, created_at, *, now=None, stale_seconds: float | None = None) -> str:
+    """把 `message_store.turn_status` + 写入时间换算成对外的轮次状态。
+
+    返回：
+    - ``"running"``：回答还在生成（前端应去取回/继续等）；
+    - ``"ended"``：已结束（成功有回答；失败/中止则是"没有回答的孤立提问"，不删行）；
+    - ``""``：老数据没有标记，调用方沿用旧判断（最后一条是提问就当待补）。
+    """
+    status = (turn_status or "").strip()
+    if status == "ended":
+        return "ended"
+    if status != "running":
+        return ""
+    if created_at is None or now is None:
+        return "running"
+    slack = PENDING_STALE_SLACK_SECONDS if stale_seconds is None else stale_seconds
+    try:
+        # TIMESTAMPTZ 取回来是带时区的；若拿到 naive 值（手工塞的测试数据/旧驱动），按 UTC 处理
+        if getattr(created_at, "tzinfo", None) is None:
+            created_at = created_at.replace(tzinfo=timezone.utc)
+        age = (now - created_at).total_seconds()
+    except Exception:
+        return "running"
+    return "running" if age <= (settings.chat_turn_budget + slack) else "ended"
 
 
 class PostgresMemoryStore:
@@ -516,14 +641,18 @@ class PostgresMemoryStore:
 
         过滤 tool/system 消息、tool_call_agent 注入的 next_step_prompt 占位消息及空消息；
         user 消息剥离 base_agent 注入的指令防护边界标记。
+
+        带上 `status`（running / ended，见 pending_status）：前端据此判断"最后一条提问
+        还在生成"还是"这一问已结束、只是没有回答"——后者不再当成待补去轮询。
         """
         try:
             session_uuid = self._resolve_session_uuid(session_id)
+            now = datetime.now(timezone.utc)
             with _get_pool().connection() as conn:
                 cur = conn.execute(
-                    """
-                    SELECT message, created_at FROM message_store
-                    WHERE session_id = %s ORDER BY created_at
+                    f"""
+                    SELECT message, created_at, turn_status FROM {settings.memory_table_name}
+                    WHERE session_id = %s ORDER BY created_at, id
                 """,
                     (session_uuid,),
                 )
@@ -544,13 +673,15 @@ class PostgresMemoryStore:
                 role = "user" if raw_role == "human" else "assistant"
                 if role == "user":
                     content = _strip_user_input_boundary(content)
-                messages.append(
-                    {
-                        "role": role,
-                        "content": content,
-                        "time": str(row[1]) if row[1] else "",
-                    }
-                )
+                entry = {
+                    "role": role,
+                    "content": content,
+                    "time": str(row[1]) if row[1] else "",
+                }
+                status = pending_status(row[2] if len(row) > 2 else None, row[1], now=now)
+                if status:
+                    entry["status"] = status
+                messages.append(entry)
             return messages
         except Exception:
             log.exception("获取会话消息失败: {}", session_id)

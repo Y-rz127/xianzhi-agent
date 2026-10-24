@@ -1400,6 +1400,9 @@ async function resumePendingTurn() {
     if (!msgs.length) return
     const last = msgs[msgs.length - 1]
     if (last.role !== 'user') return // 上一轮已落库，没有待补的
+    // 后端已把这一问标成"已结束"（失败/中止留下的孤立提问，不会再产出回答）：
+    // 它就是历史里的一条普通提问，别当成待补去轮询 165 秒
+    if (last.status === 'ended') return
     messages.value = msgs.map(m => ({ role: m.role, content: m.content }))
     messages.value.push({ role: 'assistant', content: '', progress: '上一轮仍在生成中，正在取回…' })
     const turnId = genClientMsgId()

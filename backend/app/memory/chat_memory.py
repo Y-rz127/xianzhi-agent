@@ -69,6 +69,18 @@ class FileBasedChatMemory:
             if p.exists():
                 p.unlink()
 
+    def add_pending_question(self, conversation_id, message):
+        """提问即时落库：文件后端没有"单条消息改状态"的能力，返回 None（调用方跳过收尾）。
+
+        语义上的损失只是"生成期间切会话再回来，这一问要等本轮结束才在历史里出现"，
+        与 PG 后端相比少一层兜底，不影响任何功能。
+        """
+        return None
+
+    def end_pending_question(self, message_id) -> bool:
+        """与 add_pending_question 配套的空实现（文件后端不支持轮次状态）。"""
+        return False
+
     def _write(self, conversation_id, messages):
         p = self._path(conversation_id)
         data = messages_to_dict(messages)

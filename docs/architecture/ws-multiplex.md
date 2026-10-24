@@ -103,3 +103,27 @@ cd frontend/uniapp && npx vue-tsc --noEmit
 两边各自流式输出；切回 A 能看到 A 的回答继续在长；把同时生成的会话数开到
 `WS_MAX_PARALLEL_SESSIONS + 1`，第 N+1 个应立刻收到
 "最多同时 N 个会话在生成，请等其中一个完成再发"。
+
+## 附：提问即时落库（多会话并行的前提之一）
+
+完整一轮（问 + 答）是 `_persist_history` 在 cleanup 里**一次性**写的。生成期间服务端
+什么都没有，于是"切走再切回会不会丢提问"就取决于前端内存 —— 页面一重建（小程序被
+回收、直接杀掉）就补不回来。所以提问在**轮次开始时就落库**：
+
+| 时机 | 写入 | `message_store.turn_status` |
+|---|---|---|
+| 轮次开始（`run` / `run_stream` / `arun_stream` 载入历史之后） | 用户提问 | `running` |
+| 轮次结束（cleanup，成功/失败/中止都走） | 回答（失败则没有） | 提问行改成 `ended`，**不删行** |
+
+配套约束：
+
+- `_persist_pending_question` 把 `_persist_history` 的跳过位点前移，cleanup 只追加回答，
+  同一个提问不会写两遍（只跳过"内容完全一致的那一条"）。
+- 崩溃后重试同一个问题会**复用**那条 `running` 行（刷新 `created_at`），不重复存；
+  新开一轮时会把该会话其余 `running` 一并收尾 —— 一个会话最多一条 `running`。
+- 读取侧 `get_messages` 带回 `status`（`running` / `ended` / 不返回=老数据），
+  前端 `resumePendingTurn` 据此区分"还在生成"和"已结束的孤立提问"，
+  后者不再空转 165 秒去轮询。
+- 进程崩溃没人收尾时，`pending_status()` 按 `created_at` + 单轮预算（`CHAT_TURN_BUDGET`）
+  + 120s 余量判成 `ended`，前端不会永远显示"生成中"。
+

@@ -816,7 +816,18 @@ export interface ChatSession {
   messageCount: number
 }
 
-export interface SessionMessage { role: 'user' | 'assistant'; content: string; time?: string }
+export interface SessionMessage {
+  role: 'user' | 'assistant'
+  content: string
+  time?: string
+  /**
+   * 轮次状态（后端 `message_store.turn_status`）：
+   * - `running`：这一问的回答还在生成 → 前端可去取回/继续等；
+   * - `ended`：已结束（成功有回答；失败/中止则是"没有回答的孤立提问"，后端不会再有后续）；
+   * - 不返回：老数据没有标记，沿用"最后一条是提问就算待补"的旧判断。
+   */
+  status?: 'running' | 'ended'
+}
 
 export interface SessionBirthInfo { time: string | null; gender: string | null }
 

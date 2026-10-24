@@ -101,6 +101,10 @@ class Xianzhi(ToolCallAgent):
         self._bazi_pending: Optional[dict] = None  # 八字待确认候选: {"pillars","gender","candidates"}
         self._birth_signal: bool = False  # 模糊生辰信号：精确正则没抓到但疑似在提供生辰
         self._history_len = 0  # 本轮载入的历史消息数，_persist_history 据此只落盘新增消息
+        # 提问即时落库（见 _persist_pending_question）：行 id 用于 cleanup 时标 ended，
+        # 原文用于 _persist_history 跳过它、避免同一问写两遍
+        self._pending_question_id: Optional[int] = None
+        self._persisted_question: str = ""
         # 命盘挂载回调（由 API 层按轮注册）：挂上盘就立刻通知前端，
         # 不再等整轮回答流完（旧做法在 socket 断开时会连通知一起丢，见 _fire_chart_notifier）
         self._chart_notifier: Optional[Callable[[dict], None]] = None
@@ -222,6 +226,8 @@ class Xianzhi(ToolCallAgent):
         self._sect = 2
         self._yun_sect = 1
         self._history_len = 0
+        self._pending_question_id = None
+        self._persisted_question = ""
         self._turn_started_at = time.monotonic()
         # 每轮重置「已通知」标记：同一张盘在新的一轮仍要再通知一次
         # （客户端可能刚重建页面/换端接入，拿不到通知就靠 birth-info 接口兜底）
@@ -374,6 +380,7 @@ class Xianzhi(ToolCallAgent):
         self.reset()
         self.mount_chart_context(user_prompt, self._sect, self._yun_sect)
         self._load_history()
+        self._persist_pending_question(user_prompt)
         if self._workflow_context:
             chunks = list(self._workflow_stream(user_prompt))
             return chunks[-1] if chunks else ""
@@ -710,6 +717,7 @@ class Xianzhi(ToolCallAgent):
         # 与 arun_stream 保持一致：无条件尝试挂载（用户中途更新生辰时覆盖旧盘）
         self.mount_chart_context(user_prompt, self._sect, self._yun_sect)
         self._load_history()
+        self._persist_pending_question(user_prompt)
         if self._workflow_context and not verbose:
             return self._workflow_stream(user_prompt)
         # 闲聊短路：无命盘 + 闲聊意图 → 直接调一次 LLM，不走 ReAct 工具循环
@@ -734,6 +742,8 @@ class Xianzhi(ToolCallAgent):
         # 挂载与历史载入含正则解析/排盘/PG IO，放线程池避免阻塞事件循环
         await asyncio.to_thread(self.mount_chart_context, user_prompt, self._sect, self._yun_sect)
         await asyncio.to_thread(self._load_history)
+        # 提问即时落库（PG IO，放线程池）：生成期间服务端就有这一问，前端切会话/被杀都不丢
+        await asyncio.to_thread(self._persist_pending_question, user_prompt)
         if self._workflow_context and not verbose:
             async for chunk in self._aworkflow_stream(user_prompt):
                 yield chunk
@@ -811,12 +821,48 @@ class Xianzhi(ToolCallAgent):
         except Exception as e:
             log.warning("[xianzhi] 出生信息落库失败（不影响回答）: {}", e)
 
+    def _persist_pending_question(self, user_prompt: str) -> None:
+        """把本轮提问**即时落库**并标为"生成中"（PG `message_store.turn_status`）。
+
+        为什么提前写：完整一轮（问+答）是 cleanup 里 `_persist_history` 一次性写的，
+        生成期间服务端什么都没有 —— 用户这时切到别的会话、或小程序被系统回收再打开，
+        这一问就只剩前端内存兜着，页面一重建就没了。提前写之后服务端始终知道
+        "这一问还在生成（running）/ 已结束（ended）"。
+
+        写完把 `_history_len` 前移到"含这一问"，cleanup 再按 `_persisted_question`
+        跳过它，保证同一个提问只落一次。落库失败不影响回答（只降级为旧行为）。
+        """
+        text = (user_prompt or "").strip()
+        if not text:
+            return
+        # 文件记忆后端没有单条更新能力，返回 None → 保持旧行为
+        add = getattr(self._memory, "add_pending_question", None)
+        if add is None:
+            return
+        try:
+            self._pending_question_id = add(self._conversation_id, HumanMessage(content=user_prompt))
+            # 记住"这一问已经写过"，_persist_history 据此跳过（否则 cleanup 会再写一遍）
+            self._persisted_question = text if self._pending_question_id else ""
+        except Exception as e:
+            self._pending_question_id = None
+            self._persisted_question = ""
+            log.warning("[xianzhi] 提问即时落库失败（不影响回答）: {}", e)
+
     def _persist_history(self):
         """仅持久化本轮新增的消息，避免重复追加历史导致消息指数级重复。
         同时过滤掉 next_step_prompt 占位消息（tool_call_agent.think 注入的 HumanMessage），
         防止历史会话恢复时把"工具指引"内容当作用户消息显示在左边。
         """
         new_messages = self.message_list[self._history_len :]
+        # 提问已在轮次开始时即时落库（_persist_pending_question），这里跳过它，
+        # 否则同一个提问会被写两遍；只跳过"内容完全一致的那一条"，别误伤后续消息
+        if new_messages and self._persisted_question:
+            first = new_messages[0]
+            if (
+                first.__class__.__name__ == "HumanMessage"
+                and (getattr(first, "content", "") or "").strip() == self._persisted_question
+            ):
+                new_messages = new_messages[1:]
         if new_messages:
             # 过滤 next_step_prompt 注入的 HumanMessage（其内容以工具调度模板开头）
             filtered = [
@@ -864,6 +910,16 @@ class Xianzhi(ToolCallAgent):
             self._persist_birth_info()
         except Exception as e:
             log.warning("[xianzhi] cleanup 持久化出生信息失败: {}", e)
+        # 收尾：把这一问标成已结束。**成功、失败、中止都调**——
+        # 失败时这一问已经落库了（没有回答），它不该一直显示"生成中"，但也**不删**
+        # （用户仍能看到自己问过什么）。没落过库（None）就是空操作。
+        if self._pending_question_id:
+            try:
+                self._memory.end_pending_question(self._pending_question_id)
+            except Exception as e:
+                log.warning("[xianzhi] 标记提问已结束失败（读取侧按超时兜底）: {}", e)
+        self._pending_question_id = None
+        self._persisted_question = ""
         # 命盘上下文持久化到会话：不清空，下一轮同会话仍可用
         # 仅在切换会话（set_conversation_id）时才主动清空
         self._turn_id = ""
