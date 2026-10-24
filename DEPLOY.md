@@ -131,6 +131,29 @@ CloudBase 云托管支持两种方式：
 - 浏览器/终端访问 `https://你的云托管域名/api/health` 应返回健康状态。
 - 小程序设置正确后，发一条消息验证端到端连通。
 
+### 6.1 跑测试要用独立的测试库（别写进开发库）
+
+单测里有构造真实 Agent 的用例，会写 `session_metadata` / `message_store` / `session_birth_info`。
+`backend/.env` 的 `MEMORY_STORE_TYPE=postgres` 生效时，这些写入会落到
+`POSTGRES_CONNECTION_STRING` 指的库 —— 若不改道，开发库里就会冒出 `test-workflow`
+这类脏会话（2026-10-24 实际踩过）。
+
+做法（本机复用 docker 的 `xianzhi-pg`）：
+
+```bash
+# 1) 建测试库（含 pgvector，与开发库同扩展）
+docker exec -it xianzhi-pg psql -U postgres -c "CREATE DATABASE xianzhi_test"
+docker exec -it xianzhi-pg psql -U postgres -d xianzhi_test -c "CREATE EXTENSION IF NOT EXISTS vector"
+
+# 2) backend/.env 加一行（该文件不入库；CI 用同名环境变量）
+TEST_POSTGRES_CONNECTION_STRING=postgresql://postgres:postgres@localhost:5433/xianzhi_test
+```
+
+`tests/conftest.py` 的规则：
+- 配了且**库名以 `_test` 结尾** → 全量跑测改道该库，开跑前清空会话类表（本机长驻库也不串数据）；
+- 没配 → 单测退化为文件记忆 + 挡掉出生信息/命盘快照写入，集成测试跳过（CI 的 unit job 即此模式）；
+- 配了但库名不以 `_test` 结尾 → 视为填错，**不改道**并提醒（避免把测试数据写进真库）。
+
 ---
 
 ## 7. 注意事项

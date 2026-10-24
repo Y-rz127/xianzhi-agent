@@ -36,6 +36,8 @@ logs/
 
 # 测试
 .pytest_cache/
+# 单测的记忆临时目录（tests/conftest.py 把 MEMORY_STORE_TYPE 强制为 file 后落这里）
+.pytest-memory/
 # pytest 在临时目录不可写时会回退到当前工作目录，落这些目录（每跑一次一个）
 pytest-cache-files-*/
 .coverage

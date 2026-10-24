@@ -228,6 +228,13 @@ class Settings(BaseSettings):
         default="postgresql://postgres:postgres@localhost:5433/xianzhi",
         alias="POSTGRES_CONNECTION_STRING",
     )
+    # 测试库连接串（**只被 tests/conftest.py 读取**，运行时代码不碰）：
+    # 配了它，跑测就整体改道到这个库，测试数据只落这里，绝不进开发库；
+    # 库名必须以 `_test` 结尾（conftest 会把关），防止误填成开发库把脏数据写进去。
+    # 本机可直接复用 docker 的 xianzhi-pg：postgresql://postgres:postgres@localhost:5433/xianzhi_test
+    test_postgres_connection_string: str = Field(
+        default="", alias="TEST_POSTGRES_CONNECTION_STRING"
+    )
     # PG 向量表名
     postgres_collection: str = Field(default="xianzhi_knowledge", alias="POSTGRES_COLLECTION")
     # DashScope embedding 不可用时回退本地 HuggingFace 模型（避免欠费导致服务崩溃）
