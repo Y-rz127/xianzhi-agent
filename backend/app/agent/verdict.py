@@ -628,6 +628,8 @@ async def chart_with_verdict(
 # 会连着派发同一个 chart_hash，不去重就是判三遍——既烧 token，又跟正在跑的对话抢模型配额。
 _bg_inflight: set[str] = set()
 _bg_inflight_lock = threading.Lock()
+# 同盘已在补判时，后续挂过来的回调（如保存接口落库）等这次跑完一起收结果
+_bg_pending_callbacks: dict[str, list] = {}
 
 
 def _hash_of(chart: BaziChart) -> str:
@@ -667,6 +669,31 @@ def verdict_cache_namespace(chash: str) -> str:
     except Exception as e:
         log.warning("[verdict] 缓存命名空间判定失败，按计算版处理: {}", _err_text(e))
         return "p"
+
+
+def chart_with_cached_verdict(chart: BaziChart, allow_stale: bool = True) -> BaziChart:
+    """只应用**已落库**的裁决，不派任何后台任务（保存接口用）。
+
+    与 `chart_with_verdict_sync` 的分工：那条路径遇到没有裁决就顺手派后台补判，
+    调用方无从得知"补判什么时候结束"。保存接口要的是"先给能立刻拿到的结论，
+    再由我自己派补判并挂回调回写"，所以这里把"读缓存"抽出来单独可用。
+    同版本裁决优先；`allow_stale` 时旧版裁决顶上（注记会写"旧版"）。
+    """
+    chash = _hash_of(chart)
+    if not chash:
+        return chart
+    try:
+        cached = _get_cached_verdict(chash)
+    except Exception as e:
+        log.warning("[verdict] 缓存读取失败，按计算版处理: {}", _err_text(e))
+        cached = None
+    if cached is not None:
+        return apply_verdict(chart, cached, (cached or {}).get("relation_to_engine", "confirm"))
+    if allow_stale:
+        stale_chart = _apply_stale(chart, chash)
+        if stale_chart is not None:
+            return stale_chart
+    return chart
 
 
 async def chart_with_verdict_for_api(chart: BaziChart, model: Any = None) -> BaziChart:
@@ -722,15 +749,31 @@ def chart_with_verdict_sync(chart: BaziChart, model: Any = None) -> BaziChart:
     return stale_chart if stale_chart is not None else chart
 
 
-def _submit_background_verdict(chart: BaziChart, model: Any, chash: str) -> None:
-    """派一个后台补判线程；同一 chart_hash 已在跑则跳过（去重）。"""
+def _submit_background_verdict(
+    chart: BaziChart, model: Any, chash: str, on_done: Any = None
+) -> None:
+    """派一个后台补判线程；同一 chart_hash 已在跑则只挂回调（去重）。"""
     with _bg_inflight_lock:
         if chash in _bg_inflight:
+            if on_done is not None:
+                _bg_pending_callbacks.setdefault(chash, []).append(on_done)
             return
         _bg_inflight.add(chash)
+        if on_done is not None:
+            _bg_pending_callbacks.setdefault(chash, []).append(on_done)
     threading.Thread(
         target=_background_verdict, args=(chart, model, chash), name="verdict-bg", daemon=True
     ).start()
+
+
+def submit_verdict_background(chart: BaziChart, on_done: Any = None) -> None:
+    """保存接口等外部路径：为这张盘派后台补判，跑完后把生效后的盘交给回调。"""
+    if not _verdict_enabled():
+        return
+    chash = _hash_of(chart)
+    if not chash:
+        return
+    _submit_background_verdict(chart, None, chash, on_done=on_done)
 
 
 def _background_verdict(chart: BaziChart, model: Any, chash: str = "") -> None:
@@ -743,8 +786,9 @@ def _background_verdict(chart: BaziChart, model: Any, chash: str = "") -> None:
     `allow_stale=False` 是关键：后台线程若也走"旧版先顶上"分支，就会立刻返回旧版、
     永远不产生新版本裁决——版本升级后旧结论将一直顶替下去。
     """
+    applied: BaziChart | None = None
     try:
-        asyncio.run(chart_with_verdict(chart, model, allow_stale=False))
+        applied = asyncio.run(chart_with_verdict(chart, model, allow_stale=False))
     except Exception as e:
         log.warning(
             "[verdict] 后台补判失败（{} {}）: {}",
@@ -753,6 +797,13 @@ def _background_verdict(chart: BaziChart, model: Any, chash: str = "") -> None:
             _err_text(e),
         )
     finally:
+        callbacks: list = []
         if chash:
             with _bg_inflight_lock:
                 _bg_inflight.discard(chash)
+                callbacks = _bg_pending_callbacks.pop(chash, [])
+        for callback in callbacks:
+            try:
+                callback(applied if applied is not None else chart)
+            except Exception as e:
+                log.warning("[verdict] 补判回调失败: {}", _err_text(e))

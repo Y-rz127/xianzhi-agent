@@ -78,6 +78,16 @@ def _ensure_schema():
                 conn.execute(
                     "CREATE INDEX IF NOT EXISTS idx_session_birth_info_user ON session_birth_info(user_id)"
                 )
+                # 命盘快照：保存接口先落计算版，终审完成后覆盖为终审版
+                conn.execute(
+                    "ALTER TABLE session_birth_info ADD COLUMN IF NOT EXISTS chart_json JSONB"
+                )
+                conn.execute(
+                    "ALTER TABLE session_birth_info ADD COLUMN IF NOT EXISTS chart_engine_version TEXT"
+                )
+                conn.execute(
+                    "ALTER TABLE session_birth_info ADD COLUMN IF NOT EXISTS verdict_status TEXT DEFAULT 'none'"
+                )
                 # 会话列表/消息查询的高频过滤列，避免每次全表扫描
                 conn.execute(
                     """
@@ -609,6 +619,45 @@ class PostgresMemoryStore:
             _record_error("memory.get_session_birth_info")
             return None
 
+    def set_session_chart(
+        self, session_id: str, chart: dict, engine_version: str, status: str
+    ) -> None:
+        """写入命盘快照（仅更新已有出生信息的会话，不新建行）。"""
+        from psycopg.types.json import Jsonb
+
+        _ensure_schema()
+        session_uuid = self._resolve_session_uuid(session_id)
+        with _get_pool().connection() as conn:
+            conn.execute(
+                """UPDATE session_birth_info
+                   SET chart_json = %s, chart_engine_version = %s, verdict_status = %s, updated_at = now()
+                   WHERE session_id = %s""",
+                (Jsonb(chart), engine_version, status, session_uuid),
+            )
+
+    def get_session_chart(self, session_id: str) -> dict | None:
+        """读取命盘快照；没有快照返回 None。"""
+        try:
+            _ensure_schema()
+            session_uuid = self._resolve_session_uuid(session_id)
+            with _get_pool().connection() as conn:
+                row = conn.execute(
+                    "SELECT chart_json, chart_engine_version, verdict_status"
+                    " FROM session_birth_info WHERE session_id = %s",
+                    (session_uuid,),
+                ).fetchone()
+            if not row or row[0] is None:
+                return None
+            return {
+                "chart": row[0],
+                "engine_version": row[1] or "",
+                "verdict_status": row[2] or "none",
+            }
+        except Exception as e:
+            log.warning("读取会话命盘快照失败: {}", e)
+            _record_error("memory.get_session_chart")
+            return None
+
     def get_birth_info_from_session(self, session_id: str) -> dict | None:
         """从会话历史中的排盘工具调用参数提取出生信息。
 
@@ -698,6 +747,14 @@ def upsert_session_birth_info(
 
 def get_session_birth_info(session_id: str) -> dict | None:
     return _store.get_session_birth_info(session_id)
+
+
+def set_session_chart(session_id: str, chart: dict, engine_version: str, status: str) -> None:
+    return _store.set_session_chart(session_id, chart, engine_version, status)
+
+
+def get_session_chart(session_id: str) -> dict | None:
+    return _store.get_session_chart(session_id)
 
 
 def get_birth_info_from_session(session_id: str) -> dict | None:

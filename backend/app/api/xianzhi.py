@@ -67,22 +67,8 @@ async def list_my_sessions(token: str = Query(None)):
 
 
 async def _check_session_access(session_id: str, token: str | None):
-    """会话归属校验：user_id 非空的会话仅限本人 token 访问（防越权枚举）。
-
-    - 游客会话（session_metadata.user_id 为空，如 PC web 无登录场景）放行；
-    - 有归属会话：token 无效或与归属用户不一致 → 403。
-      （小程序端 get/del 请求自动携带 token query，正常用户不受影响）
-    """
-    try:
-        owner = await repo.get_session_owner(session_id)
-    except Exception:
-        log.exception("查询会话归属失败 session_id={}", session_id)
-        raise HTTPException(status_code=503, detail="会话服务暂不可用")
-    if not owner:
-        return
-    user = await repo.get_by_token(token) if token else None
-    if not user or user["id"] != owner:
-        raise HTTPException(status_code=403, detail="无权访问该会话")
+    """会话归属校验（实现已下沉 `_xianzhi_common.check_session_access`，供子路由共用）。"""
+    await _xianzhi_common.check_session_access(session_id, token)
 
 
 @router.delete("/sessions/{session_id}")

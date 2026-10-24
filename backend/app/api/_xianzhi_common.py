@@ -8,10 +8,36 @@ from __future__ import annotations
 
 import asyncio
 
+from fastapi import HTTPException
+
 from app.core.logger import log
 
 # 保活 ping 间隔（秒）：小于常见网关默认的 60s 读超时，也小于小程序侧的静默回收窗口
 WS_PING_SECONDS = 15.0
+
+
+async def check_session_access(session_id: str, token: str | None) -> None:
+    """会话归属校验：user_id 非空的会话仅限本人 token 访问（防越权枚举）。
+
+    - 游客会话（session_metadata.user_id 为空，如 PC web 无登录场景）放行；
+    - 有归属会话：token 无效或与归属用户不一致 → 403。
+      （小程序端 get/del 请求自动携带 token query，正常用户不受影响）
+
+    放在本模块而不是 `app.api.xianzhi`：xianzhi 聚合了 chart/kline/report 子路由，
+    子路由若反向 import 聚合器就成环；共享辅助统一沉到这里，谁都能用。
+    """
+    from app.api import data_access as repo
+
+    try:
+        owner = await repo.get_session_owner(session_id)
+    except Exception:
+        log.exception("查询会话归属失败 session_id={}", session_id)
+        raise HTTPException(status_code=503, detail="会话服务暂不可用")
+    if not owner:
+        return
+    user = await repo.get_by_token(token) if token else None
+    if not user or user["id"] != owner:
+        raise HTTPException(status_code=403, detail="无权访问该会话")
 
 
 def _mount_chart_context(
@@ -40,10 +66,17 @@ def _mount_chart_context(
 
 
 def _payload_from_birth_info(info: dict) -> dict:
-    """出生信息 → 前端 chart_context payload（字段名与前端约定一致）。"""
+    """出生信息 → 前端 chart_context payload（字段名与前端约定一致）。
+
+    带上 `longitude`：后端已按识别到的出生地算好经度（真太阳时口径），
+    前端直接用它排内嵌命盘卡片即可，不必再靠城市名二次匹配 ——
+    匹配不到就会画出一张没做校正的盘，与聊天里用的那张不是同一张。
+    """
     payload = {"birth_time": info.get("time"), "gender": info.get("gender")}
     if info.get("place"):
         payload["birth_place"] = info["place"]
+    if info.get("longitude"):
+        payload["longitude"] = info["longitude"]
     return payload
 
 

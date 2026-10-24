@@ -10,6 +10,7 @@ import threading
 from collections import OrderedDict
 
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, Field
 
 router = APIRouter(tags=["Xianzhi"])
 
@@ -240,6 +241,215 @@ async def get_chart(
         return payload
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+class ChartSaveRequest(BaseModel):
+    """出生信息保存（小程序面板「保存并排盘」）入参。
+
+    面板改动在点保存前只是草稿：只有本接口才会**按会话落库**并触发排盘/终审，
+    这是"一次填写只算一份盘"的落点（此前面板 watch / 选城市都会各算一次）。
+    """
+
+    session_id: str = Field(..., description="会话 ID：出生信息与命盘快照都按会话落库")
+    birth_time: str = Field(..., description="出生时间（公历/农历/时辰/节日格式均可，与 /chart 同一入口）")
+    gender: str
+    place: str = Field("", description="出生地；填了才做真太阳时校正，不填不校正")
+    longitude: float | None = Field(None, description="出生地经度；与 place 同时给时以它为准")
+    sect: int = 2
+    yun_sect: int = 1
+    token: str | None = Field(None, description="登录 token：有归属的会话需本人才能写")
+
+
+def _resolve_save_longitude(body: "ChartSaveRequest") -> float:
+    """出生地 → 经度：显式经度优先，其次地名匹配；都拿不到返回 0（不做真太阳时校正）。"""
+    from app.agent.birth_parse import birth_place_to_longitude
+
+    if body.longitude:
+        return float(body.longitude)
+    place = (body.place or "").strip()
+    if place:
+        return float(birth_place_to_longitude(place) or 0.0)
+    return 0.0
+
+
+def _chart_snapshot(chart, birth_time: str = "") -> dict:
+    """会话命盘快照（`session_birth_info.chart_json`）。
+
+    只存"重进会话要回显/审计的结论"，不存整份 payload（后者几十 KB 且可重算）：
+    四柱 + 强弱/格局 + 喜忌 + 五神 + 终审状态。
+
+    `birth_time` 传**用户输入侧**的（未做真太阳时校正的）标准写法：它是下次挂盘的入参，
+    而 `chart.birth.solar` 在带经度时已被校正过（如 14:30→13:47），拿它当入参会二次校正。
+    """
+    from app.agent.verdict import (
+        PROMPT_VERSION,
+        verdict_applied,
+        verdict_five_gods,
+        verdict_is_stale,
+    )
+    from app.domain.analysis_calc import ENGINE_VERSION
+
+    w = chart.wuxing
+    return {
+        "birth_time": birth_time or chart.birth.solar,
+        "solar_corrected": chart.birth.solar,
+        "gender": chart.birth.gender,
+        "pillars": " ".join(p.ganzhi for p in chart.pillars),
+        "day_master": w.day_master,
+        "day_master_wuxing": w.day_master_wuxing,
+        "strength": w.strength,
+        "special_pattern": w.special_pattern,
+        "useful_hint": w.useful_hint,
+        "gods": verdict_five_gods(chart),
+        "verdict_applied": verdict_applied(chart),
+        "verdict_stale": verdict_is_stale(chart),
+        "engine_version": ENGINE_VERSION,
+        "prompt_version": PROMPT_VERSION,
+    }
+
+
+def _cache_chart_payload(
+    payload: dict, chart, birth_time: str, gender: str, sect: int, yun_sect: int, longitude
+) -> None:
+    """把 payload 预热进 /chart 的缓存（key 与 `get_chart` 逐字同构，否则永远不命中）。"""
+    from app.agent.verdict import PROMPT_VERSION, verdict_applied, verdict_is_stale
+    from app.domain.analysis_calc import ENGINE_VERSION
+    from app.tools.cache import bazi_cache
+
+    if verdict_is_stale(chart):
+        ns = "s"
+    elif verdict_applied(chart):
+        ns = "v"
+    else:
+        ns = "p"
+    bazi_cache.set(
+        birth_time,
+        gender,
+        payload,
+        sect,
+        yun_sect,
+        f"chart_api:{ns}:{longitude}:{ENGINE_VERSION}:{PROMPT_VERSION}",
+    )
+
+
+@router.post("/chart/save")
+async def save_chart(body: ChartSaveRequest):
+    """保存出生信息并排盘（小程序面板「保存并排盘」）。
+
+    与 `GET /chart` 只差两件事：**按会话落库**、**先落计算版再回写终审版**。
+    - 出生地填了 → 按经度做真太阳时校正；没填 → 不校正（不沿用上一张盘的地点）；
+    - 点了保存就落库（`session_birth_info` + 命盘快照），重进会话/换端都能恢复；
+    - 终审在后台补判，跑完用回调**覆盖写入**快照并把终审版 payload 预热进缓存，
+      前端下次下拉/重进拿到的就是终审版，不必干等。
+    """
+    from app.agent.verdict import (
+        chart_with_cached_verdict,
+        submit_verdict_background,
+        verdict_applied,
+        verdict_is_stale,
+    )
+    from app.api import data_access as repo
+    from app.api._xianzhi_common import check_session_access
+    from app.core.logger import log
+    from app.domain.analysis_calc import ENGINE_VERSION
+    from app.domain.time_parse import _normalize_birth_time
+    from app.memory import postgres_memory as memory
+
+    await check_session_access(body.session_id, body.token)
+
+    longitude = _resolve_save_longitude(body)
+    lon_param = longitude or None  # 与 /chart 的入参写法对齐：没经度就是 None
+    try:
+        # 入参口径：**未校正**的标准写法（农历/时辰在这里换算）。
+        # 带经度时 chart.birth.solar 会被校正成真太阳时（如 14:30→13:47），
+        # 那是排盘结果、不是入参 —— 拿它入库/做缓存键，下次挂盘会二次校正。
+        birth_time = _normalize_birth_time(body.birth_time)
+        chart = await asyncio.to_thread(
+            _build_chart_only, birth_time, body.gender, body.sect, body.yun_sect, lon_param
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    gender = chart.birth.gender
+    place = (body.place or "").strip()
+    user_id = ""
+    if body.token:
+        user = await repo.get_by_token(body.token)
+        if user:
+            user_id = user["id"]
+
+    # 1) 出生信息落库：会话级权威来源（get birth-info / 聊天挂盘都读它）
+    # 这一步失败要明确告诉用户：没落库的话重进会话就查不到了，不能假装保存成功
+    try:
+        await asyncio.to_thread(
+            memory.upsert_session_birth_info,
+            body.session_id,
+            birth_time,
+            gender,
+            place,
+            longitude,
+            user_id,
+        )
+    except Exception:
+        log.exception("[chart/save] 出生信息落库失败 session={}", body.session_id)
+        raise HTTPException(status_code=503, detail="出生信息保存失败，请稍后再试")
+
+    # 2) 已有同版本裁决就直接应用（命中毫秒级）：省掉"先计算版再跳终审版"的闪动
+    chart = await asyncio.to_thread(chart_with_cached_verdict, chart)
+    if verdict_is_stale(chart):
+        status = "stale"  # 旧版结论先顶上，下面照常派后台重判
+    elif verdict_applied(chart):
+        status = "verdict"
+    else:
+        status = "pending"
+    payload = await asyncio.to_thread(_format_chart_payload, chart)
+
+    # 3) 快照先落"当前拿得到的版本"，并预热缓存（前端立刻能拿到同一份）
+    # 快照是"回显/审计"用的副本，写失败不影响本次排盘结果，只留日志
+    try:
+        await asyncio.to_thread(
+            memory.set_session_chart,
+            body.session_id,
+            _chart_snapshot(chart, birth_time),
+            ENGINE_VERSION,
+            status,
+        )
+    except Exception as e:
+        log.warning("[chart/save] 命盘快照落库失败（不影响本次排盘）: {}", e)
+    _cache_chart_payload(payload, chart, birth_time, gender, body.sect, body.yun_sect, lon_param)
+
+    # 4) 还没终审 → 后台补判；跑完覆盖写入快照 + 预热终审版 payload
+    if status != "verdict":
+
+        def _backfill(applied_chart) -> None:
+            """回调跑在补判线程里（同步上下文）：DB 与缓存都用同步入口，别回主循环。"""
+            try:
+                final_status = "verdict" if verdict_applied(applied_chart) else "failed"
+                memory.set_session_chart(
+                    body.session_id,
+                    _chart_snapshot(applied_chart, birth_time),
+                    ENGINE_VERSION,
+                    final_status,
+                )
+                if verdict_applied(applied_chart):
+                    fresh = _format_chart_payload(applied_chart)
+                    _cache_chart_payload(
+                        fresh, applied_chart, birth_time, gender, body.sect, body.yun_sect, lon_param
+                    )
+                log.info(
+                    "[chart/save] 终审回写 {} {} → {}", birth_time, gender, final_status
+                )
+            except Exception as e:  # 回写失败不能影响已返回的计算版
+                log.warning("[chart/save] 终审回写失败: {}", e)
+
+        submit_verdict_background(chart, on_done=_backfill)
+
+    return {
+        "birth_info": {"time": birth_time, "gender": gender, "place": place, "longitude": longitude},
+        "chart": payload,
+        "verdict_status": status,
+        "verdict_applied": verdict_applied(chart),
+    }
 
 
 @router.post("/bazi/infer-dates")
