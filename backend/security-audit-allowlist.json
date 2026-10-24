@@ -2,69 +2,9 @@
   "comment": "已知依赖漏洞豁免（按 package==version 精确匹配）。仅允许冻结版本的既有问题：升级依赖后对应条目自动失效，需重新扫描。禁止用此文件豁免新引入的高/严重漏洞而不做评估。",
   "packages": [
     {
-      "name": "aiohttp",
-      "version": "3.14.1",
-      "reason": "锁文件冻结版本，上游已修复（3.14.4）；随下次依赖升级更新 requirements.lock"
-    },
-    {
-      "name": "certifi",
-      "version": "2026.6.17",
-      "reason": "证书包版本过期，上游已修复（2026.10.19）；随下次依赖升级处理"
-    },
-    {
       "name": "chromadb",
       "version": "1.5.9",
       "reason": "上游暂无修复版本；仅内部知识库使用，不接受外部不可信输入"
-    },
-    {
-      "name": "cryptography",
-      "version": "49.0.0",
-      "reason": "修复需升级到 50.0.0 主版本，排期专项升级；当前仅用于库内部 TLS/签名"
-    },
-    {
-      "name": "filelock",
-      "version": "3.30.2",
-      "reason": "修复需升级到 4.x 主版本，排期专项升级；仅本地/进程内文件锁"
-    },
-    {
-      "name": "langgraph-sdk",
-      "version": "0.4.2",
-      "reason": "上游已修复（0.4.4）；随 langgraph 依赖升级处理"
-    },
-    {
-      "name": "mcp",
-      "version": "1.28.1",
-      "reason": "上游已修复（1.30.0）；MCP 子进程仅运行固定版本高德 server"
-    },
-    {
-      "name": "multidict",
-      "version": "6.7.1",
-      "reason": "上游已修复（6.9.1）；随 aiohttp 依赖升级处理"
-    },
-    {
-      "name": "oauthlib",
-      "version": "3.3.1",
-      "reason": "修复需升级到 4.x 主版本；仅 kubernetes 客户端间接依赖，本服务不使用"
-    },
-    {
-      "name": "opentelemetry-api",
-      "version": "1.44.0",
-      "reason": "上游已修复（1.45.1）；随 chromadb 依赖升级处理"
-    },
-    {
-      "name": "pillow",
-      "version": "12.3.0",
-      "reason": "修复需升级到 13.0.0 主版本；本服务不处理用户上传图片，仅 chromadb 间接依赖"
-    },
-    {
-      "name": "soupsieve",
-      "version": "2.8.4",
-      "reason": "上游已修复；随 BeautifulSoup 依赖升级处理"
-    },
-    {
-      "name": "urllib3",
-      "version": "2.7.0",
-      "reason": "上游已修复；随 requests 依赖升级处理"
     }
   ]
 }

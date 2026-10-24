@@ -7,9 +7,10 @@ ENV PIP_INDEX_URL=https://mirrors.cloud.tencent.com/pypi/simple \
     PIP_RETRIES=5 \
     PIP_TIMEOUT=60
 
-COPY requirements.txt .
+# 锁文件安装：构建产物可复现，升级依赖需重新 pip-compile 并提交 requirements.lock
+COPY requirements.lock .
 RUN apt-get update && apt-get install -y --no-install-recommends fonts-noto-cjk && rm -rf /var/lib/apt/lists/*
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.lock
 
 COPY . .
 # 容器入口监听端口对齐 CloudBase「服务端口设置」(80)；main.py 在容器内强制监听 80（除非显式设置 PORT），本地可用 PORT/APP_PORT 覆盖

@@ -256,3 +256,8 @@ CI 的 `audit` job 在每次 push / PR 执行：
 1. 优先升级依赖，不要用豁免掩盖可修复问题。
 2. 新增 high/critical 漏洞不得直接加豁免，必须先评估可利用性；每条豁免写明原因与复审计划。
 3. 升级 `requirements.lock` / 前端依赖后，同步清理失效豁免并让 audit job 重新变绿。
+
+**升级流程**
+- 依赖版本以 `backend/requirements.lock` 为准：Docker 构建、CI、本地开发统一安装锁文件。
+- 调整依赖范围改 `backend/requirements.txt`，随后重新生成锁：
+  `pip-compile --output-file=requirements.lock requirements.txt`（Python 3.12），提交两者并重跑 audit。

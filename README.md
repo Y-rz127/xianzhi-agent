@@ -332,7 +332,8 @@ APP_PORT=8123
 # 后端（venv 建在仓库根）
 python -m venv .venv
 .venv\Scripts\activate
-pip install -r backend/requirements.txt
+# 装锁文件保证与生产/CI 一致；升级依赖改 requirements.txt 后重跑 pip-compile
+pip install -r backend/requirements.lock
 
 # 前端（Web）
 cd frontend\web
