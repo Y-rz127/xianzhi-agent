@@ -105,6 +105,22 @@ def get_chart_profile(user_id: str, birth_time: str, gender: str) -> dict | None
         return _row_to_chart_profile(row) if row else None
 
 
+def get_chart_profile_by_id(profile_id: str) -> dict | None:
+    """按 profile id 取画像（仅供接口层做归属校验；业务查询一律走 user_id + chart_hash）。
+
+    单独提供它是因为 `GET /feedback/profiles/{id}/facts` 这类"按 id 取子资源"的接口
+    必须能确认这个 id 是不是调用者本人的 —— 只凭 id 就去取断事知识等于把别人的
+    画像事实暴露给任何登录用户（IDOR）。
+    """
+    _ensure_tables()
+    with get_pool().connection() as conn:
+        row = conn.execute(
+            f"SELECT {_PROFILE_COLUMNS} FROM chart_profiles WHERE id = %s",
+            (profile_id,),
+        ).fetchone()
+        return _row_to_chart_profile(row) if row else None
+
+
 def list_chart_profiles_by_user(user_id: str) -> list:
     """列出某用户所有命盘的画像。"""
     _ensure_tables()

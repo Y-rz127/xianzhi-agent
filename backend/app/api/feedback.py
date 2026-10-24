@@ -294,8 +294,20 @@ async def get_profile_facts(
     confidence: str | None = Query(default=None),
     limit: int = Query(default=20, ge=1, le=100),
 ):
-    """获取指定命盘画像的断事知识列表。"""
-    await _require_uid(token)
+    """获取指定命盘画像的断事知识列表（**仅限本人的画像**）。
+
+    断事知识是"某用户 × 某命盘"的长期记忆，含这个人确认过的私事结论：只校验 token
+    有效是不够的（那等于任何登录用户拿到 profile_id 就能读别人的），必须确认画像是
+    调用者本人的。非本人一律 404，不区分"不存在"与"不是你的"，避免变成枚举探针。
+    """
+    uid = await _require_uid(token)
+    try:
+        profile = await repo.get_chart_profile_by_id(profile_id)
+    except Exception as e:
+        log.exception("查询命盘画像失败")
+        raise HTTPException(status_code=500, detail=client_error(e))
+    if not profile or profile.get("user_id") != uid:
+        raise HTTPException(status_code=404, detail="断事知识不存在")
     try:
         return {"facts": await repo.get_chart_facts(profile_id, confidence, limit)}
     except Exception as e:

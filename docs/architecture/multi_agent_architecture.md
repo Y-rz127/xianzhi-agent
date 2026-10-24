@@ -297,6 +297,19 @@ Human:  【用户问题】(边界包裹) / 【识别意图】/【最近对话摘
 LLM 生成 → Reviewer 两层审核 → 定稿或修复
 ```
 
+**【历史断事参考】只在"本人 × 本盘"内生效**（`workflow_messages.get_chart_facts_text`
+→ `get_chart_profile(ctx.user_id, birth_time, gender)`）。画像表的约束是
+`UNIQUE (user_id, chart_hash)`，事实行挂在那张画像下，所以：
+
+- A 确认过的事，只在 A 重新挂同一张盘时被引用（跨会话、跨设备都算同一个 A）；
+- B 就算排出一模一样的四柱/生辰，用的也是 `(B, chart_hash)` 这个键 —— 查不到 A 的画像，
+  一条事实都不会注入。**这条隔离全靠那个 `ctx.user_id` 参数**，改成只按命盘查就会
+  静默变成跨用户串台（不会报错，只会让 B 看到 A 的人生细节）。不变量由
+  `tests/test_chart_facts_scope.py` 守着；接口侧 `GET /feedback/profiles/{id}/facts`
+  也只允许读本人的画像（非本人 404）。
+- 游客（无 token）没有画像键：写入侧用 conversation_id 兜底、读取侧 `user_id=''`，
+  两边对不上，所以游客不累积也不读取断事知识（宁可没有记忆，也不跨人共享）。
+
 ### 日志链路
 
 ```
