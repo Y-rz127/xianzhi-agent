@@ -236,3 +236,23 @@ CloudBase 云托管支持两种方式：
 > 注意：连接串里的 `172.17.0.9` 这类地址疑似本地 Docker 桥接网段，
 > 请务必从**云数据库 PostgreSQL 控制台「数据库连接」页**复制真实地址，
 > 不要用本地 docker-compose 的地址。
+
+## 10. 依赖漏洞扫描与豁免
+
+CI 的 `audit` job 在每次 push / PR 执行：
+
+| 范围 | 命令 | 门禁 |
+|------|------|------|
+| 后端 | `pip-audit -r requirements.lock` + `scripts/check_pip_audit.py` | 未豁免漏洞即失败 |
+| Web | `npm audit --package-lock-only` + `scripts/check_npm_audit.mjs` | 未豁免 high/critical 即失败 |
+| 小程序 | `npm audit --omit=dev`（informational） | 不阻塞；未上线，上线前必须清零或登记 |
+
+**豁免清单**
+- [`backend/security-audit-allowlist.json`](backend/security-audit-allowlist.json)：按 `package==version` 精确匹配。
+  依赖升级后旧条目自动失效，新版本漏洞仍会被拦截；未命中的条目会提示删除。
+- [`frontend/web/audit-allowlist.json`](frontend/web/audit-allowlist.json)：按 GHSA 编号，仅允许开发期依赖（不进生产构建）。
+
+**规则**
+1. 优先升级依赖，不要用豁免掩盖可修复问题。
+2. 新增 high/critical 漏洞不得直接加豁免，必须先评估可利用性；每条豁免写明原因与复审计划。
+3. 升级 `requirements.lock` / 前端依赖后，同步清理失效豁免并让 audit job 重新变绿。

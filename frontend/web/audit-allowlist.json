@@ -1,0 +1,14 @@
+{
+  "comment": "仅豁免开发期依赖（不进生产构建）。新增 high/critical 漏洞必须修复，或在 advisories 中登记原因与复审日期；不要批量豁免整个包。",
+  "advisories": {
+    "GHSA-67mh-4wv8-2f99": "esbuild 开发服务器可被任意网页请求；修复需 vite 8 主版本，仅影响本地开发",
+    "GHSA-4w7w-66w2-5vf9": "vite 开发服务器路径穿越；修复需 vite 8 主版本，生产构建产物不含 dev server",
+    "GHSA-v6wh-96g9-6wx3": "vite 内置 launch-editor 的 UNC 路径 NTLM 泄露（Windows 开发机）；修复需 vite 8",
+    "GHSA-fx2h-pf6j-xcff": "vite server.fs.deny 在 Windows 备选路径下可绕过；仅影响开发服务器；修复需 vite 8",
+    "GHSA-698v-4r3x-3vcv": "vite launch-editor 命令参数转义不完整（Windows）；仅影响开发服务器；修复需 vite 8",
+    "GHSA-r825-w8mm-5pxw": "vite launch-editor 编辑器参数误判可执行任意命令；仅开发机本地触发；修复需 vite 8",
+    "GHSA-587h-7wmj-h5pm": "vite launch-editor 文件存在性检查在 Windows 可绕过；仅影响开发服务器；修复需 vite 8",
+    "GHSA-9jrq-w75r-8gcw": "vite 自定义中间件跨源脚本执行；仅影响开发服务器；修复需 vite 8",
+    "GHSA-rq7h-c2jc-7f22": "vite 非 Windows 路径匹配可越出 server.fs.allow；仅影响开发服务器；修复需 vite 8"
+  }
+}

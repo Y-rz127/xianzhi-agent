@@ -24,9 +24,39 @@ jobs:
           pip install -r requirements.txt
           pip install pytest ruff
       - name: Ruff
-        run: ruff check app tests main.py
+        run: ruff check app tests scripts/check_pip_audit.py main.py
       - name: Unit / security / chaos tests
         run: pytest -q
+
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install pip-audit
+        run: python -m pip install "pip-audit>=2.7,<3"
+      - name: Backend dependency audit
+        working-directory: backend
+        run: |
+          # pip-audit 本身对发现项返回非 0；交给豁免清单脚本判定是否放行
+          python -m pip_audit -r requirements.lock -f json -o /tmp/pip-audit.json || true
+          python scripts/check_pip_audit.py --audit-json /tmp/pip-audit.json
+      - name: Web dependency audit (production)
+        working-directory: frontend/web
+        run: |
+          npm audit --package-lock-only --json > /tmp/web-audit.json || true
+          node scripts/check_npm_audit.mjs /tmp/web-audit.json
+      - name: Uniapp dependency audit (informational, not launched)
+        continue-on-error: true
+        working-directory: frontend/uniapp
+        run: |
+          npm audit --omit=dev --package-lock-only --json > /tmp/uniapp-audit.json || true
+          node -e "const r=require('/tmp/uniapp-audit.json'); console.log('uniapp prod:', JSON.stringify(r.metadata && r.metadata.vulnerabilities))"
 
   integration:
     if: github.event_name == 'workflow_dispatch'
