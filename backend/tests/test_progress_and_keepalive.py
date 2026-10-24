@@ -25,6 +25,8 @@ import asyncio
 import threading
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from app.agent.xianzhi import Xianzhi
 from app.api.xianzhi import WS_PING_SECONDS, make_progress_notifier, ws_keepalive_loop
 from app.api.xianzhi_chat import _relay_chunks
@@ -266,5 +268,58 @@ def test_session_lock_stops_renew_when_lease_lost(monkeypatch):
             await asyncio.sleep(0.08)
         assert calls["extend"] == 1
         assert calls["release"] == 1
+
+    asyncio.run(main())
+
+
+def test_session_lock_wait_timeout_raises_busy(monkeypatch):
+    """同会话上一轮未结束：排队超过上限应报忙，而不是无限挂起。"""
+    import app.core.redis_client as redis_client
+    from app.agent.context import SessionBusyError, SessionLock
+    from app.core.config import settings
+
+    async def no_redis_lock(key, token, ttl_ms):
+        return None
+
+    monkeypatch.setattr(redis_client, "acquire_lock", no_redis_lock)
+    monkeypatch.setattr(settings, "session_lock_wait_timeout", 0.05)
+
+    async def main():
+        local = asyncio.Lock()
+        holder = SessionLock("conv-wait-test", local)
+        async with holder:
+            waiter = SessionLock("conv-wait-test", local)
+            start = asyncio.get_running_loop().time()
+            with pytest.raises(SessionBusyError):
+                await waiter.acquire()
+            assert asyncio.get_running_loop().time() - start >= 0.04
+
+        again = SessionLock("conv-wait-test", local)
+        await again.acquire()
+        assert again.locked()
+        await again.release()
+
+    asyncio.run(main())
+
+
+def test_session_lock_redis_wait_timeout(monkeypatch):
+    """跨副本锁排队同样受等待上限约束，超时后本地锁必须释放。"""
+    import app.core.redis_client as redis_client
+    from app.agent.context import SessionBusyError, SessionLock
+    from app.core.config import settings
+
+    async def held_by_other(key, token, ttl_ms):
+        return False
+
+    monkeypatch.setattr(redis_client, "acquire_lock", held_by_other)
+    monkeypatch.setattr(settings, "session_lock_wait_timeout", 0.05)
+
+    async def main():
+        lock = SessionLock("conv-redis-wait", asyncio.Lock())
+        start = asyncio.get_running_loop().time()
+        with pytest.raises(SessionBusyError):
+            await lock.acquire()
+        assert asyncio.get_running_loop().time() - start >= 0.04
+        assert not lock.locked()
 
     asyncio.run(main())

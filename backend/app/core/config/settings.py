@@ -140,6 +140,8 @@ class Settings(BaseSettings):
     checkpoint_enabled: bool = Field(default=True, alias="CHECKPOINTER_ENABLED")
     # 会话 Redis 锁租约（秒）：持有期间按 1/3 周期自动续租，进程崩溃后最多这么久解锁
     session_lock_ttl_seconds: int = Field(default=60, alias="SESSION_LOCK_TTL_SECONDS")
+    # 同会话排队等锁上限（秒）：超时返回"上一轮仍在生成"，0=无限等待（旧行为）
+    session_lock_wait_timeout: float = Field(default=10.0, alias="SESSION_LOCK_WAIT_TIMEOUT")
     # 单轮对话总时限（秒）：工作流/ReAct/闲聊共用，防止多阶段超时叠加
     chat_turn_budget: float = Field(default=180.0, alias="CHAT_TURN_BUDGET")
     # 工作流各阶段上限（秒）；实际调用再取 min(阶段上限, 剩余预算)

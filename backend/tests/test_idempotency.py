@@ -116,19 +116,27 @@ def test_turn_falls_back_to_local_when_redis_absent(monkeypatch) -> None:
 
 
 def _patch_chat_repo(monkeypatch) -> None:
+    import app.core.redis_client as redis_client
+
     async def _get_by_token(token):
         return {"id": token} if token else None
 
     async def _ensure(cid, uid):
         return True
 
+    async def _no_lock(key, token, ttl_ms):
+        return None
+
     monkeypatch.setattr(chat_mod.repo, "get_by_token", _get_by_token)
     monkeypatch.setattr(chat_mod.repo, "ensure_session_owner", _ensure)
+    monkeypatch.setattr(redis_client, "acquire_lock", _no_lock)
 
 
 class _Ctx:
     def get_xianzhi(self, cid):
-        return object(), asyncio.Lock()
+        from app.agent.context import SessionLock
+
+        return object(), SessionLock(cid, asyncio.Lock())
 
 
 class _FakeAgent:
@@ -154,7 +162,9 @@ class _FakeAgent:
 
 class _CtxWithAgent(_Ctx):
     def get_xianzhi(self, cid):
-        return _FakeAgent(), asyncio.Lock()
+        from app.agent.context import SessionLock
+
+        return _FakeAgent(), SessionLock(cid, asyncio.Lock())
 
 
 def test_sse_hung_running_key_re_executes(monkeypatch) -> None:

@@ -30,6 +30,7 @@ from __future__ import annotations
 import asyncio
 import secrets
 import threading
+import time
 from collections import OrderedDict
 from dataclasses import dataclass, field
 from typing import Any
@@ -48,6 +49,10 @@ _REDIS_LOCK_KEY_PREFIX = "lock:session:"
 _LOCK_WAIT_INTERVAL = 0.5
 
 
+class SessionBusyError(RuntimeError):
+    """等待会话锁超时：同会话上一轮仍在执行。"""
+
+
 class SessionLock:
     """会话级互斥锁：进程内锁快路径 + Redis 分布式锁跨副本互斥。"""
 
@@ -62,13 +67,41 @@ class SessionLock:
         self._renew_task: asyncio.Task | None = None
 
     async def __aenter__(self) -> "SessionLock":
-        await self._local.acquire()
+        await self.acquire()
+        return self
+
+    async def acquire(self) -> None:
+        """获取双层锁；等待超过 SESSION_LOCK_WAIT_TIMEOUT 抛 SessionBusyError。
+
+        超时限定的是"排队等待"，不限制持有时间：上一轮正常生成（最长 180s）
+        由续租维持，不会因为 TTL 或等待上限被中途打断。
+        """
+        from app.core.config import settings
+
+        timeout = settings.session_lock_wait_timeout
+        if timeout > 0:
+            try:
+                await asyncio.wait_for(self._local.acquire(), timeout)
+            except asyncio.TimeoutError:
+                raise SessionBusyError("会话正在执行上一轮请求") from None
+        else:
+            await self._local.acquire()
         try:
-            await self._acquire_redis()
-        except Exception:
+            await self._acquire_redis(timeout)
+        except BaseException:
             self._local.release()
             raise
-        return self
+
+    async def release(self) -> None:
+        try:
+            await self._stop_renew()
+            if self._token:
+                from app.core.redis_client import release_lock
+
+                await release_lock(self._key, self._token)
+                self._token = ""
+        finally:
+            self._local.release()
 
     def locked(self) -> bool:
         """本会话是否已有请求持有锁（与 asyncio.Lock.locked() 同名同义）。
@@ -85,19 +118,12 @@ class SessionLock:
         return self._local.locked()
 
     async def __aexit__(self, *exc_info) -> None:
-        try:
-            await self._stop_renew()
-            if self._token:
-                from app.core.redis_client import release_lock
+        await self.release()
 
-                await release_lock(self._key, self._token)
-                self._token = ""
-        finally:
-            self._local.release()
-
-    async def _acquire_redis(self) -> None:
+    async def _acquire_redis(self, timeout: float) -> None:
         from app.core.redis_client import acquire_lock
 
+        deadline = time.monotonic() + timeout if timeout > 0 else None
         while True:
             token = secrets.token_hex(16)
             got = await acquire_lock(self._key, token, self._ttl_ms)
@@ -108,7 +134,13 @@ class SessionLock:
                 self._token = token
                 self._renew_task = asyncio.create_task(self._renew_lease())
                 return
-            await asyncio.sleep(_LOCK_WAIT_INTERVAL)
+            if deadline is not None:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise SessionBusyError("会话正在执行上一轮请求")
+                await asyncio.sleep(min(_LOCK_WAIT_INTERVAL, remaining))
+            else:
+                await asyncio.sleep(_LOCK_WAIT_INTERVAL)
 
     async def _renew_lease(self) -> None:
         """持有期间定期续租；续租失败说明锁已丢失，停止续租避免误以为仍互斥。"""

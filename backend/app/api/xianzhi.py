@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from app.agent.context import AppContext
+from app.agent.context import AppContext, SessionBusyError
 from app.api import (
     _xianzhi_common,
     data_access as repo,
@@ -99,9 +99,15 @@ async def delete_xianzhi_session(
         await repo.delete_session(session_id)
         return {"status": "ok"}
     # 与正在执行的轮次互斥：等它结束再删，避免删除后 cleanup 又把消息写回来
-    async with lock:
+    try:
+        await lock.acquire()
+    except SessionBusyError:
+        raise HTTPException(status_code=409, detail="会话正在生成回答，请稍后再删除")
+    try:
         await repo.delete_session(session_id)
         app_ctx.evict_xianzhi(session_id)
+    finally:
+        await lock.release()
     return {"status": "ok"}
 
 

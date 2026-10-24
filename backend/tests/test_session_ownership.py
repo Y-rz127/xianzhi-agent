@@ -111,6 +111,8 @@ def _patch_chat_repo(monkeypatch, owner_uid: str) -> None:
 
 
 def test_delete_session_evicts_agent(monkeypatch) -> None:
+    import app.core.redis_client as redis_client
+    from app.agent.context import SessionLock
     from app.api import xianzhi as api_mod
 
     deleted: list[str] = []
@@ -122,15 +124,19 @@ def test_delete_session_evicts_agent(monkeypatch) -> None:
     async def _delete(session_id):
         deleted.append(session_id)
 
+    async def _no_lock(key, token, ttl_ms):
+        return None
+
     class _Ctx:
         def get_xianzhi(self, session_id):
-            return object(), asyncio.Lock()
+            return object(), SessionLock(session_id, asyncio.Lock())
 
         def evict_xianzhi(self, session_id):
             evicted.append(session_id)
 
     monkeypatch.setattr(api_mod, "_check_session_access", _noop_access)
     monkeypatch.setattr(api_mod.repo, "delete_session", _delete)
+    monkeypatch.setattr(redis_client, "acquire_lock", _no_lock)
 
     out = asyncio.run(api_mod.delete_xianzhi_session("s1", token=None, app_ctx=_Ctx()))
 

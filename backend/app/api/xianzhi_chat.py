@@ -13,7 +13,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
 from sse_starlette.sse import EventSourceResponse
 
-from app.agent.context import AppContext, get_app_context
+from app.agent.context import AppContext, SessionBusyError, get_app_context
 from app.api import data_access as repo
 from app.api._xianzhi_common import (
     WS_PING_SECONDS,
@@ -43,6 +43,8 @@ from app.core.turn_idempotency import (
 )
 
 router = APIRouter(tags=["Xianzhi"])
+
+_SESSION_BUSY_TEXT = "上一轮回答仍在生成，请稍后重试"
 
 
 async def _guard_session(conversation_id: str, uid: str) -> str:
@@ -88,8 +90,14 @@ async def chat_with_xianzhi(
 
     async def event_stream():
         # 会话实例级锁：同一会话串行，不同会话并行；
-        # sect 设置与命盘挂载均在锁内完成，避免并发污染
-        async with lock:
+        # sect 设置与命盘挂载均在锁内完成，避免并发污染。
+        # 排队超过上限就明确报忙，不让 EventSource 连接无限挂着。
+        try:
+            await lock.acquire()
+        except SessionBusyError:
+            yield {"event": "error", "data": _SESSION_BUSY_TEXT}
+            return
+        try:
             # 防重放判定放在锁内：重复请求会排队到上一轮结束后再判定，
             # 此时必为 done（直接回放）或 new；running 只可能是进程崩溃留下的悬挂键
             if mid:
@@ -165,6 +173,8 @@ async def chat_with_xianzhi(
                 # 让它照常跑完并落库——用户回头能在会话记录里看到答案；取消 = 白等一场。
                 if not task.done():
                     log.info("[sse] 客户端已断开，本轮继续在后台生成并落库")
+        finally:
+            await lock.release()
 
     # ping：长静默期（检索/生成/审核可长达 2 分钟）保持连接，兼防网关读超时
     return EventSourceResponse(event_stream(), ping=int(WS_PING_SECONDS))
@@ -269,7 +279,15 @@ async def ws_chat_with_xianzhi(websocket: WebSocket):
             # （判定必须在抢锁之前，进锁后 locked() 恒为真）
             if lock.locked():
                 log.info("[ws] 上一轮仍在后台生成，本轮排队等待（同会话串行）")
-            async with lock:
+            try:
+                await lock.acquire()
+            except SessionBusyError:
+                if not await _safe_ws_send(
+                    websocket, {"type": "error", "data": _SESSION_BUSY_TEXT}
+                ):
+                    break
+                continue
+            try:
                 # 防重放判定在锁内：重复请求排队到上一轮结束后必为 done 或 new
                 if mid:
                     state = await begin_turn(conversation_id, mid, uid)
@@ -346,6 +364,8 @@ async def ws_chat_with_xianzhi(websocket: WebSocket):
                 # 回答发送失败时通知必然一起丢，正是"八字信息丢失"的根因。
                 if client_alive:
                     await _safe_ws_send(websocket, {"type": "done"})
+            finally:
+                await lock.release()
     except WebSocketDisconnect:
         log.info("WebSocket disconnected")
     except RuntimeError as e:
@@ -385,7 +405,11 @@ async def chat_with_xianzhi_sync(
     except RuntimeError:
         return {"error": "Xianzhi not initialized"}
     mid = validate_client_msg_id(client_msg_id)
-    async with lock:
+    try:
+        await lock.acquire()
+    except SessionBusyError:
+        raise HTTPException(status_code=409, detail=_SESSION_BUSY_TEXT)
+    try:
         # 防重放判定在锁内：重复请求排队到上一轮结束后直接复用它
         if mid:
             state = await begin_turn(conversation_id, mid, uid)
@@ -413,3 +437,5 @@ async def chat_with_xianzhi_sync(
             except Exception as e:
                 log.warning("[sync] 轮次结果缓存失败: {}", e)
         return {"result": answer}
+    finally:
+        await lock.release()
