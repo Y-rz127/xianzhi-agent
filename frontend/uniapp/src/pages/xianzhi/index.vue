@@ -83,7 +83,7 @@
         </view>
         <view class="birth-actions">
           <view class="legal-link" @tap="goDisclaimer">查看免责声明 ›</view>
-          <text class="save-btn" @tap="saveBirthPanel">保存并排盘</text>
+          <text :class="['save-btn', saving && 'save-btn-off']" @tap="saveBirthPanel">{{ saving ? '排盘中…' : '保存并排盘' }}</text>
         </view>
       </view>
     </view>
@@ -323,7 +323,7 @@ import { showDialog } from '@/composables/useDialog'
 import ThemeDialog from '@/components/ThemeDialog/ThemeDialog.vue'
 import { chatWithXianzhiWS, closeAllWS } from '@/api/chat'
 import {
-  downloadReport, getChart,
+  downloadReport, getChart, saveChart,
   fetchSessions, fetchMySessions, deleteSession as deleteSessionApi, getSessionMessages,
   getSessionBirthInfo,
   submitAnswerFeedback,
@@ -577,6 +577,8 @@ function confirmRegionPicker() {
 }
 const inputText = ref('')
 const thinking = ref(false)
+/** 保存并排盘进行中：按钮置灰，避免连点重复请求 */
+const saving = ref(false)
 const feedbackState = ref<Record<string, 'up' | 'down' | 'saved'>>({})
 const feedbackReasons = ref<Record<string, string>>({})
 const feedbackReasonOptions = ['分析具体', '结论符合', '事实有误', '太笼统', '风格不喜欢']
@@ -865,27 +867,52 @@ function refreshProfile() {
 
 // 出生信息以「保存并排盘」为准：面板改动只更新草稿，不自动重算
 async function saveBirthPanel() {
+  if (saving.value) return
   if (!birthDate.value || !birthTime.value) {
     uni.showToast({ title: '请先选择出生日期和时间', icon: 'none' })
     return
   }
   const time = `${birthDate.value} ${birthTime.value}`
+  const place = birthPlace.value
+  // 有出生地 → 带经度做真太阳时；没填 → 不带（后端不校正，也不沿用上一张盘的地点）
+  const longitude = place ? birthLongitude.value || undefined : undefined
   lastBirthInfo.value = { time, gender: gender.value }
-  savedPlace.value = birthPlace.value
-  savedLongitude.value = birthLongitude.value
+  savedPlace.value = place
+  savedLongitude.value = longitude || 0
   if (conversationId.value) {
     setBirthInfoLocal(conversationId.value, time, gender.value)
-    if (birthPlace.value) setBirthPlaceLocal(conversationId.value, birthPlace.value, birthLongitude.value)
+    if (place) setBirthPlaceLocal(conversationId.value, place, longitude || 0)
     else clearBirthPlaceLocal(conversationId.value)
   }
+  saving.value = true
   try {
-    // 有出生地 → 带经度排真太阳时；没填 → 不传经度（后端不校正）
-    chartData.value = await getChart(time, gender.value, sect, 1, birthLongitude.value || undefined)
-    uni.showToast({ title: birthPlace.value ? '已保存，按真太阳时排盘' : '已保存并排盘', icon: 'none' })
+    // 走「保存并排盘」接口：出生信息按会话落库，终审在后台补判后覆盖写入
+    const res = await saveChart({
+      sessionId: conversationId.value,
+      birthTime: time,
+      gender: gender.value,
+      place,
+      longitude,
+      sect,
+      yunSect: 1,
+      token: getToken(),
+    })
+    chartData.value = res.chart
+    uni.showToast({ title: saveToastText(place, res.verdict_status), icon: 'none' })
   } catch {
     chartData.value = null
     uni.showToast({ title: '排盘失败，请稍后重试', icon: 'none' })
+  } finally {
+    saving.value = false
   }
+}
+
+/** 保存成功后的提示：终审状态不同，用户该等多久不一样 */
+function saveToastText(place: string, status: string): string {
+  if (status === 'pending' || status === 'stale') {
+    return place ? '已保存并排盘（真太阳时）· 终审生成中' : '已保存并排盘 · 终审生成中'
+  }
+  return place ? '已保存，按真太阳时排盘' : '已保存并排盘'
 }
 
 /** 预填出生信息并自动发起排盘（来自命例/档案带入） */
@@ -1158,33 +1185,14 @@ function openChartDetail() {
   uni.navigateTo({ url: `/pages/chart-detail/index?${q}${lon ? `&longitude=${lon}` : ''}` })
 }
 
-/** 把解析出的出生时间同步到表单、命盘上下文并主动拉取 chartData */
-async function applyExtractedBirth(time: string, g: '男' | '女') {
-  lastBirthInfo.value = { time, gender: g }
-  // 纯文字给时间、未提出生地：不沿用上一张盘的经度，避免把别人的真太阳时带过来
-  savedPlace.value = ''
-  savedLongitude.value = 0
-  if (conversationId.value) setBirthInfoLocal(conversationId.value, time, g)
-  const [d, tm] = time.split(' ')
-  birthDate.value = d || ''
-  birthTime.value = zhiHourToHHMM(tm)
-  gender.value = g
-  try { chartData.value = await getChart(time, g, 2, 1) } catch { chartData.value = null }
-}
-
-async function tryExtractBirth(text: string) {
-  const gender = text.match(/(男|女)/)?.[1] as '男' | '女' | undefined
-  const t = text.match(/(\d{4}[-年/]\d{1,2}[-月/]\d{1,2}[日 ]+\d{1,2}[:：]\d{1,2})/)
-  if (gender && t) {
-    // 完整年月日时：用户给的就是确定值，直接挂盘
-    const time = t[1].replace(/年|月/g, '-').replace('日', '').replace('：', ':').trim()
-    await applyExtractedBirth(time, gender)
-  }
-  // 干支四柱（如 甲申 庚午 壬申 甲辰）：前端**完全静默**。
-  // 反推候选由后端 bazi_infer_dates → _bazi_pending 流程负责，模型会在回复里
-  // 列出候选并请用户确认；前端不挂盘、也不弹提示——提示会先于模型回复出现，
-  // 与"正在推演"的等待感重复，反而突兀（2026-10-08 现场反馈）。
-}
+/**
+ * 聊天里给出生时间：**前端不再抢着挂盘**。
+ *
+ * 曾经这里会先用正则抓"时间+性别"本地挂一次盘（当时还没解析出生地 → 按无经度算），
+ * 后端随后从同一句话里识别到出生地又按真太阳时重算一次 —— 一句话两张盘、两次终审。
+ * 现在统一由后端识别（正则 + 排盘工具），挂盘成功后用 `chart_context` 事件回通知，
+ * 前端只在 `onChartContext` 里更新面板与命盘卡片。
+ */
 
 function downloadPdfReport() {
   if (!birthTimeFull.value && !lastBirthInfo.value) {
@@ -1300,7 +1308,8 @@ function onSend() {
   const targetList = messages.value
   targetList.push({ role: 'user', content: text })
   inputText.value = ''
-  tryExtractBirth(text)
+  // 聊天里的出生信息交给后端识别（含出生地 → 真太阳时），挂盘成功后经 chart_context 回通知；
+  // 前端不再抢先挂一次无经度的盘（那会和后端的真太阳时那次重复算两份）
   thinking.value = true
   scrollToBottom()
 
@@ -1329,8 +1338,8 @@ function onSend() {
     // 业务错误（如 LLM 限流、解析失败等）保留在消息流，便于用户回看
     targetList[idx].content = targetList[idx].content || `[出错] ${err}`
   }
-  // 后端从 LLM 工具调用中提取到出生信息时回调（覆盖自然语言输入场景）
-  const onChartContext = async (bt: string, g: string, bp?: string) => {
+  // 后端从对话里提取到出生信息时回调（正则 / 排盘工具两条路径都走这里）
+  const onChartContext = async (bt: string, g: string, bp?: string, longitude?: number) => {
     if (!bt || !g) return
     // 记录切换前的八字，用于区分"同一命盘的追问"与"换了一张新命盘"
     const prevTime = birthTimeFull.value
@@ -1348,8 +1357,13 @@ function onSend() {
     const isNewChart = bt !== prevTime
     if (bp) {
       if (isNewChart || !birthPlace.value) {
+        // 后端已按识别到的地点算好经度 → 直接采用（前端按城市名二次匹配可能匹配不到，
+        // 那样画出来的卡片盘就没做真太阳时，和聊天里用的那张不是同一张）
         const matched = matchCityByName(bp)
-        if (matched) {
+        if (longitude) {
+          birthPlace.value = matched ? `${matched.province} ${matched.city}` : bp
+          birthLongitude.value = longitude
+        } else if (matched) {
           birthPlace.value = `${matched.province} ${matched.city}`
           birthLongitude.value = matched.longitude
         } else {
@@ -1731,6 +1745,8 @@ messages.value.push({
   border-radius: 999rpx;
   letter-spacing: 0.05em;
 }
+/* 排盘中：置灰不可点（连点会重复落库、重复派终审） */
+.save-btn-off { opacity: 0.55; }
 .legal-link {
   font-size: 26rpx;
   color: $color-ink-light;

@@ -10,6 +10,8 @@ export const EP = {
   CHAT_SYNC: '/ai/xianzhi/chat/sync',
   CHAT_STREAM: '/ai/xianzhi/chat',
   CHART: '/ai/xianzhi/chart',
+  /** 保存出生信息并按会话落库 + 排盘（小程序面板「保存并排盘」） */
+  CHART_SAVE: '/ai/xianzhi/chart/save',
   /** 按点选的大运/流年/流月现算「岁运分析 / 原局分析」六栏 */
   RELATIONS: '/ai/xianzhi/relations',
   /** 命理 K 线：确定性运势评分 → 年蜡烛 + 大运带（一次请求一个维度） */

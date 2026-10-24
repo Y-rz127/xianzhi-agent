@@ -289,6 +289,22 @@ export interface ChartData {
 
 export interface BaziCandidate { birth_time: string; ganzhi: string; shi_chen: string }
 
+/**
+ * 「保存并排盘」结果：出生信息按会话落库 + 当前命盘载荷。
+ *
+ * `verdict_status` 是这次保存拿到的终审状态：
+ * - `verdict` 已有同版本终审，`chart` 就是终审版；
+ * - `stale`   只有旧版终审，先顶上，后台正在重判；
+ * - `pending` 还没有终审，后台补判跑完会覆盖写入（下拉刷新/重进即终审版）；
+ * - `failed`  终审不可用（关闭或失败），按计算版使用。
+ */
+export interface ChartSaveResult {
+  birth_info: { time: string; gender: string; place: string; longitude: number }
+  chart: ChartData
+  verdict_status: 'verdict' | 'stale' | 'pending' | 'failed'
+  verdict_applied: boolean
+}
+
 /* ============ 命理 K 线（确定性运势评分 → 年蜡烛） ============ */
 
 /** 取象维度；key 与后端 `fortune_score.DIMENSIONS`、既有领域 key 对齐 */

@@ -42,7 +42,12 @@ export interface ChatWSCallbacks {
   onMessage: (data: string) => void
   onDone: () => void
   onError: (err: string) => void
-  onChartContext?: (birthTime: string, gender: string, birthPlace?: string) => void
+  /**
+   * 后端挂盘成功通知。`birthPlace` 为后端从对话里识别到的出生地；
+   * `longitude` 是**后端已按该地点算好**的经度（真太阳时口径），有就直接用，
+   * 别让前端再靠城市名二次匹配 —— 匹配不到就会排出一张没校正的盘。
+   */
+  onChartContext?: (birthTime: string, gender: string, birthPlace?: string, longitude?: number) => void
   /** 阶段进度（"正在检索命理知识…"）：长静默期给用户反馈，别让人以为卡死 */
   onProgress?: (text: string) => void
   /**
@@ -163,7 +168,7 @@ function connectChatWS(path: string, payload: Record<string, any>, cb: ChatWSCal
       const data = JSON.parse(res.data as string)
       if (data.type === 'message') cb.onMessage(data.data)
       else if (data.type === 'cards') cb.onCards?.(data.data)
-      else if (data.type === 'chart_context') cb.onChartContext?.(data.data?.birth_time, data.data?.gender, data.data?.birth_place)
+      else if (data.type === 'chart_context') cb.onChartContext?.(data.data?.birth_time, data.data?.gender, data.data?.birth_place, data.data?.longitude)
       else if (data.type === 'progress') cb.onProgress?.(String(data.data || ''))
       else if (data.type === 'ping') { /* 服务端保活，忽略 */ }
       else if (data.type === 'done') { doneOrError = true; cb.onDone(); currentChatActive = false }

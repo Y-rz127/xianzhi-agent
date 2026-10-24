@@ -9,7 +9,7 @@ import { interpretLiuYaoStreamWS, interpretZiWeiStreamWS, hehunStreamWS } from '
 
 // R11 共享 API 层：数据模型/文本解析器/端点常量与 Web 端共用，统一在 frontend/shared/api 维护
 export type {
-  AnswerFeedbackPayload, BaziProfile, ChartAnalysis, ChartCase, ChartData,
+  AnswerFeedbackPayload, BaziProfile, ChartAnalysis, ChartCase, ChartData, ChartSaveResult,
   ChatSession, DayunItem, FavoriteCase, HehunParams, KlineAnnotation,
   KlineAnnotationScope, KlineBacktest, KlineBacktestMiss, KlineBacktestSummary,
   KlineCandle, KlineData,
@@ -32,7 +32,7 @@ export {
   isSameDayun, collapseBySelection, ttsAudioPath,
 } from '@shared/api'
 import type {
-  AnswerFeedbackPayload, BaziProfile, ChartCase, ChartData, ChatSession,
+  AnswerFeedbackPayload, BaziProfile, ChartCase, ChartData, ChartSaveResult, ChatSession,
   FavoriteCase, HehunParams, KlineAnnotation, KlineAnnotationScope,
   KlineBacktest, KlineData, KlineDimension, KlineEventDomain, KlineEventItem,
   KlineEventPayload, KlineEventResult, KlineEventStats, KlineFeedbackPayload,
@@ -318,6 +318,34 @@ export const getChart = (birthTime: string, gender: string, sect = 2, yunSect = 
     sect,
     yun_sect: yunSect,
     ...(longitude ? { longitude } : {}),
+  })
+
+/**
+ * 保存出生信息并排盘（小程序面板「保存并排盘」）。
+ *
+ * 与 `getChart` 的区别：**按会话落库**（重进/换端都能恢复），且终审在后台补判、
+ * 跑完覆盖写入 —— 所以这一步只付"计算版"的等待时间，不必干等终审。
+ * `place` 填了才带经度做真太阳时；不填就不要传上一张盘的地点。
+ */
+export const saveChart = (params: {
+  sessionId: string
+  birthTime: string
+  gender: string
+  place?: string
+  longitude?: number
+  sect?: number
+  yunSect?: number
+  token?: string | null
+}) =>
+  post<ChartSaveResult>(EP.CHART_SAVE, {
+    session_id: params.sessionId,
+    birth_time: params.birthTime,
+    gender: params.gender,
+    place: params.place || '',
+    ...(params.longitude ? { longitude: params.longitude } : {}),
+    sect: params.sect ?? 2,
+    yun_sect: params.yunSect ?? 1,
+    ...(params.token ? { token: params.token } : {}),
   })
 
 /**
