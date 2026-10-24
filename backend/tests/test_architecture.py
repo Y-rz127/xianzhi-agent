@@ -1,6 +1,6 @@
 """架构防回归断言（fitness function）。
 
-把 docs/backend-architecture-review.md 第四节的分层铁律固化成可执行的断言，
+把 docs/architecture/backend-architecture-review.md 第四节的分层铁律固化成可执行的断言，
 使分层决策自动化执行，而不是靠人记住。
 
 设计：**基线棘轮（ratchet）**。重构进行中的现存违规登记在 BASELINE_* 中，
@@ -220,7 +220,7 @@ def test_no_new_layer_violations() -> None:
         if k not in BASELINE_VIOLATIONS
     }
     assert not added, (
-        "新增了倒置依赖，请改为允许的依赖方向（详见 docs/backend-architecture-review.md 第四节）：\n"
+        "新增了倒置依赖，请改为允许的依赖方向（详见 docs/architecture/backend-architecture-review.md 第四节）：\n"
         + "\n".join(f"  {k[0]} -> {k[1]} ({n} 处): {actual[k]}" for k, n in sorted(added.items()))
     )
 

@@ -1,7 +1,7 @@
 # 专业细盘 — 代码审核报告 R2（deepseek 第二轮交付）
 
 > 审核人：可可　|　日期：2026-09-06
-> 基线：`docs/professional-chart-prd.md`（§1.4 字段 / §5 验收 / §6 代码审核清单）+ `docs/professional-chart-review-r1.md`
+> 基线：`docs/product/professional-chart-prd.md`（§1.4 字段 / §5 验收 / §6 代码审核清单）+ `docs/reviews/professional-chart-review-r1.md`
 > 本轮交付：后端 2 改 1 新 + 单测新文件；**web 端 + 小程序端首次落地**；shared 类型扩展
 > 验证方式：跑单测 + 回归 + `vue-tsc` 类型检查 + 4 张真实盘完整路径输出 + 权威口径交叉核对
 

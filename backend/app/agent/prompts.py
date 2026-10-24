@@ -4,7 +4,7 @@
 消除原 xianzhi.py::SYSTEM_PROMPT 与 xianzhi_workflow.py 内 system 的双份漂移，
 让合规红线、注入隔离、篇幅规则"一处改全路径生效"。
 
-设计原则（来自 docs/prompt_optimization_proposal.md）：
+设计原则（按 token 预算实测见 docs/prompt_budget/INDEX.md）：
 - 确定性优先：四柱/大运/流年由 bazi_engine 计算，LLM 不得自行推算干支；
 - 合规红线不可逾越：不推断生死、不指导赌博投机、不宣扬符咒改运、不提供堕胎择时；
 - 双路径一致体验：ReAct 与 Workflow 的"先知"人格必须共享同一基座；

@@ -100,7 +100,7 @@ LLM 自主规划、自主调工具，适合首次对话、用户主动提供生�
 7. 通过 → 返回 / 未通过 → Reflextion 回退修复
 ```
 
-详细架构见 [docs/multi_agent_architecture.md](docs/multi_agent_architecture.md)。
+详细架构见 [docs/architecture/multi_agent_architecture.md](docs/architecture/multi_agent_architecture.md)。
 
 ### 闲聊双重短路
 
@@ -158,7 +158,7 @@ Layer 1（`KnowledgeBase.search` → `_search_reranked`）为后端无关的两�
 2. （仅 Chroma）按 `rag_distance_threshold` 距离阈值过滤低相关片段；
 3. 关键词字符 2-gram（Jaccard）重叠度降序**重排**，取 `rag_k` 条。
 
-用关键词重叠度而非后端 score 重排，规避 Chroma（L2 距离越小越相关）与 pgvector / Milvus（余弦相似度越大越相关）的 score 方向不一致；不支持 score 检索的后端自动回退 MMR（`rag_mmr_lambda`）。完整对比见 [docs/multi_agent_architecture.md](docs/multi_agent_architecture.md)。
+用关键词重叠度而非后端 score 重排，规避 Chroma（L2 距离越小越相关）与 pgvector / Milvus（余弦相似度越大越相关）的 score 方向不一致；不支持 score 检索的后端自动回退 MMR（`rag_mmr_lambda`）。完整对比见 [docs/architecture/multi_agent_architecture.md](docs/architecture/multi_agent_architecture.md)。
 
 ### 5. 每日黄历（Web / 小程序）
 
@@ -297,7 +297,8 @@ xianzhi-agent/
 │   │   └── src/views/           # 先知/合婚/塔罗/六爻/黄历/命例库/管理后台等
 │   ├── uniapp/                  # 小程序前端（UniApp，聊天抽屉含合婚/塔罗/六爻/黄历/紫微入口）
 │   └── shared/                  # Web 与小程序共享 API 层（数据模型/端点常量/解析器）
-├── docs/                        # 多 Agent 架构 / code review / 持续学习路线图
+├── docs/                        # 文档：architecture/（现状与铁律） product/ plans/ reviews/ archive/
+│                                #   入口见 docs/README.md（索引）；裁决缓存口径见 docs/verdict-cache.md
 ├── 学习资料/                     # 智能体开发学习笔记
 └── docker-compose.yml           # 编排（api=backend/ 镜像，frontend=frontend/web/ 镜像）
 ```
@@ -433,7 +434,7 @@ docker-compose up -d
 
 ## 多 Agent 协作架构
 
-详见 [docs/multi_agent_architecture.md](docs/multi_agent_architecture.md)。
+详见 [docs/architecture/multi_agent_architecture.md](docs/architecture/multi_agent_architecture.md)。
 
 ### 核心：Supervisor + Worker + Reviewer
 
@@ -536,7 +537,7 @@ for s in _compute_shensha(chart.pillars):
 
 ### 添加新 Worker
 
-在 `app/agent/workflow/xianzhi_workflow.py` 的 `WORKERS` 注册表添加配置，并在 `DOMAIN_KEYWORDS` 和 `DOMAIN_RULE_QUERIES` 添加对应配置。详见 [docs/multi_agent_architecture.md](docs/multi_agent_architecture.md#扩展-worker)。
+在 `app/agent/workflow/xianzhi_workflow.py` 的 `WORKERS` 注册表添加配置，并在 `DOMAIN_KEYWORDS` 和 `DOMAIN_RULE_QUERIES` 添加对应配置。详见 [docs/architecture/multi_agent_architecture.md](docs/architecture/multi_agent_architecture.md#扩展-worker)。
 
 ### 命理知识库扩展
 

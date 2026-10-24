@@ -1,7 +1,7 @@
 # 专业细盘 — 审核报告 R1（deepseek 首次交付）
 
 > 审核人：可可　|　日期：2026-09-06
-> 审核基线：`docs/professional-chart-prd.md`（§1.4 字段清单 + §5 验收 + §6 代码审核清单）
+> 审核基线：`docs/product/professional-chart-prd.md`（§1.4 字段清单 + §5 验收 + §6 代码审核清单）
 > 交付范围：`git status --short` 显示：3 个文件（2 改 + 1 新），**前端/API/测试 一项未动**
 
 ---

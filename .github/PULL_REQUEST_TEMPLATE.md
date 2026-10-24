@@ -1,5 +1,5 @@
 <!--
-  本模板对应 docs/code-review-standard.md §4。请务必填写，空白/敷衍将被直接打回（request changes）。
+  评审口径与提交前自检清单见 docs/README.md（docs/ 索引页）。请务必填写，空白/敷衍将被直接打回（request changes）。
 -->
 ## 变更动机（Why）
 <!-- 解决什么问题 / 关联 issue 或需求单据编号。没有动机的 PR 不审。 -->
@@ -26,7 +26,7 @@
 - 回滚方式：
 
 ## 审查自检（Checklist）
-<!-- 对应 docs/code-review-checklist.md 的 A 节，确认已逐项通过。 -->
+<!-- 对应 docs/README.md「提交前自检」一节，确认已逐项通过。 -->
 - [ ] ruff / vue-tsc 零错误
 - [ ] 安全硬指标（输入校验/鉴权不绕过/零注入/密钥零落库）已确认
 - [ ] 复杂度与命名达标

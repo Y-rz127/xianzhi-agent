@@ -412,7 +412,7 @@ if len(doc.page_content) > max_chars_per_chunk:
 
 1. **"deepagents 编译文件漏收 11 篇" —— 错。** 早期用「整文件字符串包含」判定，因标题层级与空白差异误判。改为按 H1 编号 + 多探针核对后确认：编译文件覆盖 **1–53 节，仅 `054_Trace链路追踪.md` 缺失**。
 2. **"120 处占位符" —— 错。** 正则 `TODO` 未排除 **`TodoListMiddleware`**（一个真实 API 名），单此一项造成 182 次误报。修正后知识库真实占位符为 0–2 处。
-3. **各处行数 —— 早前数字偏小。** PowerShell `Measure-Object -Line` 与 `Get-Content` 会漏计空行（且对纯 LF 文件行为不同）。本报告全部行数改用「按 `\n` 计数」重测，例如 `README.md` 实为 555 行（非 431）、`docs/backend-architecture-review.md` 实为 949 行（非 577）。
+3. **各处行数 —— 早前数字偏小。** PowerShell `Measure-Object -Line` 与 `Get-Content` 会漏计空行（且对纯 LF 文件行为不同）。本报告全部行数改用「按 `\n` 计数」重测，例如 `README.md` 实为 555 行（非 431）、`docs/architecture/backend-architecture-review.md` 实为 949 行（非 577）。
 4. **"典籍标注说明覆盖 21 篇" —— 错。** 那是长版措辞的份数。实测合计 **26 篇带（17 长版 + 9 短版）、23 篇完全不带**，且不带的那 23 篇恰好包含**全部 12 篇古籍**。
 
 第 3 点对本次范围的影响：`00_知识库总索引.md` 与 48 篇内容文档的行数均以重测值为准（合计 12,409 行）。
