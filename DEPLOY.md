@@ -292,3 +292,42 @@ scrape_configs:
 4xx 突增、聊天接口 P95、1 小时 LLM 成本、降级错误激增。报告队列深度由 Redis exporter
 （`redis_queue_length{xianzhi:report:queue}`）另行抓取，或直接看 `/api/health/ready` 的
 `checks.report_queue.depth`。
+
+## 12. 备份与恢复演练
+
+**策略**
+- 云数据库 PostgreSQL 开启自动备份（每日全量 + 日志备份），保留 ≥7 天；这是恢复的第一道保险。
+- 应用侧再用 [`backend/scripts/backup_db.sh`](backend/scripts/backup_db.sh) 每日导出一份 custom 格式
+  备份到对象存储/独立磁盘（与数据库实例不同故障域），保留 7 份。目标：RPO ≤ 24h，RTO ≤ 30min。
+- Redis 不含业务真相，无需备份：报告任务状态在 PG `report_tasks`，启动时会按 pending 重入队；
+  会话锁/限流/幂等键都是短生命周期数据。
+- 备份文件含生辰与问答原文，存储端必须加密并限制访问；下载到本地用完即删。
+
+**执行**
+```bash
+# 每日（cron 示例：03:10 执行）
+POSTGRES_CONNECTION_STRING='postgresql://...' BACKUP_DIR=/data/backups ./scripts/backup_db.sh
+# 把 /data/backups/xianzhi_*.dump 同步到对象存储（按现有 COS/OSS 工具链）
+```
+
+**恢复演练**（禁止指向生产库）
+```bash
+# 1. 建独立演练库（需 pgvector 扩展）
+createdb -h <host> -U <user> xianzhi_drill
+# 2. 恢复 + 核对关键表行数与迁移版本，不一致直接非 0 退出
+POSTGRES_CONNECTION_STRING='<源库>' \
+  ./scripts/restore_drill.sh /path/to/xianzhi_YYYYmmdd_HHMMSS.dump \
+  'postgresql://<user>:<pass>@<host>:5432/xianzhi_drill'
+```
+
+**演练记录（2026-10-24 本地 PostgreSQL 16 实例实测）**
+
+| 项目 | 结果 |
+|------|------|
+| 备份 | `backup_db.sh` 生成 6.0 MB custom dump，`pg_restore --list` 校验通过，sha256 落盘 |
+| 恢复 | 独立库 `pg_restore` 成功，`CREATE EXTENSION vector` 自动重建，embedding 表 795 行可读 |
+| 数据核对 | users 7 / message_store 717 / cases 54 / chart_verdicts 102 / report_tasks 9 / app_config 3 / admin_accounts 1，源库与演练库逐表一致 |
+| 迁移版本 | 演练库 `alembic_version = c4e8a9f1b2d6`（含管理员账号表迁移） |
+| 耗时 | 备份 <10s、恢复 <20s（本地 6 MB 量级；生产按数据量线性放大，RTO 按 30min 预留） |
+
+上线后每季度做一次完整演练（含从对象存储取回备份），并在本表追加记录；换机器/换数据库实例后必须补做一次。
