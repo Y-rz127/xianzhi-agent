@@ -225,12 +225,12 @@ async def get_kline(
     from app.agent.verdict import (
         ENGINE_VERSION,
         PROMPT_VERSION,
+        chart_hash_for_input,
         chart_with_verdict_for_api,
         verdict_applied,
         verdict_cache_namespace,
         verdict_is_stale,
     )
-    from app.db.chart_store import chart_hash_of
     from app.tools.cache import bazi_cache
 
     if not 0 < max_age <= MAX_AGE_LIMIT:
@@ -246,7 +246,9 @@ async def get_kline(
     # key 里带终审命名空间 v/p：payload 内嵌终审结论，状态不参与 key 就会
     # "先按计算版缓存过、补判落库后也永远吐旧的"（同 /chart，2026-10-11）
     try:
-        chash = chart_hash_of(birth_time, gender)
+        # 指纹按排盘口径（真太阳时校正后）算，与写侧 chart.birth.solar 对齐：
+        # 拿原始时间算会永远 miss，K 线也会一直停在计算版（见 chart_hash_for_input 注释）
+        chash = await asyncio.to_thread(chart_hash_for_input, birth_time, gender, longitude)
     except Exception:
         chash = ""
     # DB 查询放线程池：别让一次连接等待卡住事件循环
@@ -350,11 +352,13 @@ async def annotate_kline(
     anchor_year = annotator.today_year()
     # 覆盖步数要进缓存键：批注写的是"全期最高/最低"，区间一变文案就该变；
     # 终审命名空间同理（批注读的是同一张盘，终审版与计算版文案会不同）
-    from app.agent.verdict import verdict_cache_namespace
-    from app.db.chart_store import chart_hash_of
+    from app.agent.verdict import chart_hash_for_input, verdict_cache_namespace
 
     try:
-        _chash = chart_hash_of(body.birth_time, body.gender)
+        # 同 /kline：指纹按排盘口径算（带经度时是校正后的时间），否则终审命名空间恒为 p
+        _chash = await asyncio.to_thread(
+            chart_hash_for_input, body.birth_time, body.gender, body.longitude
+        )
     except Exception:
         _chash = ""
     _ns = await asyncio.to_thread(verdict_cache_namespace, _chash)

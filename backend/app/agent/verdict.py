@@ -643,6 +643,29 @@ def _hash_of(chart: BaziChart) -> str:
         return ""
 
 
+def chart_hash_for_input(birth_time: str, gender: str, longitude: float | None = None) -> str:
+    """**排盘前**算命盘指纹（供接口层在 build 之前查终审/定缓存命名空间）。
+
+    命盘身份是 `chart.birth.solar` ——**真太阳时校正后**的时间，写侧 `run_shadow_verdict`
+    就是用它做 chart_hash。所以读侧必须复算同一套"标准化 → 校正"，不能拿查询串里的原始时间：
+
+    2026-10-24 实测的错位：出生 `2004-06-22 08:15` + 经度 108.63 →
+    裁决写在 `2004-06-22 07:28`（hash `2f629bf2…`），而 `/chart`、`/kline` 用 08:15 算
+    （hash `c621b85b…`）→ `verdict_cache_namespace` 恒为 "p" → 详情页永远显示
+    「终审版生成中」，下拉刷新也只会命中计算版缓存；同时每个不同经度/是否带地点都算出
+    一个新指纹，于是同一张盘被反复重判（chart_verdicts 里 08:00 / 08:05 / 08:50 / 07:28 各一行）。
+    """
+    from app.db.chart_store import chart_hash_of
+    from app.domain.chart_builder import parse_birth
+    from app.domain.solar_time import apply_solar_time
+    from app.domain.time_parse import _normalize_birth_time
+
+    normalized = _normalize_birth_time(birth_time)
+    y, m, d, h, mi = parse_birth(normalized)
+    y, m, d, h, mi = apply_solar_time(y, m, d, h, mi, longitude)
+    return chart_hash_of(f"{y:04d}-{m:02d}-{d:02d} {h:02d}:{mi:02d}", gender)
+
+
 def verdict_in_flight(chash: str) -> bool:
     """这张盘是否已有后台补判在跑（接口层据此避免重复判、重复等）。"""
     if not chash:

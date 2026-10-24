@@ -193,12 +193,12 @@ async def get_chart(
     from app.agent.verdict import (
         ENGINE_VERSION,
         PROMPT_VERSION,
+        chart_hash_for_input,
         chart_with_verdict_for_api,
         verdict_applied,
         verdict_cache_namespace,
         verdict_is_stale,
     )
-    from app.db.chart_store import chart_hash_of
     from app.tools.cache import bazi_cache
 
     # 复用与聊天工具同一套 LRU：/chart 是全量重算的 CPU 密集路径，高频请求会抢 GIL 拖垮事件循环。
@@ -206,7 +206,9 @@ async def get_chart(
     # 以及终审命名空间 v/p —— payload 里嵌着终审结论，状态不参与 key 的话，一张盘先按
     # 计算版缓存过，后台补判落库后详情页也永远吐旧载荷（2026-10-11 用户实测到的问题）。
     try:
-        chash = chart_hash_of(birth_time, gender)
+        # 指纹必须按**排盘口径**（校正后的出生时间）算，见 chart_hash_for_input 的注释：
+        # 拿原始查询串算会与写侧（chart.birth.solar）错位，导致永远查不到裁决。
+        chash = await asyncio.to_thread(chart_hash_for_input, birth_time, gender, longitude)
     except Exception:
         chash = ""
     # DB 查询放线程池：与排盘同理，别让一次连接等待卡住事件循环
