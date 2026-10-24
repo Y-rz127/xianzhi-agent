@@ -15,8 +15,10 @@ from app.core.logger import log
 
 # 进程内 API 指标存储
 _metrics_lock = threading.Lock()
+# 延迟直方图桶（秒），导出 Prometheus histogram 用
+_LATENCY_BUCKETS = (0.1, 0.3, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0, 40.0, 60.0)
 _metrics: dict[str, Any] = {
-    "endpoints": defaultdict(lambda: {"count": 0, "total_latency_ms": 0.0}),
+    "endpoints": defaultdict(lambda: {"count": 0, "total_latency_ms": 0.0, "buckets": defaultdict(int)}),
     "status_codes": {"2xx": 0, "4xx": 0, "5xx": 0},
     "recent_errors": [],
     # DB/记忆层失败等被降级兜住的错误，供 /metrics 观测
@@ -123,6 +125,13 @@ def record_request(
         ep = _metrics["endpoints"][key]
         ep["count"] += 1
         ep["total_latency_ms"] += latency_ms
+        # 每桶记"落在该桶"的原始次数，导出时再累加成 Prometheus 的累计桶
+        for i, bound in enumerate(_LATENCY_BUCKETS):
+            if duration <= bound:
+                ep["buckets"][i] += 1
+                break
+        else:
+            ep["buckets"][len(_LATENCY_BUCKETS)] += 1
 
         if 200 <= status < 300:
             _metrics["status_codes"]["2xx"] += 1
@@ -208,6 +217,110 @@ def get_metrics() -> dict[str, Any]:
             "llm_totals": llm_totals,
             "uptime_seconds": round(time.time() - _metrics["started_at"], 2),
         }
+
+
+def _escape_label(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("\n", "\\n").replace('"', '\\"')
+
+
+def prometheus_text() -> str:
+    """按 Prometheus 文本格式导出本副本指标。
+
+    进程内聚合无法跨副本汇总，故每副本各暴露一份带 instance 标签的序列，
+    由 Prometheus 抓取后统一聚合/告警（见 deploy/prometheus/alerts.yml）。
+    """
+    lines = [
+        "# HELP xianzhi_app_info 实例版本（灰度时用于区分新旧版本）",
+        "# TYPE xianzhi_app_info gauge",
+        f'xianzhi_app_info{{version="{_escape_label(settings.app_version)}"}} 1',
+        "# HELP xianzhi_process_start_time_seconds 进程启动时间（Unix 秒）",
+        "# TYPE xianzhi_process_start_time_seconds gauge",
+        f"xianzhi_process_start_time_seconds {_metrics['started_at']:.3f}",
+    ]
+    with _metrics_lock:
+        endpoints = [(k, dict(v["buckets"]), v["count"], v["total_latency_ms"]) for k, v in _metrics["endpoints"].items()]
+        status_codes = dict(_metrics["status_codes"])
+        internal_errors = dict(_metrics["internal_errors"])
+        llm_entries = list(_metrics["llm"].items())
+
+    lines += [
+        "# HELP xianzhi_http_requests_total HTTP 请求数（按路由模板计数）",
+        "# TYPE xianzhi_http_requests_total counter",
+    ]
+    for key, _buckets, count, _total_ms in endpoints:
+        method, path = key.split(" ", 1)
+        lines.append(
+            f'xianzhi_http_requests_total{{method="{_escape_label(method)}",'
+            f'path="{_escape_label(path)}"}} {count}'
+        )
+
+    lines += [
+        "# HELP xianzhi_http_request_duration_seconds HTTP 请求耗时",
+        "# TYPE xianzhi_http_request_duration_seconds histogram",
+    ]
+    for key, buckets, count, total_ms in endpoints:
+        method, path = key.split(" ", 1)
+        labels = f'method="{_escape_label(method)}",path="{_escape_label(path)}"'
+        cumulative = 0
+        for i, bound in enumerate(_LATENCY_BUCKETS):
+            cumulative += buckets.get(i, 0)
+            lines.append(
+                f"xianzhi_http_request_duration_seconds_bucket{{{labels},le=\"{bound}\"}} {cumulative}"
+            )
+        lines.append(
+            f'xianzhi_http_request_duration_seconds_bucket{{{labels},le="+Inf"}} {count}'
+        )
+        lines.append(f"xianzhi_http_request_duration_seconds_sum{{{labels}}} {total_ms / 1000:.3f}")
+        lines.append(f"xianzhi_http_request_duration_seconds_count{{{labels}}} {count}")
+
+    lines += [
+        "# HELP xianzhi_http_responses_total HTTP 响应按状态段计数",
+        "# TYPE xianzhi_http_responses_total counter",
+    ]
+    for bucket, count in sorted(status_codes.items()):
+        lines.append(f'xianzhi_http_responses_total{{status="{bucket}"}} {count}')
+
+    lines += [
+        "# HELP xianzhi_internal_errors_total 被降级兜住的内部错误",
+        "# TYPE xianzhi_internal_errors_total counter",
+    ]
+    for category, count in sorted(internal_errors.items()):
+        lines.append(f'xianzhi_internal_errors_total{{category="{_escape_label(category)}"}} {count}')
+
+    lines += [
+        "# HELP xianzhi_llm_calls_total LLM 调用次数",
+        "# TYPE xianzhi_llm_calls_total counter",
+    ]
+    for key, data in llm_entries:
+        model, tag = key.split("|", 1)
+        lines.append(
+            f'xianzhi_llm_calls_total{{model="{_escape_label(model)}",'
+            f'tag="{_escape_label(tag)}"}} {data["calls"]}'
+        )
+
+    lines += [
+        "# HELP xianzhi_llm_tokens_total LLM token 用量",
+        "# TYPE xianzhi_llm_tokens_total counter",
+    ]
+    for key, data in llm_entries:
+        model, tag = key.split("|", 1)
+        labels = f'model="{_escape_label(model)}",tag="{_escape_label(tag)}"'
+        lines.append(f'xianzhi_llm_tokens_total{{{labels},kind="prompt"}} {data["prompt_tokens"]}')
+        lines.append(f'xianzhi_llm_tokens_total{{{labels},kind="completion"}} {data["completion_tokens"]}')
+
+    lines += [
+        "# HELP xianzhi_llm_estimated_cost_yuan_total LLM 估算成本（元，未配单价时为 0）",
+        "# TYPE xianzhi_llm_estimated_cost_yuan_total counter",
+    ]
+    for key, data in llm_entries:
+        model, tag = key.split("|", 1)
+        in_price, out_price = _price_of(model)
+        cost = data["prompt_tokens"] / 1e6 * in_price + data["completion_tokens"] / 1e6 * out_price
+        lines.append(
+            f'xianzhi_llm_estimated_cost_yuan_total{{model="{_escape_label(model)}",'
+            f'tag="{_escape_label(tag)}"}} {cost:.6f}'
+        )
+    return "\n".join(lines) + "\n"
 
 
 def init_observability() -> bool:

@@ -264,3 +264,31 @@ CI 的 `audit` job 在每次 push / PR 执行：
 - 依赖版本以 `backend/requirements.lock` 为准：Docker 构建、CI、本地开发统一安装锁文件。
 - 调整依赖范围改 `backend/requirements.txt`，随后重新生成锁：
   `pip-compile --output-file=requirements.lock requirements.txt`（Python 3.12），提交两者并重跑 audit。
+
+## 11. 指标抓取与告警
+
+应用内指标是**进程级**的（每副本各一份），跨副本聚合交给 Prometheus：每副本暴露
+`GET /api/ai/metrics/prometheus`（Prometheus 文本格式，需 `X-API-Key`），Prometheus 按 instance 汇总。
+
+抓取配置示例：
+
+```yaml
+scrape_configs:
+  - job_name: xianzhi-backend
+    metrics_path: /api/ai/metrics/prometheus
+    static_configs:
+      - targets: ['10.0.0.11:80', '10.0.0.12:80']
+    headers:
+      X-API-Key: <API_KEYS 中的管理 Key>
+```
+
+导出指标：`xianzhi_http_requests_total` / `xianzhi_http_request_duration_seconds_bucket`
+（0.1~60s 分桶）/ `xianzhi_http_responses_total{status}` / `xianzhi_internal_errors_total{category}`
+/ `xianzhi_llm_calls_total{model,tag}` / `xianzhi_llm_tokens_total{model,tag,kind}`
+/ `xianzhi_llm_estimated_cost_yuan_total{model,tag}` / `xianzhi_app_info{version}`
+（灰度时用 version 区分新旧副本）。
+
+告警规则见 [`deploy/prometheus/alerts.yml`](deploy/prometheus/alerts.yml)：实例不可抓取、5xx 比例、
+4xx 突增、聊天接口 P95、1 小时 LLM 成本、降级错误激增。报告队列深度由 Redis exporter
+（`redis_queue_length{xianzhi:report:queue}`）另行抓取，或直接看 `/api/health/ready` 的
+`checks.report_queue.depth`。

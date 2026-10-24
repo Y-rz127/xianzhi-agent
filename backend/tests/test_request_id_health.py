@@ -9,13 +9,18 @@ from fastapi.testclient import TestClient
 
 import app.api.health as health
 from app.core.config import settings
-from app.core.observability import get_metrics, record_request
+from app.core.observability import (
+    get_metrics,
+    prometheus_text,
+    record_llm_call,
+    record_request,
+)
 from app.core.request_context import (
     RequestIdMiddleware,
     get_request_id,
     normalize_request_id,
 )
-from app.core.security import _is_auth_exempt, _is_rate_exempt
+from app.core.security import _is_admin_path, _is_auth_exempt, _is_rate_exempt
 
 pytestmark = pytest.mark.security
 
@@ -58,6 +63,47 @@ def test_metrics_requires_admin_but_stays_rate_limit_exempt():
     assert _is_auth_exempt("/api/ai/observability/status") is False
     assert _is_rate_exempt("/api/ai/observability/status") is True
     assert _is_auth_exempt("/api/health/ready") is True
+
+
+def test_prometheus_endpoint_stays_admin_only():
+    assert _is_auth_exempt("/api/ai/metrics/prometheus") is False
+    assert _is_admin_path("/api/ai/metrics/prometheus") is True
+
+
+def _prom_value(text: str, metric_line_prefix: str) -> float:
+    for line in text.splitlines():
+        if line.startswith(metric_line_prefix):
+            return float(line.rsplit(" ", 1)[1])
+    raise AssertionError(f"未找到指标行: {metric_line_prefix}")
+
+
+def test_prometheus_text_exports_histogram_and_llm_counters():
+    record_request("GET", "/unit-test/prom", 200, 0.2)
+    record_llm_call("unit-model", "unit-tag", 10, 5, 100.0)
+
+    text = prometheus_text()
+    labels = 'method="GET",path="/unit-test/prom"'
+    count = _prom_value(text, f"xianzhi_http_request_duration_seconds_count{{{labels}}}")
+    inf = _prom_value(text, f'xianzhi_http_request_duration_seconds_bucket{{{labels},le="+Inf"}}')
+    within_300ms = _prom_value(
+        text, f'xianzhi_http_request_duration_seconds_bucket{{{labels},le="0.3"}}'
+    )
+
+    assert count >= 1
+    assert inf == count  # Prometheus 累计桶：+Inf 等于总次数
+    assert 0 < within_300ms <= count
+    assert 'xianzhi_http_requests_total{method="GET",path="/unit-test/prom"}' in text
+    assert 'xianzhi_llm_calls_total{model="unit-model",tag="unit-tag"}' in text
+    assert 'xianzhi_llm_tokens_total{model="unit-model",tag="unit-tag",kind="prompt"}' in text
+    assert "xianzhi_llm_estimated_cost_yuan_total" in text
+
+
+def test_prometheus_text_escapes_label_values():
+    record_request("GET", '/unit-test/escape"x', 404, 0.01)
+
+    text = prometheus_text()
+
+    assert 'path="/unit-test/escape\\"x"' in text
 
 
 class _KB:

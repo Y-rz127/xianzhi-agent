@@ -1,0 +1,78 @@
+# 先知智能体 Prometheus 告警规则
+# 抓取配置示例（每副本一个 target，/metrics/prometheus 需带 X-API-Key）：
+#   scrape_configs:
+#     - job_name: xianzhi-backend
+#       metrics_path: /api/ai/metrics/prometheus
+#       static_configs:
+#         - targets: ['10.0.0.11:80', '10.0.0.12:80']
+#       headers:
+#         X-API-Key: <API_KEYS 中的管理 Key>
+groups:
+  - name: xianzhi-availability
+    rules:
+      - alert: XianzhiInstanceDown
+        expr: up{job="xianzhi-backend"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "先知实例不可抓取（{{ $labels.instance }}）"
+          description: "超过 2 分钟未抓到指标，检查进程/网络/鉴权是否失效。"
+
+      - alert: XianzhiHighErrorRate
+        expr: |
+          sum(rate(xianzhi_http_responses_total{status=~"5xx"}[5m]))
+            / sum(rate(xianzhi_http_requests_total[5m])) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "5xx 比例超过 5%"
+          description: "近 5 分钟 5xx 占比 {{ $value | humanizePercentage }}，先看 /metrics 的 recent_errors 与日志 rid。"
+
+      - alert: XianzhiClientErrorSpike
+        expr: |
+          sum(rate(xianzhi_http_responses_total{status="4xx"}[5m]))
+            / sum(rate(xianzhi_http_requests_total[5m])) > 0.30
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "4xx 比例超过 30%"
+          description: "多为限流/鉴权/参数问题，确认是否被刷或前端版本不匹配。"
+
+  - name: xianzhi-latency
+    rules:
+      - alert: XianzhiChatP95Slow
+        expr: |
+          histogram_quantile(0.95,
+            sum by (le) (rate(xianzhi_http_request_duration_seconds_bucket{path=~"/api/ai/xianzhi/.*"}[10m]))
+          ) > 120
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "聊天接口 P95 超过 120s"
+          description: "整轮预算 180s，P95 逼近上限说明生成/审核过慢或模型降级。"
+
+  - name: xianzhi-llm
+    rules:
+      - alert: XianzhiLlmCostSpike
+        expr: |
+          sum(increase(xianzhi_llm_estimated_cost_yuan_total[1h])) > 100
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "近 1 小时 LLM 成本超过 100 元"
+          description: "核对 /api/ai/metrics 的 tag 分布，确认是否异常重试或拆解放大。"
+
+      - alert: XianzhiDegradedErrors
+        expr: |
+          sum by (category) (increase(xianzhi_internal_errors_total[10m])) > 10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "内部降级错误增多（{{ $labels.category }}）"
+          description: "DB/Redis/记忆层等被兜底失败的次数 10 分钟内超过 10 次。"
