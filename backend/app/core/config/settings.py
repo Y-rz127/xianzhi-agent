@@ -111,6 +111,12 @@ class Settings(BaseSettings):
     admin_session_secret: str = Field(default="", alias="ADMIN_SESSION_SECRET")
     # 管理员令牌有效期（秒），默认 2 小时
     admin_token_ttl_seconds: int = Field(default=7200, alias="ADMIN_TOKEN_TTL_SECONDS")
+    # 管理员登录防爆破：单 IP 每分钟尝试上限（0=关闭）
+    admin_login_ip_limit: int = Field(default=10, alias="ADMIN_LOGIN_IP_LIMIT")
+    # 同一账号在窗口内连续失败达到该次数后锁定（0=不锁定）
+    admin_login_max_fails: int = Field(default=5, alias="ADMIN_LOGIN_MAX_FAILS")
+    admin_login_fail_window_seconds: int = Field(default=600, alias="ADMIN_LOGIN_FAIL_WINDOW")
+    admin_login_lock_seconds: int = Field(default=300, alias="ADMIN_LOGIN_LOCK_SECONDS")
     # 限流：单 IP 每分钟最大请求数（0=不限流）
     # 默认 300：开发机上所有客户端共用 127.0.0.1 一个桶，60 太紧（一次切会话+排盘就能打满，
     # 表现为 /metrics 与 WS 握手连片 429）；生产经 RATE_LIMIT_PER_MINUTE 覆盖。

@@ -12,6 +12,14 @@ from fastapi import APIRouter, HTTPException, Request
 
 from app.core.admin_token import create_admin_token
 from app.core.config import settings
+from app.core.http.client_ip import client_ip_from_request
+from app.core.login_throttle import (
+    account_login_locked,
+    clear_login_failures,
+    ip_login_allowed,
+    record_login_failure,
+)
+from app.core.observability import record_error
 
 router = APIRouter(prefix="/admin/accounts", tags=["Admin Accounts"])
 
@@ -111,6 +119,12 @@ async def admin_login(req: Request) -> dict:
     password = body.get("password", "")
     if not username or not password:
         raise HTTPException(status_code=400, detail="用户名和密码不能为空")
+    if not await ip_login_allowed(client_ip_from_request(req)):
+        record_error("admin_login_ip_limited")
+        raise HTTPException(status_code=429, detail="登录尝试过于频繁，请稍后再试")
+    if await account_login_locked(username):
+        record_error("admin_login_account_locked")
+        raise HTTPException(status_code=429, detail="登录失败次数过多，请稍后再试")
     accounts = _load_accounts()
     for acc in accounts:
         if acc.get("username") != username:
@@ -124,6 +138,7 @@ async def admin_login(req: Request) -> dict:
             if needs_migration:
                 acc["password_hash"] = _hash_admin_password(password)
                 _save_accounts(accounts)
+            await clear_login_failures(username)
             token, expires_in = create_admin_token(acc)
             return {
                 "id": acc["id"],
@@ -132,6 +147,10 @@ async def admin_login(req: Request) -> dict:
                 "token": token,
                 "expires_in": expires_in,
             }
+    if await record_login_failure(username):
+        record_error("admin_login_account_locked")
+        raise HTTPException(status_code=429, detail="登录失败次数过多，请稍后再试")
+    record_error("admin_login_failed")
     raise HTTPException(status_code=401, detail="用户名或密码错误")
 
 
