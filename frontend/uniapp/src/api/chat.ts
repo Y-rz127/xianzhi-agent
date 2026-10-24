@@ -38,7 +38,11 @@ function withTokenUrl(path: string): string {
   return path + (path.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(token)
 }
 
-export interface ChatWSCallbacks {
+/**
+ * 先知对话：一轮的推送回调。
+ * 帧已经被 SDK 按 request_id 路由好了，回调里不必再判断"这是不是本轮"。
+ */
+export interface XianzhiTurnHandlers {
   onMessage: (data: string) => void
   onDone: () => void
   onError: (err: string) => void
@@ -55,7 +59,6 @@ export interface ChatWSCallbacks {
    * 页面应清掉"推演中"状态并去会话记录里把已生成好的回答取回来。
    */
   onDisconnect?: (reason: string) => void
-  onCards?: (cards: any[]) => void
 }
 
 function wsPath(path: string): string {
@@ -108,111 +111,32 @@ function armConnectTimeout(
   return () => clearTimeout(timer)
 }
 
-let currentChatActive = false
 let currentTarotActive = false
 let wsConnId = 0
 
 export function closeAllWS() {
   try { wx.closeSocket() } catch { }
-  currentChatActive = false
+  dropXianzhiSocket('连接已关闭', false)
   currentTarotActive = false
   currentStreamActive = false
 }
 
 /**
- * 通用 WS 连接 — 使用 wx 全局 API（真机兼容）
+ * 先知对话：一条 socket 跑多轮（多路复用）。
+ *
+ * 为什么这么做：小程序同一页面只有一条 socket —— 全局 `wx.onSocketMessage` 收包时
+ * **分不出来源**，真机上 `SocketTask` 的方法又全是空的（见文件头踩坑记录），
+ * 所以"多个会话同时生成"不可能靠多开连接（也吃 5 条 socket 上限）。
+ * 改成一条连接并发跑多轮：
+ *   - 每轮带一个 turnId（同时是服务端的 request_id 与 client_msg_id）；
+ *   - 服务端推送的每一帧原样带回 request_id，这里按它路由到对应轮次；
+ *   - 因此切会话不会再串台，也不必像旧实现那样"发新消息先掐掉旧连接"
+ *     （那正是"上一轮还在生成时新建会话就崩"的根源）。
  */
-function connectChatWS(path: string, payload: Record<string, any>, cb: ChatWSCallbacks): UniApp.SocketTask | null {
-  try { wx.closeSocket() } catch { }
-  currentChatActive = false
-  const myId = ++wsConnId
-
-  const url = resolveWsBase() + wsPath(path)
-
-  let receivedMessage = false
-  let doneOrError = false
-  let sent = false
-  // 是否已连上（只有 onSocketOpen 置 true）：未连通的 socket 发不出消息，见 doSend 注释
-  let opened = false
-  // 握手超时兜底的取消函数（onOpen / onError / onClose 都要调）
-  let cancelConnectTimeout: () => void = () => {}
-
-  function isMine() { return wsConnId === myId }
-
-  function doSend() {
-    // 只在真正连上后发送：未连通时 sendSocketMessage 必定失败，失败回调会把整轮判死
-    // （弹「发送失败」且 sent 已置位 ⇒ onSocketOpen 到达后也不再重试）—— 消息就丢了。
-    if (sent || doneOrError || !opened) return
-    sent = true
-    wx.sendSocketMessage({
-      data: JSON.stringify(payload),
-      fail: (err: any) => {
-        console.error('[WS] send fail id=', myId, err)
-        if (!doneOrError && isMine()) { doneOrError = true; cb.onError(extractErrMsg(err, '发送失败')) }
-      },
-    })
-  }
-
-  wx.onSocketOpen(() => {
-    if (!isMine()) return
-    cancelConnectTimeout()
-    opened = true
-    currentChatActive = true
-    doSend()
-  })
-
-  wx.onSocketMessage((res: any) => {
-    if (!isMine() || !currentChatActive) return
-    receivedMessage = true
-    try {
-      const data = JSON.parse(res.data as string)
-      if (data.type === 'message') cb.onMessage(data.data)
-      else if (data.type === 'cards') cb.onCards?.(data.data)
-      else if (data.type === 'chart_context') cb.onChartContext?.(data.data?.birth_time, data.data?.gender, data.data?.birth_place, data.data?.longitude)
-      else if (data.type === 'progress') cb.onProgress?.(String(data.data || ''))
-      else if (data.type === 'ping') { /* 服务端保活，忽略 */ }
-      else if (data.type === 'done') { doneOrError = true; cb.onDone(); currentChatActive = false }
-      else if (data.type === 'error') { doneOrError = true; cb.onError(data.data || '服务错误'); currentChatActive = false }
-    } catch (e: any) {
-      console.error('[WS] parse fail id=', myId, e)
-      if (!doneOrError) { doneOrError = true; cb.onError('解析失败') }
-    }
-  })
-
-  wx.onSocketError((err: any) => {
-    console.error('[WS] onSocketError id=', myId, 'isMine=', isMine(), 'receivedMsg=', receivedMessage, 'err=', err)
-    if (!isMine()) return
-    cancelConnectTimeout()
-    if (!receivedMessage && !doneOrError) { doneOrError = true; cb.onError(extractErrMsg(err, '连接错误')) }
-    currentChatActive = false
-  })
-
-  wx.onSocketClose(() => {
-    if (!isMine()) return
-    cancelConnectTimeout()
-    currentChatActive = false
-    // 还没收到 done/error 就关了：后端可能仍在生成（本轮实测可长达 2 分钟），
-    // 通知页面去取回已落库的回答，而不是让"推演中…"永远转下去
-    if (!doneOrError) {
-      doneOrError = true
-      cb.onDisconnect?.('连接已断开')
-    }
-  })
-
-  // uni.connectSocket 发起连接（走 uni-app 域名绕过），wx 全局回调收消息（真机稳定）
-  uni.connectSocket({ url, complete: () => { } })
-
-  // 握手超时兜底：连不上要如实报超时（原"500ms 后盲发一次"已删，理由见 armConnectTimeout）
-  cancelConnectTimeout = armConnectTimeout(isMine, () => opened || doneOrError, () => {
-    doneOrError = true
-    cb.onError('连接超时，请检查网络后重试')
-  })
-
-  return null as any
-}
-
-export interface XianzhiChatOptions extends ChatWSCallbacks {
+export interface XianzhiChatOptions {
   conversationId: string
+  /** 本轮唯一标识：既是 request_id（前端按它路由帧）也是 client_msg_id（服务端防重放） */
+  turnId: string
   birthTime?: string
   gender?: string
   birthPlace?: string
@@ -221,16 +145,205 @@ export interface XianzhiChatOptions extends ChatWSCallbacks {
   sect?: number
   yunSect?: number
   token?: string
-  /** 每次发送生成一次，服务端据此防重放（重试不会重复跑一轮） */
-  clientMsgId?: string
 }
 
-export function chatWithXianzhiWS(message: string, opts: XianzhiChatOptions) {
-  return connectChatWS(
-    '/api/ai/xianzhi/ws',
-    { message, conversation_id: opts.conversationId, birth_time: opts.birthTime, gender: opts.gender, birth_place: opts.birthPlace, longitude: opts.longitude ?? '', sect: opts.sect ?? 2, yun_sect: opts.yunSect ?? 1, token: opts.token || '', client_msg_id: opts.clientMsgId || '' },
-    opts
-  )
+export interface XianzhiTurnHandle {
+  turnId: string
+  /**
+   * 放弃接收本轮推送（例如会话被删了）。
+   * 注意：**不会中断服务端生成** —— 那一轮照样跑完并落库，只是前端不再收帧。
+   */
+  detach: () => void
+}
+
+/** turnId → 本轮回调：帧按 request_id 路由到这里，找不到就静默丢弃 */
+const xzTurns = new Map<string, XianzhiTurnHandlers>()
+/** 还没连上时排队的轮次（连上后按序发出，各轮在服务端并发跑） */
+let xzQueue: { payload: Record<string, any>; turnId: string }[] = []
+let xzSocketOpen = false
+let xzConnecting = false
+/** 本连接的序号：与全模块共用的 wsConnId 比对，判断"这条连接还是不是我的" */
+let xzConnId = 0
+let xzConnectTimer: any = null
+
+/** 正在生成中的轮次（页面隐藏时据此决定要不要留着连接） */
+export function runningXianzhiTurns(): string[] {
+  return [...xzTurns.keys()]
+}
+
+/** 连接是否还活着（页面回到前台时用它判断要不要走"取回答案"兜底） */
+export function xianzhiSocketAlive(): boolean {
+  return xzSocketOpen && xzConnId === wsConnId
+}
+
+/**
+ * 丢弃连接并把结果告知在跑的轮次。
+ *
+ * `asError` 区分两类失败：
+ * - true（连不上/发送失败）：重试才有用，直接 onError；
+ * - false（连接断了/被关掉）：后端**不中止**生成（见后端 WS 断线策略），
+ *   走 onDisconnect 让页面去会话记录里把答案取回来。
+ */
+function dropXianzhiSocket(reason: string, asError: boolean) {
+  if (xzConnectTimer) { clearTimeout(xzConnectTimer); xzConnectTimer = null }
+  xzSocketOpen = false
+  xzConnecting = false
+  xzQueue = []
+  const pending = [...xzTurns.entries()]
+  xzTurns.clear()
+  for (const [, handlers] of pending) {
+    if (asError) handlers.onError(reason)
+    else if (handlers.onDisconnect) handlers.onDisconnect(reason)
+    else handlers.onError(reason)
+  }
+}
+
+function routeXianzhiFrame(frame: any) {
+  if (!frame || typeof frame !== 'object') return
+  const type = String(frame.type || '')
+  if (type === 'ping') return
+  const turnId = String(frame.request_id || '')
+  if (turnId) {
+    const handlers = xzTurns.get(turnId)
+    // 多路复用的关键：不是本连接上"还在跑的那一轮"就丢弃。
+    // 少了这一句，另一会话的 chunk 会被写进当前会话（串台）。
+    if (!handlers) return
+    if (type === 'message') {
+      handlers.onMessage(typeof frame.data === 'string' ? frame.data : String(frame.data ?? ''))
+    } else if (type === 'progress') {
+      handlers.onProgress?.(String(frame.data || ''))
+    } else if (type === 'chart_context') {
+      const d = frame.data || {}
+      handlers.onChartContext?.(d.birth_time, d.gender, d.birth_place, d.longitude)
+    } else if (type === 'done') {
+      xzTurns.delete(turnId)
+      handlers.onDone()
+    } else if (type === 'error') {
+      xzTurns.delete(turnId)
+      handlers.onError(String(frame.data || '服务错误'))
+    }
+    return
+  }
+  // 没有 request_id 的帧只可能是连接级错误：广播给所有在跑的轮次
+  if (type === 'error') {
+    const msg = String(frame.data || '服务错误')
+    const pending = [...xzTurns.entries()]
+    xzTurns.clear()
+    for (const [, handlers] of pending) handlers.onError(msg)
+  }
+}
+
+function bindXianzhiSocket(connId: number) {
+  const mine = () => wsConnId === connId && xzConnId === connId
+  wx.onSocketOpen(() => {
+    if (!mine()) return
+    if (xzConnectTimer) { clearTimeout(xzConnectTimer); xzConnectTimer = null }
+    xzConnecting = false
+    xzSocketOpen = true
+    const queue = xzQueue
+    xzQueue = []
+    for (const item of queue) sendXianzhiPayload(item.payload, item.turnId)
+  })
+  wx.onSocketMessage((res: any) => {
+    if (!mine()) return
+    try {
+      routeXianzhiFrame(JSON.parse(res.data as string))
+    } catch (e: any) {
+      console.error('[WS] 先知的帧解析失败', e)
+    }
+  })
+  wx.onSocketError((err: any) => {
+    if (!mine()) return
+    dropXianzhiSocket(extractErrMsg(err, '连接错误'), true)
+  })
+  wx.onSocketClose(() => {
+    if (!mine()) return
+    dropXianzhiSocket('连接已断开', false)
+  })
+}
+
+function sendXianzhiPayload(payload: Record<string, any>, turnId: string) {
+  wx.sendSocketMessage({
+    data: JSON.stringify(payload),
+    fail: (err: any) => {
+      console.error('[WS] 先知轮次发送失败 turn=', turnId, err)
+      const handlers = xzTurns.get(turnId)
+      if (!handlers) return
+      xzTurns.delete(turnId)
+      handlers.onError(extractErrMsg(err, '发送失败'))
+    },
+  })
+}
+
+function ensureXianzhiSocket() {
+  if (xzSocketOpen || xzConnecting) return
+  xzConnecting = true
+  xzConnId = ++wsConnId
+  bindXianzhiSocket(xzConnId)
+  uni.connectSocket({ url: resolveWsBase() + wsPath('/api/ai/xianzhi/ws'), complete: () => { } })
+  if (xzConnectTimer) clearTimeout(xzConnectTimer)
+  xzConnectTimer = setTimeout(() => {
+    xzConnectTimer = null
+    if (!xzConnecting) return
+    // 握手超时：如实报超时，不要盲发（未连通的 socket 必定发送失败，见 armConnectTimeout）
+    try { wx.closeSocket() } catch { }
+    dropXianzhiSocket('连接超时，请检查网络后重试', true)
+  }, WS_CONNECT_TIMEOUT_MS)
+}
+
+/**
+ * 发一轮对话。
+ *
+ * 可以同时发多轮（不同会话）：一条连接上各轮并发跑，帧按 turnId 各回各家。
+ * 同一会话仍由服务端串行（会话锁），页面侧也不该并发发同一会话。
+ */
+export function sendXianzhiTurn(
+  message: string,
+  opts: XianzhiChatOptions,
+  handlers: XianzhiTurnHandlers,
+): XianzhiTurnHandle {
+  const turnId = opts.turnId
+  xzTurns.set(turnId, handlers)
+  const payload = {
+    message,
+    conversation_id: opts.conversationId,
+    birth_time: opts.birthTime,
+    gender: opts.gender,
+    birth_place: opts.birthPlace,
+    longitude: opts.longitude ?? '',
+    sect: opts.sect ?? 2,
+    yun_sect: opts.yunSect ?? 1,
+    token: opts.token || '',
+    // 同一个 id 兼作防重放键：网络抖动重发时服务端直接回放上一轮结果
+    client_msg_id: turnId,
+    request_id: turnId,
+  }
+  // 别的页面（塔罗/六爻等）调过 wx.closeSocket 把连接换走了：当作断线并重连
+  if (xzSocketOpen && xzConnId !== wsConnId) {
+    xzSocketOpen = false
+    xzQueue = []
+  }
+  if (xzSocketOpen) sendXianzhiPayload(payload, turnId)
+  else {
+    xzQueue.push({ payload, turnId })
+    ensureXianzhiSocket()
+  }
+  return {
+    turnId,
+    detach: () => {
+      xzTurns.delete(turnId)
+      xzQueue = xzQueue.filter((item) => item.turnId !== turnId)
+    },
+  }
+}
+
+/**
+ * 关掉先知连接（页面隐藏/离开时用）：在跑的轮次收到 onDisconnect，
+ * 后端照旧跑完并落库，切回来时从会话记录取回。
+ */
+export function closeXianzhiSocket() {
+  try { wx.closeSocket() } catch { }
+  dropXianzhiSocket('连接已关闭', false)
 }
 
 export interface TarotDrawCallbacks { onCards: (cards: any[]) => void; onError: (err: string) => void }

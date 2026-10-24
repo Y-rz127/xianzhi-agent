@@ -146,6 +146,10 @@ class Settings(BaseSettings):
     session_lock_wait_timeout: float = Field(default=10.0, alias="SESSION_LOCK_WAIT_TIMEOUT")
     # 单轮对话总时限（秒）：工作流/ReAct/闲聊共用，防止多阶段超时叠加
     chat_turn_budget: float = Field(default=180.0, alias="CHAT_TURN_BUDGET")
+    # 单条 WS 连接可同时生成的会话数上限（先知对话多路复用）：
+    # 小程序前端就一条 socket，多会话并行只能靠它跑多轮；超限直接回错误而不是排队，
+    # 否则用户以为发出去了，其实还在等。默认 3 是按"同时开几个会话还看得过来"定的。
+    ws_max_parallel_sessions: int = Field(default=3, alias="WS_MAX_PARALLEL_SESSIONS")
     # 工作流各阶段上限（秒）；实际调用再取 min(阶段上限, 剩余预算)
     workflow_decompose_timeout: float = Field(default=15.0, alias="WORKFLOW_DECOMPOSE_TIMEOUT")
     workflow_generate_timeout: float = Field(default=100.0, alias="WORKFLOW_GENERATE_TIMEOUT")

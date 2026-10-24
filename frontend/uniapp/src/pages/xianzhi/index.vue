@@ -315,13 +315,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, nextTick, watch, onMounted, onBeforeUnmount } from 'vue'
+import { ref, reactive, computed, nextTick, watch, onMounted, onBeforeUnmount } from 'vue'
 import { onLoad, onHide, onShow } from '@dcloudio/uni-app'
 import { requireLogin } from '@/utils/authGuard'
 import { useTheme } from '@/composables/useTheme'
 import { showDialog } from '@/composables/useDialog'
 import ThemeDialog from '@/components/ThemeDialog/ThemeDialog.vue'
-import { chatWithXianzhiWS, closeAllWS } from '@/api/chat'
+import { sendXianzhiTurn, closeXianzhiSocket, runningXianzhiTurns, xianzhiSocketAlive } from '@/api/chat'
 import {
   downloadReport, getChart, saveChart,
   fetchSessions, fetchMySessions, deleteSession as deleteSessionApi, getSessionMessages,
@@ -576,7 +576,6 @@ function confirmRegionPicker() {
   showRegionPicker.value = false
 }
 const inputText = ref('')
-const thinking = ref(false)
 /** 保存并排盘进行中：按钮置灰，避免连点重复请求 */
 const saving = ref(false)
 const feedbackState = ref<Record<string, 'up' | 'down' | 'saved'>>({})
@@ -611,6 +610,65 @@ function genConversationId(): string {
   return `mp-xianzhi-${token}`
 }
 const conversationId = ref(genConversationId())
+
+/**
+ * 每个会话在跑的一轮（同会话串行，不同会话可以并行）。
+ *
+ * 为什么按会话记状态：一条 WS 连接上现在同时跑着多轮（见 api/chat.ts 的多路复用），
+ * 用户切到别的会话时，上一轮的推送**不能丢** —— 它还在跑，答案还得落回那个会话。
+ * 所以推送先进这里的缓冲（text/progress），"当前会话"才同步到可见的 messages 列表；
+ * 切回来时由 attachTurnToView 把缓冲铺上去继续实时刷新。
+ */
+interface TurnState {
+  turnId: string
+  /** 本轮提问原文：断线取回时用它去会话记录里定位回答 */
+  question: string
+  /** 已收到的回答全文（后台会话也留着，切回来立刻能看到） */
+  text: string
+  progress: string
+  /** 在本会话 messages 里的下标；-1 = 该会话不在前台，只做缓冲 */
+  idx: number
+}
+const turns = reactive<Record<string, TurnState>>({})
+/** 当前会话是否有一轮在生成（模板用它禁用发送/语音按钮） */
+const thinking = computed(() => !!turns[conversationId.value])
+
+/**
+ * 更新某一轮的进度，并在"该会话正停在前台"时同步到可见消息。
+ * 后台会话只更新缓冲：切回来时由 attachTurnToView 铺进列表。
+ */
+function writeTurn(conv: string, patch: Partial<TurnState>) {
+  const st = turns[conv]
+  if (!st) return
+  Object.assign(st, patch)
+  if (conv !== conversationId.value || st.idx < 0) return
+  const cur = messages.value[st.idx]
+  if (!cur) return
+  // 整对象替换以强制触发 v-for 重新渲染（直接改属性在部分 mp-weixin 版本不刷新）
+  messages.value[st.idx] = { ...cur, content: st.text, progress: st.progress }
+}
+
+/**
+ * 把某会话正在跑的轮次铺到当前消息列表（切回该会话时调用）。
+ * 服务端历史里若已有这轮答案（done 帧丢了/断线重连），直接认领那一条，不重复插。
+ */
+function attachTurnToView(conv: string) {
+  const st = turns[conv]
+  if (!st) return
+  const last = messages.value[messages.value.length - 1]
+  if (last && last.role === 'assistant' && st.text && last.content.slice(0, 40) === st.text.slice(0, 40)) {
+    st.idx = messages.value.length - 1
+    st.text = last.content
+    return
+  }
+  messages.value.push({ role: 'assistant', content: st.text, progress: st.progress || '推演中…' })
+  st.idx = messages.value.length - 1
+}
+
+/** 正在生成中的会话数：页面隐藏时据此决定要不要留着连接 */
+function runningConvCount(): number {
+  return Object.keys(turns).length
+}
 // 每次发送的消息 ID：WS 重连/重复提交带同一个 ID 时，服务端直接复用上一轮结果
 function genClientMsgId(): string {
   const c = (globalThis as any).crypto
@@ -694,10 +752,8 @@ function closeHistoryDrawer() {
 async function switchToSession(session: ChatSession) {
   if (!session?.id) return
   saveDraft(conversationId.value, inputText.value)
-  // 切会话即放弃本轮收流：旧 WS 的 message/progress 回调认的是上一份消息列表的索引，
-  // 不掐断就会写进已经换掉的数组；而且 thinking 会一直挂着，新会话连发都发不出去
-  closeAllWS()
-  thinking.value = false
+  // 切会话**不掐连接**：别的会话可能还在生成，关掉就把它的推送通道掐了。
+  // 多路复用按 turnId 把帧路由回各自的会话，切来切去互不影响。
   conversationId.value = session.id
   inputText.value = loadDraft(session.id)
   try {
@@ -712,6 +768,8 @@ async function switchToSession(session: ChatSession) {
       getSessionBirthInfo(session.id),
     ])
     messages.value = msgs.map(m => ({ role: m.role, content: m.content }))
+    // 这个会话若有一轮还在生成（切走时没停），把缓冲的进度铺回去继续实时刷新
+    attachTurnToView(session.id)
     // 从后端恢复命盘上下文（支持农历/节日/时辰等自然语言输入场景）
     lastBirthInfo.value = null
     chartData.value = null
@@ -754,6 +812,8 @@ async function deleteHistorySession(id: string) {
   if (!confirm) return
   try {
     await deleteSessionApi('xianzhi', id)
+    // 这个会话若还有一轮在跑：本地状态摘掉即可（后端那一轮照旧跑完，只是不再收帧）
+    delete turns[id]
     // 如果删除的是当前会话，新建一个
     if (id === conversationId.value) {
       newSession()
@@ -965,14 +1025,33 @@ onShow(() => {
   }
   // 没有外部带入：回到前台的第一件事是把上一轮还在后台生成的回答接上
   // （后端断线不中止本轮，这里负责把结果取回来，用户切出去再回来不丢答案）
+  recoverStaleTurns()
   void resumePendingTurn()
 })
 
-// 切走 tab / 页面隐藏时关闭 WS，避免 socket 累积超过小程序 5 个上限
-// 切走 tab / 页面隐藏时关闭 WS，避免 socket 累积超过小程序 5 个上限。
-// 但**本轮还在生成时不能关**：这一关就把回答送回的通道掐了（实测 2 分钟级的生成
-// 期间用户很容易切页面看别处），宁可让它保持到最后一条消息。
-onHide(() => { if (!thinking.value) closeAllWS() })
+/**
+ * 回到前台时收拾"连接已经没了、但状态还挂着在跑"的轮次。
+ *
+ * 多路复用后一个会话的推送靠连接活着；连接被系统回收、或被别的页面
+ * `wx.closeSocket` 换走时，close 事件不一定会回到我们手上，于是 turns 里的
+ * 状态就永远停在"推演中…"。这里统一转成"去会话记录里取回"。
+ */
+function recoverStaleTurns() {
+  if (xianzhiSocketAlive()) return
+  // 只抢救"SDK 还在等它、连接却已经没了"的轮次；
+  // 已经在取回流程里的（SDK 里已摘掉）别重复拉起
+  const pending = new Set(runningXianzhiTurns())
+  for (const conv of Object.keys(turns)) {
+    const st = turns[conv]
+    if (!st || !pending.has(st.turnId)) continue
+    void recoverTurn(conv, st.turnId, st.question, RESUME_WAITS, '已取回上一轮的回答', '上一轮仍在生成中，正在取回…')
+  }
+}
+
+// 切走 tab / 页面隐藏时关掉连接，避免 socket 累积超过小程序 5 个上限。
+// 但**还有会话在生成时不能关**：一关就把回答送回的通道掐了（实测 2 分钟级的生成
+// 期间用户很容易切页面看别处），此时宁可让它留到收尾。
+onHide(() => { if (runningConvCount() === 0) closeXianzhiSocket() })
 
 function onDateChange(e: any) { birthDate.value = e.detail.value }
 function onTimeChange(e: any) { birthTime.value = e.detail.value }
@@ -994,14 +1073,12 @@ function goHehun() {
 /** 新建会话：生成新会话ID并清空命盘上下文 */
 function newSession() {
   saveDraft(conversationId.value, inputText.value)
-  // 清空消息前必须先掐掉旧连接：本函数是**原地清空**同一个数组（不是换新数组），
-  // 上一轮若还在跑，它的 WS 回调仍拿得到这个空数组和旧索引，
-  // 写入时就会在 0..idx-1 留下 undefined 空洞 → v-for 渲染读 msg.role 直接抛 TypeError。
-  // 同时把 thinking 复位，否则新会话被 "if (thinking) return" 卡住发不出消息。
-  closeAllWS()
-  thinking.value = false
+  // 注意：**不关连接**。多路复用下一条 socket 同时给多个会话收推送，
+  // 关掉就等于把上一个会话还在生成的那一轮掐了（旧实现正是在这里崩的：
+  // 原地清空 messages 后旧连接的回调仍按下标写数组，写出 undefined 空洞）。
+  // 上一轮的推送继续进 turns[旧会话]，答案照常落库/落进缓冲。
   conversationId.value = genConversationId()
-  messages.value.splice(0, messages.value.length)
+  messages.value = []
   inputText.value = loadDraft(conversationId.value)
   lastBirthInfo.value = null
   chartData.value = null
@@ -1220,68 +1297,70 @@ const RECOVER_WAITS = [2000, 3000, 5000, 8000, 12000, 15000]
 const RESUME_WAITS = [2000, 3000, 5000, 8000, 12000, 15000, 20000, 30000, 30000, 30000]
 /** 补齐流程互斥标志：onShow 可能连续触发（切回、重开、重连） */
 let resuming = false
+/** 正在取回的轮次（turnId）：onDisconnect 与 onShow 兜底可能同时触发，别重复轮询 */
+const recovering = new Set<string>()
 
 /**
- * 断线兜底：WS 在 done 之前断开时，后端不再中止本轮（见后端 WS 断线策略），
+ * 断线兜底：WS 在 done 之前断开时，后端**不中止**本轮（见后端 WS 断线策略），
  * 回答一定会落库（agent cleanup → _persist_history），所以这里轮询会话消息，
  * 用"本次提问"精确定位到它对应的回答，避免把上一轮的回答误当成本轮结果。
+ *
+ * 依赖 turns[conv] 是否还是同一轮（turnId）来判断"要不要接着取"：
+ * 用户可能已经切走、甚至在同一会话重新发了一轮，那就直接放弃。
  */
-async function recoverAnswerAfterDisconnect(
-  idx: number,
-  targetList: Message[],
+async function recoverTurn(
+  conv: string,
+  turnId: string,
   sentText: string,
   waits: number[] = RECOVER_WAITS,
   okToast = '连接中断，已取回回答',
   progressText = '连接中断，正在取回回答…',
-  /**
-   * 发起这一轮时的会话 ID。默认取当前会话，但**断线回调可能在新会话里才到**
-   * （新建/切会话会先掐 socket，close 事件随后触发），那时按当前会话去轮询就会
-   * 拿别人的会话去匹配本次提问 —— 由调用方显式传入，对不上直接放弃取回。
-   */
-  expectedConv = '',
 ) {
-  const conv = expectedConv || conversationId.value
-  const want = sentText.trim()
-  const cur0 = targetList[idx]
-  if (cur0 && !cur0.content) targetList[idx] = { ...cur0, progress: progressText }
-  for (const wait of waits) {
-    await new Promise((r) => setTimeout(r, wait))
-    if (conversationId.value !== conv) return // 已切会话，放弃取回
-    try {
-      const msgs = await getSessionMessages('xianzhi', conv)
-      // 从后往前找本次提问（后端会剥离边界标记，故用前 24 字宽松匹配）
-      let qi = -1
-      for (let i = msgs.length - 1; i >= 0; i--) {
-        const m = msgs[i]
-        if (m.role !== 'user') continue
-        const c = (m.content || '').replace(/\s/g, '')
-        if (c && (c === want.replace(/\s/g, '') || c.includes(want.replace(/\s/g, '').slice(0, 24)))) {
-          qi = i
-          break
+  if (recovering.has(turnId)) return
+  const alive = () => turns[conv]?.turnId === turnId
+  if (!alive()) return
+  recovering.add(turnId)
+  try {
+    writeTurn(conv, { progress: progressText })
+    const want = sentText.replace(/\s/g, '')
+    for (const wait of waits) {
+      await new Promise((r) => setTimeout(r, wait))
+      if (!alive()) return // 已结束/已换轮次/会话被删：放弃取回
+      try {
+        const msgs = await getSessionMessages('xianzhi', conv)
+        if (!alive()) return // 拉消息期间变了
+        // 从后往前找本次提问（后端会剥离边界标记，故用前 24 字宽松匹配）
+        let qi = -1
+        for (let i = msgs.length - 1; i >= 0; i--) {
+          const m = msgs[i]
+          if (m.role !== 'user') continue
+          const c = (m.content || '').replace(/\s/g, '')
+          if (c && (c === want || c.includes(want.slice(0, 24)))) {
+            qi = i
+            break
+          }
         }
+        const ans = qi >= 0 ? msgs[qi + 1] : undefined
+        if (ans && ans.role === 'assistant' && (ans.content || '').trim()) {
+          writeTurn(conv, { text: ans.content, progress: '' })
+          delete turns[conv]
+          if (conversationId.value === conv) scrollToBottom()
+          uni.showToast({ title: okToast, icon: 'none', duration: 2500 })
+          return
+        }
+      } catch {
+        /* 取回失败继续重试 */
       }
-      const ans = qi >= 0 ? msgs[qi + 1] : undefined
-      if (ans && ans.role === 'assistant' && (ans.content || '').trim()) {
-        // 拉消息期间可能已经切会话：此时这个槽位已不属于我们，写进去就是串台
-        if (conversationId.value !== conv || !targetList[idx]) return
-        targetList[idx] = { role: 'assistant', content: ans.content }
-        thinking.value = false
-        scrollToBottom()
-        uni.showToast({ title: okToast, icon: 'none', duration: 2500 })
-        return
-      }
-    } catch {
-      /* 取回失败继续重试 */
     }
+    // 仍取不回：清掉"推演中…"状态，明确告诉用户去哪看，而不是一直转圈
+    if (!alive()) return
+    if (!turns[conv].text) writeTurn(conv, { text: '（回答仍在生成，稍后可在会话记录里查看）' })
+    writeTurn(conv, { progress: '' })
+    delete turns[conv]
+    if (conversationId.value === conv) scrollToBottom()
+  } finally {
+    recovering.delete(turnId)
   }
-  // 仍取不回：清掉"推演中…"状态，明确告诉用户去哪看，而不是一直转圈
-  if (conversationId.value !== conv) return // 已换会话：别动新会话的状态
-  const cur = targetList[idx]
-  if (cur && !cur.content) {
-    targetList[idx] = { role: 'assistant', content: '（回答仍在生成，稍后可在会话记录里查看）' }
-  }
-  thinking.value = false
-  scrollToBottom()
 }
 
 /**
@@ -1293,8 +1372,9 @@ async function recoverAnswerAfterDisconnect(
  * 覆盖三种场景：切后台再回来、小程序被杀后重开、断线重连后前端没接上。
  */
 async function resumePendingTurn() {
-  if (resuming || thinking.value) return
+  if (resuming) return
   const conv = conversationId.value
+  if (turns[conv]) return // 本会话这一轮在收流/正在取回：交给 turns 状态机，别重复拉
   resuming = true
   try {
     const msgs = await getSessionMessages('xianzhi', conv)
@@ -1304,11 +1384,18 @@ async function resumePendingTurn() {
     if (last.role !== 'user') return // 上一轮已落库，没有待补的
     messages.value = msgs.map(m => ({ role: m.role, content: m.content }))
     messages.value.push({ role: 'assistant', content: '', progress: '上一轮仍在生成中，正在取回…' })
-    thinking.value = true
+    const turnId = genClientMsgId()
+    turns[conv] = {
+      turnId,
+      question: last.content || '',
+      text: '',
+      progress: '上一轮仍在生成中，正在取回…',
+      idx: messages.value.length - 1,
+    }
     scrollToBottom()
-    await recoverAnswerAfterDisconnect(
-      messages.value.length - 1,
-      messages.value,
+    await recoverTurn(
+      conv,
+      turnId,
       last.content || '',
       RESUME_WAITS,
       '已取回上一轮的回答',
@@ -1323,117 +1410,24 @@ async function resumePendingTurn() {
 
 function onSend() {
   const text = inputText.value.trim()
-  if (!text || thinking.value) return
+  if (!text) return
   const conv = conversationId.value
-  const targetList = messages.value
-  targetList.push({ role: 'user', content: text })
+  // 同一会话不并发：服务端对同会话也是串行的（会话锁），这里先拦住，别让用户白等
+  if (turns[conv]) return
+  const turnId = genClientMsgId()
+  messages.value.push({ role: 'user', content: text })
   inputText.value = ''
-  // 聊天里的出生信息交给后端识别（含出生地 → 真太阳时），挂盘成功后经 chart_context 回通知；
-  // 前端不再抢先挂一次无经度的盘（那会和后端的真太阳时那次重复算两份）
-  thinking.value = true
   scrollToBottom()
 
-  const assistantMsg: Message = { role: 'assistant', content: '' }
-  targetList.push(assistantMsg)
-  const idx = targetList.length - 1
+  // 占位消息 + 本轮状态：都在同一个会话名下，推送按 turnId 路由回来
+  messages.value.push({ role: 'assistant', content: '', progress: '推演中…' })
+  turns[conv] = { turnId, question: text, text: '', progress: '推演中…', idx: messages.value.length - 1 }
 
-  /**
-   * 还能不能安全地改这一轮的占位消息。
-   *
-   * WS 回调是异步的，而"新建会话"是**原地清空**同一个数组（newSession 用 splice，
-   * 不是换新数组），"切会话"则整个换掉。旧连接的事件如果落在清空后的数组上，
-   * `targetList[idx] = ...` 会在 0..idx-1 写出 undefined 空洞，v-for 渲染到空洞时
-   * 读 msg.role 就抛 TypeError: Cannot read properties of undefined (reading 'role')。
-   * 所以每次写入前都确认两件事：会话没被换掉、槽位还在。
-   */
-  const patch = (fn: (cur: Message) => Message) => {
-    if (conversationId.value !== conv) return false
-    const cur = targetList[idx]
-    if (!cur) return false
-    targetList[idx] = fn(cur)
-    return true
-  }
-
-  const onMessage = (chunk: string) => {
-    // 整对象替换以强制触发 v-for 重新渲染（直接改 content 属性在部分 mp-weixin 版本不刷新）
-    if (!patch((cur) => ({ ...cur, content: cur.content + chunk }))) return
-    scrollToBottom()
-  }
-  // 回调一律认"发起时的会话"：换会话后旧连接的事件只允许被丢弃，不许改状态
-  const onDone = () => { if (conversationId.value === conv) thinking.value = false }
-  const onError = (err: string) => {
-    if (conversationId.value !== conv) return
-    thinking.value = false
-    // 纯连接类异常（WS 断开/超时/域名未配置）走 toast 提示，不污染对话历史
-    const isConnErr = /连接|超时|域名|网络|WebSocket|WS|Socket/i.test(err)
-    if (isConnErr) {
-      uni.showToast({ title: err, icon: 'none', duration: 2500 })
-      // 移除刚压入的占位 assistant 消息，保留用户问题以便重发；
-      // 只在它仍是最后一条时删，否则 splice 会把后面的消息整体前移、索引全错
-      if (idx === targetList.length - 1 && targetList[idx]) targetList.splice(idx, 1)
-      nextTick(scrollToBottom)
-      return
-    }
-    // 业务错误（如 LLM 限流、解析失败等）保留在消息流，便于用户回看
-    patch((cur) => ({ ...cur, content: cur.content || `[出错] ${err}` }))
-  }
-  // 后端从对话里提取到出生信息时回调（正则 / 排盘工具两条路径都走这里）
-  const onChartContext = async (bt: string, g: string, bp?: string, longitude?: number) => {
-    if (!bt || !g) return
-    // 换过会话就别再把旧盘的出生信息/命盘卡写进新会话
-    if (conversationId.value !== conv) return
-    // 记录切换前的八字，用于区分"同一命盘的追问"与"换了一张新命盘"
-    const prevTime = birthTimeFull.value
-    const [d, t] = bt.split(' ')
-    birthDate.value = d || ''
-    birthTime.value = zhiHourToHHMM(t)
-    gender.value = g as '男' | '女'
-    lastBirthInfo.value = { time: bt, gender: g as '男' | '女' }
-    // 本地留一份：后端通知可能丢（长回答期间 socket 断开），重进会话时先用它兜住
-    if (conversationId.value) setBirthInfoLocal(conversationId.value, bt, g as '男' | '女')
-    // 出生地必须跟随"当前这张命盘"走，否则会跨命盘串值：
-    //  - 本次后端提取到出生地 → 采用（覆盖上一张命盘遗留的值；库未收录也用原文替换，经度置 0 为安全默认）；
-    //  - 本次未提到出生地且八字已变（新命盘 / 换人）→ 清空，不让上一个地点的真太阳时挂到这张命盘；
-    //  - 八字未变（同一命盘的追问）且已有手动选择的地点 → 保留手动精度，不覆盖。
-    const isNewChart = bt !== prevTime
-    if (bp) {
-      if (isNewChart || !birthPlace.value) {
-        // 后端已按识别到的地点算好经度 → 直接采用（前端按城市名二次匹配可能匹配不到，
-        // 那样画出来的卡片盘就没做真太阳时，和聊天里用的那张不是同一张）
-        const matched = matchCityByName(bp)
-        if (longitude) {
-          birthPlace.value = matched ? `${matched.province} ${matched.city}` : bp
-          birthLongitude.value = longitude
-        } else if (matched) {
-          birthPlace.value = `${matched.province} ${matched.city}`
-          birthLongitude.value = matched.longitude
-        } else {
-          birthPlace.value = bp
-          birthLongitude.value = 0
-        }
-        if (conversationId.value) setBirthPlaceLocal(conversationId.value, birthPlace.value, birthLongitude.value)
-      }
-    } else if (isNewChart) {
-      birthPlace.value = ''
-      birthLongitude.value = 0
-      if (conversationId.value) clearBirthPlaceLocal(conversationId.value)
-    }
-    // 主动拉取结构化命盘数据（命盘详情弹窗内容）
-    savedPlace.value = birthPlace.value
-    savedLongitude.value = birthLongitude.value
-    try {
-      const chart = await getChart(bt, g, 2, 1, birthLongitude.value || undefined)
-      // 排盘在途期间换了会话：这张盘属于旧会话，丢掉
-      if (conversationId.value !== conv) return
-      chartData.value = chart
-    } catch {
-      if (conversationId.value === conv) chartData.value = null
-    }
-  }
-
-  chatWithXianzhiWS(text, {
+  // 聊天里的出生信息交给后端识别（含出生地 → 真太阳时），挂盘成功后经 chart_context 回通知；
+  // 前端不再抢先挂一次无经度的盘（那会和后端的真太阳时那次重复算两份）
+  sendXianzhiTurn(text, {
     conversationId: conv,
-    clientMsgId: genClientMsgId(),
+    turnId,
     // 只用已保存/后端提取的出生信息：面板里未点保存的草稿不参与挂盘
     birthTime: lastBirthInfo.value?.time || undefined,
     gender: lastBirthInfo.value?.gender || undefined,
@@ -1441,16 +1435,115 @@ function onSend() {
     longitude: savedLongitude.value || undefined,
     sect,
     token: getToken(),
-    onMessage, onDone, onError, onChartContext,
+  }, {
+    onMessage: (chunk: string) => {
+      const st = turns[conv]
+      if (!st || st.turnId !== turnId) return
+      writeTurn(conv, { text: st.text + chunk })
+      if (conversationId.value === conv) scrollToBottom()
+    },
     // 阶段进度：把"推演中…"换成当前阶段，长任务期间用户不会以为卡死
     onProgress: (t: string) => {
-      if (!patch((cur) => ({ ...cur, progress: t }))) return
-      scrollToBottom()
+      if (turns[conv]?.turnId !== turnId) return
+      writeTurn(conv, { progress: t })
+      if (conversationId.value === conv) scrollToBottom()
     },
-    // 连接在 done 之前断了：后端可能仍在生成，去会话记录里把回答取回来
-    // （传上发起时的 conv —— close 事件常常在新会话里才到，别拿新会话去匹配旧提问）
-    onDisconnect: (reason: string) => recoverAnswerAfterDisconnect(idx, targetList, text, RECOVER_WAITS, '连接中断，已取回回答', '连接中断，正在取回回答…', conv),
+    onDone: () => {
+      const st = turns[conv]
+      if (!st || st.turnId !== turnId) return
+      writeTurn(conv, { progress: '' })
+      delete turns[conv]
+    },
+    onError: (err: string) => {
+      const st = turns[conv]
+      if (!st || st.turnId !== turnId) return
+      // 纯连接类异常（WS 断开/超时/域名未配置）走 toast 提示，不污染对话历史
+      const isConnErr = /连接|超时|域名|网络|WebSocket|WS|Socket/i.test(err)
+      const visible = conversationId.value === conv && st.idx >= 0 && !!messages.value[st.idx]
+      delete turns[conv]
+      if (isConnErr) {
+        uni.showToast({ title: err, icon: 'none', duration: 2500 })
+        // 移除刚压入的占位 assistant 消息，保留用户问题以便重发；
+        // 只在它仍是最后一条时删，否则 splice 会把后面的消息整体前移、索引全错
+        if (visible && st.idx === messages.value.length - 1) messages.value.splice(st.idx, 1)
+        nextTick(scrollToBottom)
+        return
+      }
+      // 业务错误（如 LLM 限流、并发会话已满、解析失败等）保留在消息流，便于用户回看
+      if (visible) {
+        messages.value[st.idx] = {
+          role: 'assistant',
+          content: st.text || `[出错] ${err}`,
+        }
+      }
+    },
+    // 连接在 done 之前断了：后端不中止本轮（照常落库），去会话记录里把回答取回来
+    onDisconnect: () => {
+      void recoverTurn(conv, turnId, text)
+    },
+    // 后端从对话里提取到出生信息时回调（正则 / 排盘工具两条路径都走这里）
+    onChartContext: (bt: string, g: string, bp?: string, longitude?: number) => {
+      void applyChartContext(conv, bt, g, bp, longitude)
+    },
   })
+}
+
+/**
+ * 把后端识别到的出生信息落到面板与命盘卡片。
+ *
+ * 只有"仍然停在这个会话"时才写：后台会话的 `chart_context` 到达时用户可能正在
+ * 别的会话里，写进去就是串台（旧实现按连接区分，串不了；多路复用后必须显式判断）。
+ */
+async function applyChartContext(conv: string, bt: string, g: string, bp?: string, longitude?: number) {
+  if (!bt || !g) return
+  if (conversationId.value !== conv) return
+  // 记录切换前的八字，用于区分"同一命盘的追问"与"换了一张新命盘"
+  const prevTime = birthTimeFull.value
+  const [d, t] = bt.split(' ')
+  birthDate.value = d || ''
+  birthTime.value = zhiHourToHHMM(t)
+  gender.value = g as '男' | '女'
+  lastBirthInfo.value = { time: bt, gender: g as '男' | '女' }
+  // 本地留一份：后端通知可能丢（长回答期间 socket 断开），重进会话时先用它兜住
+  setBirthInfoLocal(conv, bt, g as '男' | '女')
+  // 出生地必须跟随"当前这张命盘"走，否则会跨命盘串值：
+  //  - 本次后端提取到出生地 → 采用（覆盖上一张命盘遗留的值；库未收录也用原文替换，经度置 0 为安全默认）；
+  //  - 本次未提到出生地且八字已变（新命盘 / 换人）→ 清空，不让上一个地点的真太阳时挂到这张命盘；
+  //  - 八字未变（同一命盘的追问）且已有手动选择的地点 → 保留手动精度，不覆盖。
+  const isNewChart = bt !== prevTime
+  if (bp) {
+    if (isNewChart || !birthPlace.value) {
+      // 后端已按识别到的地点算好经度 → 直接采用（前端按城市名二次匹配可能匹配不到，
+      // 那样画出来的卡片盘就没做真太阳时，和聊天里用的那张不是同一张）
+      const matched = matchCityByName(bp)
+      if (longitude) {
+        birthPlace.value = matched ? `${matched.province} ${matched.city}` : bp
+        birthLongitude.value = longitude
+      } else if (matched) {
+        birthPlace.value = `${matched.province} ${matched.city}`
+        birthLongitude.value = matched.longitude
+      } else {
+        birthPlace.value = bp
+        birthLongitude.value = 0
+      }
+      setBirthPlaceLocal(conv, birthPlace.value, birthLongitude.value)
+    }
+  } else if (isNewChart) {
+    birthPlace.value = ''
+    birthLongitude.value = 0
+    clearBirthPlaceLocal(conv)
+  }
+  // 主动拉取结构化命盘数据（命盘详情弹窗内容）
+  savedPlace.value = birthPlace.value
+  savedLongitude.value = birthLongitude.value
+  try {
+    const chart = await getChart(bt, g, 2, 1, birthLongitude.value || undefined)
+    // 排盘在途期间换了会话：这张盘属于旧会话，丢掉
+    if (conversationId.value !== conv) return
+    chartData.value = chart
+  } catch {
+    if (conversationId.value === conv) chartData.value = null
+  }
 }
 
 // 初始欢迎语

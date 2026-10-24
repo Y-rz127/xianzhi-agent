@@ -12,6 +12,7 @@
 | [`architecture/multi_agent_architecture.md`](architecture/multi_agent_architecture.md) | 先知智能体全貌：入口分流（workflow / ReAct / 闲聊短路）、Supervisor + Worker + Reviewer、工具集、记忆与检索 | 接手项目、改编排逻辑、加 Worker/领域 |
 | [`architecture/backend-architecture-review.md`](architecture/backend-architecture-review.md) | 后端架构审查：依赖分层铁律（第四节，`tests/test_architecture.py` 据此断言）、循环依赖与巨函数清单、阶段整改记录 | 动跨包 import、拆大文件前 |
 | [`verdict-cache.md`](verdict-cache.md) | 命盘裁决缓存：四柱指纹 vs 出生时刻指纹、三条入口时序、实测耗时、"哪些不能跨人共享" | 改终审/缓存/排盘链路前（**必读**） |
+| [`architecture/ws-multiplex.md`](architecture/ws-multiplex.md) | 先知对话 WS 单连接多路复用：为什么不能多开连接、协议帧与 `request_id` 路由、并发上限 `WS_MAX_PARALLEL_SESSIONS`、断线续跑 | 动聊天 WS / 多会话并行 / 断线取回前 |
 | [`prompt_budget/INDEX.md`](prompt_budget/INDEX.md) | 每条对话路径发给 LLM 的输入预算（字符数 / token 数）实测总表 | 调提示词、怀疑 token 爆炸时 |
 
 ## product/ —— 需求与验收基线

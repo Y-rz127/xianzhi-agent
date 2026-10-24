@@ -125,7 +125,7 @@ def make_progress_notifier(loop, push):
     return _notify
 
 
-async def ws_keepalive_loop(websocket, agent, *, interval: float = WS_PING_SECONDS) -> None:
+async def ws_keepalive_loop(websocket, agent=None, *, interval: float = WS_PING_SECONDS) -> None:
     """长静默期保活 + 断线探测。
 
     为什么需要：本轮生成实测 116 秒，服务端一个字节都不发。这段静默期内
@@ -134,6 +134,9 @@ async def ws_keepalive_loop(websocket, agent, *, interval: float = WS_PING_SECON
     更关键的是：服务端只有"发送时"才知道对端已经走了；不过这里**不中止生成**——
     答案会落库、客户端断线后会去会话记录里取回（前端 onDisconnect → 取回函数）；
     若 request_cancel，用户等了两分钟反而什么都拿不到，比浪费些 token 更糟。
+
+    `agent` 参数保留只为兼容旧调用点（早期版本想在这里做 request_cancel，从未用上）。
+    多路复用后保活是**按连接**起一个，不是按轮次：否则 N 个会话各发各的 ping。
     """
     while True:
         await asyncio.sleep(interval)
