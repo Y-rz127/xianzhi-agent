@@ -981,6 +981,9 @@ async function saveBirthPanel() {
     })
     chartData.value = res.chart
     uni.showToast({ title: saveToastText(place, res.verdict_status), icon: 'none' })
+    // 保存成功后自动收起面板：盘已经落到会话上，接着要看的是命盘卡片和对话区，
+    // 面板留着只会挡住聊天（失败时不收，方便用户改完重试）
+    showBirth.value = false
   } catch {
     chartData.value = null
     uni.showToast({ title: '排盘失败，请稍后重试', icon: 'none' })
