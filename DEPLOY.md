@@ -266,11 +266,17 @@ CI 的 `audit` job 在每次 push / PR 执行：
   `pip-compile --output-file=requirements.lock requirements.txt`（Python 3.12），提交两者并重跑 audit。
 
 **uniapp（小程序）现状**
-- 已执行 `npm audit fix` 吸收可安全升级的补丁（nanoid、source-map-js 等），`build:mp-weixin` 验证通过。
-- 剩余 70 条（27 high）全部落在 `vite` / `rollup` / `vue` / `@dcloudio/*` 的固定版本上，只能随
-  uni-app 工具链整体升级解决，归入 P1-12（生产构建，等小程序备案）一并处理，不逐包加豁免。
-- 其中多数为构建期依赖，但 `vue` / `@dcloudio/*` 的运行时代码会打进小程序包，升级前需重新
-  验证构建产物，故不视为可长期忽略。
+- 工具链已整体升级到 `3.0.0-5030320261023001`（编译器 5.33，vue3），并把此前 5.01/5.02 混用的
+  dependencies 与 devDependencies 版本对齐；`build:mp-weixin` 与 `build:h5` 均验证通过。
+- 传递依赖通过 `overrides` 收敛到已修复版本：ws / jpeg-js / adm-zip / follow-redirects / postcss /
+  browserslist / phin / baseline-browser-mapping / source-map-js / @intlify/* / @vue/server-renderer。
+- 审计结果：全量 77 条（1 critical）→ 48 条（0 critical）；生产依赖 high 26 → 1。
+- 唯一剩下的 high 是 `vite <=6.4.3`：`@dcloudio/vite-plugin-uni` 的 peerDependencies 精确锁
+  `vite 5.2.8`，且这组公告全部针对**开发服务器**（`server.fs.deny` 绕过、launch-editor 命令注入、
+  跨源请求），不随小程序包上线；服务端（生产构建）不跑 dev server。升级需等 DCloud 放开 vite 版本，
+  归入 P1-12 跟踪，不做强行 override（会与官方编译器不兼容）。
+- 另有 `esbuild` / `postcss-selector-parser` 两条 moderate，同样被 vite 5.2.8 与 uni-h5 的精确版本钉住，
+  处理方式同上。
 
 ## 11. 指标抓取与告警
 
