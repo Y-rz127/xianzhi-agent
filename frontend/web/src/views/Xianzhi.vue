@@ -615,11 +615,16 @@ const handleKeydown = (e: KeyboardEvent) => {
   }
 }
 
+// 排盘请求序号：同一出生信息可能在"出生地补齐前后"连发两次（先无经度、后有经度），
+// 只让最后一次落地，避免旧响应覆盖新盘。
+let chartReqSeq = 0
 const fetchChartData = async (birthTime: string, gender: string) => {
+  const seq = ++chartReqSeq
   try {
-    chartData.value = await getChart(birthTime, gender, sect.value, yunSect.value, birthLongitude.value || undefined)
+    const data = await getChart(birthTime, gender, sect.value, yunSect.value, birthLongitude.value || undefined)
+    if (seq === chartReqSeq) chartData.value = data
   } catch {
-    chartData.value = null
+    if (seq === chartReqSeq) chartData.value = null
   }
 }
 
@@ -697,7 +702,8 @@ const openChartDetail = async () => {
     if (raw.time && raw.gender) {
       bi = { time: zhiHourToHHMM(raw.time), gender: raw.gender }
       lastBirthInfo.value = bi
-      fetchChartData(bi.time, bi.gender) // 后台补齐会话快照，不阻塞跳转
+      // 这里不再预热排盘：详情页会按路由参数（含出生地经度）自己拉一次，
+      // 提前拉一次不带经度的盘会多算一份终审。
     }
   }
   if (!bi?.time || !bi.gender) {
@@ -912,6 +918,7 @@ const send = async () => {
       birth_time: lastBirthInfo.value.time,
       gender: lastBirthInfo.value.gender,
       birth_place: birthPlace.value || undefined,
+      longitude: birthLongitude.value || undefined,
       sect: sect.value,
       yun_sect: yunSect.value,
     } : {}),

@@ -66,6 +66,19 @@ def test_notifier_fires_on_mount(monkeypatch):
     assert seen[0]["gender"] == MALE
 
 
+def test_explicit_longitude_wins_over_birth_place_lookup(monkeypatch):
+    """聊天挂盘须与命盘详情页用同一经度：显式 longitude 优先于 birth_place 反查。"""
+    agent = _agent(monkeypatch)
+
+    agent.set_chart_context(
+        "2004-06-22 08:05", MALE, birth_place="四川省成都市", longitude=108.63
+    )
+
+    assert agent._last_birth_info["longitude"] == 108.63
+    # 真太阳时校正后应为 07:18（修复前是 08:50）
+    assert agent._workflow_context.chart.birth.solar == "2004-06-22 07:18"
+
+
 def test_notifier_dedupes_same_chart_within_turn(monkeypatch):
     """同一轮里 payload 挂载 + 正文挂载是同一张盘 → 只通知一次。"""
     agent = _agent(monkeypatch)

@@ -211,6 +211,8 @@ export interface XianzhiChatOptions extends ChatWSCallbacks {
   birthTime?: string
   gender?: string
   birthPlace?: string
+  /** 出生地经度：显式传入优先于 birthPlace 反查，保证聊天挂载的盘与详情页一致 */
+  longitude?: number
   sect?: number
   yunSect?: number
   token?: string
@@ -221,7 +223,7 @@ export interface XianzhiChatOptions extends ChatWSCallbacks {
 export function chatWithXianzhiWS(message: string, opts: XianzhiChatOptions) {
   return connectChatWS(
     '/api/ai/xianzhi/ws',
-    { message, conversation_id: opts.conversationId, birth_time: opts.birthTime, gender: opts.gender, birth_place: opts.birthPlace, sect: opts.sect ?? 2, yun_sect: opts.yunSect ?? 1, token: opts.token || '', client_msg_id: opts.clientMsgId || '' },
+    { message, conversation_id: opts.conversationId, birth_time: opts.birthTime, gender: opts.gender, birth_place: opts.birthPlace, longitude: opts.longitude ?? '', sect: opts.sect ?? 2, yun_sect: opts.yunSect ?? 1, token: opts.token || '', client_msg_id: opts.clientMsgId || '' },
     opts
   )
 }

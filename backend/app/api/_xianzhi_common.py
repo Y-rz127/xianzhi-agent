@@ -22,10 +22,19 @@ def _mount_chart_context(
     yun_sect: int = 1,
     user_id: str = "",
     birth_place: str = "",
+    longitude: float | None = None,
 ):
     if birth_time and gender:
         try:
-            agent.set_chart_context(birth_time, gender, sect, yun_sect, user_id, birth_place=birth_place)
+            agent.set_chart_context(
+                birth_time,
+                gender,
+                sect,
+                yun_sect,
+                user_id,
+                birth_place=birth_place,
+                longitude=longitude,
+            )
         except Exception as e:
             log.warning("通过 API 挂载命盘上下文失败: {}", e)
 

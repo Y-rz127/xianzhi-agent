@@ -198,6 +198,7 @@ export const chatWithXianzhi = (message: string, conversationId: string, cb: SSE
     birth_time: opts?.birth_time,
     gender: opts?.gender,
     birth_place: opts?.birth_place,
+    longitude: opts?.longitude !== undefined ? String(opts.longitude) : undefined,
     sect: opts?.sect !== undefined ? String(opts.sect) : undefined,
     yun_sect: opts?.yun_sect !== undefined ? String(opts.yun_sect) : undefined,
     client_msg_id: opts?.client_msg_id,

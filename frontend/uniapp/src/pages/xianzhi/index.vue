@@ -1357,6 +1357,7 @@ function onSend() {
     birthTime: effectiveBirthTime.value || undefined,
     gender: effectiveGender.value,
     birthPlace: birthPlace.value || undefined,
+    longitude: birthLongitude.value || undefined,
     sect,
     token: getToken(),
     onMessage, onDone, onError, onChartContext,

@@ -868,6 +868,8 @@ export interface ChatOptions {
   birth_time?: string
   gender?: string
   birth_place?: string
+  /** 出生地经度：显式传入优先于 birth_place 反查，保证聊天挂载的盘与详情页一致 */
+  longitude?: number
   sect?: number
   yun_sect?: number
   /** 每次发送生成一次，服务端据此防重放（重试不会重复跑一轮） */

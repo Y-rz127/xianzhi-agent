@@ -236,18 +236,19 @@ class Xianzhi(ToolCallAgent):
         yun_sect: int = 1,
         user_id: str = "",
         birth_place: str = "",
+        longitude: float | None = None,
     ):
         """挂载命盘上下文：外部（API/会话恢复）直接设置，AI 回答基于该盘面。
 
         出生时间支持公历(YYYY-MM-DD HH:MM)、公历+时辰、农历、农历节日等格式；
-        birth_place 为出生地城市名，用于真太阳时校正（与 /chart API 行为一致）。
+        longitude 显式传入时优先使用（与命盘详情页一致），否则由 birth_place 反查城市经度。
         """
         try:
             birth_time = _normalize_birth_time(birth_time)
             # 性别归一为中文口径再入库/通知前端：模型可能给 male/female/m/1
             # （实测 2026-10-08），原样存会让前端表单与落库数据出现「male」
             gender = normalize_gender_text(gender)
-            longitude = birth_place_to_longitude(birth_place)
+            longitude = longitude if longitude else birth_place_to_longitude(birth_place)
             # 归属用户粘住：payload 挂载带 uid，正则挂载（mount_chart_context）不带，
             # 不能让后者把前者写进去的 uid 抹掉
             if user_id:

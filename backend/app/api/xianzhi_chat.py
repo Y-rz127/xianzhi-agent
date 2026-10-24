@@ -70,6 +70,7 @@ async def chat_with_xianzhi(
     yun_sect: int = 1,
     verbose: bool = False,
     birth_place: str = "",
+    longitude: float | None = None,
     token: str = Query(None),
     client_msg_id: str | None = Query(None, max_length=64),
     app_ctx: AppContext = Depends(app_context_dependency),
@@ -130,7 +131,7 @@ async def chat_with_xianzhi(
             agent.set_progress_notifier(
                 make_progress_notifier(loop, lambda t: events.put_nowait(("progress", t)))
             )
-            _mount_chart_context(agent, birth_time, gender, sect, yun_sect, uid, birth_place)
+            _mount_chart_context(agent, birth_time, gender, sect, yun_sect, uid, birth_place, longitude)
 
             parts: list[str] = []
             finished = False
@@ -238,6 +239,11 @@ async def ws_chat_with_xianzhi(websocket: WebSocket):
             yun_sect = data.get("yun_sect", 1)
             verbose = bool(data.get("verbose", False))
             birth_place = data.get("birth_place") or ""
+            longitude = data.get("longitude")
+            try:
+                longitude = float(longitude) if longitude else None
+            except (TypeError, ValueError):
+                longitude = None
             token = data.get("token") or ""
             client_msg_id = data.get("client_msg_id") or ""
             uid = ""
@@ -334,7 +340,7 @@ async def ws_chat_with_xianzhi(websocket: WebSocket):
                         ),
                     )
                 )
-                _mount_chart_context(agent, birth_time, gender, sect, yun_sect, uid, birth_place)
+                _mount_chart_context(agent, birth_time, gender, sect, yun_sect, uid, birth_place, longitude)
                 # 保活：每 WS_PING_SECONDS 秒一个 ping；发不出去就认定客户端已走（不中止生成）
                 keepalive = asyncio.create_task(ws_keepalive_loop(websocket, agent))
                 parts: list[str] = []
@@ -388,6 +394,7 @@ async def chat_with_xianzhi_sync(
     sect: int = 2,
     yun_sect: int = 1,
     birth_place: str = "",
+    longitude: float | None = None,
     token: str = Query(None),
     client_msg_id: str | None = Query(None, max_length=64),
     app_ctx: AppContext = Depends(app_context_dependency),
@@ -422,7 +429,7 @@ async def chat_with_xianzhi_sync(
         agent._yun_sect = yun_sect
         if uid:
             agent._user_id = uid
-        _mount_chart_context(agent, birth_time, gender, sect, yun_sect, uid, birth_place)
+        _mount_chart_context(agent, birth_time, gender, sect, yun_sect, uid, birth_place, longitude)
         try:
             # run 是同步阻塞调用，放到线程池避免卡住事件循环
             answer = await asyncio.to_thread(agent.run, message)
