@@ -694,6 +694,10 @@ function closeHistoryDrawer() {
 async function switchToSession(session: ChatSession) {
   if (!session?.id) return
   saveDraft(conversationId.value, inputText.value)
+  // 切会话即放弃本轮收流：旧 WS 的 message/progress 回调认的是上一份消息列表的索引，
+  // 不掐断就会写进已经换掉的数组；而且 thinking 会一直挂着，新会话连发都发不出去
+  closeAllWS()
+  thinking.value = false
   conversationId.value = session.id
   inputText.value = loadDraft(session.id)
   try {
@@ -990,6 +994,12 @@ function goHehun() {
 /** 新建会话：生成新会话ID并清空命盘上下文 */
 function newSession() {
   saveDraft(conversationId.value, inputText.value)
+  // 清空消息前必须先掐掉旧连接：本函数是**原地清空**同一个数组（不是换新数组），
+  // 上一轮若还在跑，它的 WS 回调仍拿得到这个空数组和旧索引，
+  // 写入时就会在 0..idx-1 留下 undefined 空洞 → v-for 渲染读 msg.role 直接抛 TypeError。
+  // 同时把 thinking 复位，否则新会话被 "if (thinking) return" 卡住发不出消息。
+  closeAllWS()
+  thinking.value = false
   conversationId.value = genConversationId()
   messages.value.splice(0, messages.value.length)
   inputText.value = loadDraft(conversationId.value)
@@ -1223,8 +1233,14 @@ async function recoverAnswerAfterDisconnect(
   waits: number[] = RECOVER_WAITS,
   okToast = '连接中断，已取回回答',
   progressText = '连接中断，正在取回回答…',
+  /**
+   * 发起这一轮时的会话 ID。默认取当前会话，但**断线回调可能在新会话里才到**
+   * （新建/切会话会先掐 socket，close 事件随后触发），那时按当前会话去轮询就会
+   * 拿别人的会话去匹配本次提问 —— 由调用方显式传入，对不上直接放弃取回。
+   */
+  expectedConv = '',
 ) {
-  const conv = conversationId.value
+  const conv = expectedConv || conversationId.value
   const want = sentText.trim()
   const cur0 = targetList[idx]
   if (cur0 && !cur0.content) targetList[idx] = { ...cur0, progress: progressText }
@@ -1246,6 +1262,8 @@ async function recoverAnswerAfterDisconnect(
       }
       const ans = qi >= 0 ? msgs[qi + 1] : undefined
       if (ans && ans.role === 'assistant' && (ans.content || '').trim()) {
+        // 拉消息期间可能已经切会话：此时这个槽位已不属于我们，写进去就是串台
+        if (conversationId.value !== conv || !targetList[idx]) return
         targetList[idx] = { role: 'assistant', content: ans.content }
         thinking.value = false
         scrollToBottom()
@@ -1257,6 +1275,7 @@ async function recoverAnswerAfterDisconnect(
     }
   }
   // 仍取不回：清掉"推演中…"状态，明确告诉用户去哪看，而不是一直转圈
+  if (conversationId.value !== conv) return // 已换会话：别动新会话的状态
   const cur = targetList[idx]
   if (cur && !cur.content) {
     targetList[idx] = { role: 'assistant', content: '（回答仍在生成，稍后可在会话记录里查看）' }
@@ -1305,6 +1324,7 @@ async function resumePendingTurn() {
 function onSend() {
   const text = inputText.value.trim()
   if (!text || thinking.value) return
+  const conv = conversationId.value
   const targetList = messages.value
   targetList.push({ role: 'user', content: text })
   inputText.value = ''
@@ -1317,30 +1337,51 @@ function onSend() {
   targetList.push(assistantMsg)
   const idx = targetList.length - 1
 
+  /**
+   * 还能不能安全地改这一轮的占位消息。
+   *
+   * WS 回调是异步的，而"新建会话"是**原地清空**同一个数组（newSession 用 splice，
+   * 不是换新数组），"切会话"则整个换掉。旧连接的事件如果落在清空后的数组上，
+   * `targetList[idx] = ...` 会在 0..idx-1 写出 undefined 空洞，v-for 渲染到空洞时
+   * 读 msg.role 就抛 TypeError: Cannot read properties of undefined (reading 'role')。
+   * 所以每次写入前都确认两件事：会话没被换掉、槽位还在。
+   */
+  const patch = (fn: (cur: Message) => Message) => {
+    if (conversationId.value !== conv) return false
+    const cur = targetList[idx]
+    if (!cur) return false
+    targetList[idx] = fn(cur)
+    return true
+  }
+
   const onMessage = (chunk: string) => {
     // 整对象替换以强制触发 v-for 重新渲染（直接改 content 属性在部分 mp-weixin 版本不刷新）
-    const cur = targetList[idx]
-    targetList[idx] = { ...cur, content: cur.content + chunk }
+    if (!patch((cur) => ({ ...cur, content: cur.content + chunk }))) return
     scrollToBottom()
   }
-  const onDone = () => { thinking.value = false }
+  // 回调一律认"发起时的会话"：换会话后旧连接的事件只允许被丢弃，不许改状态
+  const onDone = () => { if (conversationId.value === conv) thinking.value = false }
   const onError = (err: string) => {
+    if (conversationId.value !== conv) return
     thinking.value = false
     // 纯连接类异常（WS 断开/超时/域名未配置）走 toast 提示，不污染对话历史
     const isConnErr = /连接|超时|域名|网络|WebSocket|WS|Socket/i.test(err)
     if (isConnErr) {
       uni.showToast({ title: err, icon: 'none', duration: 2500 })
-      // 移除刚压入的占位 assistant 消息，保留用户问题以便重发
-      targetList.splice(idx, 1)
+      // 移除刚压入的占位 assistant 消息，保留用户问题以便重发；
+      // 只在它仍是最后一条时删，否则 splice 会把后面的消息整体前移、索引全错
+      if (idx === targetList.length - 1 && targetList[idx]) targetList.splice(idx, 1)
       nextTick(scrollToBottom)
       return
     }
     // 业务错误（如 LLM 限流、解析失败等）保留在消息流，便于用户回看
-    targetList[idx].content = targetList[idx].content || `[出错] ${err}`
+    patch((cur) => ({ ...cur, content: cur.content || `[出错] ${err}` }))
   }
   // 后端从对话里提取到出生信息时回调（正则 / 排盘工具两条路径都走这里）
   const onChartContext = async (bt: string, g: string, bp?: string, longitude?: number) => {
     if (!bt || !g) return
+    // 换过会话就别再把旧盘的出生信息/命盘卡写进新会话
+    if (conversationId.value !== conv) return
     // 记录切换前的八字，用于区分"同一命盘的追问"与"换了一张新命盘"
     const prevTime = birthTimeFull.value
     const [d, t] = bt.split(' ')
@@ -1381,14 +1422,17 @@ function onSend() {
     savedPlace.value = birthPlace.value
     savedLongitude.value = birthLongitude.value
     try {
-      chartData.value = await getChart(bt, g, 2, 1, birthLongitude.value || undefined)
+      const chart = await getChart(bt, g, 2, 1, birthLongitude.value || undefined)
+      // 排盘在途期间换了会话：这张盘属于旧会话，丢掉
+      if (conversationId.value !== conv) return
+      chartData.value = chart
     } catch {
-      chartData.value = null
+      if (conversationId.value === conv) chartData.value = null
     }
   }
 
   chatWithXianzhiWS(text, {
-    conversationId: conversationId.value,
+    conversationId: conv,
     clientMsgId: genClientMsgId(),
     // 只用已保存/后端提取的出生信息：面板里未点保存的草稿不参与挂盘
     birthTime: lastBirthInfo.value?.time || undefined,
@@ -1400,12 +1444,12 @@ function onSend() {
     onMessage, onDone, onError, onChartContext,
     // 阶段进度：把"推演中…"换成当前阶段，长任务期间用户不会以为卡死
     onProgress: (t: string) => {
-      const cur = targetList[idx]
-      targetList[idx] = { ...cur, progress: t }
+      if (!patch((cur) => ({ ...cur, progress: t }))) return
       scrollToBottom()
     },
     // 连接在 done 之前断了：后端可能仍在生成，去会话记录里把回答取回来
-    onDisconnect: (reason: string) => recoverAnswerAfterDisconnect(idx, targetList, text),
+    // （传上发起时的 conv —— close 事件常常在新会话里才到，别拿新会话去匹配旧提问）
+    onDisconnect: (reason: string) => recoverAnswerAfterDisconnect(idx, targetList, text, RECOVER_WAITS, '连接中断，已取回回答', '连接中断，正在取回回答…', conv),
   })
 }
 
