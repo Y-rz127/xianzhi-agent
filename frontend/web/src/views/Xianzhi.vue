@@ -917,13 +917,69 @@ const send = async () => {
     } : {}),
   }
 
-  chatWithXianzhi(userMsg, conversationId.value, {
+  streamAnswer(userMsg, aiMsg, opts, false)
+}
+
+/** 断线取回：后端客户端断开不中止生成，答案稍后会落库，轮询会话记录把回答捞回来。 */
+const recoverAnswer = async (conv: string, sentText: string, aiMsg: SessionMessage): Promise<boolean> => {
+  const want = sentText.replace(/\s/g, "")
+  for (const wait of [2000, 3000, 5000]) {
+    await new Promise((r) => setTimeout(r, wait))
+    if (conversationId.value !== conv) return true // 已切会话，就此收手
+    try {
+      const msgs = await getSessionMessages("xianzhi", conv)
+      let qi = -1
+      for (let i = msgs.length - 1; i >= 0; i--) {
+        if (msgs[i].role !== "user") continue
+        const c = (msgs[i].content || "").replace(/\s/g, "")
+        if (c && (c === want || c.includes(want.slice(0, 24)))) { qi = i; break }
+      }
+      const ans = qi >= 0 ? msgs[qi + 1] : undefined
+      if (ans?.role === "assistant" && (ans.content || "").trim()) {
+        aiMsg.content = ans.content
+        scrollToBottom()
+        return true
+      }
+    } catch { /* 取回失败继续轮询 */ }
+  }
+  return false
+}
+
+/** 一轮 SSE 交互：断线先取回，取不回再用同一 client_msg_id 重试（命中 checkpoint 续跑，不整轮重跑）。 */
+const streamAnswer = (userMsg: string, aiMsg: SessionMessage, opts: Record<string, any>, retried: boolean) => {
+  const conv = conversationId.value
+  // 后端自定义 error 事件与原生 onerror 可能先后各触发一次，只处理首个
+  let handled = false
+  chatWithXianzhi(userMsg, conv, {
     onMessage: (data) => { aiMsg.content += data; scrollToBottom() },
-    onError: (err) => {
+    onError: async (err) => {
+      if (handled) return
+      handled = true
       // 后端 event:error（如"上一轮仍在生成"）带具体原因；原生连接错误没有 message
-      const reason = (err as ErrorEvent)?.message || "[连接中断]"
-      aiMsg.content += `\n[${reason}]`
+      const reason = (err as ErrorEvent)?.message || ""
+      const sameSession = conversationId.value === conv
+      if (sameSession) {
+        progressText.value = "连接中断，正在恢复回答…"
+        if (await recoverAnswer(conv, userMsg, aiMsg)) {
+          loading.value = false
+          progressText.value = ""
+          syncSessionBirthInfo()
+          scrollToBottom()
+          showToast("已取回回答")
+          return
+        }
+        if (!retried) {
+          // 后端进程重启等场景：同一 client_msg_id 重试可从 checkpoint 续跑；
+          // 先清空半截内容，后端重试时给出的是完整回答
+          aiMsg.content = ""
+          progressText.value = "正在重试…"
+          streamAnswer(userMsg, aiMsg, opts, true)
+          return
+        }
+      }
+      aiMsg.content += `\n[${reason || "[连接中断]"}]`
       loading.value = false
+      progressText.value = ""
     },
     onDone: () => { loading.value = false; progressText.value = ""; scrollToBottom(); syncSessionBirthInfo(); loadSessions(); loadChartCases() },
     // 阶段进度（检索/生成/审核）：长任务期间给出可见反馈，别让用户以为卡死
