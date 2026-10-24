@@ -386,7 +386,12 @@ async def lifespan(app: FastAPI):
     retention_task = asyncio.create_task(_bg_retention_cleanup())
     _bg_init_tasks.append(retention_task)
 
-    log.info("先知智能体启动完成 | 端口 {} | 本地工具 {} 个", settings.app_port, len(local_tools))
+    log.info(
+        "先知智能体启动完成 | 版本 {} | 端口 {} | 本地工具 {} 个",
+        settings.app_version,
+        settings.app_port,
+        len(local_tools),
+    )
 
     yield
 
@@ -543,6 +548,7 @@ async def health():
     ctx = getattr(app.state, "app_context", None)
     return {
         "status": "ok",
+        "version": settings.app_version,
         "rag_ready": get_knowledge_base().ready,
         "workflow_backend": AppContext.workflow_backend(),
         "agent_pool": ctx.agent_pool_stats() if ctx else {"pool_size": 0, "max_agents": 0},
@@ -552,7 +558,7 @@ async def health():
 @app.get("/api/health/live", tags=["Health"])
 async def health_live():
     """liveness：只证明进程还活着，不查任何依赖，永远 200。"""
-    return {"status": "ok"}
+    return {"status": "ok", "version": settings.app_version}
 
 
 @app.get("/api/health/ready", tags=["Health"])

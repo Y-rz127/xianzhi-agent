@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 import app.api.health as health
+from app.core.config import settings
 from app.core.observability import get_metrics, record_request
 from app.core.request_context import (
     RequestIdMiddleware,
@@ -87,6 +88,16 @@ def test_readiness_ok_when_all_dependencies_up(monkeypatch):
     assert result["ok"] is True
     assert result["status"] == "ok"
     assert result["checks"]["report_queue"]["depth"] == 3
+
+
+def test_readiness_reports_release_version(monkeypatch):
+    """灰度/回滚需要从健康检查直接确认实例版本。"""
+    _patch_health_checks(monkeypatch, pg_ok=True, redis_ok=True)
+    monkeypatch.setattr(settings, "app_version", "release-2026-10-24")
+
+    result = asyncio.run(health.readiness())
+
+    assert result["version"] == "release-2026-10-24"
 
 
 def test_readiness_degraded_when_pg_down(monkeypatch):

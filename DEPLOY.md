@@ -69,7 +69,7 @@ CloudBase 云托管支持两种方式：
 | 配置项 | 值 / 说明 |
 |--------|-----------|
 | 监听端口 | 平台注入 `PORT`（默认 80），`main.py` 已优先读取，无需改代码 |
-| 健康检查路径 | `/api/health`（代码已提供） |
+| 健康检查路径 | 存活 `/api/health/live`；就绪 `/api/health/ready`（兼容旧 `/api/health`） |
 | 环境变量 | 见 `.env.example` 全部项；重点：`POSTGRES_CONNECTION_STRING`、`DASHSCOPE_API_KEY`、`VECTOR_STORE_TYPE=postgres`、`MEMORY_STORE_TYPE=postgres`、`CORS_ORIGINS`、`REDIS_URL`、`TRUST_PROXY_HEADERS=true`、`LLM_MAX_CONCURRENCY`、`ADMIN_SESSION_SECRET`（管理后台令牌签名密钥，多副本必须一致） |
 | 内存 / 超时 | 建议内存 ≥ 1GB、请求超时 ≥ 60s（LLM 调用较慢） |
 
@@ -146,7 +146,74 @@ CloudBase 云托管支持两种方式：
   若要发布体验版/正式版或使用自有域名 H5，则需 ICP 备案。
 - **密钥**：`.env` 已在 `.gitignore` 中，切勿提交真实密钥；云端请在平台环境变量面板配置。
 
-## 8. 容器访问数据库的网络连通性（必看）
+## 8. 灰度发布与回滚 Runbook
+
+> 目标：新版本先承接少量流量，指标不劣化再放量；异常时切回上一版本即可恢复，不改库、不重建镜像。
+> 版本标识：部署时设置 `APP_VERSION=<git sha 或 tag>`，`GET /api/health/live` 直接返回该版本。
+
+### 8.1 发布前闸门（Release Gate）
+
+| 检查 | 通过标准 |
+|------|----------|
+| CI | unit job（Ruff + 单测/安全/混沌）全绿；改到集成链路的发布手动跑一次 integration job |
+| 版本 | `APP_VERSION` 已设为本次 git sha/tag；上一版本的镜像/版本仍可部署 |
+| 数据库迁移 | 只做向后兼容的增量变更；发布前做 PG 快照，并在新版本部署前执行 `alembic upgrade head`（旧代码必须能在新表结构上运行一个发布窗口） |
+| 环境变量 | 与 `.env.example` 做差集，新增项已在平台配置；`ADMIN_SESSION_SECRET` 多副本必须一致 |
+| 容量 | Redis 已配置；`副本数 × PG_POOL_MAX_SIZE` 不超过实例上限；`LLM_MAX_CONCURRENCY` 按全局配额/副本数调整 |
+| 基线 | 记录 `/api/health/ready`（version / rag_ready / 队列深度）与 `/api/ai/metrics`（管理员令牌）当前值 |
+| 回滚预案 | 明确触发阈值、执行人、沟通群；确认平台回滚只切流量、不需要动数据库 |
+
+### 8.2 灰度步骤（0% → 5% → 25% → 50% → 100%）
+
+1. **空跑部署**：部署新版本并保持 0% 流量（或独立灰度服务）。确认 `/api/health/live` 返回 200 且 `version` 是新版本，`/api/health/ready` 三个依赖均 ok。
+2. **冒烟（直连灰度实例/域名）**：
+   - `GET /api/health/live`、`GET /api/health/ready`
+   - `GET /api/ai/xianzhi/chart?birth_time=1990-05-20%2014:30&gender=男` 返回 200 且有四柱
+   - 发一轮 SSE 聊天（带 `client_msg_id`）：收到 `chart_context` / `progress`，最后 `[DONE]`，无 `event: error`
+   - 提交一份报告任务并轮询到 done（付费接口需管理员或用户 token）
+   - 管理后台登录成功，`/api/ai/metrics` 可读
+3. **按阶梯放量**，每档观察后再进入下一档：
+
+| 档位 | 最短观察 | 通过条件 |
+|------|----------|----------|
+| 5% | 10 分钟 | 5xx ≤ 1%，聊天成功率 ≥ 99%，无新增 ERROR 堆栈 |
+| 25% | 10 分钟 | p95 总耗时相对基线偏差 ≤ 20%，Reviewer 降级比例不上升 |
+| 50% | 15 分钟 | 报告队列深度不持续增长；PG 连接数 < 80% 上限 |
+| 100% | 24 小时 | 指标持平；旧版本保留到观察期结束再下线 |
+
+4. **观察项**（至少）：`/api/ai/metrics` 的 status_codes、recent_errors（含 request_id）、LLM 失败/降级计数、Reviewer 指标；`/api/health/ready` 的 `checks.report_queue.depth`；平台 CPU/内存/实例重启次数。
+5. **双版本并行是预期行为**：新旧版本共享 PG/Redis，报告队列 worker、数据保留清理可能同时在两个版本运行；任务抢占（`mark_running`）与清理逻辑均幂等，不会重复执行。
+
+> 单机 docker-compose 无法按比例分流：可用新容器独立端口 + 网关/NGINX 权重；回滚时保留旧容器即可切回。
+
+### 8.3 回滚
+
+**触发条件（任一满足立即回滚，不再观察）**
+- 5xx 比例 > 2% 持续 5 分钟，或连续 3 次健康检查失败
+- 聊天超时（180s 预算耗尽）比例 > 5%，或 p95 总耗时 > 240s
+- LLM 降级链耗尽、Reviewer 全链不可用等关键指标出现并持续
+- 报告队列深度持续增长 > 10 分钟且无下降趋势
+- 出现冒烟阶段未覆盖的新 ERROR 堆栈
+
+**执行**
+1. 在平台版本管理/流量策略把新版本流量切到 0%（或直接切回上一版本），不重新构建镜像。
+2. 等一个健康检查周期，确认 `/api/health/live` 的 `version` 已回到上一版本、`/ready` 正常。
+3. 复跑冒烟：健康检查 + 命盘接口 + 一轮聊天。
+4. 保留故障实例日志（用响应头 `X-Request-ID` 定位单请求），记录回滚时间线，24 小时内完成复盘。
+
+**数据侧红线**
+- 只做增量迁移时，旧版本可直接跑在新表结构上；**禁止同一次发布包含破坏性迁移**（删列/改类型），否则无法仅靠切流量回滚。
+- 回滚不清库：新版本已写入的会话、报告任务、checkpoint 保留；若怀疑数据被写坏，先停止写入并恢复发布前 PG 快照。
+- Redis 队列可能残留新版本入队的任务：任务 kind/params 必须能被旧版本识别，否则应等队列清空后再回滚。
+- 管理员令牌格式变更（如签名密钥轮换）会让旧令牌失效，需在低峰期执行并提前通知。
+
+### 8.4 发布后收尾
+
+- 100% 流量稳定 24 小时后下线旧版本。
+- 检查残留：异常中断的 checkpoint 由每日清理任务回收；报告任务按 7 天保留清理。
+- 更新发布记录：`APP_VERSION`、变更摘要、灰度时间线、关键指标截图。
+
+## 9. 容器访问数据库的网络连通性（必看）
 
 云托管容器与云数据库 PostgreSQL **默认不在同一网络平面**，容器直接用 `172.17.0.x`、
 `10.x` 等内网地址通常**连不通**，表现为：

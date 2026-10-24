@@ -101,6 +101,8 @@ class Settings(BaseSettings):
     # 服务
     # 默认 production（安全默认）：未显式设 APP_ENV=dev 时按生产处理，LangSmith 强制关闭
     app_env: str = Field(default="production", alias="APP_ENV")
+    # 发布版本标识（部署时注入 git sha/tag；灰度与回滚时用 /api/health 核对实例版本）
+    app_version: str = Field(default="dev", alias="APP_VERSION")
     app_port: int = Field(default=8123, alias="APP_PORT")
     debug: bool = Field(default=False, alias="DEBUG")
     # 代码热重载（仅本地开发）：改 .py 保存即重启，强制单进程，勿用于生产

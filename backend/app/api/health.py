@@ -63,6 +63,7 @@ async def readiness() -> dict:
     return {
         "status": "ok" if ok else "degraded",
         "ok": ok,
+        "version": settings.app_version,
         "checks": {
             "postgres": pg,
             "redis": redis,
