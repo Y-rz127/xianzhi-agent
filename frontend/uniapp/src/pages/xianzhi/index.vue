@@ -81,7 +81,10 @@
         <view class="sect-hint">
           排盘引擎默认为晚子时（子正换日，23:00~24:00 算次日）
         </view>
-        <view class="legal-link" @tap="goDisclaimer">查看免责声明 ›</view>
+        <view class="birth-actions">
+          <view class="legal-link" @tap="goDisclaimer">查看免责声明 ›</view>
+          <text class="save-btn" @tap="saveBirthPanel">保存并排盘</text>
+        </view>
       </view>
     </view>
 
@@ -457,10 +460,23 @@ const sect = 2 as const
 // 真太阳时：出生地与经度
 const birthPlace = ref('')
 const birthLongitude = ref(0)
-/** 真太阳时修正量（分钟）。基准经度 120°E（北京时间），每度差 4 分钟 */
+/** 已保存生效的出生地（面板改动未点保存时不参与排盘/聊天挂盘） */
+const savedPlace = ref('')
+const savedLongitude = ref(0)
+/** 均时差近似（分钟），与后端 app/domain/solar_time.py 同公式 */
+function equationOfTimeMinutes(dateStr: string) {
+  if (!dateStr) return 0
+  const d = new Date(`${dateStr}T12:00:00`)
+  if (Number.isNaN(d.getTime())) return 0
+  const start = new Date(d.getFullYear(), 0, 0)
+  const dayOfYear = Math.floor((d.getTime() - start.getTime()) / 86400000)
+  const b = (2 * Math.PI * (dayOfYear - 81)) / 365
+  return Math.round(9.87 * Math.sin(2 * b) - 7.53 * Math.cos(b) - 1.5 * Math.sin(b))
+}
+/** 真太阳时修正量（分钟）：4×(经度−120°) + 均时差 */
 const solarTimeOffset = computed(() => {
-  if (!birthLongitude.value || birthLongitude.value === 0) return 0
-  return Math.round((120 - birthLongitude.value) * 4)
+  if (!birthLongitude.value) return 0
+  return Math.round((birthLongitude.value - 120) * 4) + equationOfTimeMinutes(birthDate.value)
 })
 
 // ---- 省市区选择器弹窗状态 ----
@@ -555,15 +571,7 @@ function confirmRegionPicker() {
     if (regionSelDistrict.value) parts.push(regionSelDistrict.value)
     birthPlace.value = parts.join(' ')
     birthLongitude.value = regionSelLongitude.value
-    // 持久化出生地到本地，便于重新进入历史会话时恢复
-    if (conversationId.value) setBirthPlaceLocal(conversationId.value, birthPlace.value, birthLongitude.value)
-    // 已有出生时间则自动重排
-    if (birthDate.value && birthTime.value && gender.value) {
-      const time = `${birthDate.value} ${birthTime.value}`
-      lastBirthInfo.value = { time, gender: gender.value }
-      _skipNextChartWatch = true
-      getChart(time, gender.value, sect, 1, birthLongitude.value || undefined).then(d => { chartData.value = d }).catch(() => { chartData.value = null })
-    }
+    // 只改草稿，点「保存并排盘」才生效（避免选地点时自动多算一次命盘）
   }
   showRegionPicker.value = false
 }
@@ -591,8 +599,6 @@ function onMsgScroll(e: any) {
   showScrollBottom.value = distFromBottom > SCROLL_BOTTOM_THRESHOLD
 }
 const lastBirthInfo = ref<BirthInfo | null>(null)
-// 防止 watch 与显式 getChart 调用重复请求的标志
-let _skipNextChartWatch = false
 const chartData = ref<ChartData | null>(null)
 // 会话ID 是游客访问凭证：使用高熵随机值，归属由服务端 token 绑定
 function genConversationId(): string {
@@ -716,7 +722,8 @@ async function switchToSession(session: ChatSession) {
       birthTime.value = zhiHourToHHMM(t)
       gender.value = restored.gender as '男' | '女'
       setBirthInfoLocal(session.id, restored.time, restored.gender as '男' | '女')
-      _skipNextChartWatch = true
+      savedPlace.value = birthPlace.value
+      savedLongitude.value = birthLongitude.value
       // 命盘只服务内嵌卡片，不阻塞进入会话：后台补齐，失败保持 null
       getChart(restored.time, restored.gender, 2, 1, birthLongitude.value || undefined)
         .then((c) => { chartData.value = c })
@@ -837,8 +844,8 @@ const birthSummary = computed(() =>
     ? `${effectiveBirthTime.value} ${effectiveGender.value}${birthPlace.value ? ' · ' + birthPlace.value : ''}`
     : '点击设置出生信息'
 )
-/** 是否已挂命盘：决定标题行箭头是朱砂（有生辰）还是浅灰（还没生辰） */
-const hasBirth = computed(() => !!effectiveBirthTime.value)
+/** 是否已保存出生信息：决定标题行箭头是朱砂（有生辰）还是浅灰（还没保存） */
+const hasBirth = computed(() => !!lastBirthInfo.value?.time)
 
 const placeholderText = '请输入你的问题…'
 
@@ -856,18 +863,30 @@ function refreshProfile() {
   profileUser.value = getUser()
 }
 
-// 出生信息面板手动修改时，自动重拉 chartData
-watch([birthDate, birthTime, gender, birthLongitude], async ([d, t, g]) => {
-  // 显式调用 getChart 的地方（applyBirth/onChartContext/switchToSession/tryExtractBirth）
-  // 已自行处理 chartData，跳过 watch 避免重复请求
-  if (_skipNextChartWatch) { _skipNextChartWatch = false; return }
-  if (d && t && g) {
-    const time = `${d} ${t}`
-    lastBirthInfo.value = { time, gender: g }
-    if (conversationId.value) setBirthInfoLocal(conversationId.value, time, g)
-    try { chartData.value = await getChart(time, g, 2, 1, birthLongitude.value || undefined) } catch { chartData.value = null }
+// 出生信息以「保存并排盘」为准：面板改动只更新草稿，不自动重算
+async function saveBirthPanel() {
+  if (!birthDate.value || !birthTime.value) {
+    uni.showToast({ title: '请先选择出生日期和时间', icon: 'none' })
+    return
   }
-})
+  const time = `${birthDate.value} ${birthTime.value}`
+  lastBirthInfo.value = { time, gender: gender.value }
+  savedPlace.value = birthPlace.value
+  savedLongitude.value = birthLongitude.value
+  if (conversationId.value) {
+    setBirthInfoLocal(conversationId.value, time, gender.value)
+    if (birthPlace.value) setBirthPlaceLocal(conversationId.value, birthPlace.value, birthLongitude.value)
+    else clearBirthPlaceLocal(conversationId.value)
+  }
+  try {
+    // 有出生地 → 带经度排真太阳时；没填 → 不传经度（后端不校正）
+    chartData.value = await getChart(time, gender.value, sect, 1, birthLongitude.value || undefined)
+    uni.showToast({ title: birthPlace.value ? '已保存，按真太阳时排盘' : '已保存并排盘', icon: 'none' })
+  } catch {
+    chartData.value = null
+    uni.showToast({ title: '排盘失败，请稍后重试', icon: 'none' })
+  }
+}
 
 /** 预填出生信息并自动发起排盘（来自命例/档案带入） */
 async function applyBirth(bt: string, g: '男' | '女', name?: string) {
@@ -879,8 +898,9 @@ async function applyBirth(bt: string, g: '男' | '女', name?: string) {
   birthTime.value = zhiHourToHHMM(t)
   gender.value = g
   lastBirthInfo.value = { time: bt, gender: g }
+  savedPlace.value = ''
+  savedLongitude.value = 0
   if (conversationId.value) setBirthInfoLocal(conversationId.value, bt, g)
-  _skipNextChartWatch = true
   try { chartData.value = await getChart(bt, g, 2, 1) } catch { chartData.value = null }
   const autoMsg = name
     ? `${g}，${bt}，排盘并分析（来自：${name}）`
@@ -1127,27 +1147,28 @@ function onInputFocus() {
 }
 
 function openChartDetail() {
-  // 与按钮显示条件同源：表单手填与对话/后端提取的生辰都算，别只认 lastBirthInfo
-  const time = effectiveBirthTime.value
-  const g = effectiveGender.value
-  if (!time || !g) {
-    uni.showToast({ title: '请先提供出生时间和性别', icon: 'none' })
+  // 以已保存的出生信息为准：面板里改了但没点保存的草稿尚未排盘
+  const saved = lastBirthInfo.value
+  if (!saved?.time || !saved.gender) {
+    uni.showToast({ title: '请先在出生信息面板填写并保存', icon: 'none' })
     return
   }
-  const q = `birth_time=${encodeURIComponent(time)}&gender=${encodeURIComponent(g)}&sect=2&yun_sect=1`
-  const lon = birthLongitude.value || undefined
+  const q = `birth_time=${encodeURIComponent(saved.time)}&gender=${encodeURIComponent(saved.gender)}&sect=2&yun_sect=1`
+  const lon = savedLongitude.value || undefined
   uni.navigateTo({ url: `/pages/chart-detail/index?${q}${lon ? `&longitude=${lon}` : ''}` })
 }
 
 /** 把解析出的出生时间同步到表单、命盘上下文并主动拉取 chartData */
 async function applyExtractedBirth(time: string, g: '男' | '女') {
   lastBirthInfo.value = { time, gender: g }
+  // 纯文字给时间、未提出生地：不沿用上一张盘的经度，避免把别人的真太阳时带过来
+  savedPlace.value = ''
+  savedLongitude.value = 0
   if (conversationId.value) setBirthInfoLocal(conversationId.value, time, g)
   const [d, tm] = time.split(' ')
   birthDate.value = d || ''
   birthTime.value = zhiHourToHHMM(tm)
   gender.value = g
-  _skipNextChartWatch = true
   try { chartData.value = await getChart(time, g, 2, 1) } catch { chartData.value = null }
 }
 
@@ -1343,7 +1364,8 @@ function onSend() {
       if (conversationId.value) clearBirthPlaceLocal(conversationId.value)
     }
     // 主动拉取结构化命盘数据（命盘详情弹窗内容）
-    _skipNextChartWatch = true
+    savedPlace.value = birthPlace.value
+    savedLongitude.value = birthLongitude.value
     try {
       chartData.value = await getChart(bt, g, 2, 1, birthLongitude.value || undefined)
     } catch {
@@ -1354,10 +1376,11 @@ function onSend() {
   chatWithXianzhiWS(text, {
     conversationId: conversationId.value,
     clientMsgId: genClientMsgId(),
-    birthTime: effectiveBirthTime.value || undefined,
-    gender: effectiveGender.value,
-    birthPlace: birthPlace.value || undefined,
-    longitude: birthLongitude.value || undefined,
+    // 只用已保存/后端提取的出生信息：面板里未点保存的草稿不参与挂盘
+    birthTime: lastBirthInfo.value?.time || undefined,
+    gender: lastBirthInfo.value?.gender || undefined,
+    birthPlace: savedPlace.value || undefined,
+    longitude: savedLongitude.value || undefined,
     sect,
     token: getToken(),
     onMessage, onDone, onError, onChartContext,
@@ -1694,10 +1717,23 @@ messages.value.push({
   background: rgba(44, 44, 44, 0.08);
   color: $color-primary;
 }
+.birth-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 8rpx;
+}
+.save-btn {
+  padding: 14rpx 40rpx;
+  font-size: 28rpx;
+  color: #fff;
+  background: $color-primary;
+  border-radius: 999rpx;
+  letter-spacing: 0.05em;
+}
 .legal-link {
   font-size: 26rpx;
   color: $color-ink-light;
-  margin-top: 8rpx;
 }
 .sect-hint {
   font-size: 24rpx;
