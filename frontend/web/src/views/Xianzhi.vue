@@ -919,7 +919,12 @@ const send = async () => {
 
   chatWithXianzhi(userMsg, conversationId.value, {
     onMessage: (data) => { aiMsg.content += data; scrollToBottom() },
-    onError: () => { aiMsg.content += "\n[连接中断]"; loading.value = false },
+    onError: (err) => {
+      // 后端 event:error（如"上一轮仍在生成"）带具体原因；原生连接错误没有 message
+      const reason = (err as ErrorEvent)?.message || "[连接中断]"
+      aiMsg.content += `\n[${reason}]`
+      loading.value = false
+    },
     onDone: () => { loading.value = false; progressText.value = ""; scrollToBottom(); syncSessionBirthInfo(); loadSessions(); loadChartCases() },
     // 阶段进度（检索/生成/审核）：长任务期间给出可见反馈，别让用户以为卡死
     onProgress: (text: string) => { progressText.value = text },
