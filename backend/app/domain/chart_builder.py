@@ -21,6 +21,7 @@ from app.domain.models import (
     Pillar,
 )
 from app.domain.shensha_calc import _compute_shensha
+from app.domain.solar_time import solar_correction_minutes
 from app.domain.tables import (
     _YANG_GAN,
     _ZHI_SEQ,
@@ -321,7 +322,7 @@ def build_bazi_chart(
     """构建完整八字命盘（BaziChart）。
 
     sect: 日柱计算流派；yun_sect: 大运计算流派；
-    longitude: 出生地经度，用于真太阳时校正（基准 120°E，每度差 4 分钟）；
+    longitude: 出生地经度，用于真太阳时校正（经度差 + 均时差，基准 120°E）；
     liunian_cover_dayun: 流年范围自动扩展到覆盖当前大运起止（前端流年神煞需整运十年）；
     today: 基准日（默认取系统当天），会透传给细盘用于定位"当前岁运"。
            不传时行为与历史一致；黄金命盘快照必须传固定值，否则快照随日期漂移。
@@ -329,15 +330,13 @@ def build_bazi_chart(
     y, m, d, h, mi = parse_birth(birth_time)
     gender_int = parse_gender(gender)
 
-    # 真太阳时校正：按出生地经度修正时钟时间
-    solar_correction_min = 0
-    if longitude and 60 <= longitude <= 140:
-        solar_correction_min = round((120 - longitude) * 4)
+    # 真太阳时校正：经度差 + 均时差（公式与知识库 08_八字排盘基础.md 一致）
+    solar_correction_min = solar_correction_minutes(
+        datetime.datetime(y, m, d, h, mi), longitude
+    )
     if solar_correction_min != 0:
         corrected = datetime.datetime(y, m, d, h, mi) + datetime.timedelta(minutes=solar_correction_min)
-        h, mi = corrected.hour, corrected.minute
-        if corrected.date() != datetime.date(y, m, d):
-            y, m, d = corrected.year, corrected.month, corrected.day
+        y, m, d, h, mi = corrected.year, corrected.month, corrected.day, corrected.hour, corrected.minute
 
     solar = Solar.fromYmdHms(y, m, d, h, mi, 0)
     lunar = solar.getLunar()

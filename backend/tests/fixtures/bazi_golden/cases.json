@@ -37,6 +37,7 @@
     {"id": "shensha_tiangang", "desc": "神煞补齐：地网 + 拱禄 + 正学堂 + 魁罡", "birth": "1970-05-12 12:00", "gender": "男"},
     {"id": "shensha_sanqi", "desc": "神煞补齐：三奇贵人（顺次连续不隔柱）+ 天罗", "birth": "1970-06-12 18:00", "gender": "男"},
     {"id": "shensha_zhengciguan", "desc": "神煞补齐：正词馆", "birth": "1970-01-07 00:00", "gender": "男"},
+    {"id": "shensha_jinshen", "desc": "神煞补齐：金神（甲日丑时 → 时柱乙丑）", "birth": "1985-01-05 01:30", "gender": "男"},
     {"id": "shensha_tianshe", "desc": "神煞补齐：天赦日", "birth": "1970-02-27 00:00", "gender": "男"},
 
     {"id": "cong_true_sha", "desc": "真从·从杀格（己土无根，月令卯木官杀当令，无食伤制杀）", "birth": "1903-03-12 00:00", "gender": "男"},

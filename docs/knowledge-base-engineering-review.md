@@ -247,20 +247,18 @@ def test_index_references_every_doc():
 
 ### M1. 真太阳时：文档要求「经度修正 + 均时差」，代码只做经度修正
 
-知识库三处声明（`00_知识库总索引.md:118`、`08_八字排盘基础.md:3`、`24_标准分析流程.md`）真太阳时校正包含**均时差**。代码实现为：
+> **2026-10-24 已修复**：`app/domain/solar_time.py` 实现 `4 × (经度 − 120°) + 均时差`，
+> 同时纠正了原实现经度项方向写反的问题；`chart_builder`、合婚工具、聊天挂盘共用同一实现。
+
+知识库三处声明（`00_知识库总索引.md:118`、`08_八字排盘基础.md:3`、`24_标准分析流程.md`）真太阳时校正包含**均时差**。修复前代码实现为：
 
 ```python
-# chart_builder.py:332-337
-# 真太阳时校正：按出生地经度修正时钟时间
-solar_correction_min = 0
-if longitude is not None:
-    solar_correction_min = round((120 - longitude) * 4)   # 仅经度差 × 4 分钟
+# chart_builder.py:332-337（修复前）
+solar_correction_min = round((120 - longitude) * 4)   # 仅经度差 × 4 分钟，且方向与公式相反
 ```
 
-全局检索确认：`backend/requirements.txt`、`pyproject.toml` 中**没有任何**均时差依赖（`astral` / `ephem` / `skyfield` / `pysolar` 均无），`backend/app/domain/**` 中也无 `均时差` / `equation_of_time` 实现。
-
-- **影响**：均时差一年内摆动约 ±16 分钟，是可跨越时辰边界的量级。文档承诺了一个未实现的校正项。
-- **修复（二选一）**：① 实现均时差（引入 `astral` 或内置近似式），② 把三处表述改为「仅按出生地经度校正（基准 120°E，每度 4 分钟），未计入均时差」。**在补实现之前，必须先改文档**——否则模型会据此向用户过度承诺精度。
+- **影响**：均时差一年内摆动约 ±16 分钟，是可跨越时辰边界的量级；方向反了则误差翻倍（西部城市被推后而非提前）。
+- **修复**：`app/domain/solar_time.py` 提供 `solar_correction_minutes()`（经度差 + 均时差近似式）与 `apply_solar_time()`，回归用例见 `tests/test_solar_time.py`。
 
 ### M2. 夜子时口径：运行时正确，但依赖第三方库默认值；且文档要求"必须提示"未被保证
 

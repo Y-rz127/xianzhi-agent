@@ -20,7 +20,7 @@ from app.domain.tables import (
 # 特殊格局判定阈值
 # 引擎版本：位置权重/阈值/关系修正任一变动都必须 bump —— chart_verdicts 缓存表
 # 把它并进主键，bump 后老裁决自然失效、新裁决另起一行（历史留档可对比）。
-ENGINE_VERSION = "20261012.1"  # 三合局化局条件：化神旺/相才并入，休囚死合而不化、各归本位
+ENGINE_VERSION = "20261024.1"  # 真太阳时方向修正（经度差 + 均时差），排盘结果与旧版不同
 
 _ZHUANWANG_DOM_RATIO = 0.35       # 主导五行占「对日干影响」加权比例下限
 _ZHUANWANG_PRESSURE_MAX = 2.8     # 克泄耗三行合计加权上限（超过视为破局，不判专旺）
