@@ -309,6 +309,8 @@ async def run_shadow_verdict(chart: BaziChart, model) -> dict[str, Any]:
     diff = diff_verdicts(verdict_payload, computed) if verdict_payload else "invalid"
     row = {
         "chart_hash": chash,
+        # 裁决的正式身份：四柱+性别。同四柱的盘无论出生时刻/经度/写法，都落同一行（跨人复用）
+        "verdict_key": verdict_key_of_chart(chart),
         "birth_time": chart.birth.solar,
         "gender": chart.birth.gender,
         "engine_version": ENGINE_VERSION,
@@ -326,30 +328,67 @@ async def run_shadow_verdict(chart: BaziChart, model) -> dict[str, Any]:
 
 
 def _upsert_verdict(row: dict[str, Any]) -> None:
+    """落库裁决：**先按四柱指纹 + 版本更新已有行**，没有才插入。
+
+    为什么不是简单 upsert on (chart_hash, engine, prompt)：四柱指纹是跨人复用的身份，
+    同一张嘴的盘可能被不同人的请求先后判到（rare race）。按指纹更新可以保证
+    "一个四柱 + 一个版本 = 一行"，不会因为出生时刻/经度不同而堆出多行重复裁决。
+    `birth_time/gender/chart_hash` 保留**首次判定**那张盘的，便于审计溯源。
+    """
     from app.db.pool import get_pool
 
+    verdict_json = json.dumps(row["verdict"], ensure_ascii=False) if row["verdict"] else None
+    computed_json = json.dumps(row["computed"], ensure_ascii=False)
     with get_pool().connection() as conn:
+        updated = 0
+        if row.get("verdict_key"):
+            cur = conn.execute(
+                """
+                UPDATE chart_verdicts
+                SET status = %s, verdict = %s, computed = %s, diff = %s, model = %s,
+                    latency_ms = %s, raw_text = %s, created_at = NOW()
+                WHERE verdict_key = %s AND engine_version = %s AND prompt_version = %s
+                """,
+                (
+                    row["status"],
+                    verdict_json,
+                    computed_json,
+                    row["diff"],
+                    row["model"],
+                    row["latency_ms"],
+                    row["raw_text"],
+                    row["verdict_key"],
+                    row["engine_version"],
+                    row["prompt_version"],
+                ),
+            )
+            updated = cur.rowcount or 0
+        if updated:
+            return
         conn.execute(
             """
             INSERT INTO chart_verdicts
-                (chart_hash, birth_time, gender, engine_version, prompt_version,
+                (chart_hash, verdict_key, birth_time, gender, engine_version, prompt_version,
                  status, verdict, computed, diff, model, latency_ms, raw_text)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (chart_hash, engine_version, prompt_version)
             DO UPDATE SET status = EXCLUDED.status, verdict = EXCLUDED.verdict,
                           computed = EXCLUDED.computed, diff = EXCLUDED.diff,
                           model = EXCLUDED.model, latency_ms = EXCLUDED.latency_ms,
-                          raw_text = EXCLUDED.raw_text, created_at = NOW()
+                          raw_text = EXCLUDED.raw_text,
+                          verdict_key = COALESCE(EXCLUDED.verdict_key, chart_verdicts.verdict_key),
+                          created_at = NOW()
             """,
             (
                 row["chart_hash"],
+                row.get("verdict_key") or None,
                 row["birth_time"],
                 row["gender"],
                 row["engine_version"],
                 row["prompt_version"],
                 row["status"],
-                json.dumps(row["verdict"], ensure_ascii=False) if row["verdict"] else None,
-                json.dumps(row["computed"], ensure_ascii=False),
+                verdict_json,
+                computed_json,
                 row["diff"],
                 row["model"],
                 row["latency_ms"],
@@ -376,60 +415,67 @@ def _verdict_enabled() -> bool:
     return "pytest" not in sys.modules
 
 
-def _get_cached_verdict(chash: str) -> dict[str, Any] | None:
-    """取同版本（engine+prompt）的 ok 裁决；无则 None。命中即毫秒级复用。"""
-    from app.db.pool import get_pool
+def _fetch_verdict(key: str, by: str, *, any_version: bool = False) -> dict[str, Any] | None:
+    """按某个列取值（`by` ∈ {"verdict_key","chart_hash"}）。
 
-    with get_pool().connection() as conn:
-        row = conn.execute(
-            """
-            SELECT verdict FROM chart_verdicts
-            WHERE chart_hash = %s AND engine_version = %s AND prompt_version = %s
-              AND status = 'ok'
-            """,
-            (chash, ENGINE_VERSION, PROMPT_VERSION),
-        ).fetchone()
-    if row is None:
-        return None
-    return row[0] if isinstance(row[0], dict) else json.loads(row[0])
-
-
-def _get_stale_verdict(chash: str) -> dict[str, Any] | None:
-    """取**任意版本**最近一次 ok 裁决（版本升级后的降级展示用）。
-
-    为什么需要它：`_get_cached_verdict` 按 (engine, prompt) 精确匹配，版本一 bump
-    全线 miss。此时若仍走"同步判一次"，用户进对话/进详情页就要白等 LLM 跑完
-    （最多 _VERDICT_TIMEOUT=180s）——命盘按钮甚至要等排盘返回才出现。
-    正确做法是**旧版结论先顶上**（标注旧版），后台同时重判当前版本。
+    `any_version=False` 只取当前引擎+提示词版本（正常命中路径）；
+    `any_version=True` 取任意版本最近一条 ok（版本升级后"旧版先顶上"用）。
     """
     from app.db.pool import get_pool
 
+    if by not in ("verdict_key", "chart_hash"):
+        raise ValueError(f"未知的裁决键列: {by}")
+    if not key:
+        return None
+    sql = f"SELECT verdict FROM chart_verdicts WHERE {by} = %s AND status = 'ok'"
+    params: list[Any] = [key]
+    if any_version:
+        sql += " ORDER BY created_at DESC LIMIT 1"
+    else:
+        sql += " AND engine_version = %s AND prompt_version = %s"
+        params += [ENGINE_VERSION, PROMPT_VERSION]
     with get_pool().connection() as conn:
-        row = conn.execute(
-            """
-            SELECT verdict FROM chart_verdicts
-            WHERE chart_hash = %s AND status = 'ok'
-            ORDER BY created_at DESC
-            LIMIT 1
-            """,
-            (chash,),
-        ).fetchone()
+        row = conn.execute(sql, tuple(params)).fetchone()
     if row is None:
         return None
     return row[0] if isinstance(row[0], dict) else json.loads(row[0])
 
 
-def _apply_stale(chart: BaziChart, chash: str = "") -> BaziChart | None:
+def _lookup_current(birth_key: str = "", verdict_key: str = "") -> dict[str, Any] | None:
+    """当前版本的 ok 裁决：**先按四柱指纹**（同盘跨人复用），miss 再按出生时刻兜底。
+
+    兜底那一路是给"本改造之前写入、verdict_key 为空"的老行留的（现在库里只剩 1 行）。
+    """
+    for key, by in ((verdict_key, "verdict_key"), (birth_key, "chart_hash")):
+        verdict = _fetch_verdict(key, by)
+        if verdict is not None:
+            return verdict
+    return None
+
+
+def _lookup_stale(birth_key: str = "", verdict_key: str = "") -> dict[str, Any] | None:
+    """任意版本最近一条 ok 裁决（版本升级后先顶上），查找顺序同 `_lookup_current`。"""
+    for key, by in ((verdict_key, "verdict_key"), (birth_key, "chart_hash")):
+        verdict = _fetch_verdict(key, by, any_version=True)
+        if verdict is not None:
+            return verdict
+    return None
+
+
+def _apply_stale(
+    chart: BaziChart, birth_key: str = "", verdict_key: str = ""
+) -> BaziChart | None:
     """有旧版裁决就应用并返回新 chart；没有/读失败/结构不兼容返回 None。
 
     旧行可能来自更早的版本、字段口径不同——应用失败绝不能让 /chart 500，
     一律降级为计算版（后台照常重判当前版本）。
     """
-    chash = chash or _hash_of(chart)
-    if not chash:
+    if not birth_key and not verdict_key:
+        birth_key, verdict_key = _verdict_keys(chart)
+    if not birth_key and not verdict_key:
         return None
     try:
-        stale = _get_stale_verdict(chash)
+        stale = _lookup_stale(birth_key, verdict_key)
     except Exception as e:
         log.warning("[verdict] 旧版裁决读取失败，按无缓存处理: {}", _err_text(e))
         return None
@@ -524,14 +570,14 @@ def verdict_five_gods(chart: BaziChart) -> dict[str, str]:
     """
     if not verdict_applied(chart):
         return {}
-    chash = _hash_of(chart)
-    if not chash:
+    chash, verdict_key = _verdict_keys(chart)
+    if not chash and not verdict_key:
         return {}
     try:
-        cached = _get_cached_verdict(chash)
+        cached = _lookup_current(chash, verdict_key)
         if not cached and verdict_is_stale(chart):
             # 旧版终审正在顶替展示：五神也从旧版裁决取，否则页面会"有结论没喜忌"
-            cached = _get_stale_verdict(chash)
+            cached = _lookup_stale(chash, verdict_key)
     except Exception as e:
         log.warning("[verdict] 五神回读失败（前端回退计算版喜忌）: {}", _err_text(e))
         return {}
@@ -561,21 +607,23 @@ async def chart_with_verdict(
     except Exception as e:  # DB 不可用：直接回退，不拖主流程
         log.warning("[verdict] chart_hash 计算失败，回退计算版: {}", e)
         return chart
+    # 裁决的正式身份是四柱指纹（同一张嘴的盘跨人复用）；chash 只用于画像/老行兜底
+    verdict_key = verdict_key_of_chart(chart)
 
     verdict = None
     try:
-        verdict = await asyncio.to_thread(_get_cached_verdict, chash)
+        verdict = await asyncio.to_thread(_lookup_current, chash, verdict_key)
     except Exception as e:
         log.warning("[verdict] 缓存读取失败，走 LLM 裁决: {}", _err_text(e))
 
     if verdict is None and allow_stale:
-        stale_chart = await asyncio.to_thread(_apply_stale, chart, chash)
+        stale_chart = await asyncio.to_thread(_apply_stale, chart, chash, verdict_key)
         if stale_chart is not None:
             log.info(
                 "[verdict] {} 当前版本无裁决，先应用旧版终审并后台重判",
                 safe_birth_time(chart.birth.solar),
             )
-            _submit_background_verdict(chart, model, chash)
+            _submit_background_verdict(chart, model, verdict_key or chash)
             return stale_chart
         # 首次排盘：也不等 LLM。详情页先显示计算版（前端有"终审版生成中"提示），
         # 后台判完落库，下次请求/下拉刷新即是终审版。
@@ -583,7 +631,7 @@ async def chart_with_verdict(
             "[verdict] {} 首次排盘无任何裁决，先给计算版并后台补判",
             safe_birth_time(chart.birth.solar),
         )
-        _submit_background_verdict(chart, model, chash)
+        _submit_background_verdict(chart, model, verdict_key or chash)
         return chart
 
     # 只有后台重判线程（allow_stale=False）会走到这里：真正同步调 LLM 并落库。
@@ -633,7 +681,7 @@ _bg_pending_callbacks: dict[str, list] = {}
 
 
 def _hash_of(chart: BaziChart) -> str:
-    """命盘指纹；失败返回空串（调用方按"拿不到指纹就回退计算版"处理）。"""
+    """命盘指纹（出生时刻口径，含真太阳时校正）；失败返回空串。"""
     try:
         from app.db.chart_store import chart_hash_of
 
@@ -643,17 +691,59 @@ def _hash_of(chart: BaziChart) -> str:
         return ""
 
 
-def chart_hash_for_input(birth_time: str, gender: str, longitude: float | None = None) -> str:
-    """**排盘前**算命盘指纹（供接口层在 build 之前查终审/定缓存命名空间）。
+def pillars_key(pillars: list[str] | str, gender: str) -> str:
+    """裁决指纹 = **四柱 + 性别**（跨人复用：同盘同判）。
 
-    命盘身份是 `chart.birth.solar` ——**真太阳时校正后**的时间，写侧 `run_shadow_verdict`
-    就是用它做 chart_hash。所以读侧必须复算同一套"标准化 → 校正"，不能拿查询串里的原始时间：
+    为什么裁决只认四柱：`build_verdict_context` 的每一项输入（四柱、日主、根气、月令调候、
+    藏干、五行权重、十神分布、干支关系、强弱分构成、格局、K线喜忌）都是四柱+性别的函数，
+    与出生时刻、经度、写法无关。于是"同一张嘴的盘"无论用户填公历还是农历、带不带出生地，
+    都命中同一份裁决；同四柱的**不同人**也共享 —— 这正是复用率的来源。
+
+    反过来，凡是**用到年份**的东西（完整命盘 payload、K 线评分、大运/流年表）仍按
+    「精确出生时刻 + 经度」缓存，绝不跨人共享：四柱相同并不保证起运岁数相同。
+    `"pillars:"` 前缀让键空间与"出生时刻"那套明确分开，排查时不至于看混。
+    """
+    from app.db.chart_store import chart_hash_of
+
+    text = pillars if isinstance(pillars, str) else "".join(pillars)
+    return chart_hash_of(f"pillars:{text}", gender)
+
+
+def verdict_key_of_chart(chart: BaziChart) -> str:
+    """已排好的命盘 → 裁决指纹（失败返回空串）。"""
+    try:
+        return pillars_key([p.ganzhi for p in chart.pillars], chart.birth.gender)
+    except Exception as e:
+        log.warning("[verdict] 裁决指纹计算失败: {}", _err_text(e))
+        return ""
+
+
+def verdict_key_for_input(
+    birth_time: str, gender: str, sect: int = 2, longitude: float | None = None
+) -> str:
+    """**排盘前**算裁决指纹：只算四柱（实测 0.11ms，完整排盘 81ms）。"""
+    from app.domain.chart_builder import pillars_of
+
+    return pillars_key(pillars_of(birth_time, sect=sect, longitude=longitude), gender)
+
+
+def _verdict_keys(chart: BaziChart) -> tuple[str, str]:
+    """(出生时刻指纹, 四柱指纹)。前者用于画像/审计与老行兜底，后者是裁决的正式身份。"""
+    return _hash_of(chart), verdict_key_of_chart(chart)
+
+
+def chart_hash_for_input(birth_time: str, gender: str, longitude: float | None = None) -> str:
+    """**排盘前**算"出生时刻口径"的命盘指纹（画像/审计/老行兜底用）。
+
+    命盘时刻身份是 `chart.birth.solar` ——**真太阳时校正后**的时间，写侧
+    `run_shadow_verdict` 早期就是用它做 chart_hash。所以读侧必须复算同一套
+    "标准化 → 校正"，不能拿查询串里的原始时间。
 
     2026-10-24 实测的错位：出生 `2004-06-22 08:15` + 经度 108.63 →
-    裁决写在 `2004-06-22 07:28`（hash `2f629bf2…`），而 `/chart`、`/kline` 用 08:15 算
-    （hash `c621b85b…`）→ `verdict_cache_namespace` 恒为 "p" → 详情页永远显示
-    「终审版生成中」，下拉刷新也只会命中计算版缓存；同时每个不同经度/是否带地点都算出
-    一个新指纹，于是同一张盘被反复重判（chart_verdicts 里 08:00 / 08:05 / 08:50 / 07:28 各一行）。
+    行写在 `2004-06-22 07:28`（hash `2f629bf2…`），而 `/chart`、`/kline` 用 08:15 算
+    （hash `c621b85b…`）→ 命名空间恒为 "p" → 详情页永远显示「终审版生成中」。
+    现在裁决改按四柱指纹找（`verdict_key_for_input`），本函数只服务画像/兜底，
+    但两套都保持"排盘前后一致"这条不变量。
     """
     from app.db.chart_store import chart_hash_of
     from app.domain.chart_builder import parse_birth
@@ -666,15 +756,18 @@ def chart_hash_for_input(birth_time: str, gender: str, longitude: float | None =
     return chart_hash_of(f"{y:04d}-{m:02d}-{d:02d} {h:02d}:{mi:02d}", gender)
 
 
-def verdict_in_flight(chash: str) -> bool:
-    """这张盘是否已有后台补判在跑（接口层据此避免重复判、重复等）。"""
-    if not chash:
+def verdict_in_flight(key: str) -> bool:
+    """这张盘是否已有后台补判在跑（接口层据此避免重复判、重复等）。
+
+    `key` 用**四柱指纹**：同四柱的两个人不该各自判一遍。
+    """
+    if not key:
         return False
     with _bg_inflight_lock:
-        return chash in _bg_inflight
+        return key in _bg_inflight
 
 
-def verdict_cache_namespace(chash: str) -> str:
+def verdict_cache_namespace(birth_key: str = "", verdict_key: str = "") -> str:
     """进程内 payload 缓存的命名空间：v=同版本裁决 / s=只有旧版 / p=无裁决。
 
     接口层缓存的 payload 里嵌着终审结论，key 不带这个状态就会出现"先按计算版缓存过、
@@ -682,13 +775,15 @@ def verdict_cache_namespace(chash: str) -> str:
     **旧版终审必须单独占 "s"**：若把它当 "v"，新裁决落库后 key 不变，页面会永远
     吐旧结论（版本升级后"下拉刷新也刷不出新的"）。DB 读不到时按计算版处理
     （宁可白算一次，也不要把没终审的载荷当终审版供出去）。
+
+    `verdict_key` 是四柱指纹（正式身份），`birth_key` 仅兜底本改造前的历史行。
     """
-    if not chash:
+    if not birth_key and not verdict_key:
         return "p"
     try:
-        if _get_cached_verdict(chash) is not None:
+        if _lookup_current(birth_key, verdict_key) is not None:
             return "v"
-        return "s" if _get_stale_verdict(chash) is not None else "p"
+        return "s" if _lookup_stale(birth_key, verdict_key) is not None else "p"
     except Exception as e:
         log.warning("[verdict] 缓存命名空间判定失败，按计算版处理: {}", _err_text(e))
         return "p"
@@ -702,18 +797,18 @@ def chart_with_cached_verdict(chart: BaziChart, allow_stale: bool = True) -> Baz
     再由我自己派补判并挂回调回写"，所以这里把"读缓存"抽出来单独可用。
     同版本裁决优先；`allow_stale` 时旧版裁决顶上（注记会写"旧版"）。
     """
-    chash = _hash_of(chart)
-    if not chash:
+    chash, verdict_key = _verdict_keys(chart)
+    if not chash and not verdict_key:
         return chart
     try:
-        cached = _get_cached_verdict(chash)
+        cached = _lookup_current(chash, verdict_key)
     except Exception as e:
         log.warning("[verdict] 缓存读取失败，按计算版处理: {}", _err_text(e))
         cached = None
     if cached is not None:
         return apply_verdict(chart, cached, (cached or {}).get("relation_to_engine", "confirm"))
     if allow_stale:
-        stale_chart = _apply_stale(chart, chash)
+        stale_chart = _apply_stale(chart, chash, verdict_key)
         if stale_chart is not None:
             return stale_chart
     return chart
@@ -727,10 +822,10 @@ async def chart_with_verdict_for_api(chart: BaziChart, model: Any = None) -> Baz
     但"跳过"不等于给计算版——有旧版裁决就先顶上，旧结论也比没有强。
     """
     if _verdict_enabled():
-        chash = _hash_of(chart)
-        if verdict_in_flight(chash):
+        _chash, verdict_key = _verdict_keys(chart)
+        if verdict_in_flight(verdict_key):
             log.info("[verdict] {} 已有后台补判在跑，本次请求直接用旧版/计算版", chart.birth.solar)
-            stale_chart = await asyncio.to_thread(_apply_stale, chart, chash)
+            stale_chart = await asyncio.to_thread(_apply_stale, chart, _chash, verdict_key)
             return stale_chart if stale_chart is not None else chart
     return await chart_with_verdict(chart, model)
 
@@ -752,12 +847,13 @@ def chart_with_verdict_sync(chart: BaziChart, model: Any = None) -> BaziChart:
     if not _verdict_enabled():
         return chart
 
-    chash = _hash_of(chart)
-    if not chash:
+    chash, verdict_key = _verdict_keys(chart)
+    if not chash and not verdict_key:
         return chart
+    inflight_key = verdict_key or chash
 
     try:
-        cached = _get_cached_verdict(chash)
+        cached = _lookup_current(chash, verdict_key)
     except Exception as e:
         # 本轮拿不到缓存（DB 抖）不影响正确性：回退计算版 + 照常派后台补判
         log.warning("[verdict] 缓存读取失败，回退计算版: {}", _err_text(e))
@@ -767,25 +863,25 @@ def chart_with_verdict_sync(chart: BaziChart, model: Any = None) -> BaziChart:
             return apply_verdict(chart, cached, (cached or {}).get("relation_to_engine", "confirm"))
 
     # 版本升级：旧版裁决先顶上（标注旧版），后台同步重判当前版本
-    stale_chart = _apply_stale(chart, chash)
-    _submit_background_verdict(chart, model, chash)
+    stale_chart = _apply_stale(chart, chash, verdict_key)
+    _submit_background_verdict(chart, model, inflight_key)
     return stale_chart if stale_chart is not None else chart
 
 
 def _submit_background_verdict(
-    chart: BaziChart, model: Any, chash: str, on_done: Any = None
+    chart: BaziChart, model: Any, key: str, on_done: Any = None
 ) -> None:
-    """派一个后台补判线程；同一 chart_hash 已在跑则只挂回调（去重）。"""
+    """派一个后台补判线程；同一 `key`（四柱指纹）已在跑则只挂回调（去重）。"""
     with _bg_inflight_lock:
-        if chash in _bg_inflight:
+        if key in _bg_inflight:
             if on_done is not None:
-                _bg_pending_callbacks.setdefault(chash, []).append(on_done)
+                _bg_pending_callbacks.setdefault(key, []).append(on_done)
             return
-        _bg_inflight.add(chash)
+        _bg_inflight.add(key)
         if on_done is not None:
-            _bg_pending_callbacks.setdefault(chash, []).append(on_done)
+            _bg_pending_callbacks.setdefault(key, []).append(on_done)
     threading.Thread(
-        target=_background_verdict, args=(chart, model, chash), name="verdict-bg", daemon=True
+        target=_background_verdict, args=(chart, model, key), name="verdict-bg", daemon=True
     ).start()
 
 
@@ -793,13 +889,13 @@ def submit_verdict_background(chart: BaziChart, on_done: Any = None) -> None:
     """保存接口等外部路径：为这张盘派后台补判，跑完后把生效后的盘交给回调。"""
     if not _verdict_enabled():
         return
-    chash = _hash_of(chart)
-    if not chash:
+    key = verdict_key_of_chart(chart) or _hash_of(chart)
+    if not key:
         return
-    _submit_background_verdict(chart, None, chash, on_done=on_done)
+    _submit_background_verdict(chart, None, key, on_done=on_done)
 
 
-def _background_verdict(chart: BaziChart, model: Any, chash: str = "") -> None:
+def _background_verdict(chart: BaziChart, model: Any, key: str = "") -> None:
     """后台补判：独立线程里跑完整 async 流程；失败只留日志。
 
     这里**不再套自己的 wait_for**：chart_with_verdict 内部已经有 150 秒预算兜底，
@@ -821,10 +917,10 @@ def _background_verdict(chart: BaziChart, model: Any, chash: str = "") -> None:
         )
     finally:
         callbacks: list = []
-        if chash:
+        if key:
             with _bg_inflight_lock:
-                _bg_inflight.discard(chash)
-                callbacks = _bg_pending_callbacks.pop(chash, [])
+                _bg_inflight.discard(key)
+                callbacks = _bg_pending_callbacks.pop(key, [])
         for callback in callbacks:
             try:
                 callback(applied if applied is not None else chart)

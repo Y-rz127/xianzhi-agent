@@ -108,8 +108,8 @@ def test_sync_wrapper_returns_computed_and_schedules_background(monkeypatch):
 
     chart = build_bazi_chart(*ANCHOR)
     monkeypatch.setattr(V, "_verdict_enabled", lambda: True)
-    monkeypatch.setattr(V, "_get_cached_verdict", lambda chash: None)
-    monkeypatch.setattr(V, "_get_stale_verdict", lambda chash: None)
+    monkeypatch.setattr(V, "_lookup_current", lambda *a, **k: None)
+    monkeypatch.setattr(V, "_lookup_stale", lambda *a, **k: None)
     scheduled: list[str] = []
     monkeypatch.setattr(V, "_submit_background_verdict", lambda c, m, h: scheduled.append(h))
 
@@ -125,7 +125,7 @@ def test_sync_wrapper_applies_cached_verdict_without_background(monkeypatch):
 
     chart = build_bazi_chart(*ANCHOR)
     monkeypatch.setattr(V, "_verdict_enabled", lambda: True)
-    monkeypatch.setattr(V, "_get_cached_verdict", lambda chash: _verdict_for())
+    monkeypatch.setattr(V, "_lookup_current", lambda *a, **k: _verdict_for())
     scheduled: list[str] = []
     monkeypatch.setattr(V, "_submit_background_verdict", lambda c, m, h: scheduled.append(h))
 
@@ -142,8 +142,8 @@ def test_sync_wrapper_survives_cache_read_error(monkeypatch):
 
     chart = build_bazi_chart(*ANCHOR)
     monkeypatch.setattr(V, "_verdict_enabled", lambda: True)
-    monkeypatch.setattr(V, "_get_cached_verdict", lambda chash: (_ for _ in ()).throw(RuntimeError("db down")))
-    monkeypatch.setattr(V, "_get_stale_verdict", lambda chash: None)
+    monkeypatch.setattr(V, "_lookup_current", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("db down")))
+    monkeypatch.setattr(V, "_lookup_stale", lambda *a, **k: None)
     scheduled: list[str] = []
     monkeypatch.setattr(V, "_submit_background_verdict", lambda c, m, h: scheduled.append(h))
 
@@ -212,7 +212,7 @@ def test_chart_payload_carries_five_gods(monkeypatch):
     verdict = _verdict_for(xishen=["木"], choushen=["水"])
     applied = V.apply_verdict(chart, verdict)
     monkeypatch.setattr(V, "_hash_of", lambda c: "hash-gods")
-    monkeypatch.setattr(V, "_get_cached_verdict", lambda chash: verdict)
+    monkeypatch.setattr(V, "_lookup_current", lambda *a, **k: verdict)
 
     gods = _format_chart_payload(applied)["gods"]
     assert gods == {"yongshen": "火", "xishen": "木", "jishen": "金", "choushen": "水"}
@@ -229,11 +229,11 @@ def test_cache_namespace_switches_with_verdict_presence(monkeypatch):
     """有 ok 裁决 → v；没有 → p；读失败 → 按计算版处理（宁可白算不误发）。"""
     from app.agent import verdict as V
 
-    monkeypatch.setattr(V, "_get_cached_verdict", lambda chash: _verdict_for())
+    monkeypatch.setattr(V, "_lookup_current", lambda *a, **k: _verdict_for())
     assert V.verdict_cache_namespace("h1") == "v"
-    monkeypatch.setattr(V, "_get_cached_verdict", lambda chash: None)
+    monkeypatch.setattr(V, "_lookup_current", lambda *a, **k: None)
     assert V.verdict_cache_namespace("h1") == "p"
-    monkeypatch.setattr(V, "_get_cached_verdict", lambda chash: (_ for _ in ()).throw(RuntimeError("db down")))
+    monkeypatch.setattr(V, "_lookup_current", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("db down")))
     assert V.verdict_cache_namespace("h1") == "p"
     assert V.verdict_cache_namespace("") == "p"
 
@@ -247,7 +247,7 @@ def test_api_entry_skips_verdict_while_background_running(monkeypatch):
     called = []
     monkeypatch.setattr(V, "chart_with_verdict", _fake_async(called, chart))
     monkeypatch.setattr(V, "verdict_in_flight", lambda chash: True)
-    monkeypatch.setattr(V, "_get_stale_verdict", lambda chash: None)
+    monkeypatch.setattr(V, "_lookup_stale", lambda *a, **k: None)
 
     out = asyncio.run(V.chart_with_verdict_for_api(chart))
 
@@ -368,7 +368,7 @@ def test_verdict_five_gods_reads_cached_verdict(monkeypatch):
 
     chart = V.apply_verdict(build_bazi_chart(*ANCHOR), _verdict_for(xishen=["木"], choushen=["水"]))
     monkeypatch.setattr(V, "_hash_of", lambda c: "hash-x")
-    monkeypatch.setattr(V, "_get_cached_verdict", lambda chash: _verdict_for(xishen=["木"], choushen=["水"]))
+    monkeypatch.setattr(V, "_lookup_current", lambda *a, **k: _verdict_for(xishen=["木"], choushen=["水"]))
 
     gods = V.verdict_five_gods(chart)
     assert gods["yongshen"] == "火" and gods["jishen"] == "金"
@@ -383,7 +383,7 @@ def test_verdict_five_gods_survives_db_failure(monkeypatch):
 
     chart = V.apply_verdict(build_bazi_chart(*ANCHOR), _verdict_for())
     monkeypatch.setattr(V, "_hash_of", lambda c: "hash-y")
-    monkeypatch.setattr(V, "_get_cached_verdict", lambda chash: (_ for _ in ()).throw(RuntimeError("db down")))
+    monkeypatch.setattr(V, "_lookup_current", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("db down")))
 
     assert V.verdict_five_gods(chart) == {}
 
@@ -401,8 +401,8 @@ def test_stale_verdict_applied_without_blocking(monkeypatch):
 
     chart = build_bazi_chart(*ANCHOR)
     monkeypatch.setattr(V, "_verdict_enabled", lambda: True)
-    monkeypatch.setattr(V, "_get_cached_verdict", lambda chash: None)
-    monkeypatch.setattr(V, "_get_stale_verdict", lambda chash: _verdict_for())
+    monkeypatch.setattr(V, "_lookup_current", lambda *a, **k: None)
+    monkeypatch.setattr(V, "_lookup_stale", lambda *a, **k: _verdict_for())
     scheduled: list[str] = []
     monkeypatch.setattr(V, "_submit_background_verdict", lambda c, m, h: scheduled.append(h))
 
@@ -441,8 +441,8 @@ def test_cache_namespace_marks_stale_as_s(monkeypatch):
     """只有旧版裁决时命名空间是 s：既区别于 v（新裁决落库后要能失效），也区别于 p。"""
     from app.agent import verdict as V
 
-    monkeypatch.setattr(V, "_get_cached_verdict", lambda chash: None)
-    monkeypatch.setattr(V, "_get_stale_verdict", lambda chash: _verdict_for())
+    monkeypatch.setattr(V, "_lookup_current", lambda *a, **k: None)
+    monkeypatch.setattr(V, "_lookup_stale", lambda *a, **k: _verdict_for())
     assert V.verdict_cache_namespace("h-s") == "s"
 
 
@@ -452,8 +452,8 @@ def test_sync_wrapper_applies_stale_and_schedules_background(monkeypatch):
 
     chart = build_bazi_chart(*ANCHOR)
     monkeypatch.setattr(V, "_verdict_enabled", lambda: True)
-    monkeypatch.setattr(V, "_get_cached_verdict", lambda chash: None)
-    monkeypatch.setattr(V, "_get_stale_verdict", lambda chash: _verdict_for())
+    monkeypatch.setattr(V, "_lookup_current", lambda *a, **k: None)
+    monkeypatch.setattr(V, "_lookup_stale", lambda *a, **k: _verdict_for())
     scheduled: list[str] = []
     monkeypatch.setattr(V, "_submit_background_verdict", lambda c, m, h: scheduled.append(h))
 
@@ -471,8 +471,8 @@ def test_verdict_five_gods_falls_back_to_stale(monkeypatch):
 
     chart = V.apply_verdict(build_bazi_chart(*ANCHOR), _verdict_for(xishen=["木"]), stale=True)
     monkeypatch.setattr(V, "_hash_of", lambda c: "hash-stale")
-    monkeypatch.setattr(V, "_get_cached_verdict", lambda chash: None)
-    monkeypatch.setattr(V, "_get_stale_verdict", lambda chash: _verdict_for(xishen=["木"]))
+    monkeypatch.setattr(V, "_lookup_current", lambda *a, **k: None)
+    monkeypatch.setattr(V, "_lookup_stale", lambda *a, **k: _verdict_for(xishen=["木"]))
 
     gods = V.verdict_five_gods(chart)
 
@@ -485,8 +485,8 @@ def test_stale_verdict_with_broken_schema_falls_back(monkeypatch):
 
     chart = build_bazi_chart(*ANCHOR)
     monkeypatch.setattr(V, "_verdict_enabled", lambda: True)
-    monkeypatch.setattr(V, "_get_cached_verdict", lambda chash: None)
-    monkeypatch.setattr(V, "_get_stale_verdict", lambda chash: {"strength": "偏弱"})
+    monkeypatch.setattr(V, "_lookup_current", lambda *a, **k: None)
+    monkeypatch.setattr(V, "_lookup_stale", lambda *a, **k: {"strength": "偏弱"})
     scheduled: list[str] = []
     monkeypatch.setattr(V, "_submit_background_verdict", lambda c, m, h: scheduled.append(h))
 
@@ -506,8 +506,8 @@ def test_first_chart_without_any_verdict_returns_computed(monkeypatch):
 
     chart = build_bazi_chart(*ANCHOR)
     monkeypatch.setattr(V, "_verdict_enabled", lambda: True)
-    monkeypatch.setattr(V, "_get_cached_verdict", lambda chash: None)
-    monkeypatch.setattr(V, "_get_stale_verdict", lambda chash: None)
+    monkeypatch.setattr(V, "_lookup_current", lambda *a, **k: None)
+    monkeypatch.setattr(V, "_lookup_stale", lambda *a, **k: None)
     scheduled: list[str] = []
     monkeypatch.setattr(V, "_submit_background_verdict", lambda c, m, h: scheduled.append(h))
 
@@ -533,8 +533,8 @@ def test_chart_payload_carries_stale_flag(monkeypatch):
 
     chart = build_bazi_chart(*ANCHOR)
     monkeypatch.setattr(V, "_hash_of", lambda c: "hash-flag")
-    monkeypatch.setattr(V, "_get_cached_verdict", lambda chash: None)
-    monkeypatch.setattr(V, "_get_stale_verdict", lambda chash: _verdict_for())
+    monkeypatch.setattr(V, "_lookup_current", lambda *a, **k: None)
+    monkeypatch.setattr(V, "_lookup_stale", lambda *a, **k: _verdict_for())
 
     fresh = V.apply_verdict(chart, _verdict_for())
     stale = V.apply_verdict(chart, _verdict_for(), stale=True)

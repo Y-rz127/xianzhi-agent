@@ -202,6 +202,13 @@ def _ensure_chart_verdicts(conn) -> None:
         )
         """
     )
+    # 裁决指纹 = 四柱 + 性别：同一张嘴的盘（不同出生时刻/经度/写法）跨人复用同一份裁决。
+    # chart_hash 是早期"出生时刻"口径的身份，保留做审计与老行兜底。
+    conn.execute("ALTER TABLE chart_verdicts ADD COLUMN IF NOT EXISTS verdict_key TEXT")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_chart_verdicts_vkey"
+        " ON chart_verdicts(verdict_key, engine_version, prompt_version)"
+    )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_chart_verdicts_engine ON chart_verdicts(engine_version, prompt_version)"
     )

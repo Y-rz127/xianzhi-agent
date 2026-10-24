@@ -198,6 +198,7 @@ async def get_chart(
         verdict_applied,
         verdict_cache_namespace,
         verdict_is_stale,
+        verdict_key_for_input,
     )
     from app.tools.cache import bazi_cache
 
@@ -206,13 +207,14 @@ async def get_chart(
     # 以及终审命名空间 v/p —— payload 里嵌着终审结论，状态不参与 key 的话，一张盘先按
     # 计算版缓存过，后台补判落库后详情页也永远吐旧载荷（2026-10-11 用户实测到的问题）。
     try:
-        # 指纹必须按**排盘口径**（校正后的出生时间）算，见 chart_hash_for_input 的注释：
-        # 拿原始查询串算会与写侧（chart.birth.solar）错位，导致永远查不到裁决。
+        # 终审按**四柱指纹**查找（同盘跨人复用，只算四柱 ~0.1ms）；
+        # 出生时刻指纹只用于兜底本改造前的历史行与画像口径。
         chash = await asyncio.to_thread(chart_hash_for_input, birth_time, gender, longitude)
+        vkey = await asyncio.to_thread(verdict_key_for_input, birth_time, gender, sect, longitude)
     except Exception:
-        chash = ""
+        chash, vkey = "", ""
     # DB 查询放线程池：与排盘同理，别让一次连接等待卡住事件循环
-    ns = await asyncio.to_thread(verdict_cache_namespace, chash)
+    ns = await asyncio.to_thread(verdict_cache_namespace, chash, vkey)
     cache_tool = f"chart_api:{ns}:{longitude}:{ENGINE_VERSION}:{PROMPT_VERSION}"
     payload = bazi_cache.get(birth_time, gender, sect, yun_sect, cache_tool)
     if payload is not None:

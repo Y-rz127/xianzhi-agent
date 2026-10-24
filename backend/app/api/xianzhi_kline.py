@@ -230,6 +230,7 @@ async def get_kline(
         verdict_applied,
         verdict_cache_namespace,
         verdict_is_stale,
+        verdict_key_for_input,
     )
     from app.tools.cache import bazi_cache
 
@@ -246,13 +247,13 @@ async def get_kline(
     # key 里带终审命名空间 v/p：payload 内嵌终审结论，状态不参与 key 就会
     # "先按计算版缓存过、补判落库后也永远吐旧的"（同 /chart，2026-10-11）
     try:
-        # 指纹按排盘口径（真太阳时校正后）算，与写侧 chart.birth.solar 对齐：
-        # 拿原始时间算会永远 miss，K 线也会一直停在计算版（见 chart_hash_for_input 注释）
+        # 终审按四柱指纹查（同盘跨人复用），出生时刻指纹仅兜底老行；见 chart_hash_for_input 注释
         chash = await asyncio.to_thread(chart_hash_for_input, birth_time, gender, longitude)
+        vkey = await asyncio.to_thread(verdict_key_for_input, birth_time, gender, sect, longitude)
     except Exception:
-        chash = ""
+        chash, vkey = "", ""
     # DB 查询放线程池：别让一次连接等待卡住事件循环
-    ns = await asyncio.to_thread(verdict_cache_namespace, chash)
+    ns = await asyncio.to_thread(verdict_cache_namespace, chash, vkey)
     cache_tool = (
         f"kline_api:{ns}:{longitude}:{max_age}:{max_dayun}:{int(include_months)}:"
         f"{dimension}:{ENGINE_VERSION}:{PROMPT_VERSION}"
@@ -352,16 +353,23 @@ async def annotate_kline(
     anchor_year = annotator.today_year()
     # 覆盖步数要进缓存键：批注写的是"全期最高/最低"，区间一变文案就该变；
     # 终审命名空间同理（批注读的是同一张盘，终审版与计算版文案会不同）
-    from app.agent.verdict import chart_hash_for_input, verdict_cache_namespace
+    from app.agent.verdict import (
+        chart_hash_for_input,
+        verdict_cache_namespace,
+        verdict_key_for_input,
+    )
 
     try:
-        # 同 /kline：指纹按排盘口径算（带经度时是校正后的时间），否则终审命名空间恒为 p
+        # 同 /kline：裁决按四柱指纹查（跨人复用），出生时刻指纹兜底老行
         _chash = await asyncio.to_thread(
             chart_hash_for_input, body.birth_time, body.gender, body.longitude
         )
+        _vkey = await asyncio.to_thread(
+            verdict_key_for_input, body.birth_time, body.gender, body.sect, body.longitude
+        )
     except Exception:
-        _chash = ""
-    _ns = await asyncio.to_thread(verdict_cache_namespace, _chash)
+        _chash, _vkey = "", ""
+    _ns = await asyncio.to_thread(verdict_cache_namespace, _chash, _vkey)
     tool = (
         f"{annotator.cache_tool(body.scope, body.dimension, body.year, anchor_year)}"
         f"|dayun{body.max_dayun}|{_ns}"

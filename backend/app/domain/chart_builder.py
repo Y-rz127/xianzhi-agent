@@ -62,6 +62,31 @@ def parse_gender(gender: str) -> int:
     raise ValueError("gender 必须是 男 或 女")
 
 
+def pillars_of(
+    birth_time: str, sect: int = 2, longitude: float | None = None
+) -> list[str]:
+    """只算四柱干支（不建大运/流年/神煞/细盘），用于"命盘身份"这类只需四柱的场景。
+
+    为什么单列一个函数：终审裁决、K 线评分等都以"这张盘"为单位缓存，而**判定身份只需
+    四柱 + 性别**（格局/强弱/用神都是四柱的函数）。完整排盘实测 ~81ms，只算四柱 ~0.1ms，
+    差 800 倍 —— 命中缓存这条高频路径没必要每次都整盘重算。
+
+    口径必须与 `build_bazi_chart` 逐字一致：同一步"标准化 → 真太阳时校正 → 八字换算"，
+    含 `sect`（晚子时换日影响日柱）。不一致就会出现"身份算出来是一张盘、排出来的却是另一张"。
+    """
+    from app.domain.time_parse import _normalize_birth_time  # 局部导入：time_parse 反向依赖本模块
+
+    y, m, d, h, mi = parse_birth(_normalize_birth_time(birth_time))
+    corr = solar_correction_minutes(datetime.datetime(y, m, d, h, mi), longitude)
+    if corr:
+        corrected = datetime.datetime(y, m, d, h, mi) + datetime.timedelta(minutes=corr)
+        y, m, d, h, mi = corrected.year, corrected.month, corrected.day, corrected.hour, corrected.minute
+    ec = Solar.fromYmdHms(y, m, d, h, mi, 0).getLunar().getEightChar()
+    if sect != 2:
+        ec.setSect(sect)
+    return [ec.getYear(), ec.getMonth(), ec.getDay(), ec.getTime()]
+
+
 def _gender_label(gender_int: int) -> str:
     return "男" if gender_int == 1 else "女"
 

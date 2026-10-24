@@ -320,7 +320,7 @@ def test_favor_carries_five_gods_when_verdict_applied(monkeypatch) -> None:
             "reason": "壬水午月身弱，用印比，土为杀最忌，火为财助杀。",
         },
     )
-    monkeypatch.setattr(V, "_get_cached_verdict", lambda chash: {
+    monkeypatch.setattr(V, "_lookup_current", lambda *a, **k: {
         "useful_god": "水", "avoid_god": "土",
         "xishen": ["金"], "choushen": ["火"], "pingshen": [],
     })

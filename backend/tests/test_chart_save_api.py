@@ -67,8 +67,8 @@ def captured(monkeypatch):
         lambda chart, on_done=None: calls["verdict"].append((chart, on_done)),
     )
     # 裁决缓存默认当"没有"：快照里的五神/终审状态不该去碰真库
-    monkeypatch.setattr(V, "_get_cached_verdict", lambda chash: None)
-    monkeypatch.setattr(V, "_get_stale_verdict", lambda chash: None)
+    monkeypatch.setattr(V, "_lookup_current", lambda *a, **k: None)
+    monkeypatch.setattr(V, "_lookup_stale", lambda *a, **k: None)
     return calls
 
 
@@ -193,7 +193,7 @@ def test_verdict_callback_overwrites_snapshot_and_cache(captured, monkeypatch):
     resp = _save()
     _chart, on_done = captured["verdict"][0]
     # 终审落库后，快照里的五神要能读出来
-    monkeypatch.setattr(V, "_get_cached_verdict", lambda chash: _VERDICT)
+    monkeypatch.setattr(V, "_lookup_current", lambda *a, **k: _VERDICT)
 
     applied = V.apply_verdict(build_bazi_chart(BIRTH, "男"), _VERDICT)
     on_done(applied)
