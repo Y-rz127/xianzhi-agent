@@ -38,7 +38,9 @@ logs/
 .pytest_cache/
 # 单测的记忆临时目录（tests/conftest.py 把 MEMORY_STORE_TYPE 强制为 file 后落这里）
 .pytest-memory/
-# pytest 在临时目录不可写时会回退到当前工作目录，落这些目录（每跑一次一个）
+# pytest 缓存插件写不进 .pytest_cache 时会退回工作目录，每跑一次落一个空目录。
+# backend/pyproject.toml 已用 `-p no:cacheprovider` 关掉该插件；这条只是兜底
+# （比如有人临时去掉那个参数，或别的 pytest 版本走别的路径）。
 pytest-cache-files-*/
 .coverage
 htmlcov/

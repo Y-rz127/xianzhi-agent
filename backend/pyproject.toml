@@ -55,7 +55,11 @@ combine-as-imports = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 # 默认只跑单元/安全/混沌（mock 注入）；集成与负载需显式 -m 选择
-addopts = "-m 'not integration and not load'"
+# -p no:cacheprovider：关掉 pytest 的缓存插件。它在写不进 `.pytest_cache` 时会退回到
+# 工作目录拉一个 `pytest-cache-files-*` 临时目录（本机沙箱里建得出来、删不掉），
+# 每跑一次 pytest 就留一个空目录 + 一条 PytestCacheWarning。缓存只为 --lf 服务，
+# 这里用不上，直接关掉，换来干净的测试输出和零残留。
+addopts = "-m 'not integration and not load' -p no:cacheprovider"
 markers = [
     "integration: 依赖真实 PG/Redis/LLM 的集成测试（需 TEST_POSTGRES_CONNECTION_STRING）",
     "load: 负载测试（脚本形式，不进默认 pytest）",
