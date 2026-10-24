@@ -650,19 +650,37 @@ function writeTurn(conv: string, patch: Partial<TurnState>) {
 
 /**
  * 把某会话正在跑的轮次铺到当前消息列表（切回该会话时调用）。
- * 服务端历史里若已有这轮答案（done 帧丢了/断线重连），直接认领那一条，不重复插。
+ *
+ * 三种情况都要认：
+ * ① 一问一答都已落库（done 帧丢了 / 断线重连）→ 认领最后那条，不重复插；
+ * ② 提问已落库、回答还没 → 只补占位；
+ * ③ 生成期间后端还没落库（`_persist_history` 在 cleanup 才跑，生成中服务端
+ *    那边什么都没记）→ **提问只存在于前端**，切走再切回必须自己补回来，
+ *    否则就出现"提问凭空消失，只剩一个正在推演"。
  */
 function attachTurnToView(conv: string) {
   const st = turns[conv]
   if (!st) return
-  const last = messages.value[messages.value.length - 1]
-  if (last && last.role === 'assistant' && st.text && last.content.slice(0, 40) === st.text.slice(0, 40)) {
-    st.idx = messages.value.length - 1
+  const norm = (s: string) => (s || '').replace(/\s/g, '').slice(0, 24)
+  const want = norm(st.question)
+  const isQuestion = (m?: Message) => !!want && !!m && m.role === 'user' && norm(m.content) === want
+  const n = messages.value.length
+  const last = messages.value[n - 1]
+  const prev = messages.value[n - 2]
+
+  if (last && last.role === 'assistant' && isQuestion(prev)) {
+    // ① 认领历史里那条回答：以服务端落库的全文为准
+    st.idx = n - 1
     st.text = last.content
+    st.progress = ''
     return
+  }
+  if (!isQuestion(last) && st.question.trim()) {
+    messages.value.push({ role: 'user', content: st.question })
   }
   messages.value.push({ role: 'assistant', content: st.text, progress: st.progress || '推演中…' })
   st.idx = messages.value.length - 1
+  scrollToBottom()
 }
 
 /** 正在生成中的会话数：页面隐藏时据此决定要不要留着连接 */
