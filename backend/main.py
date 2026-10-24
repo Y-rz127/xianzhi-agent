@@ -264,6 +264,13 @@ async def lifespan(app: FastAPI):
         await asyncio.to_thread(report_task_db.reconcile_after_restart)
     except Exception as e:
         log.warning("报告任务悬挂修复失败（数据库不可达，跳过）: {}", e)
+    # 管理员账号存 PG：表为空时播种旧 JSON/环境变量默认账号；失败不阻断启动，但登录将 fail-closed
+    try:
+        from app.api.admin_accounts import init_admin_accounts
+
+        await asyncio.to_thread(init_admin_accounts)
+    except Exception as e:
+        log.warning("管理员账号初始化失败（账号库不可用，管理员登录将被拒绝）: {}", e)
     from app.tasks.worker import requeue_pending, worker_loop
 
     try:

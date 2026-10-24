@@ -49,6 +49,9 @@
   后续发布时 `alembic upgrade head` 增量升级；不 stamp 会导致下次 upgrade 报“表已存在”
 - 连接串复用 `POSTGRES_CONNECTION_STRING`，运行前先设好该环境变量；
   `langchain_pg_*`（向量/记忆库表）不在迁移内，由对应库运行时自建
+- 管理员账号存 PG `admin_accounts` 表（原 `data/admin_accounts.json` 仅作首次播种）：
+  发布本版本前先 `alembic upgrade head`；表为空时首次启动自动导入旧 JSON（导入后改名为
+  `admin_accounts.json.imported`）。账号库不可用时管理员登录直接拒绝（fail-closed）
 
 ---
 

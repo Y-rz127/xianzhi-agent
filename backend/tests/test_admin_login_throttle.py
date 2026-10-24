@@ -36,16 +36,19 @@ def _request(payload: bytes, ip: str = "10.0.0.1") -> Request:
     )
 
 
-def _setup_account(monkeypatch, tmp_path, password: str = "correct-password") -> None:
-    data_file = tmp_path / "admin_accounts.json"
-    monkeypatch.setattr(admin_accounts, "ADMIN_DATA_FILE", data_file)
-    admin_accounts._save_accounts(
-        [{
-            "id": "acc_admin",
-            "username": "admin",
-            "password_hash": admin_accounts._hash_admin_password(password),
-            "enabled": True,
-        }]
+def _setup_account(monkeypatch, password: str = "correct-password") -> None:
+    account = {
+        "id": "acc_admin",
+        "username": "admin",
+        "password_hash": admin_accounts._hash_admin_password(password),
+        "enabled": True,
+        "is_super": False,
+        "created_at": "",
+    }
+    monkeypatch.setattr(
+        admin_accounts.admin_store,
+        "get_by_username",
+        lambda username: account if username == "admin" else None,
     )
 
 
@@ -80,8 +83,8 @@ def _login(payload: dict) -> dict:
     return asyncio.run(admin_accounts.admin_login(_request(json.dumps(payload).encode())))
 
 
-def test_ip_limit_blocks_before_password_verification(monkeypatch, tmp_path, no_redis):
-    _setup_account(monkeypatch, tmp_path)
+def test_ip_limit_blocks_before_password_verification(monkeypatch, no_redis):
+    _setup_account(monkeypatch)
     monkeypatch.setattr(settings, "admin_login_ip_limit", 1)
     monkeypatch.setattr(settings, "admin_login_max_fails", 0)
 
@@ -95,8 +98,8 @@ def test_ip_limit_blocks_before_password_verification(monkeypatch, tmp_path, no_
     assert second.value.status_code == 429
 
 
-def test_account_locks_after_consecutive_failures(monkeypatch, tmp_path, no_redis):
-    _setup_account(monkeypatch, tmp_path)
+def test_account_locks_after_consecutive_failures(monkeypatch, no_redis):
+    _setup_account(monkeypatch)
     monkeypatch.setattr(settings, "admin_login_ip_limit", 0)
     monkeypatch.setattr(settings, "admin_login_max_fails", 2)
     monkeypatch.setattr(settings, "admin_login_lock_seconds", 300)
@@ -115,8 +118,8 @@ def test_account_locks_after_consecutive_failures(monkeypatch, tmp_path, no_redi
     assert locked.value.status_code == 429
 
 
-def test_successful_login_clears_failure_counter(monkeypatch, tmp_path, no_redis):
-    _setup_account(monkeypatch, tmp_path)
+def test_successful_login_clears_failure_counter(monkeypatch, no_redis):
+    _setup_account(monkeypatch)
     monkeypatch.setattr(settings, "admin_login_ip_limit", 0)
     monkeypatch.setattr(settings, "admin_login_max_fails", 2)
     monkeypatch.setattr(settings, "admin_login_lock_seconds", 300)

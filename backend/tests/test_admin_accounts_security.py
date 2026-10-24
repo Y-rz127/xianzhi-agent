@@ -55,21 +55,89 @@ def test_legacy_sha256_is_accepted_only_for_migration() -> None:
     assert _verify_admin_password("wrong-password", legacy) == (False, True)
 
 
-def test_login_migrates_legacy_hash(monkeypatch, tmp_path) -> None:
-    data_file = tmp_path / "admin_accounts.json"
-    monkeypatch.setattr(admin_accounts, "ADMIN_DATA_FILE", data_file)
+def test_login_migrates_legacy_hash(monkeypatch) -> None:
     legacy = hashlib.sha256("old-password".encode("utf-8")).hexdigest()
-    admin_accounts._save_accounts(
-        [{"id": "legacy", "username": "admin", "password_hash": legacy, "enabled": True}]
+    account = {"id": "legacy", "username": "admin", "password_hash": legacy, "enabled": True}
+    updated: dict = {}
+    monkeypatch.setattr(
+        admin_accounts.admin_store,
+        "get_by_username",
+        lambda username: account if username == "admin" else None,
     )
+    monkeypatch.setattr(
+        admin_accounts.admin_store,
+        "update_account",
+        lambda account_id, fields: updated.update(fields) or True,
+    )
+
+    async def _clear(username: str) -> None:
+        return None
+
+    monkeypatch.setattr(admin_accounts, "clear_login_failures", _clear)
 
     request = _json_request(b'{"username":"admin","password":"old-password"}')
     result = asyncio.run(admin_accounts.admin_login(request))
 
     assert result["id"] == "legacy"
-    assert admin_accounts._load_accounts()[0]["password_hash"].startswith("pbkdf2_sha256$")
+    assert updated["password_hash"].startswith("pbkdf2_sha256$")
     payload = verify_admin_token(result["token"])
     assert payload is not None and payload["sub"] == "legacy"
+
+
+def test_login_refuses_when_account_db_unavailable(monkeypatch) -> None:
+    async def _allow(*args, **kwargs) -> bool:
+        return True
+
+    async def _not_locked(*args, **kwargs) -> bool:
+        return False
+
+    def _boom(username: str):
+        raise RuntimeError("pg down")
+
+    monkeypatch.setattr(admin_accounts, "ip_login_allowed", _allow)
+    monkeypatch.setattr(admin_accounts, "account_login_locked", _not_locked)
+    monkeypatch.setattr(admin_accounts.admin_store, "get_by_username", _boom)
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(admin_accounts.admin_login(
+            _json_request(b'{"username":"admin","password":"x"}')
+        ))
+    assert exc.value.status_code == 503
+
+
+def test_init_imports_legacy_json_and_backs_up_file(monkeypatch, tmp_path) -> None:
+    import json
+
+    data_file = tmp_path / "admin_accounts.json"
+    data_file.write_text(
+        json.dumps([{"id": "default", "username": "admin", "password_hash": "x"}]),
+        encoding="utf-8",
+    )
+    imported: list[dict] = []
+    monkeypatch.setattr(admin_accounts, "ADMIN_DATA_FILE", data_file)
+    monkeypatch.setattr(admin_accounts.admin_store, "count_accounts", lambda: 0)
+    monkeypatch.setattr(
+        admin_accounts.admin_store,
+        "insert_many",
+        lambda accounts: imported.extend(accounts) or len(accounts),
+    )
+
+    admin_accounts.init_admin_accounts()
+
+    assert [acc["id"] for acc in imported] == ["default"]
+    assert not data_file.exists()
+    assert (tmp_path / "admin_accounts.json.imported").exists()
+
+
+def test_init_skips_import_when_pg_has_accounts(monkeypatch) -> None:
+    monkeypatch.setattr(admin_accounts.admin_store, "count_accounts", lambda: 3)
+    monkeypatch.setattr(
+        admin_accounts.admin_store,
+        "insert_many",
+        lambda accounts: pytest.fail("已有账号时不应导入旧 JSON"),
+    )
+
+    admin_accounts.init_admin_accounts()
 
 
 def test_malformed_hash_fails_closed() -> None:
