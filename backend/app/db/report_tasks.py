@@ -125,20 +125,28 @@ def fail(task_id: str, error: str) -> None:
         )
 
 
-def reconcile_after_restart(stale_pending_minutes: int = 10) -> None:
-    """启动时修复悬挂任务（worker 崩溃/重启导致）：
-    - running：执行到一半进程死了 → failed
-    - pending 超时：入队消息已被消费但状态未推进（BRPOP 与 mark_running 之间崩溃）→ failed
+def list_pending(limit: int = 500) -> list[str]:
+    """列出仍处于 pending 的任务 ID（启动时重新入队，覆盖取号后崩溃的孤儿）。"""
+    with get_pool().connection() as conn:
+        rows = conn.execute(
+            """SELECT id FROM report_tasks WHERE status = 'pending'
+               ORDER BY created_at LIMIT %s""",
+            (limit,),
+        ).fetchall()
+    return [str(row[0]) for row in rows]
+
+
+def reconcile_after_restart() -> None:
+    """启动时修复悬挂任务：running（执行到一半进程死了）→ failed。
+
+    pending 不在这里判失败：交由启动流程重新入队（tasks.worker.requeue_pending）。
+    取号后进程崩溃的任务 DB 仍是 pending、队列里却没有它，重新入队才能继续执行；
+    队列积压导致的 pending 也不该被误杀。
     """
     with get_pool().connection() as conn:
         conn.execute(
             """UPDATE report_tasks SET status = 'failed', error = '服务重启中断，请重新提交', updated_at = now()
                WHERE status = 'running'"""
-        )
-        conn.execute(
-            """UPDATE report_tasks SET status = 'failed', error = '任务超时未执行，请重新提交', updated_at = now()
-               WHERE status = 'pending' AND created_at < now() - interval '%s minutes'""",
-            (stale_pending_minutes,),
         )
 
 

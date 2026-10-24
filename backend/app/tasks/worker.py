@@ -28,6 +28,26 @@ async def enqueue(task_id: str) -> None:
     await r.lpush(_QUEUE_KEY, task_id)
 
 
+async def requeue_pending(limit: int = 500) -> int:
+    """启动时把库中仍 pending 的任务重新入队，返回入队数量。
+
+    覆盖两类孤儿：① RPOP 取号后进程崩溃，DB 仍 pending 且队列里已无该任务；
+    ② 队列消息因 Redis 故障丢失。先 LREM 去重再 LPUSH，重复消息由
+    mark_running 的 pending→running 原子抢占兜底，不会重复执行。
+    """
+    r = await get_redis()
+    if r is None:
+        return 0
+    pending = await asyncio.to_thread(report_tasks.list_pending, limit)
+    for task_id in pending:
+        try:
+            await r.lrem(_QUEUE_KEY, 0, task_id)
+            await r.lpush(_QUEUE_KEY, task_id)
+        except Exception as e:
+            log.warning("[report-worker] 任务重新入队失败 task={}: {}", task_id, e)
+    return len(pending)
+
+
 async def worker_loop(chat_model: Any | None, stop_event: asyncio.Event) -> None:
     """单 worker 循环：RPOP 非阻塞轮询（阻塞式 BRPOP 会与 Redis 连接读超时冲突），
     收到 stop 信号后当轮退出。

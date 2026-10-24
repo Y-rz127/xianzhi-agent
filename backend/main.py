@@ -257,14 +257,21 @@ async def lifespan(app: FastAPI):
     sub_model_specs = [s for s in sub_model_specs if s.model_name]
 
     # 报告任务后台 worker（Redis 队列消费；多副本各自消费，任务单飞）
-    # 启动前先修复上次进程崩溃遗留的 running/超时 pending 悬挂任务
+    # 启动前先把上次进程崩溃遗留的 running 标失败，并把仍 pending 的任务重新入队
     try:
         from app.db import report_tasks as report_task_db
 
         await asyncio.to_thread(report_task_db.reconcile_after_restart)
     except Exception as e:
         log.warning("报告任务悬挂修复失败（数据库不可达，跳过）: {}", e)
-    from app.tasks.worker import worker_loop
+    from app.tasks.worker import requeue_pending, worker_loop
+
+    try:
+        requeued = await requeue_pending()
+        if requeued:
+            log.info("[report-worker] 启动重新入队 pending 任务 {} 个", requeued)
+    except Exception as e:
+        log.warning("报告任务重新入队失败（Redis 不可达，任务保持 pending）: {}", e)
 
     report_stop = asyncio.Event()
     report_workers = [
