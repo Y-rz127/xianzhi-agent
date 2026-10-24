@@ -265,6 +265,13 @@ CI 的 `audit` job 在每次 push / PR 执行：
 - 调整依赖范围改 `backend/requirements.txt`，随后重新生成锁：
   `pip-compile --output-file=requirements.lock requirements.txt`（Python 3.12），提交两者并重跑 audit。
 
+**uniapp（小程序）现状**
+- 已执行 `npm audit fix` 吸收可安全升级的补丁（nanoid、source-map-js 等），`build:mp-weixin` 验证通过。
+- 剩余 70 条（27 high）全部落在 `vite` / `rollup` / `vue` / `@dcloudio/*` 的固定版本上，只能随
+  uni-app 工具链整体升级解决，归入 P1-12（生产构建，等小程序备案）一并处理，不逐包加豁免。
+- 其中多数为构建期依赖，但 `vue` / `@dcloudio/*` 的运行时代码会打进小程序包，升级前需重新
+  验证构建产物，故不视为可长期忽略。
+
 ## 11. 指标抓取与告警
 
 应用内指标是**进程级**的（每副本各一份），跨副本聚合交给 Prometheus：每副本暴露
