@@ -23,7 +23,7 @@ from app.agent.birth_parse import (  # 解耦：生辰解析职责独立成模�
     resolve_bazi_selection,
 )
 from app.agent.checkpoint import delete_checkpoint_thread
-from app.agent.core.base_agent import AgentState, BaseAgent
+from app.agent.core.base_agent import AgentState, BaseAgent, unwrap_user_input
 from app.agent.core.tool_call_agent import ToolCallAgent
 from app.agent.prompts import (
     CHITCHAT_SYSTEM,
@@ -855,14 +855,16 @@ class Xianzhi(ToolCallAgent):
         """
         new_messages = self.message_list[self._history_len :]
         # 提问已在轮次开始时即时落库（_persist_pending_question），这里跳过它，
-        # 否则同一个提问会被写两遍；只跳过"内容完全一致的那一条"，别误伤后续消息
+        # 否则同一个提问会被写两遍；只跳过"内容完全一致的那一条"，别误伤后续消息。
+        # ReAct 路径的 message_list 里是**包装版**（BaseAgent 加了
+        # `--- USER INPUT BEGIN/END ---` 防注入边界），必须先剥掉再比，
+        # 否则包装版永远不等于原文，去重直接失效（2026-10-25 现场：两条一样的提问）。
         if new_messages and self._persisted_question:
             first = new_messages[0]
-            if (
-                first.__class__.__name__ == "HumanMessage"
-                and (getattr(first, "content", "") or "").strip() == self._persisted_question
-            ):
-                new_messages = new_messages[1:]
+            if first.__class__.__name__ == "HumanMessage":
+                first_text = unwrap_user_input(getattr(first, "content", "") or "").strip()
+                if first_text == self._persisted_question:
+                    new_messages = new_messages[1:]
         if new_messages:
             # 过滤 next_step_prompt 注入的 HumanMessage（其内容以工具调度模板开头）
             filtered = [

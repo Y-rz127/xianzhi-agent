@@ -709,6 +709,14 @@ class PostgresMemoryStore:
                 status = pending_status(row[2] if len(row) > 2 else None, row[1], now=now)
                 if status:
                     entry["status"] = status
+                # ReAct 一轮会落好几条 assistant：中间步骤（"我先翻翻书"、"再查一次"）
+                # + 最终回答。前端只要最终回答 —— 否则会话里会出现 3~4 个气泡回答同一个
+                # 问题，TTS 还会逐段朗读（`_filter_steps` 的约定本来就是"只产出最终回答"）。
+                # 同一轮内后一条覆盖前一条；一轮失败没有最终回答时，留下的也是最后那条，
+                # 不会把整轮清空。
+                if role == "assistant" and messages and messages[-1]["role"] == "assistant":
+                    messages[-1] = entry
+                    continue
                 messages.append(entry)
             return messages
         except Exception:

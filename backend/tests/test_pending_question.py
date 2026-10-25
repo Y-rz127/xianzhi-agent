@@ -206,6 +206,38 @@ def test_get_messages_surfaces_turn_status(monkeypatch):
     assert "status" not in out[3]  # 回答本身没有轮次状态
 
 
+def test_get_messages_keeps_only_final_assistant_per_turn(monkeypatch):
+    """ReAct 一轮会落多条 assistant（中间步骤 + 最终回答），前端只该看到最终那条。
+
+    2026-10-25 现场：同一个问题下挂着 3~4 个气泡（"我先翻翻书"、"再查一次"…），
+    点朗读还会逐段读。`xianzhi._filter_steps` 的约定本来就是"只产出最终回答"，
+    展示侧要跟上，否则刷一次页面就把 ReAct 的内心戏全暴露给用户。
+    """
+    now = datetime.now(timezone.utc)
+    rows = [
+        ({"type": "human", "data": {"content": "什么是飞天禄马格？"}}, now, "ended"),
+        ({"type": "ai", "data": {"content": "我先翻翻书"}}, now, None),
+        ({"type": "tool", "data": {"content": "资料"}}, now, None),
+        ({"type": "ai", "data": {"content": "再查一次"}}, now, None),
+        ({"type": "ai", "data": {"content": "最终回答"}}, now, None),
+        ({"type": "human", "data": {"content": "下一问"}}, now, "ended"),
+        ({"type": "ai", "data": {"content": "下一答"}}, now, None),
+    ]
+    conn = _Conn(rows=rows)
+    monkeypatch.setattr(pg, "_get_pool", lambda: _Pool(conn))
+    store = pg.PostgresMemoryStore()
+    monkeypatch.setattr(store, "_resolve_session_uuid", lambda sid: "uuid")
+
+    out = store.get_messages("mp-xianzhi-test")
+
+    assert [(m["role"], m["content"]) for m in out] == [
+        ("user", "什么是飞天禄马格？"),
+        ("assistant", "最终回答"),
+        ("user", "下一问"),
+        ("assistant", "下一答"),
+    ]
+
+
 # ---------------- ④ agent 侧 ----------------
 def _agent(memory) -> object:
     from app.agent.xianzhi import Xianzhi
@@ -265,6 +297,52 @@ def test_persist_history_does_not_write_the_question_twice():
         agent._persist_history()
 
     assert [m.content for m in mem.added] == ["回答"]
+
+
+def test_persist_history_skips_wrapped_question():
+    """ReAct 路径的输入被 BaseAgent 包了防注入边界，去重也得认得出来。
+
+    2026-10-25 现场：`message_list` 里存的是
+    `\\n--- USER INPUT BEGIN ---\\nQ\\n--- USER INPUT END ---\\n`，而 `_persisted_question`
+    是原文 `Q`，直接比永远不等 → 同一问写两遍，前端会话里连着两条
+    "我：什么是飞天禄马格?"。workflow 路径不包边界，所以那边一直是好的。
+    """
+    from app.agent.core.base_agent import _wrap_user_input
+
+    mem = _Mem()
+    agent = _agent(mem)
+    agent._history_len = 0
+    agent._persist_pending_question("什么是飞天禄马格？")
+    agent.message_list = [
+        HumanMessage(content=_wrap_user_input("什么是飞天禄马格？")),
+        AIMessage(content="回答"),
+    ]
+
+    with patch("app.memory.summarizer.maybe_summarize"):
+        agent._persist_history()
+
+    assert [m.content for m in mem.added] == ["回答"]
+
+
+def test_boundary_strip_implementations_agree():
+    """`base_agent` 与 `postgres_memory` 各有一份剥标记实现，行为必须一致。
+
+    漂移的后果特别隐蔽：展示侧剥了（前端看着正常）、去重侧没剥（库里悄悄多一条），
+    排查时只看界面根本发现不了。
+    """
+    from app.agent.core.base_agent import _wrap_user_input, unwrap_user_input
+    from app.memory.postgres_memory import _strip_user_input_boundary as memory_strip
+
+    samples = [
+        _wrap_user_input("什么是飞天禄马格？"),
+        _wrap_user_input(""),
+        "裸文本",
+        "",
+        "前半段\n--- USER INPUT END ---\n",  # 只有后半个标记，不该被剥
+        "\n--- USER INPUT BEGIN ---\n缺后标记",  # 只有前半个标记，不该被剥
+    ]
+    for sample in samples:
+        assert unwrap_user_input(sample) == memory_strip(sample), repr(sample)
 
 
 def test_persist_history_writes_question_when_early_write_failed():

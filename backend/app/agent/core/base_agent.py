@@ -30,6 +30,23 @@ def _wrap_user_input(user_prompt: str) -> str:
     return f"{_USER_INPUT_PREFIX}{user_prompt}{_USER_INPUT_SUFFIX}"
 
 
+def unwrap_user_input(content: str) -> str:
+    """还原 `_wrap_user_input` 包进去的原文（包装的对偶操作，**保留正文**）。
+
+    别和 `app.tools.text_clean.strip_user_input_boundary` 混：那个是给**模型输出**用的，
+    正则把 `--- BEGIN --- ... --- END ---` **整块删掉**（模型复述用户原话时要清干净）；
+    这里的用途是**取出中间正文**，用于落库去重和回显。
+    用错方向的后果：拿 strip 版比对得到空串，去重永远不命中，同一问写两遍。
+
+    2026-10-25 现场：`xianzhi._persist_history` 用原文 `_persisted_question` 比对
+    `message_list[0]`（包装版），包装版永远不等于原文 → 会话里连着两条一样的提问。
+    """
+    text = content or ""
+    if text.startswith(_USER_INPUT_PREFIX) and text.endswith(_USER_INPUT_SUFFIX):
+        return text[len(_USER_INPUT_PREFIX) : -len(_USER_INPUT_SUFFIX)]
+    return text
+
+
 class BaseAgent(ABC):
     """抽象基础代理（对应 Java BaseAgent）：run / run_stream / arun_stream 共用同一执行循环。"""
     def __init__(self, name, chat_model, system_prompt="", next_step_prompt="", max_steps=5):

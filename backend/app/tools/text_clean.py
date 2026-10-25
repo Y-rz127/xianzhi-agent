@@ -53,6 +53,10 @@ def strip_user_input_boundary(content: str) -> str:
     用户输入被 `_wrap_user_input` 包上边界标记以防指令注入；若模型把整段标记连同
     用户原话一并当回答输出，这里一次性剥掉，保证用户永远看不到内部标记。
     所有生成路径（Workflow / 闲聊短路）都应调用，统一防护、避免各自为政漏剥。
+
+    **注意方向**：这里是把 `--- BEGIN --- ... --- END ---` **整块删掉**（连正文一起），
+    只适合"清洗模型输出"。要**取出**被包裹的正文（落库去重、回显还原），用
+    `app.agent.core.base_agent.unwrap_user_input` —— 用反了会拿到空串，去重永远不命中。
     """
     if not content:
         return content
