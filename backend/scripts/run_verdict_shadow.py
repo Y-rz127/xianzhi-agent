@@ -72,7 +72,7 @@ async def main(limit: int, model_name: str, ids: str) -> int:
             invalid += 1
             print(f"  [{i}/{len(jobs)}] {cid}: ✗ invalid（{row['raw_text'][:80]}）")
 
-    print(f"\n=== 影子报告 ===")
+    print("\n=== 影子报告 ===")
     print(f"成功 {ok}（一致 {same} / 差异 {diff_cnt}）、invalid {invalid}")
     if diff_lines:
         print("\n全部差异：")

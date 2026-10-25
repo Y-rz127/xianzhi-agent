@@ -58,6 +58,13 @@ if _TEST_DSN_SAFE:
 if _TEST_REDIS:
     settings.redis_url = _TEST_REDIS
 
+# 建索引/embedding 初始化在这里就关掉，不能只靠 _isolate_runtime。
+# 原因：module/session 级的 `TestClient(app)` fixture 在 function 级 autouse fixture **之前**
+# 就进 lifespan，那时 rag_init_enabled 还是 True，于是真去 ping DashScope embedding；
+# 网络一抖就是 4×60s 重试（再加上 HF 回退），全量跑测能从 80s 拖到 6 分钟，
+# 而且断言全对、只是慢，很容易被误判成"最近改动引入了性能回归"。
+settings.rag_init_enabled = False
+
 
 def pytest_sessionstart(session):
     """用测试库时先清会话类表：CI 每次都是新库，本机却是长驻库，残留会让断言飘。"""

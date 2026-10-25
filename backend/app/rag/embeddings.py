@@ -7,6 +7,16 @@ from langchain_core.embeddings import Embeddings
 from app.core.config import settings
 from app.core.logger import log
 
+# 启动探测用的超时/重试。真实批次走 get_embeddings() 的 60s/3 次；
+# 探测只问"通不通"，不需要 4 次重试放大（见 _probe_dashscope 的说明）。
+#
+# 25s 是实测出来的下限，别往下调：DashScope 单条 embedding 平时只要 0.2~0.5s，
+# 但**服务启动瞬间**同时有 5~6 个 LLM 探活（kimi/deepseek/qwen 各一次）在抢同一个
+# 企业代理，8s 会把"排队等代理"误判成"服务挂了"→ 触发 HF 回退 → 内网必然失败
+# → RAG 整个不可用（2026-10-25 用 8s 踩过，日志 `DashScope embedding 不可用（Request timed out.）`）。
+_PROBE_TIMEOUT = 25.0
+_PROBE_RETRIES = 0
+
 
 class BatchEmbeddings(Embeddings):
     """把大批量 embed_documents 拆成小批次，同时满足条数与总字符数双上限。
@@ -86,12 +96,56 @@ def get_embeddings() -> Embeddings:
     )
 
 
+def _probe_dashscope() -> None:
+    """用短超时客户端探一次 DashScope embedding，不可用即抛。
+
+    刻意不复用 `get_embeddings()`：那个客户端的 60s / 3 次重试是给**真实批次**用的
+    （单批 10 条 × 600 字，长尾确实可能几十秒）。探测只需要回答"通不通"，
+    用同一套重试会把一次网络抖动放大成 4×60s——端口已经在听、健康检查却报 degraded，
+    看起来像服务挂了。2026-10-25 实测：DashScope 一抖，RAG 初始化从 1s 变 300s，
+    全量跑测也被拖到 6 分钟。
+    """
+    from langchain_openai import OpenAIEmbeddings
+
+    probe = OpenAIEmbeddings(
+        model=settings.embedding_model,
+        api_key=settings.embedding_api_key,
+        base_url=settings.dashscope_url,
+        timeout=_PROBE_TIMEOUT,
+        max_retries=_PROBE_RETRIES,
+        check_embedding_ctx_length=False,
+    )
+    probe.embed_query("ping")
+
+
 def _get_local_embeddings() -> Embeddings:
-    """本地 HuggingFace embedding（DashScope 不可用时的回退）。"""
+    """本地 HuggingFace embedding（DashScope 不可用时的回退）。
+
+    内网环境基本走不到成功路径：没有外网，连 huggingface.co 的 config.json 都要等
+    WinError 10060（十几秒起）。先用 `try_to_load_from_cache` 查本地缓存 —— 这个调用
+    不联网、毫秒级 —— 没缓存就直接抛，别让启动白等十几秒再打一堆
+    `LangChainDeprecationWarning` 把日志刷花。
+    """
     try:
         from langchain_community.embeddings import HuggingFaceEmbeddings
     except ImportError as e:
-        raise RuntimeError("本地 embedding 回退 sentence-transformers") from e
+        raise RuntimeError("本地 embedding 回退需要 langchain-community + sentence-transformers") from e
+
+    try:
+        from huggingface_hub import try_to_load_from_cache
+    except ImportError:
+        try_to_load_from_cache = None  # type: ignore[assignment]
+
+    if try_to_load_from_cache is not None:
+        # 命中返回缓存文件路径（str），未命中返回 _CACHED_NO_EXIST 或 None，两者都不是 str
+        cached = try_to_load_from_cache(settings.embedding_local_model, "config.json")
+        if not isinstance(cached, str):
+            raise RuntimeError(
+                "本地 embedding 模型未下载（{}），内网无法从 huggingface.co 拉取；"
+                "如需启用本地回退，请先在有网机器上下载到 HF 缓存目录再拷贝".format(
+                    settings.embedding_local_model
+                )
+            )
     return HuggingFaceEmbeddings(model_name=settings.embedding_local_model)
 
 
@@ -101,10 +155,13 @@ def _select_embeddings() -> tuple[Embeddings, str]:
     优先 DashScope；实测调用失败且允许回退时切换本地模型。
     embedding_id 参与文档指纹，换模型后指纹不匹配会自动重建索引，
     保证查询向量与入库向量来自同一模型。
+
+    探测走 `_probe_dashscope`（短超时、不重试），不用返回的这个客户端自己去 ping ——
+    否则一次抖动就是 4×60s，启动阶段白等 5 分钟。
     """
     dashscope = get_embeddings()
     try:
-        dashscope.embed_query("ping")
+        _probe_dashscope()
         return dashscope, "dashscope:{}".format(settings.embedding_model)
     except Exception as e:
         if not settings.embedding_local_fallback:

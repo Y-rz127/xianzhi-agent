@@ -50,14 +50,35 @@ def _rerank_weight(query: str, doc: Document) -> float:
     return weight
 
 
+# Chroma 兜底库的集合名（本地目录内唯一，与 settings.postgres_collection 无关）
+_CHROMA_COLLECTION = "xianzhi_knowledge"
+
+
+def _reset_chroma_collection() -> None:
+    """删除同名 Chroma 集合，让重建从零开始。
+
+    `Chroma.from_documents` 只做 upsert，不会替换集合：换过 embedding 模型后旧集合仍是
+    老维度，查询会报 `Collection expecting embedding with dimension of 1536, got 1024`，
+    表现为「重建成功」但索引不可用。重建前先删，才能保证维度跟着新模型走。
+    """
+    import chromadb
+
+    client = chromadb.PersistentClient(path=str(settings.vector_db_dir))
+    try:
+        client.delete_collection(_CHROMA_COLLECTION)
+    except Exception:
+        pass  # 集合不存在（首次构建）
+
+
 def _build_chroma(chunks: list[Document], embeddings: Embeddings):
     """Chroma 本地持久化向量库（全量重建）。"""
     from langchain_chroma import Chroma
 
+    _reset_chroma_collection()
     store = Chroma.from_documents(
         documents=chunks,
         embedding=embeddings,
-        collection_name="xianzhi_knowledge",
+        collection_name=_CHROMA_COLLECTION,
         persist_directory=str(settings.vector_db_dir),
     )
     log.info("Chroma 向量库重建完成: {}", settings.vector_db_dir)
@@ -69,7 +90,7 @@ def _load_chroma(embeddings: Embeddings):
     from langchain_chroma import Chroma
 
     store = Chroma(
-        collection_name="xianzhi_knowledge",
+        collection_name=_CHROMA_COLLECTION,
         embedding_function=embeddings,
         persist_directory=str(settings.vector_db_dir),
     )
