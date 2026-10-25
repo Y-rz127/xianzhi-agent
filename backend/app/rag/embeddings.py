@@ -7,14 +7,15 @@ from langchain_core.embeddings import Embeddings
 from app.core.config import settings
 from app.core.logger import log
 
-# 启动探测用的超时/重试。真实批次走 get_embeddings() 的 60s/3 次；
-# 探测只问"通不通"，不需要 4 次重试放大（见 _probe_dashscope 的说明）。
+# 启动探测用的超时/重试。真实批次走 get_embeddings() 的 60s/3 次重试。
 #
-# 25s 是实测出来的下限，别往下调：DashScope 单条 embedding 平时只要 0.2~0.5s，
-# 但**服务启动瞬间**同时有 5~6 个 LLM 探活（kimi/deepseek/qwen 各一次）在抢同一个
-# 企业代理，8s 会把"排队等代理"误判成"服务挂了"→ 触发 HF 回退 → 内网必然失败
-# → RAG 整个不可用（2026-10-25 用 8s 踩过，日志 `DashScope embedding 不可用（Request timed out.）`）。
-_PROBE_TIMEOUT = 25.0
+# 探测只做"快速判定"，8s 足够：DashScope 单条 embedding 平时 0.2~0.5s，真正慢的是
+# **启动瞬间的并发排队** —— 实测 6 并发里有 1 个会被企业代理卡 40s+（APIConnectionError），
+# 这时把超时调到 25s 也照样超时，只是每次启动白等 25 秒。
+# 关键前提：**探测失败不再判死 RAG**（见 `_select_embeddings`）—— 复用已有 pgvector 索引
+# 根本不需要 embedding，真正的 `embed_query` 只发生在检索时。所以这里取小值只影响
+# "启动慢多少"，不影响可用性；别为了等拥塞再往上调。
+_PROBE_TIMEOUT = 8.0
 _PROBE_RETRIES = 0
 
 
@@ -152,12 +153,21 @@ def _get_local_embeddings() -> Embeddings:
 def _select_embeddings() -> tuple[Embeddings, str]:
     """选择可用 embedding，返回 (embeddings, embedding_id)。
 
-    优先 DashScope；实测调用失败且允许回退时切换本地模型。
+    优先 DashScope；探测失败且本地模型**确实可用**时才回退。
     embedding_id 参与文档指纹，换模型后指纹不匹配会自动重建索引，
     保证查询向量与入库向量来自同一模型。
 
     探测走 `_probe_dashscope`（短超时、不重试），不用返回的这个客户端自己去 ping ——
     否则一次抖动就是 4×60s，启动阶段白等 5 分钟。
+
+    **探测失败不等于 DashScope 挂了**，所以不判死：
+    实测启动瞬间 6 个探活并发时，5 个 0.3~0.6s 返回，1 个会被企业代理卡 46s
+    （`APIConnectionError`）—— 纯粹是并发连接排队，跟服务健康无关。
+    更关键的是：**复用已有 pgvector 索引根本不需要 embedding**，真正的
+    `embed_query` 只发生在检索时，那时启动期的拥塞早已过去。
+    所以本地回退也不可用时（内网没预下载），仍然带着 DashScope 起来，
+    让 RAG 就绪；检索真失败会被 `search()` 的 try/except 兜住返回空，
+    比"整个 RAG 不可用、问一句零知识"要好。
     """
     dashscope = get_embeddings()
     try:
@@ -167,10 +177,16 @@ def _select_embeddings() -> tuple[Embeddings, str]:
         if not settings.embedding_local_fallback:
             raise
         log.warning(
-            "DashScope embedding 不可用（{}），回退本地模型 {}",
+            "DashScope embedding 探测失败（{}），尝试本地回退 {}",
             e,
             settings.embedding_local_model,
         )
-        local = _get_local_embeddings()
-        local.embed_query("ping")  # 触发模型下载/加载，不可用则抛错
+        try:
+            local = _get_local_embeddings()
+            local.embed_query("ping")  # 触发模型加载，不可用则抛错
+        except Exception as local_err:
+            log.warning(
+                "本地回退也不可用（{}），继续使用 DashScope，检索时再试", local_err
+            )
+            return dashscope, "dashscope:{}".format(settings.embedding_model)
         return local, "local:{}".format(settings.embedding_local_model)

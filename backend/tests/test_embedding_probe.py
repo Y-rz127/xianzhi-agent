@@ -33,10 +33,9 @@ def test_probe_client_uses_short_timeout_and_no_retry(monkeypatch):
 
     assert captured["timeout"] == embeddings._PROBE_TIMEOUT
     assert captured["max_retries"] == 0
-    # 下限别调太小：服务启动瞬间有 5~6 个 LLM 探活在抢同一个企业代理，8s 会把
-    # "排队等代理"误判成"服务挂了"（2026-10-25 踩过，RAG 直接降级）。
-    # 上限也别放开：真挂了不该让启动干等太久。
-    assert 10 <= embeddings._PROBE_TIMEOUT <= 30
+    # 取值只影响"启动慢多少"：探测失败不再判死 RAG（见 _select_embeddings），
+    # 所以别指望靠调大它来扛启动拥塞 —— 实测 6 并发里那个坏连接会卡 40s+，调多大都可能撞上。
+    assert embeddings._PROBE_TIMEOUT <= 10
 
 
 def test_select_embeddings_probes_instead_of_pinging_real_client(monkeypatch):
@@ -76,6 +75,33 @@ def test_select_embeddings_falls_back_when_probe_raises(monkeypatch):
 
     assert isinstance(got, FakeLocal)
     assert embedding_id.startswith("local:")
+
+
+def test_keeps_dashscope_when_probe_fails_and_local_unavailable(monkeypatch):
+    """探测超时 + 本地模型没预下载时，**不能**把 RAG 判死。
+
+    内网很常见的组合：启动瞬间 6 个探活并发，企业代理会把其中一条连接卡 40s+
+    （实测 APIConnectionError），探测必然超时；而本地 HF 模型没下载、内网也下不了。
+    此时若抛错，RAG 整个不可用、用户问一句零知识；但复用已建好的 pgvector 索引
+    根本不需要 embedding（真正调用在检索时）—— 带着 DashScope 起来才是对的。
+    """
+    dashscope = object()
+
+    def _timeout():
+        raise TimeoutError("Request timed out.")
+
+    def _no_local():
+        raise RuntimeError("本地 embedding 模型未下载")
+
+    monkeypatch.setattr(embeddings, "get_embeddings", lambda: dashscope)
+    monkeypatch.setattr(embeddings, "_probe_dashscope", _timeout)
+    monkeypatch.setattr(embeddings, "_get_local_embeddings", _no_local)
+    monkeypatch.setattr(settings, "embedding_local_fallback", True)
+
+    got, embedding_id = embeddings._select_embeddings()
+
+    assert got is dashscope
+    assert embedding_id.startswith("dashscope:")
 
 
 def test_select_embeddings_raises_when_fallback_disabled(monkeypatch):
