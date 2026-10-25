@@ -159,6 +159,9 @@ def format_review_context(chart: BaziChart) -> str:
     """
     shensha_by_pillar = _shensha_by_pillar(chart)
     wx = chart.wuxing
+    # 最旺/最弱按**全局**口径算，与命盘页和回答正文一致（理由见下方五行段注释）
+    g_strong = max(wx.global_counts, key=wx.global_counts.get)
+    g_weak = min(wx.global_counts, key=wx.global_counts.get)
     lines = [
         f"【性别/生肖】 {chart.birth.gender} / {chart.birth.shengxiao}",
         "",
@@ -176,9 +179,13 @@ def format_review_context(chart: BaziChart) -> str:
         "",
         "【五行与日主】",
         f"  日主: {wx.day_master}({wx.day_master_wuxing})",
-        f"  五行权重·对日干影响（日干不计）: {wx.counts}",
+        # 两个口径必须都给：回答正文引用的是**全局**（含日干本气，见 format_analysis_text
+        # 的硬性要求），审核员只拿"对日干影响"去比就会把正确回答判成错 —— 少了日干本气
+        # 那一份，数值和最旺/最弱都可能不同（2026-10-25 用户反馈终审口径不对）。
+        f"  五行分布·全局（含日干本气；回答正文引用的就是这个口径）: {wx.global_counts}",
+        f"  五行权重·对日干影响（日干不计；仅用于判强弱，不是正文口径）: {wx.counts}",
         f"  显性五行: {wx.visible_counts}",
-        f"  最旺/最弱: {wx.strongest}({wx.counts[wx.strongest]}) / {wx.weakest}({wx.counts[wx.weakest]})",
+        f"  最旺/最弱（全局）: {g_strong}({wx.global_counts[g_strong]}) / {g_weak}({wx.global_counts[g_weak]})",
         f"  日主强弱: {wx.strength} (score={wx.strength_score})",
         f"  特殊格局: {wx.special_pattern or '无（普通正格/未达极端候选）'}",
         f"  用神提示: {wx.useful_hint}",
