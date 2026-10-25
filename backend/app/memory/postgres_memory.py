@@ -25,16 +25,28 @@ from app.db.pool import get_pool as _get_pool
 # 会话 schema 初始化状态（仅 memory 层会话表；业务表统一由 app.db.schema 负责）
 _schema_lock = threading.Lock()
 _schema_ready = False
+# 不可自愈的初始化失败（依赖缺失/被系统策略拦截）。非空 = 本进程内不再重试，
+# 也不再只打一条"将重试"的 WARNING —— 那种错重试一万次也不会好。
+_schema_fatal = ""
+
+
+def memory_schema_status() -> dict:
+    """记忆层建表状态，供 /api/health/ready 与启动自检使用。
+
+    - ``ready``：建表成功，对话历史可以正常读写；
+    - ``fatal``：非空表示依赖层不可用（重试无效），值是失败原因。
+    """
+    return {"ready": _schema_ready, "fatal": _schema_fatal}
 
 
 def _ensure_schema():
     """建表与索引（进程内只执行一次；数据库不可达时降级，不阻断启动）。"""
-    global _schema_ready
-    if _schema_ready:
+    global _schema_ready, _schema_fatal
+    if _schema_ready or _schema_fatal:
         return
     pool = _get_pool()  # 先取池（内部自锁），避免嵌套持锁
     with _schema_lock:
-        if _schema_ready:
+        if _schema_ready or _schema_fatal:
             return
         try:
             with pool.connection() as conn:
@@ -108,6 +120,22 @@ def _ensure_schema():
                 )
                 log.info("PG 记忆表已就绪: {}", settings.memory_table_name)
             _schema_ready = True
+            _schema_fatal = ""
+        except ImportError as e:
+            # 依赖层不可用（venv 里少了包，或被系统策略拦住原生扩展 —— Windows 智能应用
+            # 控制/AppLocker 拦 sqlalchemy 的 _util_cy.pyd 就是这个症状：日志里写
+            # 「应用程序控制策略已阻止此文件」）。这种错**重试永远不会好**，还会让
+            # 服务"看着启动成功、其实一句对话都存不下"，所以按不可自愈处理：
+            # 打 ERROR、进程内不再重试，并由 /api/health/ready 报 not ready。
+            _schema_fatal = f"{type(e).__name__}: {e}"
+            log.error(
+                "PG 记忆层依赖不可用（重试无效，对话历史无法持久化）: {}；"
+                "若消息含「应用程序控制策略已阻止此文件」，是 Windows 智能应用控制/AppLocker "
+                "拦住了 venv 里的原生扩展（常见于 sqlalchemy 的 _util_cy.pyd）。"
+                "修复：在 backend/ 目录跑 ..\\.venv\\Scripts\\python.exe scripts\\ensure_cext_fallback.py"
+                "（自动停用被拦的 .pyd，SQLAlchemy 走纯 Python 实现，语义等价）",
+                e,
+            )
         except Exception as e:
             # 数据库暂不可达：仅告警，保持 _schema_ready=False，下次调用/重启时重试
             log.warning("PG 记忆表初始化失败（数据库暂不可达，将在重启/首次使用时重试）: {}", e)

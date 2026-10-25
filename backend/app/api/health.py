@@ -54,18 +54,45 @@ async def _queue_depth() -> int | None:
         return None
 
 
+async def _check_memory() -> dict:
+    """记忆层（对话历史）可用性：PG 模式要求建表成功。
+
+    为什么不能复用 `_check_pg`：那条只做裸 psycopg 的 `SELECT 1`，而对话历史走的是
+    `langchain_postgres`（底层 SQLAlchemy）。实测过一种"绿着但废了"的组合 ——
+    PG 探测正常、记忆层却因原生扩展被系统策略拦截（Windows 智能应用控制拦
+    `sqlalchemy/sql/_util_cy.pyd`）而完全不可用：此时 /health/ready 仍报 ok，
+    但用户问一句就丢一句。所以这里单独探一次，宁可 503 也别假绿。
+    """
+    kind = (settings.memory_store_type or "").strip().lower()
+    if kind != "postgres":
+        return {"ok": True, "detail": kind or "file"}
+    try:
+        from app.memory import postgres_memory as pg_memory
+
+        status = pg_memory.memory_schema_status()
+    except Exception as e:
+        return {"ok": False, "error": f"{type(e).__name__}: {str(e)[:80]}"}
+    fatal = status.get("fatal") or ""
+    if fatal:
+        return {"ok": False, "error": fatal[:120]}
+    if not status.get("ready"):
+        return {"ok": False, "error": "schema 未就绪"}
+    return {"ok": True}
+
+
 async def readiness() -> dict:
     """返回 readiness 快照；ok=False 时调用方应返回 503。"""
-    pg, redis = await asyncio.gather(_check_pg(), _check_redis())
+    pg, redis, memory = await asyncio.gather(_check_pg(), _check_redis(), _check_memory())
     rag_ready = get_knowledge_base().ready
     queue_depth = await _queue_depth() if redis.get("ok") else None
-    ok = bool(pg.get("ok") and redis.get("ok") and rag_ready)
+    ok = bool(pg.get("ok") and redis.get("ok") and memory.get("ok") and rag_ready)
     return {
         "status": "ok" if ok else "degraded",
         "ok": ok,
         "version": settings.app_version,
         "checks": {
             "postgres": pg,
+            "memory": memory,
             "redis": redis,
             "rag": {"ok": rag_ready},
             "report_queue": {"ok": queue_depth is not None, "depth": queue_depth},
