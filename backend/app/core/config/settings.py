@@ -157,6 +157,10 @@ class Settings(BaseSettings):
     workflow_repair_timeout: float = Field(default=50.0, alias="WORKFLOW_REPAIR_TIMEOUT")
     # 无预算场景（脚本/测试直接调用）的兜底单次 LLM 超时
     workflow_llm_timeout: float = Field(default=180.0, alias="WORKFLOW_LLM_TIMEOUT")
+    # 命盘终审 LLM 总预算（秒）：模型层各有 timeout/重试/熔断，这里是外层兜底。
+    # 注意必须 ≥ LLM_TIMEOUT × (LLM_MAX_RETRIES + 1) + 排队时间，否则重试链还没跑完
+    # 外层就先到期（慢模型/思考型模型场景下 180s 默认值可能不够）
+    verdict_timeout: float = Field(default=180.0, alias="VERDICT_TIMEOUT")
 
     # 并发与连接池
     # 专用线程池（替换 asyncio 默认池，默认仅 min(32, cpu+4)）：

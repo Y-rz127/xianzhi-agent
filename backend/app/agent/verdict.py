@@ -30,6 +30,7 @@ import time
 from dataclasses import replace
 from typing import Any
 
+from app.core.config import settings
 from app.core.logger import log
 from app.core.privacy import safe_birth_time
 from app.domain.analysis_calc import ENGINE_VERSION
@@ -38,8 +39,10 @@ from app.domain.fortune_score import detect_ailment, favor_vector
 
 PROMPT_VERSION = "v9"
 
-# 终审 LLM 总超时（秒）：模型层各有 timeout/重试/熔断，这里兜底防接口被拖死
-_VERDICT_TIMEOUT = 180.0
+# 终审 LLM 总超时（秒）：模型层各有 timeout/重试/熔断，这里兜底防接口被拖死。
+# 可用 VERDICT_TIMEOUT 环境变量调整；必须 ≥ LLM_TIMEOUT × (LLM_MAX_RETRIES+1)，
+# 否则模型层重试链还没跑完外层就先到期，日志只会看到"裁决超时"。
+_VERDICT_TIMEOUT = settings.verdict_timeout
 
 _VALID_STRENGTH = ("极旺", "偏旺", "中和", "偏弱", "极弱")
 _VALID_WUXING = ("金", "木", "水", "火", "土")
