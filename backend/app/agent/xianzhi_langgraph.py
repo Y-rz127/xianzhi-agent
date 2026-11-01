@@ -37,6 +37,10 @@ FACT_CHECK_FAILED_TEXT = (
     "可以把问题问得更具体，或稍后重试。"
 )
 
+# 修复节点的最低预算门槛：低于此值启动修复注定超时（思考型模型连首 token 都出不来），
+# 还会被 SDK 重试放大成 4 倍等待；不如直接下发原稿。10s 曾在剩余 15s 时放行注定失败的调用。
+_REPAIR_MIN_BUDGET = 20.0
+
 
 class XianzhiGraphState(TypedDict, total=False):
     """LangGraph 工作流状态字典：各节点在 state 上读写，贯穿分类→扩盘→检索→生成→校验→修复。"""
@@ -225,7 +229,7 @@ def _repair_node(workflow, state: XianzhiGraphState) -> XianzhiGraphState:
     if is_chitchat:
         log.info("[Reflextion] 闲聊场景，跳过修复节点，直接返回原答案")
         return {"final_answer": state.get("raw_answer", ""), "issues": []}
-    if not budget_enough(10.0):
+    if not budget_enough(_REPAIR_MIN_BUDGET):
         if state.get("issues_hard"):
             record_error("answer_blocked_unresolved_facts")
             log.warning(
@@ -253,7 +257,19 @@ def _repair_node(workflow, state: XianzhiGraphState) -> XianzhiGraphState:
         state.get("worker"),
     )
     start = time.monotonic()
-    repaired = workflow._invoke(messages, timeout_cap=settings.workflow_repair_timeout)
+    try:
+        repaired = workflow._invoke(messages, timeout_cap=settings.workflow_repair_timeout)
+    except Exception as e:
+        # 修复调用失败（超时/预算尽/上游异常）：按统一降级策略下发原稿，绝不让整轮报错。
+        # 现场（2026-10-31）：审核耗时超支把预算吃到剩 15s，修复 cap 被压到 15.25s，
+        # 思考型模型必然 ReadTimeout，异常一路穿透到图外，用户看到"分析过程遇到错误"。
+        record_error("workflow_repair_failed_delivered")
+        log.warning(
+            "[Reflextion] {} 修复调用失败（{}），按统一策略下发原稿",
+            getattr(worker, "label", "?"),
+            e,
+        )
+        return {"final_answer": state.get("raw_answer", ""), "issues": state.get("issues", [])}
     log.info(
         "[Reflextion] {} Worker 修复完成 ({}字) 耗时{:.1f}s 剩余预算{:.1f}s，二次审核中...",
         getattr(worker, "label", "?"),

@@ -317,6 +317,17 @@ def _coerce_pass(value: Any) -> bool:
     return True
 
 
+def _cap_issue(issue: str, limit: int = 400) -> str:
+    """单条 issue 截到上限长度。
+
+    审核模型偶发把"内心戏"写进 issue（现场一条 700+ 字的推理独白，结论却藏在句尾），
+    超长 issue 对修复器不是线索而是噪声，会把修复提示词挤爆、把修复方向带偏。
+    截断保留前半段：问题定位通常在开头，推演过程在后面。
+    """
+    issue = (issue or "").strip()
+    return issue if len(issue) <= limit else issue[:limit] + "…"
+
+
 def _salvage_verdict(raw: str) -> tuple[bool, list[str]] | None:
     """从**残缺**的审核输出里抢救结论与 issues（JSON 解析失败时的兜底）。
 
@@ -595,7 +606,9 @@ class ReviewerWorker:
                         issues = [
                             "审核判不通过但输出被截断、未给出可解析的 issues；请按标准命理口径复核该回答的事实与生克逻辑"
                         ]
-                    return FactCheckResult(ok=passed, issues=issues, source="llm_salvaged")
+                    return FactCheckResult(
+                        ok=passed, issues=[_cap_issue(i) for i in issues], source="llm_salvaged"
+                    )
                 log.warning(
                     "[Reviewer] LLM 审核返回非 JSON 且捞不到结论（截断={}），审核未完成（不视为通过）; raw(前800字):\n{}",
                     truncated,
@@ -605,7 +618,11 @@ class ReviewerWorker:
                 return FactCheckResult(ok=True, source="reviewer_unavailable", degraded=True)
             passed = _coerce_pass(data.get("pass", True))
             issues_raw = data.get("issues", [])
-            issues = [str(i) for i in issues_raw if str(i).strip()] if isinstance(issues_raw, list) else []
+            issues = (
+                [_cap_issue(str(i)) for i in issues_raw if str(i).strip()]
+                if isinstance(issues_raw, list)
+                else []
+            )
             if not passed and not issues:
                 # 判不通过却不给 issues：修复器无事可做，只会白烧一轮，按通过处理并计入指标
                 log.warning("[Reviewer] LLM 判不通过但未给出 issues，按通过处理（避免空修复轮）")

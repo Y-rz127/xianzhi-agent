@@ -90,6 +90,35 @@ def test_repair_node_skips_when_budget_exhausted():
     assert out["issues"] == ["问题1"]
 
 
+def test_repair_node_delivers_raw_answer_when_invoke_fails(monkeypatch):
+    """修复调用超时/异常：下发原稿，绝不让整轮报错（2026-10-31 婚姻题现场）。"""
+
+    class _Workflow:
+        def _emit_progress(self, text):
+            pass
+
+        def _build_repair_messages(self, *args, **kwargs):
+            return []
+
+        def _invoke(self, messages, timeout_cap=None):
+            raise RuntimeError("simulated ReadTimeout")
+
+    state = {
+        "intent": QuestionIntent(domain="marriage", label="婚姻关系"),
+        "raw_answer": "原稿回答",
+        "issues": ["issue-1", "issue-2"],
+        "chart_context": SimpleNamespace(chart=object()),
+        "user_prompt": "q",
+        "knowledge": "",
+        "worker": SimpleNamespace(label="婚姻关系"),
+    }
+    with turn_budget(60):
+        out = graph._repair_node(_Workflow(), state)
+
+    assert out["final_answer"] == "原稿回答"
+    assert out["issues"] == ["issue-1", "issue-2"]
+
+
 def test_check_node_skips_llm_review_when_budget_exhausted(monkeypatch):
     class _Reviewer:
         def __init__(self):
