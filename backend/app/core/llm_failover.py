@@ -72,9 +72,15 @@ def _retryable(exc: Exception) -> bool:
         # 额度用尽（如 openai.PermissionDeniedError + AllocationQuota.FreeTierOnly）：
         # 属模型级不可用，必须降级；此前落到末尾 return False，导致整条链一次都没试
         return True
-    if "RateLimitError" in name or "APITimeoutError" in name or "APIConnectionError" in name:
-        return True
-    if "InternalServerError" in name:
+    if (
+        "RateLimitError" in name
+        or "APITimeoutError" in name
+        or "OpenAITimeoutError" in name
+        or "APIConnectionError" in name
+        or "OpenAIConnectionError" in name
+        or "InternalServerError" in name
+        or "OpenAIAPIError" in name
+    ):
         return True
     if "BadRequestError" in name or "UnprocessableEntityError" in name or "NotFoundError" in name:
         # 模型级参数不兼容（temperature 等）→ 跳过该模型继续降级

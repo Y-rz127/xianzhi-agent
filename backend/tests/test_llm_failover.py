@@ -129,6 +129,48 @@ def test_failover_switches_on_model_param_error(monkeypatch):
     assert backup.calls == 1
 
 
+# ---------------- 5. langchain-openai 包装异常（2026-10-31 超时断链事故） ----------------
+# 升级 langchain-openai 1.7 后，原始 openai 异常被包装成 OpenAI*Error 族。
+# "APITimeoutError" 不是 "OpenAITimeoutError" 的子串（Open≠API），旧名字匹配全部落空，
+# 超时被判"不可降级"直接抛出——降级链对超时静默失效，kimi-k3 一次生成超时即整轮报错。
+
+
+def _langchain_exc(cls_name: str) -> Exception:
+    from types import SimpleNamespace
+
+    import langchain_openai.chat_models.base as base
+
+    cls = getattr(base, cls_name)
+    fake_response = SimpleNamespace(request=object(), status_code=500, headers={})
+    if cls_name == "OpenAITimeoutError":
+        return cls(fake_response.request)  # 签名：(request)
+    if cls_name == "OpenAIConnectionError":
+        return cls(message="simulated", request=fake_response.request)  # (message, *, request)
+    return cls("simulated", response=fake_response, body=None)  # APIStatusError 族
+
+@pytest.mark.parametrize(
+    "cls_name",
+    [
+        "OpenAITimeoutError",  # 本次事故：生成/审核/修复超时
+        "OpenAIConnectionError",  # 连接失败（原 APIConnectionError 同样匹配失败）
+        "OpenAIRateLimitError",  # 限流
+        "OpenAIAPIError",  # langchain 对 5xx 等未特判错误的兜底包装
+    ],
+)
+def test_langchain_wrapped_errors_are_retryable(cls_name):
+    assert _retryable(_langchain_exc(cls_name)) is True
+
+
+def test_failover_switches_on_langchain_timeout(monkeypatch):
+    """超时必须切到链上下一模型，而不是把 OpenAITimeoutError 直接抛给用户。"""
+    fm, primary, backup = _failover(_langchain_exc("OpenAITimeoutError"))
+    monkeypatch.setattr(fo, "get_active_chain", lambda: [settings.dashscope_model, "backup-model"])
+
+    assert fm.invoke("hi") == "ok:backup-model"
+    assert primary.calls == 1
+    assert backup.calls == 1
+
+
 def test_temperature_for_omits_kimi_and_keeps_qwen(monkeypatch):
     from app.core.llm_params import temperature_for
 

@@ -125,6 +125,9 @@ async def lifespan(app: FastAPI):
     register_chart_verdict_hook(chart_with_verdict_sync)
 
     # 答案生成主模型（直连 DashScope，不经系统代理）
+    # max_retries=0：外层已有 FailoverModel 按链切换，SDK 层再重试只会把单模型失败
+    # 放大 (LLM_MAX_RETRIES+1) 倍——现场 kimi-k3 一次生成 100s 超时 × 4 次重试 =
+    # 用户干等 404s 才看到报错，且全程没切到备选模型。失败交给降级链换模型。
     http = httpx.Client(trust_env=False)
     raw_chat_model = ChatOpenAI(
         model=settings.dashscope_model,
@@ -132,7 +135,7 @@ async def lifespan(app: FastAPI):
         api_key=settings.dashscope_api_key,
         temperature=temperature_for(settings.dashscope_model, settings.llm_temperature),
         timeout=settings.llm_timeout,
-        max_retries=settings.llm_max_retries,
+        max_retries=0,
         # 思考期无 chunk 流出的长静默预算，同 _make_model 内的说明
         stream_chunk_timeout=settings.llm_stream_chunk_timeout,
         extra_body={"enable_thinking": settings.llm_enable_thinking},
@@ -144,13 +147,13 @@ async def lifespan(app: FastAPI):
     chat_model = ThrottledModel(ThinkingRouter(raw_chat_model, default_thinking=settings.llm_enable_thinking))
 
     def _make_failover_model(name: str) -> ThrottledModel:
-        """降级链备选模型实例工厂（共用主 http 连接池；max_retries=1 快速失败换链）。"""
+        """降级链备选模型实例工厂（共用主 http 连接池；max_retries=0 快速失败换链）。"""
         llm = ChatOpenAI(
             model=name,
             base_url=settings.dashscope_url,
             api_key=settings.dashscope_api_key,
             timeout=settings.llm_timeout,
-            max_retries=1,
+            max_retries=0,
             extra_body={"enable_thinking": settings.llm_enable_thinking},
             http_client=http,
         )
