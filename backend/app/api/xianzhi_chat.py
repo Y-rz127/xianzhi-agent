@@ -119,8 +119,8 @@ async def chat_with_xianzhi(
             agent.set_turn_id(mid)
             agent._sect = sect
             agent._yun_sect = yun_sect
-            if uid:
-                agent._user_id = uid
+            # 每轮都覆盖（含游客置空）：同一 agent 实例不得沿用上一账号的用户级设置。
+            agent._user_id = uid or ""
             loop = asyncio.get_running_loop()
             events: asyncio.Queue = asyncio.Queue()
             _END = object()  # 生产者结束哨兵
@@ -373,8 +373,8 @@ async def _run_ws_turn(
         agent.set_turn_id(mid)
         agent._sect = sect
         agent._yun_sect = yun_sect
-        if uid:
-            agent._user_id = uid
+        # 每轮都覆盖（含游客置空）：同一 agent 实例不得沿用上一账号的用户级设置。
+        agent._user_id = uid or ""
         # 挂盘即通知：把「命盘已挂载」提前到挂载那一刻发，不再等整轮回答流完。
         # 旧做法排在回答之后且带 client_alive 门槛，回答一发送失败就静默丢通知
         # （2026-09-15 实测：生成 29s 后 socket 已断 → chart_context 没发出去）。
@@ -562,8 +562,8 @@ async def chat_with_xianzhi_sync(
         agent.set_turn_id(mid)
         agent._sect = sect
         agent._yun_sect = yun_sect
-        if uid:
-            agent._user_id = uid
+        # 每轮都覆盖（含游客置空）：同一 agent 实例不得沿用上一账号的用户级设置。
+        agent._user_id = uid or ""
         _mount_chart_context(agent, birth_time, gender, sect, yun_sect, uid, birth_place, longitude)
         try:
             # run 是同步阻塞调用，放到线程池避免卡住事件循环

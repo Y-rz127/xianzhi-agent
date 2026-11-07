@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import replace
-from typing import Callable
+from typing import Any, Callable
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
@@ -37,6 +37,7 @@ from app.agent.workflow.workflow_messages import (  # noqa: F401
     fact_block,
     get_chart_facts_text,
     invoke,
+    invoke_stream,
 )
 from app.agent.workflow.workflow_models import (  # noqa: F401
     DOMAIN_LABELS,
@@ -111,6 +112,14 @@ class XianzhiWorkflow:
         self._checkpointer = checkpointer if checkpointer is not None else get_checkpointer()
         # 阶段进度回调（由 Agent 注入；长静默期给前端一点反馈，避免用户以为卡死）
         self.on_progress: Callable[[str], None] | None = None
+        # 流式 token 回调（关闭 LLM 审核时由 Agent 注入；逐 token 直出，可能被频繁调用）
+        self.on_token: Callable[[str], None] | None = None
+        # 用户级覆盖（每轮开始由 Agent 注入，见 Xianzhi._apply_user_ai_overrides）：
+        # - overlay_model：用户自定义问答模型；generate/repair 优先用它，失败回退服务端模型。
+        #   拆解/审核模型不用用户模型——审核独立性是它存在的意义（用自己的模型审自己=没审）。
+        # - review_enabled：覆盖 env 的 WORKFLOW_LLM_REVIEW_ENABLED；None=跟随 env。
+        self.overlay_model: Any | None = None
+        self.review_enabled: bool | None = None
         # 编排后端唯一为 LangGraph：构建失败即快速失败（启动期暴露），
         # 不再保留内置流水线双后端，避免两套实现行为分叉
         try:
@@ -129,6 +138,13 @@ class XianzhiWorkflow:
         """编排后端（唯一实现：langgraph）。"""
         return "langgraph"
 
+    @property
+    def review_on(self) -> bool:
+        """本轮是否走 LLM 审核：用户偏好（已设置）优先于 env 全局默认。"""
+        if self.review_enabled is None:
+            return settings.workflow_llm_review_enabled
+        return self.review_enabled
+
     # ===== 阶段进度 =====
     def _emit_progress(self, text: str) -> None:
         """向调用方（前端）通报当前阶段。
@@ -144,6 +160,20 @@ class XianzhiWorkflow:
             fn(text)
         except Exception as e:  # 通知失败绝不能影响生成
             log.warning("[workflow] 进度通知失败: {}", e)
+
+    def _emit_token(self, text: str) -> None:
+        """流式 token 转发（关闭 LLM 审核时，由 generate 节点逐 token 调用）。
+
+        与 _emit_progress 同防护：回调可能在工作线程被高频调用，实现方
+        （Agent）必须做线程安全转投；任何异常只记日志，绝不影响生成本身。
+        """
+        fn = self.on_token
+        if fn is None or not text:
+            return
+        try:
+            fn(text)
+        except Exception as e:
+            log.warning("[workflow] token 转发失败: {}", e)
 
     # ===== LLM 意图拆解 =====
     _DECOMPOSE_SYSTEM = domain_sysprompt
@@ -367,6 +397,8 @@ class XianzhiWorkflow:
                     "history": history or [],
                     "intent": intent,
                     "summary": summary,
+                    # 每轮按用户偏好/全局默认决定走不走审核（动态路由，非建图时定型）
+                    "review_enabled": self.review_on,
                 },
                 graph_config,
             )
@@ -374,7 +406,7 @@ class XianzhiWorkflow:
 
     @staticmethod
     def _extract_final(result: dict) -> str:
-        final = (result.get("final_answer") or "").strip()
+        final = (result.get("final_answer") or result.get("raw_answer") or "").strip()
         if not final:
             # 图各节点均保证非空 final_answer（_invoke 对空产出有兜底文案），
             # 走到这里说明编排存在缺陷，快速失败而非向用户返回空回复
@@ -413,7 +445,50 @@ class XianzhiWorkflow:
         return build_repair_messages(raw_answer, checked, user_prompt, intent, ctx, knowledge, worker)
 
     def _invoke(self, messages, timeout_cap=None):
-        return invoke(self.chat_model, messages, timeout_cap)
+        if self.overlay_model is None:
+            return invoke(self.chat_model, messages, timeout_cap)
+        try:
+            return invoke(self.overlay_model, messages, timeout_cap)
+        except TurnBudgetExceeded:
+            raise  # 预算尽与模型无关，回退只会再超一次
+        except Exception as e:
+            record_error("user_model_invoke_fallback")
+            log.warning(
+                "[user-llm] 用户自定义模型生成失败（{}），回退服务端模型", type(e).__name__[:60]
+            )
+            return invoke(self.chat_model, messages, timeout_cap)
+
+    def _invoke_stream(self, messages, timeout_cap=None):
+        """流式生成；用户模型失败时只能在尚未发出正文前无缝回退。
+
+        已发出的 token 无法撤回，因此中途失败不能追加另一模型的整篇回答，否则用户看到
+        两篇拼接，而落库又只保存后一篇。此时保留已发内容并追加明确的中断提示。
+        """
+        if self.overlay_model is None:
+            return invoke_stream(self.chat_model, messages, self._emit_token, timeout_cap)
+        emitted: list[str] = []
+
+        def _emit(text: str) -> None:
+            if text:
+                emitted.append(text)
+                self._emit_token(text)
+
+        try:
+            return invoke_stream(self.overlay_model, messages, _emit, timeout_cap)
+        except TurnBudgetExceeded:
+            raise
+        except Exception as e:
+            log.warning(
+                "[user-llm] 用户自定义模型流式失败（{}），已发正文块={}",
+                type(e).__name__[:60],
+                len(emitted),
+            )
+            if emitted:
+                notice = "\n\n（自定义模型连接中断，本次回答未完整生成。）"
+                self._emit_token(notice)
+                return "".join(emitted) + notice
+            record_error("user_model_invoke_fallback")
+            return invoke_stream(self.chat_model, messages, self._emit_token, timeout_cap)
 
     def check_facts(self, answer, chart, other_chart=None, needs_chart=True, facts_text=""):
         return check_facts(answer, chart, other_chart, needs_chart, facts_text)

@@ -155,6 +155,14 @@ class Settings(BaseSettings):
     workflow_generate_timeout: float = Field(default=100.0, alias="WORKFLOW_GENERATE_TIMEOUT")
     workflow_review_timeout: float = Field(default=60.0, alias="WORKFLOW_REVIEW_TIMEOUT")
     workflow_repair_timeout: float = Field(default=50.0, alias="WORKFLOW_REPAIR_TIMEOUT")
+    # 是否开启 LLM 审核（默认开=现状：正则快筛 + LLM 深审 + 修复节点，整轮完成后一次性下发）。
+    # 关闭=纯流式模式：审核/修复是"生成完整后审完再发"的产物，与逐 token 下发天然互斥，
+    # 故关闭时 check/repair 节点整体跳过，生成阶段逐 token 直出（思考块在发送侧被过滤）。
+    workflow_llm_review_enabled: bool = Field(default=True, alias="WORKFLOW_LLM_REVIEW_ENABLED")
+    # 用户自定义模型的 API key 认证加密密钥（HMAC 流加密 + 完整性校验，标准库实现）。
+    # 未配置时复用 ADMIN_SESSION_SECRET；两者都为空则拒绝保存密钥，不使用内置弱默认。
+    # 生产环境应显式配置；更换密钥后用户需重新填写 API key。
+    user_llm_key_secret: str = Field(default="", alias="USER_LLM_KEY_SECRET")
     # 无预算场景（脚本/测试直接调用）的兜底单次 LLM 超时
     workflow_llm_timeout: float = Field(default=180.0, alias="WORKFLOW_LLM_TIMEOUT")
     # 命盘终审 LLM 总预算（秒）：模型层各有 timeout/重试/熔断，这里是外层兜底。

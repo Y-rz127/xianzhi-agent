@@ -24,6 +24,21 @@ _USER_INPUT_BOUNDARY_RE = re.compile(
 _DATA_MARKER_RE = re.compile(r"<<<\s*/?\s*DATA_(?:BEGIN|END)[^>]*>>>", re.IGNORECASE)
 
 
+def strip_think_marks(content: str) -> str:
+    """移除 ReAct/思考式标记块（[思考]…[/思考]、<thinking>…</thinking> 等），含未闭合残尾。
+
+    与 ThinkStreamGuard 同开/闭标签口径：流式发送侧由 guard 过滤，返回的完整文本
+    用本函数做同口径清洗，保证「用户看到的」与「落库/防重放缓存」一致。
+    clean_think_tags 只处理 <thinking> 族；本函数额外覆盖 [思考]/[行动]/[观察] 族。
+    """
+    if not content:
+        return content
+    for op, cl in zip(_THINK_OPEN_MARKS, _THINK_CLOSE_MARKS):
+        content = re.sub(re.escape(op) + r"[\s\S]*?" + re.escape(cl), "", content)
+        content = re.sub(re.escape(op) + r"[\s\S]*$", "", content)
+    return content.strip()
+
+
 def clean_think_tags(content: str) -> str:
     """移除 LLM 输出中的 thinking 推理过程标签（含未闭合的流式中断场景）。"""
     if not content:
@@ -65,3 +80,79 @@ def strip_user_input_boundary(content: str) -> str:
     # 清理剥离后可能残留的多余空行
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
     return cleaned
+
+
+# ───────────────────────── 流式发送守卫 ─────────────────────────
+
+# 流式下「生成完整后再 clean_think_tags」失效——token 已经逐块出去了。
+# 思考标记开/闭标签配对（与 clean_think_tags / 前端 isThinking 的口径一致）：
+_THINK_OPEN_MARKS = ("[思考]", "[行动]", "[观察]", "<thinking>")
+_THINK_CLOSE_MARKS = ("[/思考]", "[/行动]", "[/观察]", "</thinking>")
+
+
+class ThinkStreamGuard:
+    """逐 token 发送前的思考块过滤：滞后窗口内识别开标签 → 抑制直到闭标签。
+
+    文本后处理（clean_think_tags）只能作用于完整文本；流式模式下 token 已发出，
+    必须在发送侧拦一道。原理：开标签最多 7 字符，滞后窗口（默认 16 字符）保证
+    开标签完整落在窗口内可被识别；识别后进入抑制态，吞掉直到配对的闭标签结束。
+
+    兼容跨 chunk 断裂：抑制态只保留「闭标签长度-1」的尾部字符，避免闭标签被
+    拆在两次 feed 之间导致永久吞掉后续正文。生成结束调用 flush() 放行窗口内
+    剩余正文；抑制态未闭合的残余（思考没写完）直接丢弃。
+    """
+
+    def __init__(self, lag: int = 16) -> None:
+        self._lag = max(lag, 8)
+        self._pending = ""
+        self._suppress_close: str | None = None
+
+    @staticmethod
+    def _find_open(text: str) -> tuple[int, str] | None:
+        best_i, best_close = -1, ""
+        for op, cl in zip(_THINK_OPEN_MARKS, _THINK_CLOSE_MARKS):
+            i = text.find(op)
+            if i >= 0 and (best_i < 0 or i < best_i):
+                best_i, best_close = i, cl
+        return (best_i, best_close) if best_i >= 0 else None
+
+    def feed(self, text: str) -> str:
+        """喂入增量文本，返回应发给用户的正文（可能为空/多段）。"""
+        if not text:
+            return ""
+
+        if self._suppress_close is not None:
+            # 抑制态：拼上跨 chunk 保留的尾部一起找闭标签；找不到只留尾部窗口
+            buf = self._pending + text
+            i = buf.find(self._suppress_close)
+            if i < 0:
+                keep = len(self._suppress_close) - 1
+                self._pending = buf[-keep:] if keep > 0 else ""
+                return ""
+            close_len = len(self._suppress_close)
+            self._suppress_close = None
+            self._pending = ""
+            return self.feed(buf[i + close_len:])
+
+        self._pending += text
+        hit = self._find_open(self._pending)
+        if hit is not None:
+            i, close = hit
+            pre = self._pending[:i]
+            self._pending = ""
+            self._suppress_close = close
+            return pre
+
+        if len(self._pending) > self._lag:
+            send, self._pending = self._pending[: -self._lag], self._pending[-self._lag:]
+            return send
+        return ""
+
+    def flush(self) -> str:
+        """生成结束：放行窗口内残余正文；未闭合的抑制残余丢弃。"""
+        if self._suppress_close is not None:
+            self._suppress_close = None
+            self._pending = ""
+            return ""
+        out, self._pending = self._pending, ""
+        return out

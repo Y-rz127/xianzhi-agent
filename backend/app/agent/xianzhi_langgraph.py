@@ -56,6 +56,9 @@ class XianzhiGraphState(TypedDict, total=False):
     final_answer: str
     issues: list[str]
     issues_hard: bool  # 当前 issues 是否来自正则层的确定性硬错误
+    # LLM 审核开关（每轮由 answer() 按「用户偏好 > env 全局默认」注入）：决定
+    # generate 流式/非流式，以及 generate 之后走 check 还是直接结束
+    review_enabled: bool
 
 
 def _dropped_real_facts(before: str, after: str, facts_text: str) -> list[str]:
@@ -115,7 +118,14 @@ def _retrieve_node(workflow, state: XianzhiGraphState) -> XianzhiGraphState:
 
 
 def _generate_node(workflow, state: XianzhiGraphState) -> XianzhiGraphState:
-    """生成节点：组装 Worker 消息并调用 LLM 产出原始回答（含会话摘要透传）。"""
+    """生成节点：组装 Worker 消息并调用 LLM 产出原始回答（含会话摘要透传）。
+
+    两套模式：
+    - LLM 审核开启（默认）：非流式 invoke，产出发往 check 节点审核；
+    - LLM 审核关闭：流式 invoke，token 经 workflow._emit_token 逐块直出，
+      同时返回 full text（供落库与防重放缓存），并直接写入 final_answer
+      （该模式下图中没有 check/repair，无人再消费 raw_answer）。
+    """
     worker = state.get("worker")
     workflow._emit_progress("正在推演生成…")
     messages = workflow._build_messages(
@@ -128,15 +138,27 @@ def _generate_node(workflow, state: XianzhiGraphState) -> XianzhiGraphState:
         state.get("summary", ""),
     )
     start = time.monotonic()
-    raw = workflow._invoke(messages, timeout_cap=settings.workflow_generate_timeout)
+    # 每轮按用户偏好/全局默认动态分流（state 由 answer() 注入，见 orchestrator.review_on）
+    review_on = bool(state.get("review_enabled", settings.workflow_llm_review_enabled))
+    if review_on:
+        raw = workflow._invoke(messages, timeout_cap=settings.workflow_generate_timeout)
+        log.info(
+            "[Worker] {} 生成回答 {}字 耗时{:.1f}s 剩余预算{:.1f}s",
+            getattr(worker, "label", "?"),
+            len(raw),
+            time.monotonic() - start,
+            budget_remaining() or 0,
+        )
+        return {"raw_answer": raw}
+    raw = workflow._invoke_stream(messages, timeout_cap=settings.workflow_generate_timeout)
     log.info(
-        "[Worker] {} 生成回答 {}字 耗时{:.1f}s 剩余预算{:.1f}s",
+        "[Worker:stream] {} 流式生成回答 {}字 耗时{:.1f}s 剩余预算{:.1f}s（LLM 审核已关闭）",
         getattr(worker, "label", "?"),
         len(raw),
         time.monotonic() - start,
         budget_remaining() or 0,
     )
-    return {"raw_answer": raw}
+    return {"raw_answer": raw, "final_answer": raw}
 
 
 def _check_node(workflow, state: XianzhiGraphState) -> XianzhiGraphState:
@@ -362,6 +384,11 @@ def _repair_node(workflow, state: XianzhiGraphState) -> XianzhiGraphState:
     return {"final_answer": repaired, "issues": repaired_review.issues}
 
 
+def _route_after_generate(state: XianzhiGraphState) -> str:
+    """生成后条件路由：本轮开审核走 check，否则直接结束（流式直出模式）。"""
+    return "check" if state.get("review_enabled") else "end"
+
+
 def _route_after_check(state: XianzhiGraphState) -> str:
     """条件路由：有 issues 走 repair，否则结束。"""
     return "repair" if state.get("issues") else "end"
@@ -371,6 +398,11 @@ def create_xianzhi_graph(workflow, checkpointer=None):
     """构建编译后的 LangGraph 编排图；langgraph 未安装时直接抛 ImportError（硬依赖）。
 
     checkpointer 非空时，每个节点完成后落 checkpoint；同一 thread_id 重试可续跑。
+
+    节点集固定（classify→chart→retrieve→generate→check→(repair)），但**审核是否参与
+    是每轮动态的**（state["review_enabled"]，由 answer() 按「用户偏好 > env 全局默认」
+    注入）：关审核时 generate 流式直出、经条件路由跳过 check/repair；开审核走现状。
+    不能在建图时按 env 定型拓扑——同一服务里不同用户可能有不同偏好。
     """
     from langgraph.graph import END, StateGraph
 
@@ -385,7 +417,7 @@ def create_xianzhi_graph(workflow, checkpointer=None):
     graph.add_edge("classify", "chart")
     graph.add_edge("chart", "retrieve")
     graph.add_edge("retrieve", "generate")
-    graph.add_edge("generate", "check")
+    graph.add_conditional_edges("generate", _route_after_generate, {"check": "check", "end": END})
     graph.add_conditional_edges("check", _route_after_check, {"repair": "repair", "end": END})
     graph.add_edge("repair", END)
     return graph.compile(checkpointer=checkpointer)

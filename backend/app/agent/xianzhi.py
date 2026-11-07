@@ -7,6 +7,8 @@
 from __future__ import annotations
 
 import asyncio
+import queue
+import threading
 import time
 import uuid
 from typing import Callable, Optional
@@ -120,6 +122,8 @@ class Xianzhi(ToolCallAgent):
         # MCP 工具签名缓存：None=尚未绑定；仅签名变化时才重新 bind_tools（见 think）
         self._mcp_tool_signature: Optional[tuple] = None
         self._lock = asyncio.Lock()
+        # 纯流式模式的桥接 runner 引用（防 GC，见 _aworkflow_stream）
+        self._stream_runner: Optional[asyncio.Task] = None
 
     def set_turn_id(self, turn_id: str) -> None:
         """设置本轮 client_msg_id；同一 ID 重试时工作流会从 checkpoint 续跑。"""
@@ -383,7 +387,12 @@ class Xianzhi(ToolCallAgent):
         self._persist_pending_question(user_prompt)
         if self._workflow_context:
             chunks = list(self._workflow_stream(user_prompt))
-            return chunks[-1] if chunks else ""
+            if not chunks:
+                return ""
+            # 审核模式单 chunk 是完整答案；纯流式模式 chunk 是逐 token 片段，拼起来才是全文
+            if self._workflow.review_on:
+                return chunks[-1]
+            return "".join(chunks)
         return super().run(user_prompt)
 
     def think(self):
@@ -595,7 +604,73 @@ class Xianzhi(ToolCallAgent):
         self._capture_birth_from_tool_calls()
         return answer
 
+    def _prepare_user_overrides(self) -> None:
+        """每轮开始按「用户偏好 > env 默认」注入审核开关与自定义问答模型（游客跳过）。
+
+        每次轮次开始重置：用户在小程序改设置后下一轮立即生效，
+        且优雅兜底——查库/解密失败一律回落到服务端默认，不阻断对话。
+        """
+        self._workflow.overlay_model = None
+        self._workflow.review_enabled = None
+        uid = self._user_id or ""
+        if not uid:
+            return
+        try:
+            from app.db.user_ai_settings import get_user_ai_settings
+            from app.db.user_llm import get_user_model
+
+            s = get_user_ai_settings(uid)
+            if s.get("review_set"):
+                self._workflow.review_enabled = bool(s["review_enabled"])
+            model = get_user_model(uid)
+            if model is not None:
+                self._workflow.overlay_model = model
+                log.info("[user-llm] 自定义问答模型已启用（{}）", s.get("llm_model") or "?")
+        except Exception as e:
+            log.warning("[user-ai] 应用用户 AI 设置失败，按服务端默认执行: {}", e)
+
     def _workflow_stream(self, user_prompt: str):
+        self._prepare_user_overrides()
+        # 纯流式模式（本轮 LLM 审核关闭）：token 经工作流回调收集、逐块 yield；
+        # 完整答案不再重复 yield（已按 token 发完），仅落库用。
+        if not self._workflow.review_on:
+            # 同步生成器也必须边生成边 yield：工作线程负责 LLM/落库，消费线程从队列取 token。
+            # 不能像普通 run() 那样先 list(...) 收完，否则前端仍要等整轮结束才看到首字。
+            tokens: queue.Queue = queue.Queue()
+            end = object()
+
+            def _worker() -> None:
+                try:
+                    self._execute_workflow(
+                        user_prompt, list(self.message_list), self._get_session_summary()
+                    )
+                except TurnBudgetExceeded as e:
+                    record_error("workflow_turn_timeout")
+                    log.warning("[xianzhi] workflow 轮次超时: {}", e)
+                    tokens.put(_TURN_TIMEOUT_TEXT)
+                except LLMBusyError as e:
+                    log.info("[xianzhi] LLM 繁忙或熔断: {}", e)
+                    tokens.put("当前咨询人数较多，请稍后再试。")
+                except Exception as e:
+                    self.state = AgentState.ERROR
+                    self._last_error = str(e)
+                    log.exception("Xianzhi workflow error")
+                    tokens.put("分析过程遇到错误，请稍后重试。")
+                finally:
+                    try:
+                        self.cleanup()
+                    finally:
+                        self._workflow.on_token = None
+                        tokens.put(end)
+
+            self._workflow.on_token = tokens.put
+            threading.Thread(target=_worker, daemon=True).start()
+            while True:
+                item = tokens.get()
+                if item is end:
+                    break
+                yield item
+            return
         try:
             history_snapshot = list(self.message_list)
             summary = self._get_session_summary()
@@ -616,6 +691,67 @@ class Xianzhi(ToolCallAgent):
             self.cleanup()
 
     async def _aworkflow_stream(self, user_prompt: str):
+        # 用户设置读取/模型构造含 PG 与 DNS 校验，放线程池避免阻塞事件循环。
+        await asyncio.to_thread(self._prepare_user_overrides)
+        # 纯流式模式（本轮 LLM 审核关闭）：工作线程里的 token 回调经 call_soon_threadsafe
+        # 桥接到事件循环上的队列，本生成器逐块 yield；完整答案只落库不重复 yield。
+        if not self._workflow.review_on:
+            loop = asyncio.get_running_loop()
+            q: asyncio.Queue = asyncio.Queue()
+
+            def _token(t: str) -> None:
+                if t:
+                    try:
+                        loop.call_soon_threadsafe(q.put_nowait, t)
+                    except RuntimeError:
+                        pass  # 事件循环已关闭：丢弃
+
+            self._workflow.on_token = _token
+            end = object()
+
+            async def _runner() -> None:
+                err_chunk = ""
+                try:
+                    if self._cancel_requested():
+                        log.info("[xianzhi] workflow 执行前检测到取消，跳过本轮")
+                        return
+                    history_snapshot = list(self.message_list)
+                    # 会话摘要来自 PG 同步查询，放线程池避免阻塞事件循环
+                    summary = await asyncio.to_thread(self._get_session_summary)
+                    await asyncio.to_thread(
+                        self._execute_workflow, user_prompt, history_snapshot, summary
+                    )
+                except TurnBudgetExceeded as e:
+                    record_error("workflow_turn_timeout")
+                    log.warning("[xianzhi] workflow 轮次超时: {}", e)
+                    err_chunk = _TURN_TIMEOUT_TEXT
+                except LLMBusyError as e:
+                    log.info("[xianzhi] LLM 繁忙或熔断: {}", e)
+                    err_chunk = "当前咨询人数较多，请稍后再试。"
+                except Exception as e:
+                    self.state = AgentState.ERROR
+                    self._last_error = str(e)
+                    log.exception("Xianzhi workflow error")
+                    err_chunk = "分析过程遇到错误，请稍后重试。"
+                finally:
+                    # cleanup 内含 PG 落盘（_persist_history），放线程池避免阻塞事件循环
+                    try:
+                        await asyncio.to_thread(self.cleanup)
+                    finally:
+                        self._workflow.on_token = None
+                        if err_chunk:
+                            loop.call_soon_threadsafe(q.put_nowait, err_chunk)
+                        loop.call_soon_threadsafe(q.put_nowait, end)
+
+            # 持有引用防 GC；下一轮开始时上一 task 必已完成（会话级串行锁）
+            self._stream_runner = asyncio.create_task(_runner())
+            while True:
+                item = await q.get()
+                if item is end:
+                    break
+                yield item
+            await self._stream_runner
+            return
         try:
             # 客户端已断开（如 WS 关闭触发 request_cancel）则不再启动整条 LLM 链
             if self._cancel_requested():

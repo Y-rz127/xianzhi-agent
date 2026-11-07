@@ -66,7 +66,12 @@ from app.domain.yun_relations import (
     relations_for,
     resolve_target_dayuns,
 )
-from app.tools.text_clean import clean_think_tags, strip_user_input_boundary
+from app.tools.text_clean import (
+    ThinkStreamGuard as _ThinkStreamGuard,
+    clean_think_tags,
+    strip_think_marks,
+    strip_user_input_boundary,
+)
 
 # 工作流生成/修复产出长文本（含思维链），60s 默认超时不够，单独放宽
 _WORKFLOW_LLM_TIMEOUT = _settings.workflow_llm_timeout
@@ -311,6 +316,121 @@ def invoke(chat_model, messages: list[BaseMessage], timeout_cap: float | None = 
     if not content:
         return "我先看盘面，当前信息足够排盘，但模型没有生成有效解读。你可以换一个更具体的问题继续问。"
     return _dedupe_content(content)
+
+
+def invoke_stream(
+    chat_model,
+    messages: list[BaseMessage],
+    on_token,
+    timeout_cap: float | None = None,
+) -> str:
+    """流式版 invoke：逐 token 产出并转发给 on_token，最终仍返回完整文本（落库/防重放用）。
+
+    与 invoke() 的分工：invoke() 供「生成完才审、审完再发」的审核模式；
+    invoke_stream() 供关闭 LLM 审核时的纯流式模式（WORKFLOW_LLM_REVIEW_ENABLED=false）。
+
+    差异点：
+    - 思考块过滤必须在**发送侧**完成（token 已经出去了，事后 clean 救不回来），
+      用 ThinkStreamGuard 的滞后窗口把 `[思考]`/`  ...` 泄漏挡在发送前；
+    - 被截断（finish_reason=length）时续写也走流式转发，用户看到的是连续文本；
+    - 最终返回的完整文本同样做 clean/dedupe/边界剥离，落库口径与 invoke() 一致。
+
+    on_token 必须容忍异常（由 orchestrator._emit_token 兜底），返回文本为累积原文拼接，
+    空产出时把兜底文案也转一次 on_token（否则流式模式下用户什么也看不到）。
+    """
+    guard = _ThinkStreamGuard()
+
+    def _send(text: str) -> None:
+        for piece in guard.feed(text):
+            on_token(piece)
+
+    cap = timeout_cap or _WORKFLOW_LLM_TIMEOUT
+    try:
+        timeout = budget_timeout(cap, fallback=cap)
+    except TurnBudgetExceeded:
+        record_error("workflow_llm_budget_exceeded")
+        raise
+    bound = chat_model.bind(timeout=timeout)
+
+    parts: list[str] = []
+    finish = ""
+    for chunk in bound.stream(messages):
+        tok = getattr(chunk, "content", "") or ""
+        if tok:
+            parts.append(tok)
+            _send(tok)
+        meta = getattr(chunk, "response_metadata", None) or {}
+        if meta.get("finish_reason"):
+            finish = meta["finish_reason"]
+    send_tail = guard.flush()
+    if send_tail:
+        on_token(send_tail)
+
+    content = clean_think_tags("".join(parts))
+    content = strip_think_marks(content)  # 与发送侧 guard 同口径：落库/防重放不带思考块
+    content = strip_user_input_boundary(content)
+
+    if finish == "length":
+        record_error("workflow_output_truncated")
+        log.warning("[workflow:stream] 生成被输出上限截断（{}字），自动续写一次", len(content))
+        tail = _continue_truncated_stream(bound, messages, content, on_token, timeout_cap=cap)
+        if tail:
+            content = _merge_continuation(content, tail)
+            content = strip_user_input_boundary(content)
+
+    if not content:
+        fallback = "我先看盘面，当前信息足够排盘，但模型没有生成有效解读。你可以换一个更具体的问题继续问。"
+        on_token(fallback)
+        return fallback
+    return _dedupe_content(content)
+
+
+def _continue_truncated_stream(
+    bound_model,
+    messages: list[BaseMessage],
+    partial: str,
+    on_token,
+    timeout_cap: float | None = None,
+) -> str:
+    """流式版续写：与 _continue_truncated 同语义，但续写 token 也转发（用户看到连续文本）。"""
+    if not budget_enough(5.0):
+        record_error("workflow_continue_skipped_budget")
+        log.warning("[workflow:stream] 剩余预算不足，放弃截断续写")
+        return ""
+    try:
+        cap = timeout_cap or _WORKFLOW_LLM_TIMEOUT
+        timeout = budget_timeout(cap, fallback=cap)
+        followup = list(messages) + [
+            AIMessage(content=partial),
+            HumanMessage(content=_TRUNCATED_CONTINUE_HINT),
+        ]
+        guard = _ThinkStreamGuard()
+        parts: list[str] = []
+        finish = ""
+        for chunk in bound_model.bind(timeout=timeout).stream(followup):
+            tok = getattr(chunk, "content", "") or ""
+            if tok:
+                parts.append(tok)
+                for piece in guard.feed(tok):
+                    on_token(piece)
+            meta = getattr(chunk, "response_metadata", None) or {}
+            if meta.get("finish_reason"):
+                finish = meta["finish_reason"]
+        tail_send = guard.flush()
+        if tail_send:
+            on_token(tail_send)
+        tail = clean_think_tags("".join(parts))
+        if finish == "length":
+            record_error("workflow_output_truncated_twice")
+            log.warning("[workflow:stream] 续写仍被输出上限截断（本次续写 {}字），按现有内容定稿", len(tail))
+        return tail
+    except TurnBudgetExceeded:
+        record_error("workflow_continue_skipped_budget")
+        log.warning("[workflow:stream] 续写预算耗尽，按已有内容定稿")
+        return ""
+    except Exception as e:
+        log.warning("[workflow:stream] 续写失败，按已有内容定稿: {}", e)
+        return ""
 
 
 def _continue_truncated(

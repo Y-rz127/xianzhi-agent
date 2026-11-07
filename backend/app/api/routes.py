@@ -18,6 +18,7 @@ from app.api.observability import router as observability_router
 from app.api.profiles import router as profiles_router
 from app.api.rag import mgmt_router as rag_mgmt_router
 from app.api.tts import router as tts_router
+from app.api.user_ai import router as user_ai_router
 from app.api.xianzhi import router as xianzhi_router
 from app.sub_app.hehun.routes import router as hehun_router
 from app.sub_app.huangli.routes import router as huangli_router
@@ -43,6 +44,7 @@ router.include_router(favorites_router)
 router.include_router(ai_interpretation_records_router)
 router.include_router(feedback_router)
 router.include_router(me_router)
+router.include_router(user_ai_router)
 router.include_router(admin_users_router)
 router.include_router(admin_accounts_router)
 router.include_router(llm_chain_router)
