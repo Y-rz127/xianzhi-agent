@@ -148,6 +148,25 @@ def test_audio_endpoint_rejects_bad_id(fake_client, monkeypatch, tmp_path):
     assert e2.value.status_code == 404
 
 
+def test_synthesize_reuses_cached_audio(fake_client, monkeypatch, tmp_path):
+    """同文同音色第二次合成直接复用落盘文件，不再调上游（不重复扣费）。"""
+    monkeypatch.setattr(T.settings, "data_dir", tmp_path, raising=False)
+
+    out1 = asyncio.run(T.synthesize({"text": "同一段话"}, _request(), None))
+    out2 = asyncio.run(T.synthesize({"text": "同一段话"}, _request(), None))
+    assert out2["id"] == out1["id"]
+    assert len(fake_client.posts) == 1  # 第二次命中缓存，上游只调了一次
+    assert (tmp_path / "tts" / f"{out1['id']}.wav").is_file()
+
+    # 换文本正常 miss；换音色也要 miss
+    out3 = asyncio.run(T.synthesize({"text": "另一段话"}, _request(), None))
+    assert out3["id"] != out1["id"]
+    assert len(fake_client.posts) == 2
+    out4 = asyncio.run(T.synthesize({"text": "同一段话", "voice": "other_voice"}, _request(), None))
+    assert out4["id"] != out1["id"]
+    assert len(fake_client.posts) == 3
+
+
 def test_expired_audio_is_cleaned(monkeypatch, tmp_path):
     """过期音频在下次合成时顺手清掉，别把磁盘撑满。"""
     monkeypatch.setattr(T.settings, "data_dir", tmp_path, raising=False)

@@ -1234,6 +1234,7 @@ const plainForSpeech = (raw: string): string => raw
   .trim()
 
 const stopSpeaking = () => {
+  speakSeq++ // 让在途的合成/下载结果作废：点了停止就不能再响
   if (audioCtx) {
     try { audioCtx.stop(); audioCtx.destroy() } catch { /* 已销毁 */ }
     audioCtx = null
@@ -1241,34 +1242,59 @@ const stopSpeaking = () => {
   speakingKey.value = ''
 }
 
+// 每次点击领一个号，await 回来发现号变了＝用户已停止/换目标，直接丢弃
+let speakSeq = 0
+// 重播缓存：文本 → 本地临时文件。同一条消息反复听不再重复下载（合成在后端也有内容寻址缓存）
+const speechCache = new Map<string, string>()
+const SPEECH_CACHE_MAX = 8
+
 const toggleSpeak = async (msg: any, idx: number) => {
   const key = String(idx)
   if (speakingKey.value === key) { stopSpeaking(); return }
   stopSpeaking()
   const text = plainForSpeech(msg.content || '')
   if (!text) return
+  const clipped = text.slice(0, 4000)
+  const token = ++speakSeq
   speakingKey.value = key
   try {
-    const res = await synthesizeSpeech(text.slice(0, 4000))
-    const url = speechAudioUrl(res.id)
-    const tempFilePath = await new Promise<string>((resolve, reject) => {
-      uni.downloadFile({
-        url,
-        success: (r) => (r.statusCode === 200 ? resolve(r.tempFilePath) : reject(new Error('音频下载失败'))),
-        fail: () => reject(new Error('音频下载失败')),
+    let tempFilePath = speechCache.get(clipped)
+    if (!tempFilePath) {
+      const res = await synthesizeSpeech(clipped)
+      if (token !== speakSeq) return // 停止/切走：丢弃过期结果
+      const url = speechAudioUrl(res.id)
+      tempFilePath = await new Promise<string>((resolve, reject) => {
+        uni.downloadFile({
+          url,
+          success: (r) => (r.statusCode === 200 ? resolve(r.tempFilePath) : reject(new Error('音频下载失败'))),
+          fail: () => reject(new Error('音频下载失败')),
+        })
       })
-    })
+      if (token !== speakSeq) return
+      const oldest = speechCache.keys().next().value
+      if (speechCache.size >= SPEECH_CACHE_MAX && oldest !== undefined) {
+        speechCache.delete(oldest)
+      }
+      speechCache.set(clipped, tempFilePath)
+    }
     const ctx = uni.createInnerAudioContext()
     audioCtx = ctx
     ctx.src = tempFilePath
-    ctx.onEnded(() => { speakingKey.value = ''; audioCtx = null })
-    ctx.onError(() => {
-      speakingKey.value = ''
-      audioCtx = null
-      uni.showToast({ title: '音频播放失败', icon: 'none' })
+    // 守卫 audioCtx === ctx：销毁后迟到的回调不清掉新一轮的状态
+    ctx.onEnded(() => {
+      if (audioCtx === ctx) { speakingKey.value = ''; audioCtx = null }
     })
+    ctx.onError(() => {
+      if (audioCtx === ctx) {
+        speakingKey.value = ''
+        audioCtx = null
+        uni.showToast({ title: '音频播放失败', icon: 'none' })
+      }
+    })
+    if (token !== speakSeq) return
     ctx.play()
   } catch (e: any) {
+    if (token !== speakSeq) return // 已停止：不打扰
     speakingKey.value = ''
     uni.showToast({ title: e?.message || '朗读失败', icon: 'none' })
   }

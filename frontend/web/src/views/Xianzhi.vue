@@ -527,6 +527,7 @@ const plainForSpeech = (raw: string): string => raw
   .trim()
 
 const stopSpeaking = () => {
+  speakSeq++ // 让在途的合成结果作废：点了停止就不能再响
   if (currentAudio) {
     currentAudio.pause()
     try { currentAudio.currentTime = 0 } catch { /* 尚未加载完 */ }
@@ -535,25 +536,49 @@ const stopSpeaking = () => {
   speakingKey.value = ""
 }
 
+// 每次点击领一个号，await 回来发现号变了＝用户已停止/换目标，直接丢弃
+let speakSeq = 0
+// 重播缓存：文本 → 音频地址。同一条消息反复听不再重新请求（合成在后端有内容寻址缓存兜底）
+const speechCache = new Map<string, string>()
+const SPEECH_CACHE_MAX = 8
+
 const toggleSpeak = async (msg: SessionMessage, idx: number) => {
   const key = String(idx)
   if (speakingKey.value === key) { stopSpeaking(); return }
   stopSpeaking()
   const text = plainForSpeech(msg.content || "")
   if (!text) return
+  const clipped = text.slice(0, 4000)
+  const token = ++speakSeq
   speakingKey.value = key
   try {
-    const res = await synthesizeSpeech(text.slice(0, 4000))
-    const audio = new Audio(speechAudioUrl(res.id))
-    currentAudio = audio
-    audio.onended = () => { speakingKey.value = ""; currentAudio = null }
-    audio.onerror = () => {
-      speakingKey.value = ""
-      currentAudio = null
-      window.alert("音频播放失败，请重试")
+    let url = speechCache.get(clipped)
+    if (!url) {
+      const res = await synthesizeSpeech(clipped)
+      if (token !== speakSeq) return // 停止/切走：丢弃过期结果
+      url = speechAudioUrl(res.id)
+      if (speechCache.size >= SPEECH_CACHE_MAX) {
+        const oldest = speechCache.keys().next().value
+        if (oldest !== undefined) speechCache.delete(oldest)
+      }
+      speechCache.set(clipped, url)
     }
+    const audio = new Audio(url)
+    currentAudio = audio
+    audio.onended = () => {
+      if (currentAudio === audio) { speakingKey.value = ""; currentAudio = null }
+    }
+    audio.onerror = () => {
+      if (currentAudio === audio) {
+        speakingKey.value = ""
+        currentAudio = null
+        window.alert("音频播放失败，请重试")
+      }
+    }
+    if (token !== speakSeq) return
     await audio.play()
   } catch (e: any) {
+    if (token !== speakSeq) return // 已停止：不打扰
     speakingKey.value = ""
     currentAudio = null
     window.alert(e?.message || "朗读失败，请稍后重试")

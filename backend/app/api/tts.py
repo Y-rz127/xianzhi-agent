@@ -16,9 +16,9 @@ from __future__ import annotations
 
 import base64
 import binascii
+import hashlib
 import re
 import time
-import uuid
 from pathlib import Path
 
 import httpx
@@ -65,6 +65,15 @@ def _cleanup_expired() -> None:
                 f.unlink()
         except OSError:
             pass
+
+
+def _cache_key(text: str, voice: str) -> str:
+    """同文同音色 → 同一音频 id：重播/反复点击直接复用落盘文件，不再重复调上游扣费。
+
+    sha256 截 32 位十六进制，与既有 _ID_RE 校验和文件命名格式保持一致。
+    """
+    raw = f"{settings.tts_model}|{voice}|{text}".encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()[:32]
 
 
 async def _fetch_audio(text: str, voice: str) -> bytes:
@@ -140,10 +149,27 @@ async def synthesize(
     await enforce_quota("tts", principal, client_ip_from_request(request), settings.paid_quota_tts_daily)
     voice = str(body.get("voice") or settings.tts_voice).strip() or settings.tts_voice
 
+    audio_id = _cache_key(text, voice)
+    path = _tts_dir() / f"{audio_id}.wav"
+    if path.is_file():
+        # 缓存命中：touch 续期，常用音频不被 TTL 顺手清掉；不清理过期文件（下次 miss 时再做）
+        try:
+            path.touch()
+        except OSError:
+            pass
+        log.info(f"[tts] 缓存命中 voice={voice} chars={len(text)}")
+        return {
+            "id": audio_id,
+            "url": f"/tts/audio/{audio_id}",
+            "mime": "audio/wav",
+            "size": path.stat().st_size,
+            "chars": len(text),
+            "model": settings.tts_model,
+            "voice": voice,
+        }
+
     _cleanup_expired()
     content = await _fetch_audio(text, voice)
-    audio_id = uuid.uuid4().hex
-    path = _tts_dir() / f"{audio_id}.wav"
     try:
         path.write_bytes(content)
     except OSError as exc:
