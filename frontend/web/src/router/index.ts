@@ -13,6 +13,7 @@ import RagManager from "../views/RagManager.vue"
 import ChartCases from "../views/ChartCases.vue"
 import ChartDetail from "../views/ChartDetail.vue"
 import Observability from "../views/Observability.vue"
+import ModelConfig from "../views/ModelConfig.vue"
 import UserAdmin from "../views/UserAdmin.vue"
 import Feedback from "../views/Feedback.vue"
 import AnswerFeedback from "../views/AnswerFeedback.vue"
@@ -34,6 +35,7 @@ const routes: RouteRecordRaw[] = [
   { path: "/chart-cases", name: "chart-cases", component: ChartCases, meta: { title: "命例库" } },
   { path: "/chart-detail", name: "chart-detail", component: ChartDetail, meta: { title: "命盘详情" } },
   { path: "/observability", name: "observability", component: Observability, meta: { title: "监测台" } },
+  { path: "/observability/models", name: "model-config", component: ModelConfig, meta: { title: "模型配置" } },
   { path: "/user-admin", name: "user-admin", component: UserAdmin, meta: { title: "用户管理" } },
   { path: "/feedback", name: "feedback", component: Feedback, meta: { title: "问题反馈" } },
   { path: "/answer-feedback", name: "answer-feedback", component: AnswerFeedback, meta: { title: "回答反馈" } },

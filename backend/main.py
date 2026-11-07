@@ -202,6 +202,21 @@ async def lifespan(app: FastAPI):
         else chat_model
     )
 
+    def _make_configured_role_model(role: str, model_name: str):
+        role_options = {
+            "decompose_model": (0.1, 30.0, settings.decompose_enable_thinking),
+            "reviewer_model": (0.1, 60.0, settings.reviewer_enable_thinking),
+            "sub_app_model": (
+                settings.llm_temperature,
+                settings.llm_timeout,
+                settings.sub_app_enable_thinking,
+            ),
+        }
+        if role not in role_options:
+            raise ValueError(f"未知模型角色: {role}")
+        temperature, timeout, enable_thinking = role_options[role]
+        return _make_sub_model(model_name, temperature, timeout, enable_thinking)
+
     # 记忆（数据库不可达时降级，不阻断端口监听）
     memory = create_chat_memory()
     # LangGraph 断点恢复：checkpointer 初始化失败时无断点运行，不阻断启动
@@ -219,6 +234,12 @@ async def lifespan(app: FastAPI):
         decompose_model=decompose_model,
         reviewer_model=reviewer_model,
         sub_app_model=sub_app_model,
+        role_model_names={
+            "decompose_model": settings.decompose_model,
+            "reviewer_model": settings.reviewer_model,
+            "sub_app_model": settings.sub_app_model,
+        },
+        role_model_factory=_make_configured_role_model,
     )
     app.state.app_context = app_ctx
     set_app_context(app_ctx)

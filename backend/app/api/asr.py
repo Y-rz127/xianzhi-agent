@@ -11,6 +11,7 @@ from app.api.deps import get_optional_paid_principal
 from app.core.config import settings
 from app.core.http.client_ip import client_ip_from_request
 from app.core.logger import log
+from app.core.model_config import get_model_config
 from app.core.quota import enforce_quota
 
 router = APIRouter(prefix="/asr", tags=["ASR"])
@@ -67,6 +68,7 @@ async def transcribe(
         raise HTTPException(status_code=503, detail="语音识别服务尚未配置")
 
     await enforce_quota("asr", principal, client_ip_from_request(request), settings.paid_quota_asr_daily)
+    model_name = get_model_config()["asr_model"]
     b64 = audio.split(",", 1)[1] if "," in audio else ""
     head = _head_bytes(b64)
     sniffed, sniffed_rate = _sniff(head)
@@ -84,7 +86,7 @@ async def transcribe(
         "/compatible-mode/v1", "/api/v1/services/aigc/multimodal-generation/generation"
     )
     payload = {
-        "model": settings.asr_model,
+        "model": model_name,
         "input": {"messages": [{"role": "user", "content": [{"type": "input_audio", "input_audio": {"data": data_uri}}]}]},
         "parameters": {"format": fmt, "sample_rate": sample_rate},
     }
@@ -123,4 +125,4 @@ async def transcribe(
         log.warning(f"[asr] 未识别到文本 fmt={fmt} chars={len(b64)} → {str(data)[:300]}")
         raise HTTPException(status_code=422, detail="未识别到清晰的语音")
     log.info(f"[asr] 转写成功 fmt={fmt} rate={sample_rate} chars={len(b64)} → {len(text.strip())} 字")
-    return {"text": text.strip(), "model": settings.asr_model}
+    return {"text": text.strip(), "model": model_name}

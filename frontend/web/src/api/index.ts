@@ -518,6 +518,40 @@ export type LlmPriceMap = Record<string, { input: number; output: number }>
 
 export interface LlmPriceStatus { prices: LlmPriceMap; candidates: string[]; default_candidates?: string[] }
 
+export interface ModelRoleConfig {
+  decompose_model: string
+  reviewer_model: string
+  sub_app_model: string
+  asr_model: string
+  tts_model: string
+  tts_voice: string
+}
+
+export interface ModelRoleConfigResponse {
+  models: ModelRoleConfig
+  defaults: ModelRoleConfig
+  main_model: string
+}
+
+export async function getModelRoleConfig(): Promise<ModelRoleConfigResponse> {
+  const res = await adminFetch(`${API_BASE}/ai/admin/models`)
+  if (!res.ok) throw new Error("获取模型配置失败")
+  return await res.json()
+}
+
+export async function updateModelRoleConfig(models: ModelRoleConfig): Promise<ModelRoleConfigResponse> {
+  const res = await adminFetch(`${API_BASE}/ai/admin/models`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ models }),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: `保存失败 ${res.status}` }))
+    throw new Error(err.detail || `保存失败 ${res.status}`)
+  }
+  return await res.json()
+}
+
 export async function getLlmPrice(): Promise<LlmPriceStatus> {
   const res = await adminFetch(`${API_BASE}/ai/admin/llm/price`)
   if (!res.ok) throw new Error("获取单价表失败")

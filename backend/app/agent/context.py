@@ -33,7 +33,7 @@ import threading
 import time
 from collections import OrderedDict
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Callable
 
 from app.core.logger import log
 
@@ -183,6 +183,8 @@ class AppContext:
     reviewer_model: Any = None
     # 子应用（塔罗/紫微/六爻/合婚）解读模型：空则回落主问答模型（见 get_sub_app_model）
     sub_app_model: Any = None
+    role_model_names: dict[str, str] = field(default_factory=dict)
+    role_model_factory: Callable[[str, str], Any] | None = field(default=None, repr=False)
     # conversation_id -> Xianzhi 实例（会话锁为 agent.lock 上的 SessionLock，获取时现构）
     _agents: "OrderedDict[str, Any]" = field(default_factory=OrderedDict, repr=False)
     _pool_lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
@@ -195,6 +197,41 @@ class AppContext:
             self.reviewer_model = self.chat_model
         if self.sub_app_model is None:
             self.sub_app_model = self.chat_model
+        if not self.role_model_names:
+            from app.core.model_config import default_model_config
+
+            self.role_model_names = {
+                key: default_model_config()[key]
+                for key in ("decompose_model", "reviewer_model", "sub_app_model")
+            }
+
+    def refresh_configured_models(self, models: dict[str, str] | None = None) -> None:
+        """同步当前 worker 的模型配置；数据库配置变化后新会话立即使用新模型。"""
+        if self.role_model_factory is None:
+            return
+        if models is None:
+            from app.core.config.kv import get_config
+            from app.core.model_config import MODEL_CONFIG_KEY
+
+            stored = get_config(MODEL_CONFIG_KEY)
+            if not isinstance(stored, dict) or not isinstance(stored.get("models"), dict):
+                return
+            models = stored["models"]
+
+        with self._pool_lock:
+            changed = False
+            for role in ("decompose_model", "reviewer_model", "sub_app_model"):
+                name = models.get(role)
+                if not isinstance(name, str):
+                    continue
+                name = name.strip()
+                if name == self.role_model_names.get(role):
+                    continue
+                setattr(self, role, self.role_model_factory(role, name) if name else self.chat_model)
+                self.role_model_names[role] = name
+                changed = True
+            if changed:
+                self._agents.clear()
 
     def get_xianzhi(self, conversation_id: str):
         """获取（或创建）指定会话的 Xianzhi 实例及其会话锁（调用方在锁内完成会话操作，避免并发污染）。
@@ -202,6 +239,7 @@ class AppContext:
         返回的锁为 SessionLock（进程内锁 + Redis 分布式锁双层互斥）。
         """
         cid = conversation_id if conversation_id and conversation_id.strip() else "xianzhi-default"
+        self.refresh_configured_models()
         with self._pool_lock:
             hit = self._agents.get(cid)
             if hit is not None:
@@ -282,6 +320,9 @@ def sub_app_model_of(ctx: Any) -> Any:
     哪些算"子应用解读"：塔罗 / 紫微 / 六爻 / 合婚的解读，命理报告生成，K 线 AI 批注。
     它们都是"一次性、给定材料出解读"的短输出，与问答主链（长上下文 + 推理）不是一回事。
     """
+    refresh = getattr(ctx, "refresh_configured_models", None)
+    if callable(refresh):
+        refresh()
     return getattr(ctx, "sub_app_model", None) or getattr(ctx, "chat_model", None)
 
 

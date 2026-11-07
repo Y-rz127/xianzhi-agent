@@ -25,6 +25,11 @@
       </div>
     </header>
 
+    <nav class="monitor-tabs" aria-label="监测台页面">
+      <router-link to="/observability" exact-active-class="active">监控概览</router-link>
+      <router-link to="/observability/models" active-class="active">模型配置</router-link>
+    </nav>
+
     <section class="summary-grid">
       <div class="summary-card glass-card">
         <div class="summary-label">总请求数</div>
@@ -141,56 +146,6 @@
       </div>
     </section>
 
-    <section class="chain-section glass-card">
-      <div class="section-header">
-        <div class="section-title">模型降级链</div>
-        <div class="chain-actions">
-          <button class="btn btn-xs" @click="loadChain" :disabled="chainLoading">{{ chainLoading ? "加载中" : "重新加载" }}</button>
-          <button class="btn btn-xs" @click="saveChain" :disabled="chainSaving">{{ chainSaving ? "保存中" : "保存" }}</button>
-        </div>
-      </div>
-      <div class="chain-hint">主模型失败（限流/超时/5xx/模型不存在/额度用尽）时按顺序自动降级；每行填一个模型名，第一行为主模型。留空=回退 .env 主模型。<br />候选：点模型名加入下方输入框；点 × 从候选删去（立即保存，不影响已在链上的模型）。</div>
-      <textarea
-        v-model="chainText"
-        class="chain-input"
-        rows="4"
-        placeholder="qwen3.8-max-0902&#10;qwen3.8-27b&#10;qwen3.8-flash"
-        spellcheck="false"
-      ></textarea>
-      <div class="chain-candidates">
-        <span class="chain-candidate-label">候选：</span>
-        <span v-for="c in chainCandidates" :key="c" class="chain-chip">
-          <span class="chain-chip-name" @click="addCandidate(c)" :title="`加入降级链：${c}`">{{ c }}</span>
-          <button
-            class="chain-chip-del"
-            :disabled="candidateSaving"
-            @click="removeCandidate(c)"
-            :title="`从候选删去 ${c}（不影响降级链）`"
-          >×</button>
-        </span>
-        <span v-if="!chainCandidates.length" class="chain-candidate-empty">（暂无候选，可手动添加或点「恢复默认」）</span>
-        <span class="chain-candidate-add">
-          <input
-            v-model="newCandidate"
-            class="chain-candidate-input"
-            placeholder="添加候选模型名"
-            spellcheck="false"
-            @keyup.enter="addNewCandidate"
-          />
-          <button class="btn btn-xs" :disabled="candidateSaving || !newCandidate.trim()" @click="addNewCandidate">添加</button>
-          <button
-            class="btn btn-xs"
-            :disabled="candidateSaving || !chainDefaults.length || sameCandidates(chainCandidates, chainDefaults)"
-            @click="restoreDefaultCandidates"
-          >恢复默认</button>
-        </span>
-      </div>
-      <div v-if="chainOrder.length" class="chain-summary">
-        当前生效链：<span v-for="(m, i) in chainOrder" :key="m + i" class="chain-item">{{ i + 1 }}. {{ m }}</span>
-      </div>
-      <div v-if="chainMessage" class="chain-message" :class="{ 'chain-error': chainError }">{{ chainMessage }}</div>
-    </section>
-
     <section class="top-endpoints glass-card">
       <div class="section-title">Top 5 端点</div>
       <div v-if="topEndpoints.length === 0" class="empty-state">
@@ -234,7 +189,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from "vue"
-import { fetchMetrics, getLlmChain, updateLlmChain, updateLlmCandidates, getLlmPrice, updateLlmPrice, type MetricsData, type LlmPriceMap } from "../api"
+import { fetchMetrics, getLlmPrice, updateLlmPrice, type MetricsData, type LlmPriceMap } from "../api"
 
 const metrics = ref<MetricsData | null>(null)
 const loading = ref(false)
@@ -364,108 +319,6 @@ async function loadMetrics() {
   }
 }
 
-// ---- LLM 降级链配置 ----
-const chainText = ref("")
-const chainOrder = ref<string[]>([])
-const chainCandidates = ref<string[]>([])
-const chainLoading = ref(false)
-const chainSaving = ref(false)
-const chainMessage = ref("")
-const chainError = ref(false)
-
-async function loadChain() {
-  chainLoading.value = true
-  chainError.value = false
-  try {
-    const data = await getLlmChain()
-    chainOrder.value = data.models
-    chainCandidates.value = data.candidates
-    chainDefaults.value = data.default_candidates || []
-    chainText.value = data.models.join("\n")
-    chainMessage.value = ""
-  } catch (e: any) {
-    chainError.value = true
-    chainMessage.value = e.message || "获取降级链失败"
-  } finally {
-    chainLoading.value = false
-  }
-}
-
-async function saveChain() {
-  const models = chainText.value.split("\n").map((s) => s.trim()).filter(Boolean)
-  chainSaving.value = true
-  chainError.value = false
-  try {
-    const data = await updateLlmChain(models)
-    chainOrder.value = data.models
-    chainText.value = data.models.join("\n")
-    chainMessage.value = "已保存并生效"
-    setTimeout(() => (chainMessage.value = ""), 3000)
-  } catch (e: any) {
-    chainError.value = true
-    chainMessage.value = e.message || "保存失败"
-  } finally {
-    chainSaving.value = false
-  }
-}
-
-function addCandidate(name: string) {
-  const current = chainText.value.split("\n").map((s) => s.trim()).filter(Boolean)
-  if (!current.includes(name)) {
-    current.push(name)
-    chainText.value = current.join("\n")
-  }
-}
-
-// ---- 候选模型增删（立即落库；只影响快捷提示，不动降级链）----
-const newCandidate = ref("")
-const candidateSaving = ref(false)
-const chainDefaults = ref<string[]>([])
-
-function sameCandidates(a: string[], b: string[]) {
-  return a.length === b.length && a.every((x, i) => x === b[i])
-}
-
-async function persistCandidates(next: string[], okText: string) {
-  candidateSaving.value = true
-  chainError.value = false
-  try {
-    const data = await updateLlmCandidates(next)
-    chainCandidates.value = data.candidates // 后端返回落库后的候选（已配置就以库为准，空就是空）
-    chainMessage.value = okText
-    setTimeout(() => (chainMessage.value = ""), 3000)
-  } catch (e: any) {
-    chainError.value = true
-    chainMessage.value = e.message || "候选保存失败"
-  } finally {
-    candidateSaving.value = false
-  }
-}
-
-function removeCandidate(name: string) {
-  if (candidateSaving.value) return
-  const next = chainCandidates.value.filter((c) => c !== name)
-  persistCandidates(next, next.length ? `已从候选删去 ${name}` : `已删去 ${name}，候选已清空`)
-}
-
-function addNewCandidate() {
-  const name = newCandidate.value.trim()
-  if (!name || candidateSaving.value) return
-  if (chainCandidates.value.includes(name)) {
-    chainError.value = true
-    chainMessage.value = `${name} 已在候选中`
-    setTimeout(() => (chainMessage.value = ""), 3000)
-    return
-  }
-  newCandidate.value = ""
-  persistCandidates([...chainCandidates.value, name], `已添加候选 ${name}`)
-}
-
-function restoreDefaultCandidates() {
-  if (candidateSaving.value || !chainDefaults.value.length) return
-  persistCandidates([...chainDefaults.value], "已恢复默认候选")
-}
-
 // ---- LLM 单价配置 ----
 interface PriceRow { model: string; input: string; output: string }
 const priceEditing = ref(false)
@@ -529,7 +382,6 @@ async function savePrice() {
 
 onMounted(() => {
   loadMetrics()
-  loadChain()
   timer = setInterval(loadMetrics, 15000)    // 每 15 秒刷新一次
 })
 
@@ -548,6 +400,22 @@ onUnmounted(() => {
   gap: var(--spacing-lg);
   min-height: 100%;
   overflow-y: auto;
+}
+.monitor-tabs {
+  display: flex;
+  gap: 8px;
+  border-bottom: 1px solid var(--border);
+}
+.monitor-tabs a {
+  padding: 9px 14px;
+  color: var(--text-dim);
+  text-decoration: none;
+  border-bottom: 2px solid transparent;
+  font-size: 13px;
+}
+.monitor-tabs a:hover, .monitor-tabs a.active {
+  color: var(--accent-light);
+  border-bottom-color: var(--accent-light);
 }
 .page-header {
   display: flex;
@@ -616,89 +484,10 @@ onUnmounted(() => {
   margin-top: 4px;
 }
 
-.charts-section, .top-endpoints, .errors-section, .llm-section, .chain-section {
+.charts-section, .top-endpoints, .errors-section, .llm-section {
   padding: var(--spacing-lg);
   border-radius: var(--radius);
 }
-.chain-actions { display: flex; gap: var(--spacing-md); }
-.chain-hint { font-size: 12px; color: var(--text-dim); margin-bottom: var(--spacing-md); line-height: 1.6; }
-.chain-input {
-  width: 100%;
-  box-sizing: border-box;
-  padding: 10px 12px;
-  border-radius: var(--radius);
-  border: 1px solid var(--border);
-  background: var(--bg-bright, rgba(255, 255, 255, 0.04));
-  color: var(--text);
-  font-family: var(--font-mono, monospace);
-  font-size: 13px;
-  resize: vertical;
-}
-.chain-input:focus { outline: none; border-color: var(--accent, #d4af37); }
-.chain-candidates {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--spacing-8, 8px);
-  margin-top: var(--spacing-md);
-}
-.chain-candidate-label { font-size: 12px; color: var(--text-dim); }
-.chain-candidate-empty { font-size: 12px; color: var(--text-dim); font-style: italic; }
-.chain-candidate-add { display: inline-flex; align-items: center; gap: 6px; }
-.chain-candidate-input {
-  width: 160px;
-  font-size: 12px;
-  padding: 3px 10px;
-  border-radius: 999px;
-  border: 1px solid var(--border);
-  background: transparent;
-  color: var(--text);
-}
-.chain-candidate-input:focus { outline: none; border-color: var(--accent, #d4af37); }
-.chain-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 12px;
-  padding: 2px 4px 2px 10px;
-  border-radius: 999px;
-  border: 1px solid var(--border);
-  color: var(--text-dim);
-  transition: all 0.15s ease;
-}
-.chain-chip:hover { color: var(--text); border-color: var(--accent, #d4af37); }
-.chain-chip-name { cursor: pointer; }
-.chain-chip-del {
-  border: none;
-  background: transparent;
-  color: inherit;
-  font-size: 13px;
-  line-height: 1;
-  padding: 0 3px;
-  border-radius: 999px;
-  cursor: pointer;
-  opacity: 0.6;
-}
-.chain-chip-del:hover:not(:disabled) { color: #e06c75; opacity: 1; }
-.chain-chip-del:disabled { cursor: not-allowed; opacity: 0.3; }
-.chain-summary {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--spacing-md);
-  align-items: center;
-  margin-top: var(--spacing-md);
-  font-size: 12px;
-  color: var(--text-dim);
-}
-.chain-item {
-  padding: 2px 10px;
-  border-radius: 999px;
-  background: var(--bg-bright, rgba(255, 255, 255, 0.06));
-  font-family: var(--font-mono, monospace);
-  color: var(--text);
-}
-.chain-message { margin-top: var(--spacing-md); font-size: 12px; color: var(--success, #1dc981); }
-.chain-message.chain-error { color: var(--danger, #e8463a); }
 .llm-summary {
   display: flex;
   align-items: center;

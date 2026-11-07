@@ -14,6 +14,7 @@ from app.api.favorites import router as favorites_router
 from app.api.feedback import router as feedback_router
 from app.api.llm_chain import router as llm_chain_router
 from app.api.me import router as me_router
+from app.api.model_config import router as model_config_router
 from app.api.observability import router as observability_router
 from app.api.profiles import router as profiles_router
 from app.api.rag import mgmt_router as rag_mgmt_router
@@ -48,3 +49,4 @@ router.include_router(user_ai_router)
 router.include_router(admin_users_router)
 router.include_router(admin_accounts_router)
 router.include_router(llm_chain_router)
+router.include_router(model_config_router)

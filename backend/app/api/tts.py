@@ -29,6 +29,7 @@ from app.api.deps import get_optional_paid_principal
 from app.core.config import settings
 from app.core.http.client_ip import client_ip_from_request
 from app.core.logger import log
+from app.core.model_config import get_model_config
 from app.core.quota import enforce_quota
 
 router = APIRouter(prefix="/tts", tags=["TTS"])
@@ -67,19 +68,19 @@ def _cleanup_expired() -> None:
             pass
 
 
-def _cache_key(text: str, voice: str) -> str:
+def _cache_key(text: str, voice: str, model_name: str) -> str:
     """同文同音色 → 同一音频 id：重播/反复点击直接复用落盘文件，不再重复调上游扣费。
 
     sha256 截 32 位十六进制，与既有 _ID_RE 校验和文件命名格式保持一致。
     """
-    raw = f"{settings.tts_model}|{voice}|{text}".encode("utf-8")
+    raw = f"{model_name}|{voice}|{text}".encode("utf-8")
     return hashlib.sha256(raw).hexdigest()[:32]
 
 
-async def _fetch_audio(text: str, voice: str) -> bytes:
+async def _fetch_audio(text: str, voice: str, model_name: str) -> bytes:
     """调 DashScope 合成并把音频字节取回来。"""
     payload = {
-        "model": settings.tts_model,
+        "model": model_name,
         "input": {"text": text, "voice": voice, "format": "wav", "sample_rate": 24000},
     }
     try:
@@ -147,9 +148,11 @@ async def synthesize(
     if not settings.dashscope_api_key:
         raise HTTPException(status_code=503, detail="语音合成服务尚未配置")
     await enforce_quota("tts", principal, client_ip_from_request(request), settings.paid_quota_tts_daily)
-    voice = str(body.get("voice") or settings.tts_voice).strip() or settings.tts_voice
+    model_config = get_model_config()
+    model_name = model_config["tts_model"]
+    voice = str(body.get("voice") or model_config["tts_voice"]).strip() or model_config["tts_voice"]
 
-    audio_id = _cache_key(text, voice)
+    audio_id = _cache_key(text, voice, model_name)
     path = _tts_dir() / f"{audio_id}.wav"
     if path.is_file():
         # 缓存命中：touch 续期，常用音频不被 TTL 顺手清掉；不清理过期文件（下次 miss 时再做）
@@ -164,12 +167,12 @@ async def synthesize(
             "mime": "audio/wav",
             "size": path.stat().st_size,
             "chars": len(text),
-            "model": settings.tts_model,
+            "model": model_name,
             "voice": voice,
         }
 
     _cleanup_expired()
-    content = await _fetch_audio(text, voice)
+    content = await _fetch_audio(text, voice, model_name)
     try:
         path.write_bytes(content)
     except OSError as exc:
@@ -183,7 +186,7 @@ async def synthesize(
         "mime": "audio/wav",
         "size": len(content),
         "chars": len(text),
-        "model": settings.tts_model,
+        "model": model_name,
         "voice": voice,
     }
 
