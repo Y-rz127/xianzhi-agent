@@ -169,6 +169,13 @@ async def lifespan(app: FastAPI):
     # 为什么集中记一份：探活纠正时 `rebuild` 会再造一个实例（旧实例可能已被会话 Agent 持有，
     # 不能立刻 close），关停时统一收口，避免连接池泄漏。
     sub_model_http: list[httpx.Client] = []
+    # 角色模型（拆解/审核/子应用）实例 → 其 httpx client：
+    # 管理端改配置会重建角色模型，旧实例的连接池必须显式关闭，否则每次改配置
+    # 都在 sub_model_http 里永久堆积一个 client（只有进程退出才释放）。
+    role_model_clients: dict[str, httpx.Client] = {}
+    # 被替换掉的角色模型 client：已从活动列表摘除，等关停时统一关闭
+    # （不立即 close，避免打断仍持有它的在途请求）。
+    retired_model_http: list[httpx.Client] = []
 
     def _make_sub_model(
         model_name: str, temperature: float, timeout: float, enable_thinking: bool
@@ -215,7 +222,19 @@ async def lifespan(app: FastAPI):
         if role not in role_options:
             raise ValueError(f"未知模型角色: {role}")
         temperature, timeout, enable_thinking = role_options[role]
-        return _make_sub_model(model_name, temperature, timeout, enable_thinking)
+        client = httpx.Client(trust_env=False)
+        sub_model_http.append(client)
+        # 旧角色的 client 从活动列表摘掉，交由关停时统一关闭：
+        # 不能在这里立即 close —— 正在跑的会话可能仍持有该 client，
+        # 立即关会打断在途请求（报 "client has been closed"）。
+        old_client = role_model_clients.pop(role, None)
+        if old_client is not None:
+            sub_model_http.remove(old_client)
+            retired_model_http.append(old_client)
+        role_model_clients[role] = client
+        return ThrottledModel(
+            _make_model(model_name, temperature, timeout, client, enable_thinking=enable_thinking)
+        )
 
     # 记忆（数据库不可达时降级，不阻断端口监听）
     memory = create_chat_memory()
@@ -458,7 +477,9 @@ async def lifespan(app: FastAPI):
         log.warning("关闭 PG 连接池失败: {}", e)
 
     # 关闭 LLM 客户端 httpx 连接池（仅独立子模型实例有各自的池；复用主模型的没有）
-    for client in (*sub_model_http, http):
+    # retired_model_http：管理端改配置时被替换下来的旧角色模型连接池，
+    # 此刻在途请求已结束（服务正在关停），可以安全关闭。
+    for client in (*sub_model_http, *retired_model_http, http):
         _close_quietly(client)
 
     # 关闭专用线程池（取消排队任务，等待中的执行不再接收；已在执行的不强杀）

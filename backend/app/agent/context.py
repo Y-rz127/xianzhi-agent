@@ -206,7 +206,14 @@ class AppContext:
             }
 
     def refresh_configured_models(self, models: dict[str, str] | None = None) -> None:
-        """同步当前 worker 的模型配置；数据库配置变化后新会话立即使用新模型。"""
+        """同步当前 worker 的模型配置；数据库配置变化后新会话立即使用新模型。
+
+        模型换了**不重建会话 Agent**：每个 agent 自带会话锁（agent.lock），
+        清空 _agents 会让同一 conversation_id 下次拿到**另一个 agent、另一把锁**，
+        于是同会话两轮可能并发跑、互相覆盖会话内存（消息列表/命盘上下文）。
+        正确做法是原地替换模型引用：agent 内的 workflow/decompose/reviewer
+        在下一轮读取时取新的模型实例即可（见 Xianzhi._prepare_turn_models）。
+        """
         if self.role_model_factory is None:
             return
         if models is None:
@@ -231,7 +238,27 @@ class AppContext:
                 self.role_model_names[role] = name
                 changed = True
             if changed:
-                self._agents.clear()
+                # 原地换模型，不动会话池（会话锁绑定在 agent 实例上，不能丢）
+                self._apply_models_to_agents()
+
+    def _apply_models_to_agents(self) -> None:
+        """把新的角色模型同步到已存在的会话 Agent（保持 agent 与其会话锁不变）。
+
+        注意属性名：workflow 内是 ``_decompose_model`` 与 ``_reviewer``（ReviewerWorker
+        持有 ``_chat_model``），不是 decompose_model / reviewer_model。
+        """
+        for agent in list(self._agents.values()):
+            workflow = getattr(agent, "_workflow", None)
+            if workflow is None:
+                continue
+            try:
+                workflow.chat_model = self.chat_model
+                workflow._decompose_model = self.decompose_model
+                reviewer = getattr(workflow, "_reviewer", None)
+                if reviewer is not None:
+                    reviewer._chat_model = self.reviewer_model
+            except Exception as e:
+                log.warning("同步会话模型失败: {}", e)
 
     def get_xianzhi(self, conversation_id: str):
         """获取（或创建）指定会话的 Xianzhi 实例及其会话锁（调用方在锁内完成会话操作，避免并发污染）。
