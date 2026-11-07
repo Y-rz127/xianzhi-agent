@@ -50,6 +50,12 @@
       }
     },
     {
+      "path": "pages/settings/model-configure",
+      "style": {
+        "navigationBarTitleText": "自定义问答模型"
+      }
+    },
+    {
       "path": "pages/chart-cases/index",
       "style": {
         "navigationStyle": "custom",

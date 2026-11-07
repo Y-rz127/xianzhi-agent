@@ -65,6 +65,39 @@
         </view>
       </view>
 
+      <!-- AI 问答（按账号保存） -->
+      <view class="card form-card">
+        <view class="card-title-row">
+          <text class="card-dot">✦</text>
+          <text class="card-title">AI 问答</text>
+        </view>
+        <view class="form-row ai-row">
+          <view class="ai-info">
+            <text class="ai-name">LLM 严格审核</text>
+            <text class="ai-desc">开启：回答先事实审核、自动修正，更严谨但稍慢；关闭：流式直出，秒级响应</text>
+            <text v-if="reviewSet" class="ai-desc minor">当前按你的选择：{{ reviewEnabled ? '审核修正' : '流式直出' }}</text>
+            <text v-else class="ai-desc minor">跟随服务端全局默认</text>
+          </view>
+          <switch
+            class="ai-switch"
+            :checked="reviewEnabled"
+            :disabled="!loggedIn || reviewSaving"
+            color="#c8a24a"
+            @change="onReviewChange"
+          />
+        </view>
+        <view class="form-row ai-row" @tap="goModelConfig">
+          <view class="ai-info">
+            <text class="ai-name">自定义问答模型</text>
+            <text class="ai-desc">{{ modelSummary }}</text>
+          </view>
+          <text class="nav-arrow">›</text>
+        </view>
+        <view v-if="!loggedIn" class="hint-card clickable" @tap="goLogin">
+          <text class="hint-line">登录后以上设置按你的账号保存，多端同步</text>
+        </view>
+      </view>
+
       <!-- 操作按钮 -->
       <view class="actions">
         <text class="btn btn-ghost" @tap="onReset">恢复默认</text>
@@ -81,9 +114,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
+import { onShow } from '@dcloudio/uni-app'
 import { setConfig, getConfig } from '@/config'
-import { getHealth } from '@/api'
+import { getHealth, fetchUserAiSettings, saveUserAiSettings, type UserAiSettings } from '@/api'
+import { isLoggedIn } from '@/utils/storage'
 import { useTheme, useThemeNativeBar } from '@/composables/useTheme'
 
 const { isDark, setTheme, themeClass } = useTheme()
@@ -101,6 +136,63 @@ onMounted(() => {
   apiBase.value = c.apiBase
   wsBase.value = c.wsBase
 })
+
+// ===== AI 问答设置（按账号保存，游客仅展示） =====
+const loggedIn = ref(isLoggedIn())
+const reviewEnabled = ref(true)
+const reviewSet = ref(false)
+const reviewSaving = ref(false)
+const llmModel = ref('')
+const llmHasKey = ref(false)
+const modelSummary = computed(() =>
+  llmModel.value && llmHasKey.value
+    ? `已接入：${llmModel.value}`
+    : '接入你自己的 OpenAI 兼容 API/模型',
+)
+
+async function loadAiSettings() {
+  loggedIn.value = isLoggedIn()
+  if (!loggedIn.value) return
+  try {
+    const s = await fetchUserAiSettings()
+    reviewEnabled.value = !!s.review_enabled
+    reviewSet.value = !!s.review_set
+    llmModel.value = s.llm_model || ''
+    llmHasKey.value = !!s.has_key
+  } catch {
+    /* 后台未就绪/未登录：保持默认展示 */
+  }
+}
+
+async function onReviewChange(e: any) {
+  const next = !!e.detail.value
+  reviewSaving.value = true
+  try {
+    const s = await saveUserAiSettings({ review_enabled: next })
+    reviewEnabled.value = !!s.review_enabled
+    reviewSet.value = !!s.review_set
+    uni.showToast({ title: next ? '已开启严格审核' : '已关闭审核（流式直出）', icon: 'none' })
+  } catch (err: any) {
+    uni.showToast({ title: err?.message || '保存失败', icon: 'none' })
+    reviewEnabled.value = !next // 保存失败回弹
+  } finally {
+    reviewSaving.value = false
+  }
+}
+
+function goModelConfig() {
+  if (!loggedIn.value) {
+    goLogin()
+    return
+  }
+  uni.navigateTo({ url: '/pages/settings/model-configure' })
+}
+
+function goLogin() {
+  uni.navigateTo({ url: '/pages/login/index' })
+}
+
+onShow(loadAiSettings)
 
 function onReset() {
   apiBase.value = '/api'
@@ -269,6 +361,46 @@ async function onSave() {
   background: var(--x-warn-bg);
   border: 1rpx solid var(--x-warn-border);
   border-radius: 20rpx;
+}
+.hint-card.clickable { border-style: dashed; }
+
+/* AI 问答设置 */
+.ai-row {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20rpx;
+  padding: 8rpx 0;
+}
+.ai-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
+  min-width: 0;
+}
+.ai-name {
+  font-size: 30rpx;
+  color: $color-ink;
+  font-weight: 600;
+}
+.ai-desc {
+  font-size: 24rpx;
+  color: $color-ink-light;
+  line-height: 1.6;
+}
+.ai-desc.minor {
+  color: $color-ink-lighter;
+  font-size: 22rpx;
+}
+.ai-switch {
+  transform: scale(0.85);
+  flex-shrink: 0;
+}
+.nav-arrow {
+  font-size: 40rpx;
+  color: $color-ink-lighter;
+  flex-shrink: 0;
 }
 .hint-line {
   display: block;

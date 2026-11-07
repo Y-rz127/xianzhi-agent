@@ -50,6 +50,8 @@ export const EP = {
   FEEDBACK: '/ai/feedback',
   FEEDBACK_ANSWER: '/ai/feedback/answer',
   ME: '/ai/me',
+  /** 用户 AI 设置（LLM 审核开关 + 自定义问答模型，按登录用户隔离） */
+  USER_AI_SETTINGS: '/ai/user/ai-settings',
   AUTH_REGISTER: '/ai/auth/register',
   AUTH_LOGIN: '/ai/auth/login',
   AUTH_WX_LOGIN: '/ai/auth/wx-login',

@@ -765,6 +765,29 @@ export const fetchMe = () => get<{ user: XzUser }>(EP.AUTH_ME)
 export const updateMe = (body: { nickname?: string; avatar?: string; password?: string }) =>
   put<{ user: XzUser }>(EP.AUTH_ME, body)
 
+/* ============ 用户 AI 设置（审核开关 + 自定义问答模型，按用户隔离） ============ */
+
+export interface UserAiSettings {
+  review_enabled: boolean
+  review_set: boolean
+  llm_base_url: string
+  llm_model: string
+  has_key: boolean
+  updated_at: string
+}
+
+export const fetchUserAiSettings = () => get<UserAiSettings>(EP.USER_AI_SETTINGS)
+
+export const saveUserAiSettings = (payload: {
+  review_enabled?: boolean
+  llm_base_url?: string
+  llm_api_key?: string
+  llm_model?: string
+  clear_model?: boolean
+}) => put<UserAiSettings>(EP.USER_AI_SETTINGS, payload)
+
+export const testUserModel = () => post<{ ok: boolean; message: string }>(`${EP.USER_AI_SETTINGS}/test-model`, {})
+
 /* ============ 八字档案（按用户隔离） ============ */
 
 export const fetchProfiles = () => get<BaziProfile[]>(EP.PROFILES)
