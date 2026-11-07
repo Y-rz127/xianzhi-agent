@@ -6,7 +6,7 @@
           <text class="card-dot">✦</text>
           <text class="card-title">接入你自己的模型</text>
         </view>
-        <text class="intro">支持任意公网 OpenAI 兼容接口。配置后命盘问答的生成与修复由该模型完成（生成失败自动回退服务端模型）；意图拆解与事实审核仍用服务端模型，保持独立把关。</text>
+        <text class="intro">支持任意公网 OpenAI 兼容接口。配置后命盘问答与闲聊回复由该模型完成（调用失败自动回退服务端模型）；意图拆解、事实审核与未挂盘时的排盘工具调用仍用服务端模型。</text>
 
         <view class="form-row">
           <text class="label">接口地址（Base URL）</text>

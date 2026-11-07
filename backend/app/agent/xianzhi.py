@@ -117,6 +117,10 @@ class Xianzhi(ToolCallAgent):
         self._workflow.on_progress = self._fire_progress
         # 会话归属用户（挂盘时由 payload 带入并粘住；游客为空串）
         self._user_id: str = ""
+        # 用户自定义问答模型（每轮由 _prepare_user_overrides 解析，游客为 None）：
+        # 用于命盘问答的生成/修复与闲聊回复；ReAct 排盘工具链仍用服务端模型
+        # （用户端点未必支持 tool calling，切过去会直接报错）。
+        self._user_model_override = None
         # 已落库的出生信息（避免每轮重复写库）
         self._birth_persisted_key: Optional[tuple] = None
         # MCP 工具签名缓存：None=尚未绑定；仅签名变化时才重新 bind_tools（见 think）
@@ -609,9 +613,16 @@ class Xianzhi(ToolCallAgent):
 
         每次轮次开始重置：用户在小程序改设置后下一轮立即生效，
         且优雅兜底——查库/解密失败一律回落到服务端默认，不阻断对话。
+
+        覆盖范围：
+        - workflow 生成/修复（挂盘后的命盘问答）→ 用户模型；
+        - 闲聊回复 → 用户模型；
+        - ReAct 排盘工具链、意图拆解、事实审核 → 服务端模型（用户端点未必支持
+          tool calling，且审核独立性是它存在的意义）。
         """
         self._workflow.overlay_model = None
         self._workflow.review_enabled = None
+        self._user_model_override = None
         uid = self._user_id or ""
         if not uid:
             return
@@ -625,6 +636,8 @@ class Xianzhi(ToolCallAgent):
             model = get_user_model(uid)
             if model is not None:
                 self._workflow.overlay_model = model
+                # 闲聊回复也用用户模型（无工具调用，安全）；失败时逐条回退服务端模型
+                self._user_model_override = model
                 log.info("[user-llm] 自定义问答模型已启用（{}）", s.get("llm_model") or "?")
         except Exception as e:
             log.warning("[user-ai] 应用用户 AI 设置失败，按服务端默认执行: {}", e)
@@ -795,6 +808,24 @@ class Xianzhi(ToolCallAgent):
         intent = classify_question(user_prompt)
         return intent.domain == "chitchat"
 
+    def _invoke_chitchat(self, messages, timeout: float):
+        """闲聊调用：优先用户自定义模型，失败回退服务端模型。
+
+        闲聊不涉及工具调用，用户端点只要兼容 chat completions 即可；
+        用户模型失败必须回退，不能让用户整个问不出话。
+        """
+        user_model = self._user_model_override
+        if user_model is not None:
+            try:
+                return user_model.bind(timeout=timeout).invoke(messages)
+            except Exception as e:
+                record_error("user_model_chitchat_fallback")
+                log.warning(
+                    "[user-llm] 自定义模型闲聊调用失败（{}），回退服务端模型",
+                    type(e).__name__[:60],
+                )
+        return self.chat_model.bind(timeout=timeout).invoke(messages)
+
     def _chitchat_reply(self, user_prompt: str) -> str:
         """闲聊短路：直接调一次 LLM，不走 ReAct 循环，不调任何工具。"""
         log.info("[xianzhi] 闲聊短路，跳过 ReAct 工具调用")
@@ -826,9 +857,9 @@ class Xianzhi(ToolCallAgent):
                     self.state = AgentState.ERROR
                     return _TURN_TIMEOUT_TEXT
                 with llm_tag("chitchat"):
-                    response = self.chat_model.bind(
-                        timeout=min(settings.llm_timeout, remaining)
-                    ).invoke(messages)
+                    response = self._invoke_chitchat(
+                        messages, timeout=min(settings.llm_timeout, remaining)
+                    )
                 content = (getattr(response, "content", "") or "").strip()
                 content = clean_think_tags(content)
                 # 闲聊路径同样可能被模型回显 "--- USER INPUT BEGIN/END ---" 边界标记，
@@ -856,6 +887,8 @@ class Xianzhi(ToolCallAgent):
         self._persist_pending_question(user_prompt)
         if self._workflow_context and not verbose:
             return self._workflow_stream(user_prompt)
+        # 非命盘路径（闲聊 / ReAct）：准备用户级覆盖，让闲聊回复也走用户自定义模型
+        self._prepare_user_overrides()
         # 闲聊短路：无命盘 + 闲聊意图 → 直接调一次 LLM，不走 ReAct 工具循环
         if not verbose and self._is_chitchat(user_prompt):
 
@@ -884,6 +917,8 @@ class Xianzhi(ToolCallAgent):
             async for chunk in self._aworkflow_stream(user_prompt):
                 yield chunk
             return
+        # 非命盘路径（闲聊 / ReAct）：准备用户级覆盖，让闲聊回复也走用户自定义模型
+        await asyncio.to_thread(self._prepare_user_overrides)
         # 闲聊短路：无命盘 + 闲聊意图 → 直接调一次 LLM，不走 ReAct 工具循环
         if not verbose and self._is_chitchat(user_prompt):
             try:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import socket
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -225,6 +226,77 @@ def test_http_settings_reject_invalid_types_and_oversize_fields(user_ai_client):
     assert client.put(
         "/api/ai/user/ai-settings", headers=headers, json={"llm_base_url": "http://127.0.0.1/v1"}
     ).status_code == 400
+
+
+def _chitchat_agent(user_model=None):
+    """构造一个够跑 _chitchat_reply 的最小 Agent（不触碰网络与数据库）。"""
+    agent = Xianzhi.__new__(Xianzhi)
+    agent.state = "idle"
+    agent.message_list = []
+    agent.final_answer = ""
+    agent._last_error = None
+    agent._turn_started_at = time.monotonic()
+    agent._user_model_override = user_model
+    agent.chat_model = _FakeChatModel("服务端回答")
+    return agent
+
+
+class _FakeChatModel:
+    def __init__(self, text, fail=False):
+        self.text = text
+        self.fail = fail
+        self.calls = 0
+
+    def bind(self, **_kwargs):
+        return self
+
+    def invoke(self, _messages):
+        self.calls += 1
+        if self.fail:
+            raise RuntimeError("model down")
+        return SimpleNamespace(content=self.text)
+
+
+def test_chitchat_uses_user_model_when_configured():
+    user_model = _FakeChatModel("用户模型回答")
+    agent = _chitchat_agent(user_model)
+
+    reply = agent._chitchat_reply("你好")
+
+    assert reply == "用户模型回答"
+    assert user_model.calls == 1
+    assert agent.chat_model.calls == 0  # 服务端模型未被调用
+
+
+def test_chitchat_falls_back_to_server_model_when_user_model_fails():
+    user_model = _FakeChatModel("用户模型回答", fail=True)
+    agent = _chitchat_agent(user_model)
+
+    reply = agent._chitchat_reply("你好")
+
+    assert reply == "服务端回答"
+    assert user_model.calls == 1
+    assert agent.chat_model.calls == 1
+
+
+def test_chitchat_without_user_model_uses_server_model():
+    agent = _chitchat_agent(None)
+
+    assert agent._chitchat_reply("你好") == "服务端回答"
+    assert agent.chat_model.calls == 1
+
+
+def test_user_model_never_replaces_react_tool_chain():
+    """ReAct 排盘工具链必须仍绑服务端模型：用户端点未必支持 tool calling。"""
+    agent = _chitchat_agent(_FakeChatModel("用户模型回答"))
+    agent._llm_with_tools = "server-bound-model"
+    agent._workflow = SimpleNamespace(overlay_model=None, review_enabled=None)
+    agent._user_id = ""
+
+    agent._prepare_user_overrides()
+
+    assert agent._llm_with_tools == "server-bound-model"
+    assert agent._user_model_override is None  # 游客：清掉上一账号的模型
 
 
 def test_saving_invalidates_settings_and_model_caches(monkeypatch):
