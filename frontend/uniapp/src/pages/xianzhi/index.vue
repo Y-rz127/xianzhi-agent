@@ -181,7 +181,8 @@
             <text class="drawer-nickname">{{ nickname }}</text>
             <text class="drawer-profile-sub">{{ isLoggedIn() ? '我的档案 ›' : '点击登录 ›' }}</text>
           </view>
-          <view class="drawer-settings-btn" :style="{ top: (statusBarHeight - 45) + 'px' }" @tap.stop="goSettings">
+          <!-- 定位在头像行下方：胶囊按钮带约 38px，top 给 30px 才不被压住 -->
+          <view class="drawer-settings-btn" :style="{ top: '30px' }" @tap.stop="goSettings">
             <text class="dq-icon">⚙</text>
           </view>
         </view>
