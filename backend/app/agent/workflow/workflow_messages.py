@@ -68,6 +68,7 @@ from app.domain.yun_relations import (
 )
 from app.tools.text_clean import (
     ThinkStreamGuard as _ThinkStreamGuard,
+    UserInputBoundaryGuard as _UserInputBoundaryGuard,
     clean_think_tags,
     strip_think_marks,
     strip_user_input_boundary,
@@ -339,9 +340,13 @@ def invoke_stream(
     空产出时把兜底文案也转一次 on_token（否则流式模式下用户什么也看不到）。
     """
     guard = _ThinkStreamGuard()
+    # 边界标记过滤：模型回显 "--- USER INPUT BEGIN/END ---" 时必须整块剥掉，
+    # 否则用户会看到内部标记，且「发给用户的」与「落库的」口径不一致
+    # （落库走 strip_user_input_boundary，发送侧此前没有 → 两边不同）。
+    boundary = _UserInputBoundaryGuard()
 
     def _send(text: str) -> None:
-        for piece in guard.feed(text):
+        for piece in boundary.feed(guard.feed(text)):
             on_token(piece)
 
     cap = timeout_cap or _WORKFLOW_LLM_TIMEOUT
@@ -362,7 +367,7 @@ def invoke_stream(
         meta = getattr(chunk, "response_metadata", None) or {}
         if meta.get("finish_reason"):
             finish = meta["finish_reason"]
-    send_tail = guard.flush()
+    send_tail = boundary.feed(guard.flush(), final=True)
     if send_tail:
         on_token(send_tail)
 

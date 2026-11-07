@@ -23,7 +23,7 @@ from langchain_core.messages import AIMessageChunk
 import app.agent.workflow.workflow_messages as wm
 import app.agent.xianzhi_langgraph as graph
 from app.agent.xianzhi import Xianzhi
-from app.tools.text_clean import ThinkStreamGuard
+from app.tools.text_clean import ThinkStreamGuard, strip_think_marks
 
 # ---------------- 1. ThinkStreamGuard ----------------
 
@@ -60,6 +60,120 @@ def test_guard_flush_drops_unclosed_think_tail():
     g = ThinkStreamGuard(lag=8)
     assert g.feed("正文[" + "思考]" + "没写完") == "正文"
     assert g.flush() == ""  # 未闭合的抑制残余丢弃
+
+
+def test_guard_keeps_text_after_think_block_in_same_chunk():
+    """回归：同一 chunk 内含完整思考块时，闭标签之后的正文不能被吞掉。
+
+    旧实现命中开标签即把整个缓冲丢掉，只吐开标签之前的正文 →
+    「正文A[思考]x[/思考]正文B」里的正文B 永远发不出去（且与落库不一致）。
+    """
+    g = ThinkStreamGuard(lag=16)
+    sent = g.feed("正文A[思考]内心推理[/思考]正文B")
+    sent += g.flush()
+    assert sent == "正文A正文B"
+    assert "内心推理" not in sent
+
+
+def test_guard_suppresses_qwen3_think_tag():
+    """回归：Qwen3/DashScope 实际输出的是 <think>（无字母 g）。
+
+    发送侧标签集漏掉它 → 模型内心推理原样发给用户（落库已剥，两边不一致）。
+    """
+    g = ThinkStreamGuard(lag=16)
+    sent = g.feed("<think>模型内心推理</think>正式回答")
+    sent += g.flush()
+    assert sent == "正式回答"
+    assert "内心推理" not in sent
+
+
+def test_guard_output_matches_persisted_text_for_all_mark_families():
+    """发送侧与落库侧（strip_think_marks）口径必须一致：逐字相同。"""
+    pairs = [
+        ("<think>", "</think>"),
+        ("<thinking>", "</thinking>"),
+        ("[思考]", "[/思考]"),
+        ("[行动]", "[/行动]"),
+        ("[观察]", "[/观察]"),
+    ]
+    for op, cl in pairs:
+        full = f"前置{op}内心推理{cl}后置"
+        g = ThinkStreamGuard(lag=16)
+        sent = g.feed(full) + g.flush()
+        assert sent == strip_think_marks(full), f"{op} 口径不一致"
+
+
+def test_guard_matches_persisted_text_under_random_chunking():
+    """模糊回归：随机切块下，发送侧输出必须逐字等于落库口径，且不泄漏思考内容。
+
+    这条守卫覆盖了手工用例难覆盖的组合（开/闭标签跨 chunk 任意位置断裂、
+    同一 chunk 内含完整思考块、连续多个思考块），任一处退化都会被抓到。
+    """
+    import random
+
+    pairs = [
+        ("<think>", "</think>"),
+        ("<thinking>", "</thinking>"),
+        ("[思考]", "[/思考]"),
+        ("[行动]", "[/行动]"),
+        ("[观察]", "[/观察]"),
+    ]
+    rng = random.Random(20261107)
+    for _ in range(400):
+        op, cl = rng.choice(pairs)
+        full = (
+            "前置正文" * rng.randint(0, 3)
+            + op
+            + "内心推理" * rng.randint(1, 3)
+            + cl
+            + "后续正文" * rng.randint(0, 3)
+        )
+        cuts = sorted(rng.sample(range(1, len(full)), k=min(len(full) - 1, rng.randint(0, 6))))
+        parts: list[str] = []
+        prev = 0
+        for c in cuts:
+            parts.append(full[prev:c])
+            prev = c
+        parts.append(full[prev:])
+        g = ThinkStreamGuard(lag=16)
+        sent = "".join(g.feed(p) for p in parts) + g.flush()
+        assert sent == strip_think_marks(full), f"切块后口径不一致: {parts}"
+        assert "内心推理" not in sent, "思考内容泄漏到用户可见输出"
+
+
+def test_stream_strips_user_input_boundary_like_persisted_text():
+    """回归：模型回显 USER INPUT 边界块时，发送侧也必须整块剥掉。
+
+    旧实现只在落库侧剥（strip_user_input_boundary）→ 用户看到内部标记，
+    且「发给用户的」与「落库的」逐字不同。
+    """
+    model = _StreamModel(
+        [
+            _tok("--- USER INPUT BEGIN ---\n用户原话\n--- USER INPUT END ---\n"),
+            _tok("正式回答"),
+        ]
+    )
+    sent: list[str] = []
+    out = wm.invoke_stream(model, [], sent.append)
+    assert "USER INPUT" not in "".join(sent)
+    assert "用户原话" not in "".join(sent)
+    assert "".join(sent) == out
+    assert out == "正式回答"
+
+
+def test_stream_boundary_split_across_chunks():
+    """边界标记跨 chunk 断开时也要正确剥除（跨 chunk 断裂回归）。"""
+    model = _StreamModel(
+        [
+            _tok("--- USER IN"),
+            _tok("PUT BEGIN ---\n用户原话\n--- USER INPUT "),
+            _tok("END ---\n正式回答"),
+        ]
+    )
+    sent: list[str] = []
+    out = wm.invoke_stream(model, [], sent.append)
+    assert "".join(sent) == out
+    assert out == "正式回答"
 
 
 # ---------------- 2. invoke_stream ----------------

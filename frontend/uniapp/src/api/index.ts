@@ -773,6 +773,8 @@ export interface UserAiSettings {
   llm_base_url: string
   llm_model: string
   has_key: boolean
+  /** 密钥解密失败等原因（如服务端加密密钥已更换），需用户重新填写 */
+  key_error: string
   updated_at: string
 }
 

@@ -63,6 +63,7 @@ const configured = ref(false)
 const saving = ref(false)
 const statusText = ref('')
 const statusOk = ref(false)
+const keyError = ref('')
 
 async function load() {
   if (!isLoggedIn()) {
@@ -76,6 +77,11 @@ async function load() {
     modelName.value = s.llm_model || ''
     hasKey.value = !!s.has_key
     configured.value = !!(s.llm_base_url && s.llm_model && s.has_key)
+    keyError.value = s.key_error || ''
+    if (keyError.value) {
+      statusText.value = keyError.value
+      statusOk.value = false
+    }
   } catch (e: any) {
     statusText.value = `读取配置失败：${e?.message || '未登录或服务不可用'}`
     statusOk.value = false

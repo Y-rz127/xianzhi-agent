@@ -110,6 +110,7 @@ def test_public_settings_never_returns_plaintext_or_ciphertext(monkeypatch):
             "llm_api_key_enc": "ciphertext",
             "llm_model": "demo",
             "has_key": True,
+            "key_error": "",
             "updated_at": "",
         },
     )
@@ -119,6 +120,21 @@ def test_public_settings_never_returns_plaintext_or_ciphertext(monkeypatch):
     assert result["has_key"] is True
     assert "llm_api_key" not in result
     assert "llm_api_key_enc" not in result
+
+
+def test_undecryptable_key_reports_no_key_and_error(monkeypatch):
+    """密钥解不开时不能报 has_key=True：否则前端显示"已保存密钥"但实际调不通。"""
+    monkeypatch.setattr(
+        store,
+        "decrypt_secret",
+        lambda _enc: (_ for _ in ()).throw(crypto_util.SecretDecryptError("bad")),
+    )
+
+    result = store._row_to_settings((None, "https://api.example.com/v1", "cipher", "demo", None))
+
+    assert result["has_key"] is False
+    assert result["key_error"]
+    assert result["llm_api_key"] == ""
 
 
 @pytest.fixture

@@ -73,6 +73,7 @@ def _row_to_settings(row) -> dict:
         updated_at,
     ) = row
     api_key = ""
+    key_error = ""
     if llm_api_key_enc:
         try:
             api_key = decrypt_secret(llm_api_key_enc)
@@ -80,6 +81,7 @@ def _row_to_settings(row) -> dict:
             # 密钥被换过或服务端密钥缺失：按无 key 处理并告警，绝不回传密文。
             log.warning("用户 API key 解密失败（加密密钥已更换或未配置），按未配置处理")
             api_key = ""
+            key_error = "加密密钥已变更，请重新填写 API Key"
     return {
         # None=用户未设置（跟随全局 env 默认）；True/False=用户明确选择
         "review_enabled": (
@@ -89,7 +91,10 @@ def _row_to_settings(row) -> dict:
         "llm_base_url": llm_base_url or "",
         "llm_api_key": api_key,
         "llm_model": llm_model or "",
-        "has_key": bool(llm_api_key_enc),
+        # has_key=「当前是否真的有一把可用的密钥」：解密失败时密文虽在，但调不通，
+        # 若仍报 True，前端会显示「已保存密钥」而实际连不上。
+        "has_key": bool(api_key),
+        "key_error": key_error,
         "updated_at": str(updated_at) if updated_at else "",
     }
 
@@ -135,6 +140,7 @@ def _row_default() -> dict:
         "llm_api_key": "",
         "llm_model": "",
         "has_key": False,
+        "key_error": "",
         "updated_at": "",
     }
 
@@ -203,6 +209,7 @@ def public_settings(user_id: str) -> dict:
             "llm_base_url",
             "llm_model",
             "has_key",
+            "key_error",
             "updated_at",
         )
     }
