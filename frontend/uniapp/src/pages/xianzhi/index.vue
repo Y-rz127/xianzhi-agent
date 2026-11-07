@@ -89,7 +89,7 @@
     </view>
 
     <!-- 消息列表 -->
-    <scroll-view class="messages" scroll-y :scroll-top="scrollTop" scroll-with-animation @scroll="onMsgScroll" :style="messagesStyle">
+    <scroll-view class="messages" scroll-y :scroll-top="scrollTop" scroll-with-animation @scroll="onMsgScroll">
       <view v-if="!messages.length" class="empty-state">
         <view class="empty-avatar display-font">易</view>
         <text class="empty-title">先知命理</text>
@@ -125,6 +125,11 @@
           </view>
         </view>
       </view>
+
+      <!-- 底部占位：把最后一条消息（连同下面的 ✓✗♪ 反馈条）顶到输入栏上方。
+           用内容占位而不是 scroll-view 的 padding-bottom —— 后者在小程序里
+           未必计入可滚动高度，最后一条反馈条会被输入栏压掉一半 -->
+      <view v-if="messages.length" class="messages-tail" :style="{ height: messagesTailHeight + 'px' }"></view>
     </scroll-view>
 
     <!-- 回到底部悬浮按钮 -->
@@ -316,7 +321,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, nextTick, watch, onMounted, onBeforeUnmount } from 'vue'
+import { ref, reactive, computed, nextTick, watch, onMounted, onBeforeUnmount, getCurrentInstance } from 'vue'
 import { onLoad, onHide, onShow } from '@dcloudio/uni-app'
 import { requireLogin } from '@/utils/authGuard'
 import { useTheme } from '@/composables/useTheme'
@@ -858,23 +863,104 @@ try {
 
 // 键盘高度：键盘弹起时让输入栏固定在键盘上方，同时给消息区留出底部空间
 const keyboardHeight = ref(0)
-const INPUT_BAR_BASE_RPX = 128 // 输入栏基础高度（含上下 padding），与样式保持一致
+const INPUT_BAR_BASE_RPX = 152 // 输入栏基础高度（不含底部安全区），量不到时的兜底值
+// 消息区底部额外留白：最后一条 AI 消息下的反馈条（✓✗♪）不压输入栏，并与输入栏留一段间距
+const MESSAGES_TAIL_GAP_RPX = 24
+const winWidth = (() => {
+  try {
+    return uni.getWindowInfo().windowWidth || 375
+  } catch {
+    return 375
+  }
+})()
+const rpx2px = (rpx: number) => (rpx / 750) * winWidth
+// 底部安全区高度（px）：输入栏自身的 padding-bottom 已含 env(safe-area-inset-bottom)，
+// 兜底估算时要自己补上
+const safeBottomPx = (() => {
+  try {
+    const info: any = uni.getWindowInfo ? uni.getWindowInfo() : uni.getSystemInfoSync()
+    const screenH = info?.screenHeight || 0
+    const safeBottom = info?.safeArea?.bottom ?? screenH
+    const inset = screenH - safeBottom
+    return inset > 0 ? inset : 0
+  } catch {
+    return 0
+  }
+})()
 const inputBarStyle = computed(() => {
   // 输入栏 fixed 在视口底部，键盘弹起时抬高 bottom
   const bottom = keyboardHeight.value > 0 ? keyboardHeight.value : 0
   return `bottom: ${bottom}px;`
 })
-const messagesStyle = computed(() => {
+/**
+ * 输入栏实测高度（px，含底部安全区）。
+ *
+ * 文本框是 auto-height：用户输入多行时输入栏会变高，写死的基准值留白就不够了，
+ * 最后一条消息下的反馈条会被输入栏压掉一半。这里实测一次真实高度跟着走。
+ */
+const inputBarHeight = ref(0)
+let _measureTimer: any = null
+// 小程序里页面是组件，选择器查询必须限定在本实例内；
+// getCurrentInstance 只在 setup 期间有效，先存下来（timer 里再取会拿到 null）
+const pageInstance = getCurrentInstance()
+/** 用户正在往上翻历史时不要把他拽回底部 */
+function scrollToBottomIfNearBottom() {
+  if (showScrollBottom.value) return
+  scrollToBottom()
+}
+/** 量输入栏高度：小程序页面本身是组件，必须 .in(实例) 才能选到页面内节点 */
+function queryInputBar() {
+  // #ifdef MP-WEIXIN
+  if (pageInstance?.proxy) return uni.createSelectorQuery().in(pageInstance.proxy)
+  // #endif
+  return uni.createSelectorQuery()
+}
+function measureInputBar() {
+  if (_measureTimer) clearTimeout(_measureTimer)
+  _measureTimer = setTimeout(() => {
+    try {
+      queryInputBar()
+        .select('.input-bar')
+        .boundingClientRect((rect: any) => {
+          const h = rect && rect.height ? rect.height : 0
+          if (h > 0 && Math.abs(h - inputBarHeight.value) > 0.5) {
+            inputBarHeight.value = h
+            scrollToBottomIfNearBottom() // 输入栏变高会多吃一条消息，重新贴底
+          }
+        })
+        .exec()
+    } catch {
+      /* 量不到就用兜底值 */
+    }
+  }, 80)
+}
+/**
+ * 消息区底部占位块高度（px）。
+ *
+ * = 输入栏实测高度（键盘弹起时还要再加上键盘高度）+ 一段间距。
+ * 最后一条 AI 消息下的 ✓✗♪ 反馈条高约 60rpx，必须完整露在输入栏上方。
+ */
+const messagesTailHeight = computed(() => {
   const kb = keyboardHeight.value > 0 ? keyboardHeight.value : 0
-  return `padding-bottom: calc(${INPUT_BAR_BASE_RPX}rpx + ${kb}px + env(safe-area-inset-bottom));`
+  const bar = inputBarHeight.value > 0
+    ? inputBarHeight.value
+    : rpx2px(INPUT_BAR_BASE_RPX) + safeBottomPx
+  return Math.round(bar + kb + rpx2px(MESSAGES_TAIL_GAP_RPX))
 })
+// 文本框 auto-height：输入多行时输入栏变高，得重新量一次留白
+watch(inputText, () => measureInputBar())
+// 底部占位高度变了（输入栏变高/键盘收起），重新贴底
+watch(messagesTailHeight, () => nextTick(scrollToBottomIfNearBottom))
 let _kbHandler: ((res: any) => void) | null = null
 let _visualViewportHandler: (() => void) | null = null
 onMounted(() => {
+  measureInputBar()
+
   // #ifdef MP-WEIXIN
   _kbHandler = (res: any) => {
     keyboardHeight.value = res?.height || 0
     if (keyboardHeight.value > 0) setTimeout(scrollToBottom, 150)
+    measureInputBar()
   }
   uni.onKeyboardHeightChange(_kbHandler)
   // #endif
@@ -886,6 +972,7 @@ onMounted(() => {
       const h = Math.max(0, window.innerHeight - vv.height)
       keyboardHeight.value = h
       if (h > 0) setTimeout(scrollToBottom, 150)
+      measureInputBar()
     }
     _visualViewportHandler = updateH5KeyboardHeight
     vv.addEventListener('resize', updateH5KeyboardHeight)
@@ -1478,6 +1565,8 @@ function onSend() {
       if (!st || st.turnId !== turnId) return
       writeTurn(conv, { progress: '' })
       delete turns[conv]
+      // 终稿落地后反馈条（✓✗♪）才渲染，消息又长高了一截，得再贴一次底
+      if (conversationId.value === conv) setTimeout(scrollToBottom, 120)
     },
     onError: (err: string) => {
       const st = turns[conv]
@@ -1930,9 +2019,11 @@ messages.value.push({
 }
 
 /* === 消息列表 === */
+/* 底部空间由内容末尾的 .messages-tail 占位块负责（见模板注释），
+   这里只留常规内边距 */
 .messages {
   flex: 1;
-  padding: 24rpx 24rpx calc(24rpx + 128rpx + env(safe-area-inset-bottom));
+  padding: 24rpx 24rpx 0;
   overflow-x: hidden;
   width: 100%;
   box-sizing: border-box;
@@ -1943,6 +2034,12 @@ messages.value.push({
 .messages::-webkit-scrollbar-track { background: rgba(255,255,255,0.03); border-radius: 5px; }
 .messages::-webkit-scrollbar-thumb { background: rgba(212,175,55,0.25); border-radius: 5px; border: 2px solid transparent; background-clip: padding-box; min-height: 60px; }
 .messages::-webkit-scrollbar-thumb:hover { background: rgba(212,175,55,0.5); border: 2px solid transparent; background-clip: padding-box; }
+
+/* 底部占位块：把最后一条消息的反馈条顶到输入栏上方（高度由 JS 按输入栏实测值给） */
+.messages-tail {
+  width: 100%;
+  flex-shrink: 0;
+}
 
 /* 回到底部悬浮按钮 */
 .scroll-bottom-btn {
