@@ -84,11 +84,21 @@ def test_xiaoyun_is_accepted_as_the_yunzhu_and_matches_chart_payload():
 
     改前这里只能不传运柱（传 dayun 会被判非法干支 400），于是点选后刷新出来的岁运分析
     比初次加载少一个小运 —— 同一盘面同一组合两套结果。
+
+    出生日期不能写死"30 天前"：起运长短取决于出生点离节气多远，实测有盘出生后
+    20 天就交运（2026-10-08 寒露当天生 ⇒ 起运 2026-10-28），那种日子跑这个用例
+    等于"宝宝已经起运"，断言必然失败。这里往前找第一个仍在童限的日期。
     """
     import datetime as dt
 
-    birth = (dt.date.today() - dt.timedelta(days=30)).strftime("%Y-%m-%d") + " 10:00"
-    xp = api_mod._compute_chart_payload(birth, MALE, 2, 1, None)["xipan"]
+    xp = None
+    for days in range(1, 366):
+        birth = (dt.date.today() - dt.timedelta(days=days)).strftime("%Y-%m-%d") + " 10:00"
+        candidate = api_mod._compute_chart_payload(birth, MALE, 2, 1, None)["xipan"]
+        if candidate["current"]["dayunLabel"] == "小运":
+            xp = candidate
+            break
+    assert xp is not None, "往前一年都找不到仍在童限的出生日期"
     cur = xp["current"]
     assert cur["dayunLabel"] == "小运", "该盘应仍在童限（起运前以当年小运论）"
 
