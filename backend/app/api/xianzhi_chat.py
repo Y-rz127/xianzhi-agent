@@ -207,17 +207,21 @@ async def _relay_chunks(
     这条不变量由 tests/test_progress_and_keepalive.py 守着。
     """
     client_alive = True
+    sent_text: list[str] = []
     async for chunk in agent.arun_stream(message, verbose=verbose):
         # 客户端断开也要继续收集完整答案，供轮次防重放复用
         if on_chunk is not None:
             on_chunk(chunk)
         if not client_alive:
             continue
-        # 调试：确认发送给前端的 chunk 长度（默认不落用户可见正文）
-        log.info("[ws] 发送 chunk {}字 :: {}", len(chunk or ""), safe_text(chunk, 40))
         if not await _safe_ws_send(websocket, {"type": "message", "data": chunk}):
             client_alive = False
             log.info("[ws] 客户端已断开，本轮转入后台生成：跑完落库供前端取回")
+            continue
+        sent_text.append(chunk or "")
+    # 整轮一条汇总日志，不逐 chunk 刷屏（预览截断，默认不落用户可见正文）
+    full = "".join(sent_text)
+    log.info("[ws] 本轮流式发送完成 {}字 :: {}", len(full), safe_text(full, 120))
     return client_alive
 
 
