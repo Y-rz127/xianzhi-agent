@@ -145,10 +145,18 @@ def _row_default() -> dict:
     }
 
 
+_UNSET = object()
+"""区分「本次不修改该字段」与「显式把该字段重置为 NULL（跟随全局默认）」。
+
+审核开关存库的语义是三态：NULL=跟随 env 默认 / True / False。
+若「不修改」与「重置为 NULL」共用 None，用户一旦点过开关就再也回不到
+「跟随全局默认」——因为 None 在 SQL 层被当成不修改。"""
+
+
 def save_user_ai_settings(
     user_id: str,
     *,
-    review_enabled: Optional[bool] = None,
+    review_enabled: object = _UNSET,
     llm_base_url: Optional[str] = None,
     llm_api_key: Optional[str] = None,
     llm_model: Optional[str] = None,
@@ -156,14 +164,15 @@ def save_user_ai_settings(
 ) -> dict:
     """保存用户 AI 设置（upsert）；返回保存后的完整设置（脱敏，无明文 key）。
 
-    None=不动该字段；llm_api_key 传空串=清除；clear_model=True 清空模型三项。
+    - review_enabled：缺省=不动该字段；显式传 None=重置为 NULL（跟随全局默认）。
+    - llm_api_key 传空串=清除；clear_model=True 清空模型三项。
     """
     _ensure_table()
     cols: list[str] = []
     params: list = [user_id]
-    if review_enabled is not None:
+    if review_enabled is not _UNSET:
         cols.append("review_enabled")
-        params.append(bool(review_enabled))
+        params.append(None if review_enabled is None else bool(review_enabled))
     if clear_model:
         cols += ["llm_base_url", "llm_api_key_enc", "llm_model"]
         params += ["", "", ""]

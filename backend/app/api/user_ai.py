@@ -47,8 +47,9 @@ async def save_settings(body: dict, current_user: dict = Depends(get_current_use
     payload: dict = {}
     if "review_enabled" in body:
         value = body.get("review_enabled")
-        if not isinstance(value, bool):
-            raise HTTPException(status_code=400, detail="review_enabled 需为布尔值")
+        # null=重置为「跟随服务端全局默认」；true/false=用户明确选择
+        if value is not None and not isinstance(value, bool):
+            raise HTTPException(status_code=400, detail="review_enabled 需为布尔值或 null")
         payload["review_enabled"] = value
     if "clear_model" in body:
         clear_model = body.get("clear_model")

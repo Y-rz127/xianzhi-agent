@@ -86,6 +86,12 @@
             @change="onReviewChange"
           />
         </view>
+        <view v-if="reviewSet" class="form-row ai-row reset-row" @tap="onReviewReset">
+          <view class="ai-info">
+            <text class="ai-desc minor">已按你的选择设置，想改回服务端全局默认？</text>
+          </view>
+          <text class="reset-link">恢复默认</text>
+        </view>
         <view class="form-row ai-row" @tap="goModelConfig">
           <view class="ai-info">
             <text class="ai-name">自定义问答模型</text>
@@ -175,6 +181,22 @@ async function onReviewChange(e: any) {
   } catch (err: any) {
     uni.showToast({ title: err?.message || '保存失败', icon: 'none' })
     reviewEnabled.value = !next // 保存失败回弹
+  } finally {
+    reviewSaving.value = false
+  }
+}
+
+async function onReviewReset() {
+  if (!loggedIn.value || reviewSaving.value) return
+  reviewSaving.value = true
+  try {
+    // null = 重置为「跟随服务端全局默认」（后端存 NULL，与 env 默认解耦）
+    const s = await saveUserAiSettings({ review_enabled: null })
+    reviewEnabled.value = !!s.review_enabled
+    reviewSet.value = !!s.review_set
+    uni.showToast({ title: '已恢复跟随服务端默认', icon: 'none' })
+  } catch (err: any) {
+    uni.showToast({ title: err?.message || '恢复失败', icon: 'none' })
   } finally {
     reviewSaving.value = false
   }
@@ -400,6 +422,14 @@ async function onSave() {
 .nav-arrow {
   font-size: 40rpx;
   color: $color-ink-lighter;
+  flex-shrink: 0;
+}
+.reset-row {
+  padding-top: 4rpx;
+}
+.reset-link {
+  font-size: 26rpx;
+  color: $color-primary;
   flex-shrink: 0;
 }
 .hint-line {

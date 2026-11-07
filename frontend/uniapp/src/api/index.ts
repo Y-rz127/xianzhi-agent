@@ -781,7 +781,8 @@ export interface UserAiSettings {
 export const fetchUserAiSettings = () => get<UserAiSettings>(EP.USER_AI_SETTINGS)
 
 export const saveUserAiSettings = (payload: {
-  review_enabled?: boolean
+  /** null = 重置为「跟随服务端全局默认」 */
+  review_enabled?: boolean | null
   llm_base_url?: string
   llm_api_key?: string
   llm_model?: string

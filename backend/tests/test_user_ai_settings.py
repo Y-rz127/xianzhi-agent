@@ -177,8 +177,14 @@ def user_ai_client(monkeypatch):
             if current["llm_api_key"]:
                 current["has_key"] = True
         if "review_enabled" in payload:
-            current["review_enabled"] = payload["review_enabled"]
-            current["review_set"] = True
+            value = payload["review_enabled"]
+            if value is None:
+                # 重置为「跟随服务端全局默认」＝存 NULL
+                current["review_enabled"] = True
+                current["review_set"] = False
+            else:
+                current["review_enabled"] = value
+                current["review_set"] = True
         return store.public_settings(uid)
 
     monkeypatch.setattr(store, "get_user_ai_settings", _get)
@@ -242,6 +248,41 @@ def test_http_settings_reject_invalid_types_and_oversize_fields(user_ai_client):
     assert client.put(
         "/api/ai/user/ai-settings", headers=headers, json={"llm_base_url": "http://127.0.0.1/v1"}
     ).status_code == 400
+
+
+def test_review_preference_can_be_reset_to_follow_global_default(user_ai_client):
+    """回归：用户把开关点过之后，必须还能重置回「跟随服务端全局默认」。
+
+    存库语义是三态（NULL=跟随默认 / True / False）。若「不修改」与「重置为 NULL」
+    共用 None，用户一旦点过开关就永远回不去。
+    """
+    client, states = user_ai_client
+    headers = {"X-Test-User": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"}
+
+    saved = client.put("/api/ai/user/ai-settings", headers=headers, json={"review_enabled": False})
+    assert saved.status_code == 200
+    assert saved.json()["review_enabled"] is False
+    assert saved.json()["review_set"] is True
+
+    # null = 重置为跟随全局默认
+    reset = client.put("/api/ai/user/ai-settings", headers=headers, json={"review_enabled": None})
+    assert reset.status_code == 200
+    assert reset.json()["review_set"] is False
+    # 重置后读回来仍是「未设置」状态
+    again = client.get("/api/ai/user/ai-settings", headers=headers)
+    assert again.json()["review_set"] is False
+
+
+def test_store_distinguishes_unset_from_explicit_null(monkeypatch):
+    """store 层：缺省不动该字段；显式 None 要写成 NULL。"""
+    import inspect
+
+    from app.db.user_ai_settings import save_user_ai_settings
+
+    sig = inspect.signature(save_user_ai_settings)
+    default = sig.parameters["review_enabled"].default
+    assert default is not None, "缺省必须是独立哨兵，不能是 None"
+    assert default is not bool, "缺省哨兵不应是布尔值"
 
 
 def _chitchat_agent(user_model=None):
