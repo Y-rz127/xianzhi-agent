@@ -42,8 +42,8 @@
         :refresher-background="refresherBg"
         @refresherrefresh="onRefresh"
       >
-        <!-- 命盘：四柱 -->
-        <view class="section section-flush" v-if="activeTab === 'paipan'">
+        <!-- 命盘：四柱（无边框铺满，见 .bazi-table） -->
+        <view class="section section-flush bleed" v-if="activeTab === 'paipan'">
           <view class="bazi-table bazi-table-4">
             <view class="bt-row bt-head">
               <text class="bt-cell bt-label"></text>
@@ -97,14 +97,18 @@
               <text class="bt-cell bt-label">纳音</text>
               <view v-for="c in mainColumns" :key="'ny' + c.name" :class="['bt-cell']"><text class="bt-nayin">{{ c.nayin || '—' }}</text></view>
             </view>
-            <!-- 神煞直接融进命盘表最后一行 -->
+            <!-- 神煞直接融进命盘表最后一行（默认每列露 4 个，多出折 +N） -->
             <view class="bt-row">
               <text class="bt-cell bt-label">神煞</text>
               <view v-for="c in mainColumns" :key="'ss' + c.name" :class="['bt-cell bt-multi']">
                 <text v-if="!(shenshaByPillar[c.name] || []).length" class="ss-empty">—</text>
-                <text v-for="(s, i) in (shenshaByPillar[c.name] || [])" :key="i" :class="['ss-tag', 'ss-' + s._cat]" @tap="showShenshaDesc(s)">{{ s.name }}</text>
+                <text v-for="(s, i) in pillarShenshaShown[c.name].shown" :key="i" :class="['ss-tag', 'ss-' + s._cat]" @tap="showShenshaDesc(s)">{{ s.name }}</text>
+                <text v-if="pillarShenshaShown[c.name].more" class="ss-more" @tap.stop="showAllTableShensha = true">+{{ pillarShenshaShown[c.name].more }}</text>
               </view>
             </view>
+          </view>
+          <view class="ss-more-row" v-if="tableShenshaHasMore">
+            <text class="ss-toggle" @tap="showAllTableShensha = !showAllTableShensha">{{ showAllTableShensha ? '收起神煞 ▲' : '展开全部神煞 ▼' }}</text>
           </view>
         </view>
 
@@ -185,17 +189,17 @@
         </view>
 
         <!-- 细盘：时间层级 -->
-        <view class="section" v-if="activeTab === 'xipan'">
+        <view class="section bleed" v-if="activeTab === 'xipan'">
           <template v-if="xipan">
-            <!-- 命盘大表：四柱 + 当前大运/流年，一屏放下 -->
-            <view class="section inner section-flush">
+            <!-- 命盘大表：四柱 + 当前大运/流年/流月（无边框铺满，见 .pd-table） -->
+            <view class="section inner section-flush bleed">
               <view class="pd-table">
                 <view class="pd-row pd-head">
-                  <text class="pd-cell pd-label">日期</text>
+                  <text class="pd-cell pd-label"></text>
                   <text
                     v-for="c in snapColumns"
                     :key="'h' + c.name"
-                    :class="['pd-cell pd-col-head', (c.name === '大运' || c.name === '小运' || c.name === '流年') && 'pd-cur-head']"
+                    :class="['pd-cell pd-col-head', (c.name === '大运' || c.name === '小运' || c.name === '流年' || c.name === '流月') && 'pd-cur-head']"
                   >{{ c.name }}</text>
                 </view>
                 <view class="pd-row">
@@ -249,13 +253,17 @@
                   <view v-for="c in snapColumns" :key="'ss' + c.name" class="pd-cell pd-stack">
                     <text v-if="!(snapShenshaMap[c.name] || []).length" class="ss-empty">—</text>
                     <text
-                      v-for="(s, i) in (snapShenshaMap[c.name] || [])"
+                      v-for="(s, i) in snapShenshaShown[c.name].shown"
                       :key="i"
                       :class="['pd-ss-tag', 'ss-' + s._cat]"
                       @tap="showShenshaDesc(s)"
                     >{{ s.name }}</text>
+                    <text v-if="snapShenshaShown[c.name].more" class="pd-ss-more" @tap.stop="showAllTableShensha = true">+{{ snapShenshaShown[c.name].more }}</text>
                   </view>
                 </view>
+              </view>
+              <view class="ss-more-row" v-if="tableShenshaHasMore">
+                <text class="ss-toggle" @tap="showAllTableShensha = !showAllTableShensha">{{ showAllTableShensha ? '收起神煞 ▲' : '展开全部神煞 ▼' }}</text>
               </view>
             </view>
 
@@ -266,7 +274,7 @@
             </view>
 
             <!-- 大运横条（10 运并排 + 星运行） -->
-            <view class="section inner">
+            <view class="section inner bleed">
               <view class="strip-container" :style="stripBox(ROWS_DAYUN)">
                 <view class="strip-labels-fixed">
                   <view class="strip-labels-grid" :style="labelGrid(ROWS_DAYUN)">
@@ -300,7 +308,7 @@
             </view>
 
             <!-- 流年横条（所选大运 10 年 + 小运行 + 星运行） -->
-            <view class="section inner" v-if="liunianCols.length">
+            <view class="section inner bleed" v-if="liunianCols.length">
               <view class="strip-container" :style="stripBox(ROWS_LIUNIAN)">
                 <view class="strip-labels-fixed">
                   <view class="strip-labels-grid" :style="labelGrid(ROWS_LIUNIAN)">
@@ -335,7 +343,7 @@
             </view>
 
             <!-- 流月横条（选中流年 12 节气月 + 星运行，可横滑） -->
-            <view class="section inner" v-if="liuyueCols.length">
+            <view class="section inner bleed" v-if="liuyueCols.length">
               <view class="strip-container" :style="stripBox(ROWS_LIUYUE)">
                 <view class="strip-labels-fixed">
                   <view class="strip-labels-grid" :style="labelGrid(ROWS_LIUYUE)">
@@ -715,6 +723,8 @@ const snapColumns = computed(() => {
   }
   cols.push(col(snapYunColName.value, snapDayunGz.value))
   cols.push(col('流年', snapLiunianGz.value))
+  // 流月列：跟随当前选中的流月（点流月横条会同步刷新），无选中时留空
+  cols.push(col('流月', selectedLiuyueGz.value))
   return cols
 })
 
@@ -891,12 +901,14 @@ function labelGrid(rows: string) {
   return { gridTemplateRows: rows }
 }
 
-/** 横条容器精确高度 = 行高之和 + 1rpx 行缝 + 上下 1rpx 边框。
- *  mp-weixin 下 scroll-view 不给高度会把 flex 容器撑高，多出的部分露出容器灰底，
- *  看起来像表格下面多了一条空白行。 */
+/** 横条容器精确高度 = 行高之和。
+ *  mp-weixin 下 scroll-view 不给高度会把 flex 容器撑高，多出的部分露出空白，
+ *  看起来像表格下面多了一条空白行。
+ *  注意：横条已改成无边框、零行缝（见 .strip-grid/.strip-container），
+ *  所以这里不再加行缝与边框的补偿值。 */
 function stripBox(rows: string) {
   const heights = rows.split(' ').map((v) => parseInt(v, 10) || 0)
-  const total = heights.reduce((a, b) => a + b, 0) + Math.max(0, heights.length - 1) + 2
+  const total = heights.reduce((a, b) => a + b, 0)
   return { height: `${total}rpx` }
 }
 
@@ -1082,7 +1094,40 @@ const snapShenshaMap = computed(() => {
   map['流年'] = (xp.liunianShensha?.[snapLiunianGz.value] || [])
     .map((name) => ({ name, description: dict[name] || '' }))
     .map(tag)
+  // 流月列：按干支索引去重下发（同 liuyueShensha 口径，见 monthShenshaRows）
+  map['流月'] = (xp.liuyueShensha?.[selectedLiuyueGz.value] || [])
+    .map((name) => ({ name, description: dict[name] || '' }))
+    .map(tag)
   return map
+})
+
+// 命盘表「神煞」行：每列默认只露前 4 个，多出的折成 +N（点 +N 或表格下方开关展开）。
+// 神煞个数随柱波动（3~10 个），全展开时这一行能占掉整张表三分之一的高度。
+const SHENSHA_TABLE_PREVIEW = 4
+const showAllTableShensha = ref(false)
+function shownShensha(list?: (ShenshaItem & { _cat?: string })[]) {
+  const arr = list || []
+  if (showAllTableShensha.value || arr.length <= SHENSHA_TABLE_PREVIEW) {
+    return { shown: arr, more: 0 }
+  }
+  return { shown: arr.slice(0, SHENSHA_TABLE_PREVIEW), more: arr.length - SHENSHA_TABLE_PREVIEW }
+}
+// 按当前列名建表，保证模板里取到的键一定存在（含童限的小运列）
+const pillarShenshaShown = computed(() => {
+  const out: Record<string, ReturnType<typeof shownShensha>> = {}
+  for (const c of mainColumns.value) out[c.name] = shownShensha(shenshaByPillar.value[c.name])
+  return out
+})
+const snapShenshaShown = computed(() => {
+  const out: Record<string, ReturnType<typeof shownShensha>> = {}
+  for (const c of snapColumns.value) out[c.name] = shownShensha(snapShenshaMap.value[c.name])
+  return out
+})
+// 任一列被折过才显示开关；展开状态下保留开关，方便收回
+const tableShenshaHasMore = computed(() => {
+  if (showAllTableShensha.value) return true
+  const lists = [...Object.values(shenshaByPillar.value), ...Object.values(snapShenshaMap.value)]
+  return lists.some((l) => l.length > SHENSHA_TABLE_PREVIEW)
 })
 
 // 吉凶属性 → ASCII 样式键（中文 class 在小程序编译链路上不可靠）
@@ -1478,11 +1523,20 @@ onLoad((options: any) => {
 /* height:0 + flex:1 + min-height:0：把高度交给 flex 算法。
    小程序里 flex 子项默认 min-height:auto，会被内容撑到全高，scroll-view 自身没有
    可滚余量（表现为一直接着页面在滚、内部 scroll-y 不生效）。 */
-.page-body { flex: 1; height: 0; min-height: 0; padding: 6rpx 28rpx 0; box-sizing: border-box; }
-.section { margin-bottom: 32rpx; }
-.section.inner { margin-bottom: 36rpx; }
+.page-body { flex: 1; height: 0; min-height: 0; padding: 6rpx 0 0; box-sizing: border-box; }
+/* 横向留白一律用 margin，不用 padding：
+   uni-app 的 scroll-view 会把内容裁到**内容盒**，父级 padding 会把「铺满屏幕」的
+   孩子从左右各裁掉 28rpx（实测表现：每列标签的首字被切掉，只剩第二个字）。
+   margin 只影响布局位置、不参与裁剪，铺满与留白才能共存。 */
+.section { margin: 0 28rpx 32rpx; }
+.section.inner { margin: 0 28rpx 36rpx; }
 /* 表格贴顶：无标题的首个 section 不留上间距 */
 .section-flush { margin-top: 0; }
+/* 铺满屏幕左右边界：横向 margin 归零，内容真正贴边（内部各自留 12~16rpx 安全边）。
+   必须带上 .section 前缀，否则权重(0,1,0) 输给 .section.inner(0,2,0)，
+   细盘内层横条会残留 28rpx 缩进。 */
+.section.bleed,
+.section.inner.bleed { margin-left: 0; margin-right: 0; }
 
 /* 外链 tab：点了跳走，故不给选中态，仅用主色区分「可点开」 */
 .tab-btn.tab-link { color: $color-primary; }
@@ -1550,31 +1604,28 @@ onLoad((options: any) => {
 }
 
 /* 四柱表格 */
+/* 基本排盘四柱：不再做成带边框的表格 —— 去外框、去竖线，横向铺满屏幕边界，
+   行间只用虚线分隔（与「岁运分析 / 原局分析」同一套观感），列宽因此变宽、更紧凑 */
 .bazi-table {
   display: flex;
   flex-direction: column;
-  border: 1rpx solid $color-border;
-  border-radius: 12rpx;
-  overflow: hidden;
   margin-bottom: 8rpx;
+  padding: 0 16rpx;
 }
 .bt-row {
   display: flex;
   flex-direction: row;
-  border-bottom: 1rpx solid $color-border;
+  border-bottom: 1rpx dashed $color-border;
 }
 .bt-row:last-child { border-bottom: none; }
-.bt-head { background: $color-paper-warm; }
+.bt-head { background: transparent; }
 .bt-cell {
-  flex: 1; padding: 10rpx 4rpx; text-align: center; font-size: 26rpx; color: $color-ink;
+  flex: 1; padding: 9rpx 2rpx; text-align: center; font-size: 26rpx; color: $color-ink;
   display: flex; align-items: center; justify-content: center;
-  border-right: 1rpx solid $color-border; box-sizing: border-box; min-height: 0;
+  box-sizing: border-box; min-height: 0;
 }
-.bt-cell:last-child { border-right: none; }
-.bt-label { flex: 0 0 80rpx; font-size: 26rpx; color: $color-ink-light; background: rgba(0,0,0,0.03); font-weight: 500; }
+.bt-label { flex: 0 0 68rpx; font-size: 22rpx; color: $color-ink-light; background: transparent; font-weight: 400; text-align: left; justify-content: flex-start; }
 .bt-col-head { font-size: 26rpx; font-weight: 600; color: $color-ink; letter-spacing: 2px; }
-.bt-day { background: rgba(184, 72, 60, 0.06); }
-.bt-head .bt-day { background: rgba(184, 72, 60, 0.1); }
 .bt-gan { font-size: 48rpx; font-weight: bold; font-family: $font-family-display; }
 .bt-zhi { font-size: 48rpx; font-family: $font-family-display; }
 .bt-multi { flex-direction: column; gap: 2rpx; padding: 8rpx 4rpx; }
@@ -1587,8 +1638,8 @@ onLoad((options: any) => {
 .bt-fu-click:active { opacity: 0.6; }
 
 
-/* 命盘六列：当前大运/流年列高亮 */
-.bt-cur-head { background: rgba(212, 175, 55, 0.18); color: $nx-gold-light; font-weight: 700; }
+/* 当前大运/流年列表头：无底色了，用金色文字区分 */
+.bt-cur-head { color: $nx-gold-light; font-weight: 700; }
 .bt-day-master { font-size: 30rpx; font-weight: 700; color: $color-vermilion; font-family: $font-family-display; }
 .bt-cs { font-size: 26rpx; color: $color-ink; }
 .bt-nayin { font-size: 24rpx; color: $color-ink-light; }
@@ -1628,61 +1679,61 @@ onLoad((options: any) => {
 .ss-other { color: $nx-cat-slate; background: rgba(113,128,150,0.1); }
 .ss-cur-row { background: rgba(212,175,55,0.06); border-radius: 10rpx; padding: 8rpx 4rpx; }
 .ss-toggle { font-size: 22rpx; color: $color-vermilion; padding: 4rpx 8rpx; }
+/* 命盘表神煞行的「还有 N 个」与展开开关 */
+.ss-more, .pd-ss-more { font-size: 20rpx; color: $color-vermilion; padding: 2rpx 6rpx; letter-spacing: 0; }
+.ss-more-row { display: flex; justify-content: flex-end; padding: 4rpx 16rpx 0; }
 
-/* 细盘命盘大表：标签列 + 四柱 + 大运 + 流年，一屏放下不横滑 */
-.pd-table { border: 1rpx solid $color-border; border-radius: 12rpx; overflow: hidden; background: $color-bg-card; }
-.pd-row { display: flex; border-bottom: 1rpx solid $color-border; }
+/* 细盘命盘大表：标签列 + 四柱 + 大运 + 流年 + 流月。
+   同样不做成带边框的表格：去外框、去竖线，横向铺满屏幕边界，行间虚线分隔 */
+.pd-table { padding: 0 12rpx; }
+.pd-row { display: flex; border-bottom: 1rpx dashed $color-border; }
 .pd-row:last-child { border-bottom: none; }
-.pd-head { background: $color-paper-warm; }
+.pd-head { background: transparent; }
 .pd-cell {
   flex: 1; min-width: 0; box-sizing: border-box;
   display: flex; align-items: center; justify-content: center;
-  padding: 12rpx 2rpx; font-size: 22rpx; color: $color-ink;
-  border-right: 1rpx solid $color-border;
+  padding: 11rpx 1rpx; font-size: 22rpx; color: $color-ink;
 }
-.pd-cell:last-child { border-right: none; }
-.pd-label { flex: 0 0 76rpx; font-size: 22rpx; color: $color-ink-light; background: rgba(0, 0, 0, 0.03); }
-.pd-col-head { font-size: 24rpx; font-weight: 600; color: $color-ink; letter-spacing: 2rpx; padding: 14rpx 2rpx; }
+.pd-label { flex: 0 0 56rpx; font-size: 20rpx; color: $color-ink-light; background: transparent; text-align: left; justify-content: flex-start; }
+.pd-col-head { font-size: 22rpx; font-weight: 600; color: $color-ink; letter-spacing: 1rpx; padding: 12rpx 1rpx; }
 .pd-cur-head { color: $nx-gold-light; font-weight: 700; }
-.pd-day-master { font-size: 26rpx; font-weight: 700; color: $color-vermilion; font-family: $font-family-display; }
-.pd-shishen { font-size: 22rpx; color: $color-ink; line-height: 1.4; }
+.pd-day-master { font-size: 24rpx; font-weight: 700; color: $color-vermilion; font-family: $font-family-display; }
+.pd-shishen { font-size: 20rpx; color: $color-ink; line-height: 1.35; }
 .pd-click { transition: opacity 0.15s; }
 .pd-click:active { opacity: 0.6; }
-.pd-gan { font-size: 44rpx; font-weight: bold; font-family: $font-family-display; line-height: 1.25; }
-.pd-stack { flex-direction: column; gap: 2rpx; padding: 10rpx 2rpx; }
+/* 七列（四柱+大运+流年+流月）后每列仅 ~90rpx：干支字号收到 38rpx 才不换行 */
+.pd-gan { font-size: 38rpx; font-weight: bold; font-family: $font-family-display; line-height: 1.25; }
+.pd-stack { flex-direction: column; gap: 1rpx; padding: 9rpx 1rpx; }
 .pd-cang-row { display: flex; flex-direction: row; align-items: baseline; justify-content: center; }
-.pd-cang { font-size: 24rpx; font-weight: 600; line-height: 1.5; }
-.pd-cang-ss { font-size: 20rpx; color: $color-ink-light; line-height: 1.5; margin-left: 2rpx; }
-.pd-text { font-size: 22rpx; color: $color-ink; }
+.pd-cang { font-size: 22rpx; font-weight: 600; line-height: 1.45; }
+.pd-cang-ss { font-size: 18rpx; color: $color-ink-light; line-height: 1.45; margin-left: 1rpx; }
+.pd-text { font-size: 20rpx; color: $color-ink; }
 /* 神煞 tag 在窄列里竖排：只改尺寸，配色交给 .ss-good/.ss-bad 等 */
-.pd-ss-tag { font-size: 20rpx; line-height: 1.45; padding: 2rpx 4rpx; border-radius: 6rpx; }
+.pd-ss-tag { font-size: 18rpx; line-height: 1.4; padding: 2rpx 3rpx; border-radius: 6rpx; }
 
 /* 岁运横条：大运 / 流年 / 流月，同一 grid 保证各行列对齐 */
 .strip-hint-row { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 12rpx; padding: 0 2rpx; }
 .strip-ctx { font-size: 24rpx; color: $color-ink; font-weight: 600; }
 .strip-hint { font-size: 20rpx; color: $color-ink-light; }
 
-/* 横条容器：左右布局，标签固定 + 内容滚动 */
+/* 横条容器：左右布局，标签固定 + 内容滚动。
+   不做成表格：去外框与竖线，靠极浅的横向分隔与底色区分行列 */
 .strip-container {
   display: flex;
   box-sizing: border-box;
   width: 100%;
-  border: 1rpx solid $color-border;
-  border-radius: 12rpx;
   overflow: hidden;
-  background: $color-border;
 }
 .strip-labels-fixed {
   flex-shrink: 0;
-  width: 72rpx;
+  width: 76rpx;
   height: 100%;
-  background: $color-paper-warm;
-  border-right: 1rpx solid $color-border;
+  background: transparent;
   z-index: 10;
 }
 .strip-labels-grid {
   display: grid;
-  gap: 1rpx;
+  gap: 0;
 }
 .strip-scroll-content {
   flex: 1;
@@ -1691,20 +1742,24 @@ onLoad((options: any) => {
   white-space: nowrap;
 }
 .strip-grid {
-  display: grid; gap: 1rpx;
+  display: grid; gap: 0;
   overflow: hidden;
-  background: $color-border;
 }
 .strip-cell {
   display: flex; flex-direction: column; align-items: center; justify-content: center;
-  box-sizing: border-box; min-width: 0; padding: 8rpx 2rpx;
-  background: $color-bg-card;
+  box-sizing: border-box; min-width: 0; padding: 6rpx 1rpx;
+  background: transparent;
+  /* 行分隔：极浅虚线，替代原来的表格缝（暗夜下 $color-border 也足够淡） */
+  border-bottom: 1rpx dashed $color-border;
 }
-.strip-label { font-size: 22rpx; color: $color-ink-light; background: $color-paper-warm; letter-spacing: 1rpx; }
+/* 标签列：白空间必须锁定 nowrap —— 父级 .strip-scroll-content 的 pre-line 会继承下来，
+   2 个汉字在 76rpx 宽里会被折成竖排（实测显示成单字"运"/"年"，语义丢失） */
+.strip-label { font-size: 22rpx; color: $color-ink-light; background: transparent; letter-spacing: 1rpx; white-space: nowrap; }
 .strip-click { transition: opacity 0.15s; }
 .strip-click:active { opacity: 0.7; }
-.strip-cur { background: rgba(212, 175, 55, 0.16); }
-.strip-sel { background: rgba(184, 72, 60, 0.1); }
+/* 当前/选中：只给底部描边 + 轻微底色，不再用整格填充的表格感 */
+.strip-cur { background: rgba(212, 175, 55, 0.10); border-bottom-color: rgba(212, 175, 55, 0.55); }
+.strip-sel { background: rgba(184, 72, 60, 0.08); border-bottom-color: $color-vermilion; }
 .sc-year { font-size: 24rpx; font-weight: 600; color: $color-ink; line-height: 1.35; }
 .sc-jie { font-size: 22rpx; font-weight: 600; color: $color-ink; line-height: 1.35; }
 .sc-age { font-size: 20rpx; color: $color-ink-light; line-height: 1.35; white-space: nowrap; }
