@@ -1829,8 +1829,9 @@ onLoad((options: any) => {
 .strip-click { transition: opacity 0.15s; }
 .strip-click:active { opacity: 0.7; }
 /* 当前/选中：只给底部描边 + 轻微底色，不再用整格填充的表格感 */
-.strip-cur { background: rgba(212, 175, 55, 0.10); border-bottom-color: rgba(212, 175, 55, 0.55); }
-.strip-sel { background: rgba(184, 72, 60, 0.08); border-bottom-color: $color-vermilion; }
+/* 当前/选中：只用底色 + 文字色标记，不再单独画一条彩色虚线（与其它行的分隔线保持一致） */
+.strip-cur { background: rgba(212, 175, 55, 0.10); }
+.strip-sel { background: rgba(184, 72, 60, 0.08); }
 .sc-year { font-size: 24rpx; font-weight: 600; color: $color-ink; line-height: 1.35; }
 .sc-jie { font-size: 22rpx; font-weight: 600; color: $color-ink; line-height: 1.35; }
 .sc-age { font-size: 20rpx; color: $color-ink-light; line-height: 1.35; white-space: nowrap; }
