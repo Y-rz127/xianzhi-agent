@@ -183,6 +183,8 @@ class AppContext:
     reviewer_model: Any = None
     # 子应用（塔罗/紫微/六爻/合婚）解读模型：空则回落主问答模型（见 get_sub_app_model）
     sub_app_model: Any = None
+    # 会话摘要模型：摘要每 6 轮跑一次，与命盘问答诉求不同，单独配（见 get_summary_model）
+    summary_model: Any = None
     role_model_names: dict[str, str] = field(default_factory=dict)
     role_model_factory: Callable[[str, str], Any] | None = field(default=None, repr=False)
     # conversation_id -> Xianzhi 实例（会话锁为 agent.lock 上的 SessionLock，获取时现构）
@@ -197,12 +199,14 @@ class AppContext:
             self.reviewer_model = self.chat_model
         if self.sub_app_model is None:
             self.sub_app_model = self.chat_model
+        if self.summary_model is None:
+            self.summary_model = self.chat_model
         if not self.role_model_names:
             from app.core.model_config import default_model_config
 
             self.role_model_names = {
                 key: default_model_config()[key]
-                for key in ("decompose_model", "reviewer_model", "sub_app_model")
+                for key in ("decompose_model", "reviewer_model", "sub_app_model", "summary_model")
             }
 
     def refresh_configured_models(self, models: dict[str, str] | None = None) -> None:
@@ -227,7 +231,12 @@ class AppContext:
 
         with self._pool_lock:
             changed = False
-            for role in ("decompose_model", "reviewer_model", "sub_app_model"):
+            for role in (
+                "decompose_model",
+                "reviewer_model",
+                "sub_app_model",
+                "summary_model",
+            ):
                 name = models.get(role)
                 if not isinstance(name, str):
                     continue
@@ -257,6 +266,8 @@ class AppContext:
                 reviewer = getattr(workflow, "_reviewer", None)
                 if reviewer is not None:
                     reviewer._chat_model = self.reviewer_model
+                # 摘要模型挂在 agent 上（不走 workflow）：换模型后老会话也要用新的
+                agent._summary_model = self.summary_model
             except Exception as e:
                 log.warning("同步会话模型失败: {}", e)
 
@@ -283,6 +294,7 @@ class AppContext:
                 conversation_id=cid,
                 decompose_model=self.decompose_model,
                 reviewer_model=self.reviewer_model,
+                summary_model=self.summary_model,
             )
             self._agents[cid] = agent
             while len(self._agents) > _MAX_AGENTS:
@@ -360,6 +372,26 @@ def get_sub_app_model() -> Any:
     整体替换（见 `app/core/llm_health.py`），提前抓住引用会让纠正对子应用失效。
     """
     return sub_app_model_of(get_app_context())
+
+
+def summary_model_of(ctx: Any) -> Any:
+    """给定 AppContext（或测试替身）取「会话摘要模型」。
+
+    优先取 `SUMMARY_MODEL` 配出来的独立实例，未配置时回落主问答模型。
+    用 getattr 取字段而不是直接属性访问：测试里存在只塞了 `chat_model` 的 AppContext 替身。
+    """
+    refresh = getattr(ctx, "refresh_configured_models", None)
+    if callable(refresh):
+        refresh()
+    return getattr(ctx, "summary_model", None) or getattr(ctx, "chat_model", None)
+
+
+def get_summary_model() -> Any:
+    """会话摘要用模型（按请求从模块级上下文取）。
+
+    与 get_sub_app_model 同理：按请求取，避免抓住被启动探活纠正前的旧实例。
+    """
+    return summary_model_of(get_app_context())
 
 
 def get_chat_model() -> Any:

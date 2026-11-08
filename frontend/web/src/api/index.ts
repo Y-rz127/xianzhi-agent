@@ -522,6 +522,7 @@ export interface ModelRoleConfig {
   decompose_model: string
   reviewer_model: string
   sub_app_model: string
+  summary_model: string
   asr_model: string
   tts_model: string
   tts_voice: string

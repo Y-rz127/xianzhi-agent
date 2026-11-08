@@ -5,7 +5,13 @@ from app.core.config import settings
 from app.core.config.kv import get_config
 
 MODEL_CONFIG_KEY = "llm_model_roles"
-LLM_MODEL_ROLES = ("decompose_model", "reviewer_model", "sub_app_model")
+# 可在管理端热改的 LLM 角色。asr/tts 角色不在此列（它们不是 LLM 角色配置，见下）。
+LLM_MODEL_ROLES = (
+    "decompose_model",
+    "reviewer_model",
+    "sub_app_model",
+    "summary_model",
+)
 
 
 def default_model_config() -> dict[str, str]:
@@ -13,6 +19,7 @@ def default_model_config() -> dict[str, str]:
         "decompose_model": settings.decompose_model,
         "reviewer_model": settings.reviewer_model,
         "sub_app_model": settings.sub_app_model,
+        "summary_model": settings.summary_model,
         "asr_model": settings.asr_model,
         "tts_model": settings.tts_model,
         "tts_voice": settings.tts_voice,

@@ -76,6 +76,7 @@ class Xianzhi(ToolCallAgent):
         max_steps=None,
         decompose_model=None,
         reviewer_model=None,
+        summary_model=None,
     ):
         super().__init__(
             name="Xianzhi",
@@ -91,6 +92,9 @@ class Xianzhi(ToolCallAgent):
         self._memory = memory if memory is not None else create_chat_memory()
         self.chart_context = ""
         self._workflow = XianzhiWorkflow(chat_model, decompose_model, reviewer_model)
+        # 会话摘要模型：独立角色（SUMMARY_MODEL），为空时回落主模型。
+        # 装配期注入的实例可能被启动探活替换，故每轮摘要时按需重取（见 _persist_history）。
+        self._summary_model = summary_model
         self._workflow_context: WorkflowChartContext | None = None
         self._last_birth_info: Optional[dict] = None
         self._last_user_text: str = ""
@@ -1055,7 +1059,28 @@ class Xianzhi(ToolCallAgent):
         # 每 6 轮对话（一问一答=1轮，约12条消息）触发摘要（异步线程，不阻塞主流程）
         from app.memory.summarizer import maybe_summarize
 
-        maybe_summarize(self._memory, self.chat_model, self._conversation_id, self.message_list)
+        # 摘要用独立模型（SUMMARY_MODEL，默认 deepseek-v4.1-flash-1017）：
+        # 摘要是"压缩最近对话"，与命盘问答（长上下文+推理）诉求不同，
+        # 混用会把两边的成本/时延绑死。
+        #
+        # 按调用时解析而非用装配期注入的实例：启动探活可能整体替换模型实例
+        # （只接受思考模式的模型靠探活自愈），抓死旧引用会让纠正对摘要失效
+        # —— 与 get_sub_app_model() 同一考量。取不到时回落主模型。
+        summary_model = self._resolve_summary_model()
+        maybe_summarize(self._memory, summary_model, self._conversation_id, self.message_list)
+
+    def _resolve_summary_model(self):
+        """取当前生效的摘要模型：优先独立角色，其次主模型。
+
+        探活可能替换 AppContext 上的实例，所以按调用时解析（不抓死装配期引用）。
+        """
+        try:
+            from app.agent.context import get_summary_model
+
+            return get_summary_model()
+        except Exception:
+            # AppContext 未初始化（测试/独立脚本场景）时用兜底
+            return self._summary_model or self.chat_model
 
     def _get_session_summary(self) -> str:
         """从会话元数据中获取历史摘要。"""
@@ -1106,6 +1131,7 @@ def create_xianzhi_agent(
     conversation_id: str = "xianzhi-default",
     decompose_model=None,
     reviewer_model=None,
+    summary_model=None,
 ) -> "Xianzhi":
     """构造先知智能体（会话池统一入口，透传参数给 Xianzhi）。"""
     return Xianzhi(
@@ -1115,4 +1141,5 @@ def create_xianzhi_agent(
         conversation_id=conversation_id,
         decompose_model=decompose_model,
         reviewer_model=reviewer_model,
+        summary_model=summary_model,
     )

@@ -209,6 +209,20 @@ async def lifespan(app: FastAPI):
         else chat_model
     )
 
+    # 会话摘要模型：摘要每 6 轮跑一次，任务是"压缩最近对话"，
+    # 与命盘问答（长上下文 + 推理）诉求不同，值得单独一个便宜快模型。
+    # 默认 deepseek-v4.1-flash-1017（与审核模型同款，轻量够用）；留空则复用主模型。
+    summary_model = (
+        _make_sub_model(
+            settings.summary_model,
+            settings.llm_temperature,
+            settings.llm_timeout,
+            settings.summary_enable_thinking,
+        )
+        if settings.summary_model
+        else chat_model
+    )
+
     def _make_configured_role_model(role: str, model_name: str):
         role_options = {
             "decompose_model": (0.1, 30.0, settings.decompose_enable_thinking),
@@ -217,6 +231,11 @@ async def lifespan(app: FastAPI):
                 settings.llm_temperature,
                 settings.llm_timeout,
                 settings.sub_app_enable_thinking,
+            ),
+            "summary_model": (
+                settings.llm_temperature,
+                settings.llm_timeout,
+                settings.summary_enable_thinking,
             ),
         }
         if role not in role_options:
@@ -253,10 +272,12 @@ async def lifespan(app: FastAPI):
         decompose_model=decompose_model,
         reviewer_model=reviewer_model,
         sub_app_model=sub_app_model,
+        summary_model=summary_model,
         role_model_names={
             "decompose_model": settings.decompose_model,
             "reviewer_model": settings.reviewer_model,
             "sub_app_model": settings.sub_app_model,
+            "summary_model": settings.summary_model,
         },
         role_model_factory=_make_configured_role_model,
     )
@@ -295,6 +316,17 @@ async def lifespan(app: FastAPI):
                 settings.sub_app_model, settings.llm_temperature, settings.llm_timeout, flag
             ),
             model=sub_app_model,
+        ),
+        SubModelSpec(
+            label="会话摘要",
+            attr="summary_model",
+            env_key="SUMMARY_ENABLE_THINKING",
+            model_name=settings.summary_model,
+            enable_thinking=settings.summary_enable_thinking,
+            rebuild=lambda flag: _make_sub_model(
+                settings.summary_model, settings.llm_temperature, settings.llm_timeout, flag
+            ),
+            model=summary_model,
         ),
     ]
     sub_model_specs = [s for s in sub_model_specs if s.model_name]

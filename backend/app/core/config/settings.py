@@ -64,6 +64,11 @@ class Settings(BaseSettings):
     # 混用时两边的成本/时延互相绑死 —— 想给解读换个便宜快模型就得连问答一起换。
     sub_app_model: str = Field(default="", alias="SUB_APP_MODEL")
     sub_app_enable_thinking: bool = Field(default=False, alias="SUB_APP_ENABLE_THINKING")
+    # 会话摘要模型：摘要每 6 轮跑一次，任务本身是「压缩最近对话」，
+    # 与命盘问答（长上下文 + 推理）诉求不同，值得单独配一个便宜快模型。
+    # 留空则复用主模型。默认 deepseek-v4.1-flash-1017：轻量、便宜、够用。
+    summary_model: str = Field(default="deepseek-v4.1-flash-1017", alias="SUMMARY_MODEL")
+    summary_enable_thinking: bool = Field(default=False, alias="SUMMARY_ENABLE_THINKING")
     # LLM 生成参数；temperature 默认不传（None）：
     # kimi-k3 等模型不接受 temperature 参数，显式设置会被 400 拒绝；
     # 使用 qwen 等支持采样温度的模型时可设 LLM_TEMPERATURE=0.7
