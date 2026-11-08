@@ -1624,7 +1624,7 @@ onLoad((options: any) => {
   display: flex; align-items: center; justify-content: center;
   box-sizing: border-box; min-height: 0;
 }
-.bt-label { flex: 0 0 68rpx; font-size: 22rpx; color: $color-ink-light; background: transparent; font-weight: 400; text-align: left; justify-content: flex-start; }
+.bt-label { flex: 0 0 76rpx; font-size: 26rpx; color: $color-ink-light; background: transparent; font-weight: 400; text-align: center; justify-content: center; }
 .bt-col-head { font-size: 26rpx; font-weight: 600; color: $color-ink; letter-spacing: 2px; }
 .bt-gan { font-size: 48rpx; font-weight: bold; font-family: $font-family-display; }
 .bt-zhi { font-size: 48rpx; font-family: $font-family-display; }
@@ -1648,7 +1648,9 @@ onLoad((options: any) => {
 .ss-row { display: flex; align-items: flex-start; gap: 16rpx; padding: 12rpx 0; border-bottom: 1rpx dashed $color-border; }
 .ss-row:last-child { border-bottom: none; }
 .ss-gz { flex: 0 0 88rpx; font-size: 26rpx; font-weight: 700; color: $color-ink; letter-spacing: 2rpx; padding-top: 6rpx; }
-.ss-gz-wide { flex: 0 0 210rpx; font-size: 24rpx; }
+/* 流月神煞的「节气 干支」：12 个月字数固定（2+2），按内容自适应即可，
+   固定 210rpx 会白空出半列宽度，把神煞 tag 推到屏幕中间 */
+.ss-gz-wide { flex: 0 0 auto; min-width: 132rpx; font-size: 24rpx; }
 .ss-gz-cur { color: $color-vermilion; }
 .ss-list { flex: 1; display: flex; flex-wrap: wrap; gap: 10rpx; }
 /* 大运神煞：干支 + 年份区间两行标签 */
