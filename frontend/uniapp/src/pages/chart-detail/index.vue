@@ -97,7 +97,7 @@
               <text class="bt-cell bt-label">纳音</text>
               <view v-for="c in mainColumns" :key="'ny' + c.name" :class="['bt-cell']"><text class="bt-nayin">{{ c.nayin || '—' }}</text></view>
             </view>
-            <!-- 神煞直接融进命盘表最后一行（默认每列露 4 个，多出折 +N） -->
+            <!-- 神煞直接融进命盘表最后一行（收起时每列只留 1 条，其余折 +N） -->
             <view class="bt-row">
               <text class="bt-cell bt-label">神煞</text>
               <view v-for="c in mainColumns" :key="'ss' + c.name" :class="['bt-cell bt-multi']">
@@ -1101,9 +1101,9 @@ const snapShenshaMap = computed(() => {
   return map
 })
 
-// 命盘表「神煞」行：每列默认只露前 4 个，多出的折成 +N（点 +N 或表格下方开关展开）。
+// 命盘表「神煞」行：收起时每列只留 1 条，其余折成 +N（点 +N 或表格下方开关展开）。
 // 神煞个数随柱波动（3~10 个），全展开时这一行能占掉整张表三分之一的高度。
-const SHENSHA_TABLE_PREVIEW = 4
+const SHENSHA_TABLE_PREVIEW = 1
 const showAllTableShensha = ref(false)
 function shownShensha(list?: (ShenshaItem & { _cat?: string })[]) {
   const arr = list || []
