@@ -1696,7 +1696,9 @@ onLoad((options: any) => {
   display: flex; align-items: center; justify-content: center;
   padding: 11rpx 1rpx; font-size: 22rpx; color: $color-ink;
 }
-.pd-label { flex: 0 0 56rpx; font-size: 20rpx; color: $color-ink-light; background: transparent; text-align: left; justify-content: flex-start; }
+/* 行名标签：与基本排盘的 .bt-label 同样居中；7 个数据列挤，宽度只能给 56rpx，
+   字号从 20rpx 提到 22rpx 已是上限（再大会折行） */
+.pd-label { flex: 0 0 56rpx; font-size: 22rpx; color: $color-ink-light; background: transparent; text-align: center; justify-content: center; }
 .pd-col-head { font-size: 22rpx; font-weight: 600; color: $color-ink; letter-spacing: 1rpx; padding: 12rpx 1rpx; }
 .pd-cur-head { color: $nx-gold-light; font-weight: 700; }
 .pd-day-master { font-size: 24rpx; font-weight: 700; color: $color-vermilion; font-family: $font-family-display; }
