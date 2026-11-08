@@ -10,12 +10,24 @@ import threading
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from app.core.config import settings
 from app.core.llm_throttle import llm_tag
 from app.core.logger import log
 
-# 每 6 轮对话（一问一答=1轮，约12条消息）触发一次增量摘要
-_SUMMARY_TRIGGER_MESSAGES = 12
-_SUMMARY_MAX_CHARS = 900  # 增量摘要最大长度（字符数），超过截断尾部
+# 增量摘要最大长度（字符数），超过截断尾部
+_SUMMARY_MAX_CHARS = 900
+
+
+def _trigger_messages() -> int:
+    """本次触发摘要所需的「新增消息条数」。
+
+    按轮配置（SUMMARY_TRIGGER_ROUNDS，一问一答=1轮 ⇒ 轮数×2 条消息）。
+    轮数 ≤ 0 视为不触发。
+    """
+    rounds = int(getattr(settings, "summary_trigger_rounds", 6) or 0)
+    if rounds <= 0:
+        return 10**6  # 视为不触发
+    return rounds * 2
 
 _SUMMARY_PROMPT = (
     "你是一个会话摘要助手。请根据【旧摘要】和【最近对话】，生成不超过 900 字的增量摘要。\n"
@@ -40,7 +52,8 @@ def maybe_summarize(memory, chat_model, conversation_id: str, recent_messages: l
     try:
         msg_count = memory.get_message_count(conversation_id)
         last_summary_count = memory.get_last_summary_count(conversation_id)
-        if msg_count - last_summary_count < _SUMMARY_TRIGGER_MESSAGES:
+        trigger = _trigger_messages()
+        if msg_count - last_summary_count < trigger:
             return
 
         # 主线程先取快照（避免线程内读共享状态）
@@ -51,7 +64,7 @@ def maybe_summarize(memory, chat_model, conversation_id: str, recent_messages: l
             old_summary = ""
         recent_text = "\n".join(
             f"{m.__class__.__name__.replace('Message', '')}: {str(getattr(m, 'content', ''))[:300]}"
-            for m in recent_messages[-_SUMMARY_TRIGGER_MESSAGES:]
+            for m in recent_messages[-trigger:]
             if str(getattr(m, "content", "")).strip()
         )
 

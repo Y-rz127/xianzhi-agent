@@ -477,16 +477,35 @@ async def lifespan(app: FastAPI):
 
     yield
 
+    # 先等后台初始化任务（探活等）收尾，再关 httpx 连接池。
+    # 顺序反了会让在跑的探活撞上「client has been closed」——
+    # 它报的是「模型不可用」，会把启动自愈误判成配置错误（既有缺陷）。
+    if _bg_init_tasks:
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(*_bg_init_tasks, return_exceptions=True), timeout=5
+            )
+        except BaseException:  # 含 CancelledError（BaseException 子类，except Exception 接不住）
+            for t in _bg_init_tasks:
+                t.cancel()
+            # 取消后再等一次，让取消真正生效，避免关停流程被中断
+            try:
+                await asyncio.gather(*_bg_init_tasks, return_exceptions=True)
+            except BaseException:
+                pass
+
     retention_stop.set()
     try:
         await asyncio.wait_for(retention_task, timeout=2)
-    except Exception:
+    except BaseException:  # 含 CancelledError
         retention_task.cancel()
 
     # 清理 AppContext 注册（避免关停后旧实例被访问）
+    # 放在最前面做：即使后续清理抛错，全局上下文也一定被清掉
+    # （残留会让后续测试/请求拿到已关停的旧实例）。
     try:
         set_app_context(None)
-    except Exception:
+    except BaseException:
         pass
 
     # 停止报告任务 worker：给 3s 让循环自然退出，未退出的强取消
@@ -494,7 +513,7 @@ async def lifespan(app: FastAPI):
     report_stop.set()
     try:
         await asyncio.wait_for(asyncio.gather(*report_workers), timeout=3)
-    except Exception:
+    except BaseException:  # 含 CancelledError
         for w in report_workers:
             w.cancel()
 

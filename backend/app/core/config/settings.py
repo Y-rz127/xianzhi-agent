@@ -69,6 +69,9 @@ class Settings(BaseSettings):
     # 留空则复用主模型。默认 deepseek-v4.1-flash-1017：轻量、便宜、够用。
     summary_model: str = Field(default="deepseek-v4.1-flash-1017", alias="SUMMARY_MODEL")
     summary_enable_thinking: bool = Field(default=False, alias="SUMMARY_ENABLE_THINKING")
+    # 摘要触发阈值：按「轮」配置（一问一答=1轮），与用户感知一致。
+    # 轮 × 2 = 消息条数（一问一答各一条），默认 6 轮 ≈ 12 条，与历史行为对齐。
+    summary_trigger_rounds: int = Field(default=6, alias="SUMMARY_TRIGGER_ROUNDS")
     # LLM 生成参数；temperature 默认不传（None）：
     # kimi-k3 等模型不接受 temperature 参数，显式设置会被 400 拒绝；
     # 使用 qwen 等支持采样温度的模型时可设 LLM_TEMPERATURE=0.7
