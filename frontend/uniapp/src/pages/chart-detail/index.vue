@@ -1736,13 +1736,15 @@ onLoad((options: any) => {
 .ss-empty { font-size: 22rpx; color: $color-ink-lighter; padding: 6rpx 0; }
 /* 四柱干支名：原为内联 #8a6d3b，暗夜卡底糊成一片 → 走金色变量 */
 .ss-gz-bazi { color: $nx-gold-light; }
-.ss-tag { font-size: 22rpx; padding: 4rpx 14rpx; border-radius: 8rpx; line-height: 1.5; color: $nx-cat-slate; background: rgba(113,128,150,0.1); transition: transform 0.15s, opacity 0.15s; }
-.ss-tag:active { opacity: 0.7; transform: scale(0.96); }
-.ss-good { color: $nx-cat-green; background: rgba(56,161,105,0.1); }
-.ss-bad { color: $nx-cat-red; background: rgba(197,48,48,0.1); }
-.ss-love { color: $nx-cat-pink; background: rgba(184,50,128,0.1); }
-.ss-career { color: $nx-cat-blue; background: rgba(43,108,176,0.1); }
-.ss-other { color: $nx-cat-slate; background: rgba(113,128,150,0.1); }
+/* 神煞标签：一律只用文字色区分吉凶，不做底色块。
+   底色块会在窄格里贴着字形形成一圈浅色光晕，字看着发虚/像有阴影（用户实测反馈） */
+.ss-tag { font-size: 22rpx; padding: 2rpx 0; line-height: 1.5; color: $nx-cat-slate; background: transparent; transition: opacity 0.15s; }
+.ss-tag:active { opacity: 0.6; }
+.ss-good { color: $nx-cat-green; }
+.ss-bad { color: $nx-cat-red; }
+.ss-love { color: $nx-cat-pink; }
+.ss-career { color: $nx-cat-blue; }
+.ss-other { color: $nx-cat-slate; }
 .ss-cur-row { background: rgba(212,175,55,0.06); border-radius: 10rpx; padding: 8rpx 4rpx; }
 .ss-toggle { font-size: 22rpx; color: $color-vermilion; padding: 4rpx 8rpx; }
 /* 命盘表神煞行的「还有 N 个」与展开开关 */
@@ -1776,8 +1778,9 @@ onLoad((options: any) => {
 .pd-cang { font-size: 22rpx; font-weight: 600; line-height: 1.45; }
 .pd-cang-ss { font-size: 18rpx; color: $color-ink-light; line-height: 1.45; margin-left: 1rpx; }
 .pd-text { font-size: 20rpx; color: $color-ink; }
-/* 神煞 tag 在窄列里竖排：只改尺寸，配色交给 .ss-good/.ss-bad 等 */
-.pd-ss-tag { font-size: 18rpx; line-height: 1.4; padding: 2rpx 3rpx; border-radius: 6rpx; }
+/* 神煞 tag 在窄列里竖排：只改尺寸，配色交给 .ss-good/.ss-bad 等。
+   底色一律去掉：窄格里半透明底紧贴字形，看起来像一圈阴影/发虚，只保留文字色 */
+.pd-ss-tag { font-size: 19rpx; line-height: 1.4; padding: 1rpx 0; border-radius: 0; background: transparent; }
 
 /* 岁运横条：大运 / 流年 / 流月，同一 grid 保证各行列对齐 */
 .strip-hint-row { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 12rpx; padding: 0 2rpx; }
