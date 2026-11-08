@@ -173,7 +173,8 @@
             <view class="xp-state-block">
               <text class="xp-state-title">月令旺衰</text>
               <view class="xp-state-items">
-                <!-- 颜色按**五行**上（与五神同一套色）；旺/相/休/囚/死看字，不再用状态配色 -->
+                <!-- 颜色按**五行**上（与五神同一套色）；旺/相/休/囚/死看字，不再用状态配色。
+                     这里保留淡底+描边胶囊（与纯文字的神煞标签不同，此处需要色块区分五行） -->
                 <text
                   v-for="w in xipan.wuxingState"
                   :key="w.name"
@@ -1617,14 +1618,12 @@ onLoad((options: any) => {
   line-height: 1.4;
 }
 .god-row { display: flex; flex-wrap: wrap; align-items: center; margin-top: 8rpx; }
+/* 五神胶囊去底色，只留文字：与神煞标签同一处理（淡底贴着字形会显得发虚） */
 .god-chip {
   display: flex;
   align-items: baseline;
-  margin: 0 14rpx 8rpx 0;
-  padding: 4rpx 14rpx;
-  border-radius: 8rpx;
-  background: rgba(184, 72, 60, 0.07);
-  border: 1rpx solid $color-border-light;
+  margin: 0 24rpx 8rpx 0;
+  padding: 4rpx 0;
 }
 .god-name { font-size: 24rpx; color: $color-ink-light; margin-right: 8rpx; }
 /* 颜色由 :style 按五行下发（见 utils/wuxingColor.ts），这里只管字号/字重 */
@@ -1726,10 +1725,11 @@ onLoad((options: any) => {
 .an-row { display: flex; align-items: flex-start; gap: 16rpx; padding: 12rpx 0; border-bottom: 1rpx dashed $color-border; }
 .an-row:last-child { border-bottom: none; }
 .an-label { flex: 0 0 72rpx; font-size: 24rpx; color: $color-ink-light; padding-top: 6rpx; }
-.an-tags { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; gap: 10rpx; }
+.an-tags { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; gap: 8rpx 20rpx; }
+/* 关系标签只留文字（无底色/描边），字号比神煞略大：这类条目信息更重要 */
 .an-tag {
-  font-size: 22rpx; line-height: 1.5; padding: 4rpx 12rpx; border-radius: 8rpx;
-  color: $color-ink; background: $color-paper-warm; border: 1rpx solid $color-border;
+  font-size: 24rpx; line-height: 1.5; padding: 4rpx 0;
+  color: $color-ink;
 }
 
 /* 神煞按柱竖向排列：4 列网格 */
@@ -1738,7 +1738,7 @@ onLoad((options: any) => {
 .ss-gz-bazi { color: $nx-gold-light; }
 /* 神煞标签：一律只用文字色区分吉凶，不做底色块。
    底色块会在窄格里贴着字形形成一圈浅色光晕，字看着发虚/像有阴影（用户实测反馈） */
-.ss-tag { font-size: 22rpx; padding: 2rpx 0; line-height: 1.5; color: $nx-cat-slate; background: transparent; transition: opacity 0.15s; }
+.ss-tag { font-size: 24rpx; padding: 2rpx 0; line-height: 1.5; color: $nx-cat-slate; background: transparent; transition: opacity 0.15s; }
 .ss-tag:active { opacity: 0.6; }
 .ss-good { color: $nx-cat-green; }
 .ss-bad { color: $nx-cat-red; }
@@ -1889,7 +1889,7 @@ onLoad((options: any) => {
 .xp-state-block { flex: 1; min-width: 0; background: $color-bg-card; border: 1rpx solid $color-border; border-radius: 12rpx; padding: 16rpx 18rpx; box-sizing: border-box; }
 .xp-state-title { display: block; font-size: 24rpx; color: $color-ink-light; letter-spacing: 4rpx; margin-bottom: 14rpx; }
 .xp-state-items { display: flex; flex-wrap: wrap; gap: 10rpx; }
-/* 底色/描边/字色由 wuxingTintStyle(五行) 内联下发（utils/wuxingColor.ts），此处只留骨架 */
+/* 底色/描边/字色由 wuxingTintStyle(五行) 内联下发；此处只留骨架（月令旺衰保留色块） */
 .xp-state-item { font-size: 26rpx; padding: 4rpx 16rpx; border-radius: 8rpx; border: 1rpx solid $color-border; color: $color-ink; }
 .xp-siling { font-size: 30rpx; color: $color-vermilion; font-weight: 700; }
 .xp-siling-detail { display: block; font-size: 22rpx; color: $color-ink-light; margin-top: 10rpx; line-height: 1.6; }
