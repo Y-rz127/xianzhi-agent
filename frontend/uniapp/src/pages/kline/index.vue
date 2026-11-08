@@ -1567,16 +1567,14 @@ $chart-cs-row: 30rpx;     /* 十二长生行（与年份轴平行，按大运中
 .ov-stats { margin-top: 14rpx; padding-top: 14rpx; border-top: 1rpx solid $color-border-light; }
 .ov-stat { display: block; font-size: 26rpx; color: $color-ink-light; line-height: 1.8; }
 
-/* 终审五神：用神在概览格里做头条，其余四类在这里逐条标注（没判出来的类别不出现） */
+/* 终审五神：用神在概览格里做头条，其余四类在这里逐条标注（没判出来的类别不出现）。
+   不做底色块/描边：淡底贴着黄庭小字会显糊，只留文字色（与命盘详情页一致） */
 .god-row { display: flex; flex-wrap: wrap; align-items: center; margin-top: 10rpx; }
 .god-chip {
   display: flex;
   align-items: baseline;
-  margin: 0 14rpx 8rpx 0;
-  padding: 4rpx 14rpx;
-  border-radius: 8rpx;
-  background: rgba(184, 72, 60, 0.07);
-  border: 1rpx solid $color-border-light;
+  margin: 0 24rpx 8rpx 0;
+  padding: 4rpx 0;
 }
 .god-name { font-size: 24rpx; color: $color-ink-light; margin-right: 8rpx; }
 /* 颜色由 :style 按五行下发（见 utils/wuxingColor.ts），这里只管字号/字重 */
