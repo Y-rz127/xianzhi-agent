@@ -28,6 +28,16 @@
             :class="['tab-btn', activeTab === tab.key && 'tab-active', tab.to && 'tab-link']"
             @tap="onTabTap(tab)"
           >{{ tab.label }}</text>
+          <!-- 胎命身开关：只在专业细盘出现，开启后右侧三列由 大运/流年/流月 换成 胎元/命宫/身宫 -->
+          <view v-if="activeTab === 'xipan'" class="taiming-inline">
+            <text class="taiming-label display-font">胎命身</text>
+            <view
+              :class="['taiming-switch', showTaiMingShen && 'is-on']"
+              @tap="showTaiMingShen = !showTaiMingShen"
+            >
+              <view class="taiming-knob"></view>
+            </view>
+          </view>
         </view>
       </scroll-view>
 
@@ -699,6 +709,28 @@ const SNAP_PILLARS = ['年柱', '月柱', '日柱', '时柱']
 // 童限：右边那一列没有大运可显示，改显示该年小运，列名也跟着改（列名决定神煞取哪一份）
 const snapYunColName = computed(() => (snapDayunIsTongxian.value ? '小运' : '大运'))
 
+// 胎命身模式：细盘右边的「大运 / 流年 / 流月」三列换成「胎元 / 命宫 / 身宫」。
+// 三宫是命局固有柱、与选中的运柱无关，所以开启时横条的点选切换一并停用
+// （见 selectDayun / selectYear / selectLiuyue）。
+const showTaiMingShen = ref(false)
+
+/** 后端把纳音拼在同一字段里（「壬申（剑锋金）」），取前面的干支本字 */
+function gzOnly(v?: string) {
+  return (v || '').split(/[（(]/)[0].trim()
+}
+
+const GZ_RE = /^[甲乙丙丁戊己庚辛壬癸][子丑寅卯辰巳午未申酉戌亥]$/
+
+const gongColumns = computed(() => {
+  const c = chart.value
+  if (!c) return [] as { name: string; gz: string }[]
+  return [
+    { name: '胎元', gz: gzOnly(c.taiYuan) },
+    { name: '命宫', gz: gzOnly(c.mingGong) },
+    { name: '身宫', gz: gzOnly(c.shenGong) },
+  ].filter((g) => GZ_RE.test(g.gz))
+})
+
 // 命盘大表的运柱/流年两列跟随用户点选：字段查 ganzhiMeta（60 干支纯函数表，与后端 snapshot 逐字段一致）
 const snapColumns = computed(() => {
   const xp = xipan.value
@@ -721,10 +753,15 @@ const snapColumns = computed(() => {
       nayin: m?.nayin || '',
     }
   }
-  cols.push(col(snapYunColName.value, snapDayunGz.value))
-  cols.push(col('流年', snapLiunianGz.value))
-  // 流月列：跟随当前选中的流月（点流月横条会同步刷新），无选中时留空
-  cols.push(col('流月', selectedLiuyueGz.value))
+  if (showTaiMingShen.value) {
+    // 胎命身：三宫是固定柱，不跟随大运/流年/流月
+    for (const g of gongColumns.value) cols.push(col(g.name, g.gz))
+  } else {
+    cols.push(col(snapYunColName.value, snapDayunGz.value))
+    cols.push(col('流年', snapLiunianGz.value))
+    // 流月列：跟随当前选中的流月（点流月横条会同步刷新），无选中时留空
+    cols.push(col('流月', selectedLiuyueGz.value))
+  }
   return cols
 })
 
@@ -847,6 +884,8 @@ function initXipanSelection() {
 }
 
 function selectDayun(index: number) {
+  // 胎命身模式下三宫列与运柱无关，点横条不再切换任何东西
+  if (showTaiMingShen.value) return
   selectedDayunIndex.value = index
   const xp = xipan.value
   // 点正在走的大运（含童限段）→ 落回"现在"：当前年，流月随 selectYear 落当前月；
@@ -859,6 +898,7 @@ function selectDayun(index: number) {
   if (first) selectYear(first.year)
 }
 function selectYear(year: number) {
+  if (showTaiMingShen.value) return
   selectedYear.value = year
   const xp = xipan.value
   // 点的是当前年 → 落当前月（与进入细盘时的初始锚点一致）；
@@ -871,6 +911,7 @@ function selectYear(year: number) {
   selectedLiuyueGz.value = first?.ganzhi || ''
 }
 function selectLiuyue(m: XiPanLiuYue) {
+  if (showTaiMingShen.value) return
   selectedLiuyueGz.value = m.ganzhi
 }
 function isCurrentLiuyue(m: XiPanLiuYue): boolean {
@@ -1098,6 +1139,13 @@ const snapShenshaMap = computed(() => {
   map['流月'] = (xp.liuyueShensha?.[selectedLiuyueGz.value] || [])
     .map((name) => ({ name, description: dict[name] || '' }))
     .map(tag)
+  // 胎命身：三宫神煞走运柱索引（后端 _yunzhu_shensha_index：神煞只由干支决定，与柱身份无关），
+  // 后端未给该干支时自然为空，表格显示「—」
+  for (const g of gongColumns.value) {
+    map[g.name] = (xp.liunianShensha?.[g.gz] || [])
+      .map((name) => ({ name, description: dict[name] || '' }))
+      .map(tag)
+  }
   return map
 })
 
@@ -1499,7 +1547,7 @@ onLoad((options: any) => {
 .tab-row { display: flex; padding: 0 12rpx; }
 .tab-btn {
   flex-shrink: 0;
-  padding: 14rpx 28rpx 12rpx;
+  padding: 14rpx 18rpx 12rpx;
   font-size: 28rpx;
   color: $color-ink-light;
   position: relative;
@@ -1612,6 +1660,22 @@ onLoad((options: any) => {
   margin-bottom: 8rpx;
   padding: 0 16rpx;
 }
+/* 胎命身开关：挂在 tab 栏末尾（仅专业细盘显示），开启后细盘三列换成 胎元/命宫/身宫 */
+.taiming-inline { display: flex; align-items: center; gap: 8rpx; flex-shrink: 0; padding: 6rpx 6rpx 6rpx 10rpx; }
+.taiming-label { font-size: 22rpx; font-weight: 600; color: $nx-gold-light; letter-spacing: 1rpx; }
+.taiming-switch {
+  width: 52rpx; height: 30rpx; box-sizing: border-box; padding: 3rpx;
+  border-radius: 15rpx; display: flex; align-items: center;
+  /* 中性灰轨道：浅色纸墨与暗夜底上都可见，不跟主题变量走 */
+  background: rgba(128, 128, 128, 0.35);
+  transition: background 0.2s;
+}
+.taiming-switch.is-on { background: $color-vermilion; }
+.taiming-knob {
+  width: 24rpx; height: 24rpx; border-radius: 50%; background: #fff;
+  box-shadow: 0 1rpx 4rpx rgba(0, 0, 0, 0.28); transition: transform 0.2s;
+}
+.taiming-switch.is-on .taiming-knob { transform: translateX(22rpx); }
 .bt-row {
   display: flex;
   flex-direction: row;
